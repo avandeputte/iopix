@@ -151,9 +151,21 @@ async function placeTray(map, fp, el) {
     let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toast(e.message); return; }
     if (search.value.trim() !== q) return;
     results.hidden = false;
-    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => { results.hidden = true; search.value = x.name; map.setView([x.lat, x.lon], x.zoom || 15); } },
+    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => { results.hidden = true; search.value = x.name; found(x); } },
       icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Nothing found.'));
+  };
+  // the place found: close in (street level for an address or landmark), with a pin that takes the photos
+  let pin = null;
+  const found = (x) => {
+    if (pin) map.removeLayer(pin);
+    const icon_ = L.divIcon({ className: '', html: '<div class="fpin"></div>', iconSize: [30, 42], iconAnchor: [15, 40] });
+    pin = L.marker([x.lat, x.lon], { icon: icon_, zIndexOffset: 1000 }).addTo(map);
+    const label = h('div', { class: 'fpinlabel' }, h('b', null, x.name), x.detail ? h('div', { class: 'muted' }, x.detail) : null,
+      h('button', { class: 'pillbtn on', style: 'margin-top:6px', onclick: (e) => { e.stopPropagation(); place(L.latLng(x.lat, x.lon)); } }, icon('place'), 'Put the selected photos here'));
+    pin.bindPopup(label, { closeButton: false, offset: [0, -34] }).openPopup();
+    pin.on('click', (e) => { L.DomEvent.stopPropagation(e); if (sel.size) place(e.latlng); else pin.openPopup(); });
+    map.setView([x.lat, x.lon], Math.max(x.zoom || 0, 18));
   };
   // thumbnail size, remembered
   const px = () => +store.get('tray-size', '70');
