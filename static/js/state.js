@@ -7,11 +7,13 @@ import { MORE_VIEWS, currentNav, showAlbums, showAnalysis, showBursts, showDetec
 import { showConsistency, showDuplicates, showFaces, showMaintenance, showSettings, showTags } from './admin.js';
 import { M, showMap } from './map.js';
 import { renderFilters, toggleFilters } from './filters.js';
-import { syncLightbox } from './lightbox.js';
+import { LB, syncLightbox } from './lightbox.js';
 import { pollStatus } from './main.js';
 
 /** Mutable state every module reads and writes (one object, so modules can assign it; ES module bindings cannot be assigned from outside). */
 export const S = {
+  RELOAD_PENDING: false,
+  STALE_VIEW: false,
   USER: null,
   META: null,
   tagById: new Map(),
@@ -169,6 +171,7 @@ export const photosWith = (obj) => {
 };
 
 export function onRoute() {
+  if (S.RELOAD_PENDING && !LB.open && !G.sel.size) { location.reload(); return; }  // a new version waits: a change of page is a good moment
   S.route = parseHash();
   const fp = filterParams();
   const vp = new URLSearchParams(S.route.params); vp.delete('p');

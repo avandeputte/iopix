@@ -69,10 +69,20 @@ export async function showMap(fp) {
   baseLayers(map);
   const dot = L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] });
   const group = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 55, showCoverageOnHover: false, zoomToBoundsOnClick: false });
-  const marker = (i) => L.marker([d.lat[i], d.lon[i]], { icon: dot, idx: i, draggable: !!M.placing }).on('click', () => openLightbox(M.data, i, true))
-    .on('dragend', (ev) => moveMarker(ev.target, d, i));
-  group.addLayers(d.id.map((id, i) => marker(i)));
+  const marker = (dd, i) => L.marker([dd.lat[i], dd.lon[i]], { icon: dot, idx: i, draggable: !!M.placing }).on('click', () => openLightbox(M.data, i, true))
+    .on('dragend', (ev) => moveMarker(ev.target, dd, i));
+  group.addLayers(d.id.map((id, i) => marker(d, i)));
   M.group = group;
+  // the library changed (an edit here, digiKam, a background job): new markers, same view, tray and pin untouched
+  M.update = async () => {
+    if (token !== M.token || S.route.view !== 'map') return;
+    let nd; try { nd = await api('/api/map?' + fp.toString()); } catch { return; }
+    if (token !== M.token) return;
+    M.data = nd; d = nd;
+    group.clearLayers();
+    group.addLayers(nd.id.map((id, i) => marker(nd, i)));
+    const c = bar.querySelector('.mcount'); if (c) c.textContent = `${nf.format(nd.id.length)} with location`;
+  };
   // clicking a bubble offers all of its photos at once instead of forcing a drill-down
   group.on('clusterclick', (ev) => {
     const idxs = ev.layer.getAllChildMarkers().map((m) => m.options.idx).sort((a, b) => a - b);
@@ -107,7 +117,7 @@ export async function showMap(fp) {
   }).catch(() => {});
   if (S.CAN_MANAGE) bar.append(h('button', { class: 'pillbtn' + (M.placing ? ' on' : ''), title: 'Put photos without a location on the map: select them in the tray, then click the map or drag them onto it. Markers can then be dragged to a better spot.',
     onclick: () => { M.placing = !M.placing; showMap(fp); } }, icon('place'), M.placing ? 'Done placing' : 'Place photos'));
-  bar.append(h('span', { class: 'pillbtn', style: 'cursor:default' }, `${nf.format(d.id.length)} with location`),
+  bar.append(h('span', { class: 'pillbtn mcount', style: 'cursor:default' }, `${nf.format(d.id.length)} with location`),
     h('button', { class: 'pillbtn', onclick: () => {
       const b = map.getBounds();
       applyFilter((p) => p.set('bbox', [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((x) => x.toFixed(4)).join(',')), 'photos');

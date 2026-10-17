@@ -5,6 +5,7 @@ import { initSearch } from './search.js';
 import { G } from './grid.js';
 import { dbDialog } from './editing.js';
 import { loadUser, loginDialog, moreSheet, renderUserMenu, showAlbums } from './pages.js';
+import { M } from './map.js';
 import { toggleFilters } from './filters.js';
 import { LB, details } from './lightbox.js';
 
@@ -80,6 +81,14 @@ export function updateBanner(u) {
     h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('upd-dismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
   document.body.append(b);
 }
+const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', 'duplicates', 'detected', 'bursts', 'events', 'favorites'];
+/** A new version of the viewer is on the server: a small note to load it now; it also loads at the next change of page. */
+function updateReadyNote() {
+  if ($('#reloadnote')) return;
+  document.body.append(h('div', { id: 'reloadnote' }, h('span', null, 'A new version of the viewer is ready.'),
+    h('button', { class: 'pillbtn on', onclick: () => location.reload() }, 'Load it now'),
+    h('button', { class: 'iconbtn', title: 'Later: it loads when you next change page', onclick: (e) => e.currentTarget.parentElement.remove() }, icon('close'))));
+}
 export async function pollStatus() {
   let delay = 20000;
   try {
@@ -97,8 +106,13 @@ export async function pollStatus() {
       el.replaceChildren('Updating tag in sidecars', h('br'), `${nf.format(s.tagJobs.pending)} left`);
       delay = 3000;
     }
-    if (s.app && S.APP_STAMP && s.app !== S.APP_STAMP && !LB.open && !G.sel.size) { location.reload(); return; }  // the viewer was updated: use the new version
-    if (s.app) S.APP_STAMP = s.app;
+    // the viewer was updated: the new version loads when it cannot interrupt anything (the tab is in the
+    // background, or at the next change of page); meanwhile a quiet note offers to load it now
+    if (s.app && S.APP_STAMP && s.app !== S.APP_STAMP) {
+      if (document.hidden && !LB.open && !G.sel.size) { location.reload(); return; }
+      if (!S.RELOAD_PENDING) { S.RELOAD_PENDING = true; updateReadyNote(); }
+    }
+    if (s.app && !S.RELOAD_PENDING) S.APP_STAMP = s.app;
     S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
     S.IS_ADMIN = s.isAdmin; S.USERS_EXIST = s.usersExist; S.DIGIKAM_CHECK = s.digikamCheck || 'pgrep';
     if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}${S.APP_COMMIT ? ' (' + S.APP_COMMIT + ')' : ''}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
@@ -112,8 +126,12 @@ export async function pollStatus() {
     if (S.META && s.version && s.version !== S.META.version) {
       indexMeta(await api('/api/meta'));
       details.clear();
-      if (!LB.open) { const quiet = S.keepView; if (!quiet) S.keepView = S.route.view === 'photos'; S.viewKey = null; onRoute(); if (!quiet) toast('Library updated from digiKam.'); }
-      else S.viewKey = null;
+      // pages that are only lists of the library are redrawn in place; pages holding work in progress (the map
+      // while placing, forms, dialogs, the edit log's search) keep what is on screen and refresh their data quietly
+      if (LB.open) S.viewKey = null;
+      else if (S.route.view === 'map' && M.update) M.update();
+      else if (LIVE_VIEWS.includes(S.route.view)) { const quiet = S.keepView; S.keepView = true; S.viewKey = null; onRoute(); if (!quiet && S.route.view === 'photos') toast('Library updated from digiKam.'); }
+      else S.STALE_VIEW = true;
     }
   } catch { /* server restarting */ }
   pollSoon(delay);
