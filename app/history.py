@@ -105,14 +105,51 @@ def describe_edit(before: dict, ch: dict) -> str:
     return "; ".join(parts) or "Metadata rewritten"
 
 
-def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str = None) -> dict:
+def _photos_of_person(tag_id: int) -> list:
+    """Photo ids where this person (or a tag under it) is tagged or has a face region, from the index."""
+    from . import index
+    con = index.open_index()
+    try:
+        return [r[0] for r in con.execute(
+            "SELECT DISTINCT pt.photo_id FROM photo_tags pt JOIN tag_closure c ON c.tag = pt.tag_id WHERE c.anc = ? "
+            "UNION SELECT DISTINCT f.photo_id FROM faces f JOIN tag_closure c ON c.tag = f.tag_id WHERE c.anc = ?", (int(tag_id), int(tag_id)))]
+    finally:
+        con.close()
+
+
+def users() -> list:
     con = vdb.connect()
     try:
-        where, params = [], []
+        return [r[0] for r in con.execute("SELECT DISTINCT user_name FROM photo_history WHERE user_name IS NOT NULL ORDER BY user_name")]
+    finally:
+        con.close()
+
+
+def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
+            user: str = None, since: int = None, until: int = None) -> dict:
+    """The change log, newest first. q: words in the summary, file path or name, or user; person: a person tag id
+    (photos where they are tagged or have a face); user; since / until: Unix times."""
+    where, params = [], []
+    if person:
+        ids = _photos_of_person(person)
+        if not ids:
+            return {"total": 0, "entries": []}
+        where.append(f"photo_id IN ({','.join(str(int(i)) for i in ids)})")
+    con = vdb.connect()
+    try:
         if photo_id is not None:
             where.append("photo_id = ?"); params.append(int(photo_id))
         if action:
             where.append("action = ?"); params.append(action)
+        for word in (q or "").split()[:6]:
+            like = f"%{word}%"
+            where.append("(summary LIKE ? OR path LIKE ? OR user_name LIKE ? OR details LIKE ?)"); params += [like, like, like, like]
+        if user:
+            where.append("user_name = ?"); params.append(user)
+        if since:
+            where.append("ts >= ?"); params.append(int(since))
+        if until:
+            where.append("ts < ?"); params.append(int(until))
         w = (" WHERE " + " AND ".join(where)) if where else ""
         total = con.execute(f"SELECT count(*) FROM photo_history{w}", params).fetchone()[0]
         rows = con.execute(f"SELECT id, photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM photo_history{w} "

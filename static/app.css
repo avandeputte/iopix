@@ -831,3 +831,5 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .fpbody { display: grid; gap: 10px; } .fpbody label { display: grid; gap: 4px; } .fpbody textarea, .fpbody input { width: 100%; box-sizing: border-box; margin: 0; }
 .maptray .mapsearch { position: relative; } .maptray .mapsearch .alist { position: absolute; left: 0; right: 0; top: 100%; z-index: 2; background: var(--bg); box-shadow: var(--shadow); border-radius: 10px; }
 .maptray .mtsize { display: flex; gap: 6px; align-items: center; color: var(--fg2); } .maptray .mtsize .ic { width: 14px; height: 14px; } .maptray .mtsize .ic:last-child { width: 20px; height: 20px; }
+.hfilters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.qitems.large .hrow .ph, .qitems.huge .hrow .ph { width: 100%; height: 120px; }

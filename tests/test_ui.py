@@ -1389,3 +1389,11 @@ def test_metadata_quality_lists_photos_without_a_location(page, server):
     page.goto(server + "/#/quality")
     page.wait_for_selector("h1:has-text('Metadata quality')", timeout=10000)
     page.wait_for_selector("h2:has-text('No location')", timeout=20000)
+
+
+def test_edit_log_has_search_and_picture_sizes(page, server):
+    page.goto(server + "/#/history")
+    page.wait_for_selector("h1:has-text('Edit log')", timeout=10000)
+    assert page.locator(".hfilters input[placeholder^='Search']").count() == 1 and page.locator(".hfilters input[placeholder='Person']").count() == 1
+    page.locator(".hfilters .eseg button", has_text="Larger").click()
+    assert "huge" in page.locator(".hlist").get_attribute("class")

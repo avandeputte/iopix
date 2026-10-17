@@ -87,21 +87,48 @@ export function histEntry(e, onDone, withPhoto) {
         e.file_copy ? h('span', { title: e.file_copy }, `original image file (${e.file_copy.split('/').slice(-3).join('/')})`) : null) : null));
 }
 export async function showHistory(params) {
-  const photo = params.get('photo'), list = h('div', { class: 'hlist' }), more = h('button', { class: 'pillbtn', style: 'margin:14px 0', hidden: true }, 'Show more');
-  let action = params.get('action') || '', offset = 0;
-  const sel = h('select', { onchange: (e) => { action = e.target.value; offset = 0; load(); } }, h('option', { value: '' }, 'Every change'), ...Object.entries(HIST_ACTION).map(([k, l]) => h('option', { value: k, selected: k === action }, l)));
-  const load = async (append) => {
-    let r; try { r = await api(`/api/history?limit=100&offset=${offset}${photo ? '&photo=' + photo : ''}${action ? '&action=' + action : ''}`); } catch (e) { fill(list, h('div', { class: 'empty' }, e.message)); return; }
-    if (!append) list.replaceChildren();
-    if (!r.entries.length && !offset) list.append(h('div', { class: 'empty' }, 'No changes recorded yet.'));
-    list.append(...r.entries.map((e) => histEntry(e, () => { offset = 0; load(); }, true)));
-    offset += r.entries.length; more.hidden = offset >= r.total;
+  const photo = params.get('photo'), more = h('button', { class: 'pillbtn', style: 'margin:14px 0', hidden: true }, 'Show more');
+  let size = store.get('hsize', 'list');
+  const list = h('div', { class: 'hlist qitems ' + size });
+  let action = params.get('action') || '', offset = 0, timer = 0;
+  const sel = h('select', { onchange: (e) => { action = e.target.value; reload(); } }, h('option', { value: '' }, 'Every change'), ...Object.entries(HIST_ACTION).map(([k, l]) => h('option', { value: k, selected: k === action }, l)));
+  const q = h('input', { class: 'einput', placeholder: 'Search: file name, words in the change…', style: 'margin:0;min-width:220px;flex:1', oninput: () => { clearTimeout(timer); timer = setTimeout(reload, 350); } });
+  const people = (S.META?.tags || []).filter((t) => t.person && t.nAll).sort((a, b) => a.name.localeCompare(b.name));
+  const plist = h('datalist', { id: 'hpeople' }, people.map((t) => h('option', { value: t.name })));
+  const person = h('input', { class: 'einput', list: 'hpeople', placeholder: 'Person', style: 'margin:0;width:170px', onchange: () => reload(), oninput: () => { if (!person.value) reload(); } });
+  const who = h('select', { onchange: () => reload() }, h('option', { value: '' }, 'Anyone'));
+  const from = h('input', { type: 'date', class: 'einput', style: 'margin:0;width:150px', title: 'From', onchange: () => reload() });
+  const to = h('input', { type: 'date', class: 'einput', style: 'margin:0;width:150px', title: 'Until', onchange: () => reload() });
+  const sizes = h('div', { class: 'eseg', title: 'Picture size' }, [['list', 'List'], ['large', 'Large'], ['huge', 'Larger']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
+    size = k; store.set('hsize', k); list.className = 'hlist qitems ' + k; sizes.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+  const count = h('span', { class: 'muted' });
+  const query = () => {
+    const u = new URLSearchParams({ limit: 100, offset });
+    if (photo) u.set('photo', photo);
+    if (action) u.set('action', action);
+    if (q.value.trim()) u.set('q', q.value.trim());
+    const t = people.find((x) => x.name.toLowerCase() === person.value.trim().toLowerCase());
+    if (t) u.set('person', t.id);
+    if (who.value) u.set('user', who.value);
+    if (from.value) u.set('since', Math.floor(new Date(from.value + 'T00:00:00').getTime() / 1000));
+    if (to.value) u.set('until', Math.floor(new Date(to.value + 'T00:00:00').getTime() / 1000) + 86400);
+    return u;
   };
+  const load = async (append) => {
+    let r; try { r = await api('/api/history?' + query().toString()); } catch (e) { fill(list, h('div', { class: 'empty' }, e.message)); return; }
+    if (!append) list.replaceChildren();
+    if (r.users && who.options.length === 1) who.append(...r.users.map((u) => h('option', { value: u }, u)));
+    if (!r.entries.length && !offset) list.append(h('div', { class: 'empty' }, 'No change matches.'));
+    list.append(...r.entries.map((e) => histEntry(e, () => reload(), true)));
+    offset += r.entries.length; more.hidden = offset >= r.total;
+    fill(count, plural(r.total, 'change'));
+  };
+  const reload = () => { offset = 0; load(); };
   more.onclick = () => load(true);
   main.replaceChildren(h('div', { class: 'page spage' }, crumbs([['Maintenance', '#/maintenance'], ['Edit log', photo ? '#/history' : null], ...(photo ? [['One photo', null]] : [])]),
     pageTitle('calendar', 'indigo', photo ? 'Edit log of one photo' : 'Edit log'),
-    h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Every change made in the viewer, kept for good: who, when, and the values before and after. Undo puts the earlier values back; the restore links use the backups (sidecar copies, original files, deleted photos) as long as they are still there.'),
-    h('div', { class: 'ctools' }, h('span', null, 'Show: ', sel)), list, more));
+    h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Every change made in the viewer, kept for good: who, when, and the values before and after. Undo puts the earlier values back; the restore links use the backups (sidecar copies, original files, the trash).'),
+    h('div', { class: 'ctools hfilters' }, q, photo ? null : [person, plist], sel, who, h('span', { class: 'muted' }, 'from'), from, h('span', { class: 'muted' }, 'to'), to, sizes, count), list, more));
   load();
 }
 /** Delete photos for good, after a confirmation: files, sidecars, the database rows, everything the viewer knows.

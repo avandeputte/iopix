@@ -120,3 +120,21 @@ def test_backed_up_image_file_can_be_restored_from_any_change(client, lib):
     assert client.post(f"/api/history/{e['id']}/restore", json={"kind": "original"}).status_code == 200
     assert open(path, "rb").read() == open(b, "rb").read()
     b.unlink()
+
+
+def test_edit_log_search_by_words_person_user_and_time(client, lib):
+    import time
+    from app import history
+    pid = lib["with_faces"][0]
+    history.record([{"photo_id": pid, "action": "edit", "summary": "Searchable zebra change", "user": "tester-x"}])
+    r = client.get("/api/history?q=zebra").json()
+    assert r["total"] >= 1 and all("zebra" in e["summary"].lower() for e in r["entries"]) and "tester-x" in r["users"]
+    assert client.get("/api/history?q=zebra&user=tester-x").json()["total"] >= 1
+    assert client.get("/api/history?q=zebra&user=nobody-at-all").json()["total"] == 0
+    assert client.get(f"/api/history?q=zebra&since={int(time.time()) + 3600}").json()["total"] == 0
+    tag = next(f["tag"] for f in client.get(f"/api/photo/{pid}").json()["faces"])
+    by_person = client.get(f"/api/history?person={tag}&q=zebra").json()
+    assert by_person["total"] >= 1 and all(e["photo"] for e in by_person["entries"])
+    other = next(i for i in lib["ids"] if i not in lib["with_faces"])
+    history.record([{"photo_id": other, "action": "edit", "summary": "zebra on a photo without that person", "user": "tester-x"}])
+    assert all(e["photo"] != other for e in client.get(f"/api/history?person={tag}&q=zebra").json()["entries"])

@@ -101,9 +101,14 @@ async def api_quality_fix(request: Request):
 
 
 @router.get("/api/history")
-def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: str = None):
-    """The change log: every change the viewer made, newest first; for one photo with ?photo=."""
-    return history.entries(photo, max(1, min(limit, 500)), max(0, offset), action or None)
+def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
+                user: str = None, since: int = None, until: int = None):
+    """The edit log: every change the viewer made, newest first; for one photo with ?photo=; searchable by words (summary,
+    file name, user), a person, a user and a time range."""
+    r = history.entries(photo, max(1, min(limit, 500)), max(0, offset), action or None, q, person, user or None, since, until)
+    if not offset:
+        r["users"] = history.users()
+    return r
 
 
 @router.post("/api/history/{entry_id}/restore")
