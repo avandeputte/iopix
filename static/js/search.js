@@ -116,7 +116,7 @@ export function suggestions(text) {
 export function renderSuggest() {
   const box = $('#suggest');
   box.hidden = !S.sgItems.length;
-  box.replaceChildren(...sgItems.map((s, i) => h('div', { class: 'sg' + (i === S.sgSel ? ' sel' : ''), onmousedown: (e) => { e.preventDefault(); pickSuggestion(i); } },
+  box.replaceChildren(...S.sgItems.map((s, i) => h('div', { class: 'sg' + (i === S.sgSel ? ' sel' : ''), onmousedown: (e) => { e.preventDefault(); pickSuggestion(i); } },
     s.img ? h('img', { src: s.img, alt: '' }) : icon(s.ic), h('span', null, s.label, s.sub ? h('span', { class: 'sub' }, s.sub) : null),
     h('span', { class: 'kind' }, s.kind))));
   box.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });

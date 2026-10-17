@@ -1397,3 +1397,16 @@ def test_edit_log_has_search_and_picture_sizes(page, server):
     assert page.locator(".hfilters input[placeholder^='Search']").count() == 1 and page.locator(".hfilters input[placeholder='Person']").count() == 1
     page.locator(".hfilters .eseg button", has_text="Larger").click()
     assert "huge" in page.locator(".hlist").get_attribute("class")
+
+
+def test_search_box_enter_runs_the_search(page, server):
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("#q", timeout=10000)
+    page.fill("#q", "yellowstone")
+    page.wait_for_selector("#suggest .sg, .sg", timeout=5000)  # the suggestion list draws as you type
+    page.keyboard.press("Enter")
+    page.wait_for_function("location.hash.includes('q=') || location.hash.includes('place') || location.hash.includes('tag')", timeout=10000)
+    assert page.locator(".chip").count() >= 1
+    assert not errors, errors
