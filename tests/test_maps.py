@@ -131,3 +131,9 @@ def test_landmark_endpoint(client, lib, monkeypatch):
     monkeypatch.setattr(maps, "landmarks", lambda jpeg: [{"name": "Eiffel Tower", "score": 0.93, "lat": 48.8584, "lon": 2.2945}] if jpeg[:2] == b"\xff\xd8" else [])
     r = client.post("/api/location/landmark", json={"id": lib["ids"][0]})
     assert r.status_code == 200 and r.json()["landmarks"][0]["name"] == "Eiffel Tower", r.text
+
+
+def test_maps_config_offers_satellite_and_street_view(client):
+    c = client.get("/api/maps").json()
+    assert c["satellite"]["url"] and c["satellite"]["attribution"]
+    assert "{lat}" in c["streetview"]["link"] and "map_action=pano" in c["streetview"]["link"]

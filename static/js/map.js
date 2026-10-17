@@ -1,6 +1,7 @@
 /** The map page (Leaflet, loaded on demand). */
 import { $, api, date, dfDay, dfTime, fill, h, icon, main, nf, plural, store } from './core.js';
 import { S, applyFilter, filterParams, go, toast } from './state.js';
+import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
 import { openLightbox, syncLightbox } from './lightbox.js';
 
@@ -23,6 +24,29 @@ export function loadLeaflet(cluster) {
 
 export async function loadMaps() { if (S.mapsLoaded) return S.MAPS; try { S.MAPS = await api('/api/maps'); if (S.MAPS.error) toast(S.MAPS.error, null, null, 8000); } catch { /* keep OSM */ } S.mapsLoaded = true; return S.MAPS; }
 export const tiles = () => window.L.tileLayer(S.MAPS.url, { maxZoom: S.MAPS.maxZoom, attribution: S.MAPS.attribution });
+/** Map and Satellite base layers with a switcher; the choice is remembered. Returns the layer shown. */
+export function baseLayers(map) {
+  const L = window.L, road = tiles();
+  const sat = S.MAPS.satellite ? L.tileLayer(S.MAPS.satellite.url, { maxZoom: S.MAPS.satellite.maxZoom, attribution: S.MAPS.satellite.attribution }) : null;
+  const first = sat && store.get('map-layer', 'map') === 'satellite' ? sat : road;
+  first.addTo(map);
+  if (sat) {
+    L.control.layers({ Map: road, Satellite: sat }, null, { position: 'topright', collapsed: false }).addTo(map);
+    map.on('baselayerchange', (e) => store.set('map-layer', e.layer === sat ? 'satellite' : 'map'));
+  }
+  return first;
+}
+/** Street View at a spot: embedded when the server has a Google key with the Maps Embed API, else Google Maps in a new tab. */
+export function streetView(lat, lon, title) {
+  const sv = S.MAPS.streetview || {};
+  const at = (u) => u.replaceAll('{lat}', lat).replaceAll('{lon}', lon);
+  if (!sv.embed) { window.open(at(sv.link || 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}'), '_blank', 'noopener'); return; }
+  const back = modal(title || 'Street View', h('iframe', { class: 'svframe', src: at(sv.embed), allowfullscreen: true, loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade' }),
+    h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' }, 'Where Google has no Street View imagery nearby, the frame stays grey. ',
+      h('a', { class: 'lnk', href: at(sv.link), target: '_blank', rel: 'noopener' }, 'Open in Google Maps')),
+    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
+  back.querySelector('.modal').classList.add('svmodal');
+}
 export const mapLink = (lat, lon) => S.MAPS.link.replaceAll('{lat}', lat).replaceAll('{lon}', lon);
 
 export async function showMap(fp) {
@@ -42,7 +66,7 @@ export async function showMap(fp) {
   M.data = d;
   await loadMaps();
   const map = M.map = L.map(el, { worldCopyJump: true }).setView([30, 0], 2);
-  tiles().addTo(map);
+  baseLayers(map);
   const dot = L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] });
   const group = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 55, showCoverageOnHover: false, zoomToBoundsOnClick: false });
   const marker = (i) => L.marker([d.lat[i], d.lon[i]], { icon: dot, idx: i, draggable: !!M.placing }).on('click', () => openLightbox(M.data, i, true))
@@ -136,6 +160,7 @@ async function placeTray(map, fp, el) {
     toast(`${plural(picked.length, 'photo')} placed.`, 'Undo', async () => { if (await editPhotos(picked, { gps: null })) { map.removeLayer(pin); ids.unshift(...picked); draw(); } }, 10000);
   };
   map.on('click', (e) => place(e.latlng));
+  map.on('contextmenu', (e) => found({ lat: +e.latlng.lat.toFixed(6), lon: +e.latlng.lng.toFixed(6), name: 'This spot', detail: `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`, zoom: map.getZoom() }));
   el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
   el.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.getData('text/plain') === 'iopix-place') place(map.mouseEventToLatLng(e)); });
   el.style.cursor = 'crosshair';
@@ -162,10 +187,13 @@ async function placeTray(map, fp, el) {
     const icon_ = L.divIcon({ className: '', html: '<div class="fpin"></div>', iconSize: [30, 42], iconAnchor: [15, 40] });
     pin = L.marker([x.lat, x.lon], { icon: icon_, zIndexOffset: 1000 }).addTo(map);
     const label = h('div', { class: 'fpinlabel' }, h('b', null, x.name), x.detail ? h('div', { class: 'muted' }, x.detail) : null,
-      h('button', { class: 'pillbtn on', style: 'margin-top:6px', onclick: (e) => { e.stopPropagation(); place(L.latLng(x.lat, x.lon)); } }, icon('place'), 'Put the selected photos here'));
+      h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px' },
+        h('button', { class: 'pillbtn on', onclick: (e) => { e.stopPropagation(); place(L.latLng(x.lat, x.lon)); } }, icon('place'), 'Put the selected photos here'),
+        h('button', { class: 'pillbtn', onclick: (e) => { e.stopPropagation(); streetView(x.lat, x.lon, x.name); } }, 'Street View')),
+      h('div', { class: 'muted', style: 'font-size:11.5px;margin-top:4px' }, 'Right-click (or long-press) elsewhere to move the pin.'));
     pin.bindPopup(label, { closeButton: false, offset: [0, -34] }).openPopup();
     pin.on('click', (e) => { L.DomEvent.stopPropagation(e); if (sel.size) place(e.latlng); else pin.openPopup(); });
-    map.setView([x.lat, x.lon], Math.max(x.zoom || 0, 18));
+    map.setView([x.lat, x.lon], x.name === 'This spot' ? map.getZoom() : Math.max(x.zoom || 0, 18));
   };
   // thumbnail size, remembered
   const px = () => +store.get('tray-size', '70');

@@ -6,7 +6,7 @@ import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto,
 import { dateEditor, detectFaces, editControls, editPhotos, locationDialog, metadataEditor, tagDialog, tagPicker, templatePicker } from './editing.js';
 import { people } from './pages.js';
 import { tagOp } from './admin.js';
-import { M, loadLeaflet, loadMaps, mapLink, tiles } from './map.js';
+import { M, loadLeaflet, loadMaps, mapLink, streetView, tiles } from './map.js';
 import { awaitReindex, pollStatus, start } from './main.js';
 
 // src = the list being browsed ({id, w, h, ts, video}); faces/objects = overlay toggles; pushed = we added a history entry for ?p=
@@ -851,7 +851,7 @@ export function renderInfo() {
         h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${Math.round(d.alt)} m altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
           h('a', { class: 'lnk', onclick: () => go('map', photosWith({ from: d.day, to: d.day, trail: d.day })) }, 'Day’s trail'), ' · ',
           lnk('Photos nearby', { bbox: [d.lat - 0.01, d.lon - 0.015, d.lat + 0.01, d.lon + 0.015].map((x) => x.toFixed(4)).join(',') }), ' · ',
-          h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel))))] : null,
+          h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel), ' · ', h('a', { class: 'lnk', onclick: () => streetView(d.lat, d.lon, d.name) }, 'Street View'))))] : null,
     show('details') && kv.length ? [h('h4', null, 'Details'), h('div', { class: 'kv' }, kv)] : null,
     show('camera') && ckv.length ? [h('h4', null, 'Camera'), h('div', { class: 'kv' }, ckv)] : null,
     show('file') ? [h('h4', null, 'File'), h('div', { class: 'b muted', style: 'word-break:break-all;user-select:all;font-size:12.5px' }, d.path),

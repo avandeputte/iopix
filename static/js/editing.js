@@ -4,7 +4,7 @@ import { S, go, hashFor, photosWith, pollSoon, toast } from './state.js';
 import { G } from './grid.js';
 import { modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
-import { loadLeaflet, loadMaps, tiles } from './map.js';
+import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
 import { LB, details, getDetail, renderInfo, showItem } from './lightbox.js';
 import { awaitReindex, pollStatus, start } from './main.js';
 
@@ -300,7 +300,8 @@ export async function locationDialog(ids, current, after) {
   const back = modal(ids.length > 1 ? `Set location for ${nf.format(ids.length)} photos` : 'Set location',
     h('p', { class: 'muted' }, ids.length > 1 ? `The same position goes to all ${nf.format(ids.length)} selected photos, replacing any they already have. ` : '', 'Click the map or drag the pin, or type coordinates. Saved to the sidecar (and file, if on) and shown in digiKam after its database is updated.'),
     h('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:6px' }, search,
-      h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognises', onclick: suggest }, icon('spark'), 'Suggest location')), results, sugBox,
+      h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognises', onclick: suggest }, icon('spark'), 'Suggest location'),
+      h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')), results, sugBox,
     mapEl,
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, lat, lon, alt, altNote,
       h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; alt.value = d.alt ?? ''; altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo')),
@@ -325,7 +326,7 @@ export async function locationDialog(ids, current, after) {
   const L = window.L;
   await loadMaps();
   map = L.map(mapEl).setView(current ? [current.lat, current.lon] : [40.4, -80], current ? 13 : 4);
-  tiles().addTo(map);
+  baseLayers(map);
   map.on('click', (e) => { lat.value = e.latlng.lat.toFixed(6); lon.value = e.latlng.lng.toFixed(6); place(); });
   lat.onchange = lon.onchange = place;
   place();

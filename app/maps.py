@@ -22,6 +22,11 @@ SESSION_URL = "https://tile.googleapis.com/v1/createSession"
 TILE_URL = "https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}"
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 _session = {"token": None, "expires": 0}
+_sat_session = {"token": None, "expires": 0}
+ESRI_IMAGERY = {"url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                "attribution": "Imagery © Esri, Maxar, Earthstar Geographics", "maxZoom": 19}
+STREETVIEW_LINK = "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
+STREETVIEW_EMBED = "https://www.google.com/maps/embed/v1/streetview?key={key}&location={lat},{lon}&fov=80"
 _lock = threading.Lock()
 # the address the browser uses for this viewer, from the last /api/maps request. Google checks the
 # Referer of every request against the key's "HTTP referrer" restriction, and the session and
@@ -52,15 +57,43 @@ def key() -> str:
     return state.get_setting("google_maps_key", "") or os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
 
-def _create_session(k: str) -> dict:
-    body = json.dumps({"mapType": "roadmap", "language": "en-US", "region": "US"}).encode()
+def _create_session(k: str, map_type: str = "roadmap") -> dict:
+    spec = {"mapType": map_type, "language": "en-US", "region": "US"}
+    if map_type == "satellite":
+        spec["layerTypes"] = ["layerRoadmap"]  # street and place names over the imagery
+    body = json.dumps(spec).encode()
     req = urllib.request.Request(SESSION_URL + "?key=" + urllib.parse.quote(k), data=body, headers=_headers({"Content-Type": "application/json"}), method="POST")
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.load(r)
 
 
 def config() -> dict:
-    """What the browser needs to draw maps: provider, tile URL template, attribution, max zoom."""
+    """What the browser needs to draw maps: provider, tile URL templates (map and satellite), attribution,
+    max zoom, and how to show Street View (embedded with a Google key, otherwise a link to Google Maps)."""
+    c = _config()
+    if c.get("provider") == "google":
+        c["satellite"] = _satellite() or ESRI_IMAGERY
+        c["streetview"] = {"embed": STREETVIEW_EMBED.replace("{key}", urllib.parse.quote(key())), "link": STREETVIEW_LINK}
+    else:
+        c["satellite"] = ESRI_IMAGERY
+        c["streetview"] = {"embed": None, "link": STREETVIEW_LINK}
+    return c
+
+
+def _satellite():
+    k = key()
+    with _lock:
+        if not _sat_session["token"] or time.time() > _sat_session["expires"] - 3600:
+            try:
+                s = _create_session(k, "satellite")
+            except Exception:
+                return None
+            _sat_session.update(token=s["session"], expires=int(s.get("expiry", time.time() + 14 * 86400)))
+        token = _sat_session["token"]
+    return {"url": TILE_URL + "?session=" + urllib.parse.quote(token) + "&key=" + urllib.parse.quote(k), "attribution": "© Google", "maxZoom": 22}
+
+
+def _config() -> dict:
     if provider() != "google":
         return {"provider": "osm", "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "attribution": "© OpenStreetMap contributors", "maxZoom": 19,
                 "link": "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=15/{lat}/{lon}", "linkLabel": "OpenStreetMap"}
