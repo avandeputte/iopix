@@ -1,4 +1,4 @@
-"""iopix: a Google-Photos-style web front end for a digiKam library.
+"""iopix: a web front end for a digiKam library.
 
 The library (digiKam's database and the photo files) is only read here; the
 few endpoints that change it (sidecars, image files, digiKam's database on

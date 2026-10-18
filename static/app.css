@@ -599,7 +599,7 @@ body.nobadges .cbadges, body.nobadges .fbadge { display: none; }
 .page h2.sec .muted, .page h2:has(> .hic) .muted { font-weight: 400; }
 .spage h2 .muted { font-size: 13px; font-weight: 400; }
 .spage h2 + .srow, .spage h2 + div > .srow:first-child { border-top: 0; }
-/* a slimmer top bar: functionally Google Photos, not its proportions */
+/* a slimmer top bar */
 :root { --topbar: 52px; }
 @media (max-width: 800px) { :root { --topbar: 48px; } }
 #topbar { gap: 12px; padding: 0 14px; }

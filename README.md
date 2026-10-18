@@ -2,7 +2,7 @@
 
 *A web companion for your digiKam library.* iopix was called digiKam Viewer until version 1.17; see [Renamed from digiKam Viewer](#renamed-from-digikam-viewer).
 
-A Google-Photos-style web front end for a digiKam library: FastAPI + a single-page vanilla JS app. It reads digiKam's database and your photos, keeps everything it builds in its own `data/` folder, and writes to the library only for the editing features you turn on.
+A web front end for a digiKam library, for browsing, searching and managing photos from any browser: FastAPI + a single-page vanilla JS app. It reads digiKam's database and your photos, keeps everything it builds in its own `data/` folder, and writes to the library only for the editing features you turn on.
 
 ## Run
 
