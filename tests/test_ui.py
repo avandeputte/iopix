@@ -1572,6 +1572,7 @@ def test_map_place_mode_shows_the_tray(page, server):
         page.wait_for_selector(".mapbar button:has-text('Place photos')", timeout=15000)
     except Exception:
         pytest.skip("the map needs tiles from the internet")
+    assert page.locator(".mapbar .mapfind input").count() == 1, "the map has its own place search"
     page.locator(".mapbar button:has-text('Place photos')").click()
     page.wait_for_selector(".maptray .mthead", timeout=15000)
     assert page.locator(".maptray .mapsearch input").count() == 1 and page.locator(".maptray .mtsize input[type=range]").count() == 1

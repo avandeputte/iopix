@@ -865,3 +865,8 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .lb-info .approx .ic { width: 15px; height: 15px; color: #c77d00; }
 .maptray .mttown { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 6px 0 2px; cursor: pointer; flex-wrap: wrap; }
 .maptray .mttown select { padding: 2px 6px; font-size: 12.5px; }
+.mapbar .mapfind { position: relative; display: flex; align-items: center; gap: 6px; background: var(--bg); box-shadow: var(--shadow); border-radius: 999px; padding: 0 6px 0 12px; height: 36px; }
+.mapbar .mapfind .ic { width: 18px; height: 18px; color: var(--fg2); flex: none; }
+.mapbar .mapfind input { border: 0; background: transparent; margin: 0; padding: 0; width: 230px; height: 34px; box-shadow: none; outline: none; }
+.mapbar .mapfind .mapsr { position: absolute; top: 42px; left: 0; width: 340px; max-height: 280px; overflow: auto; background: var(--bg); box-shadow: var(--shadow); border-radius: 12px; }
+@media (max-width: 800px) { .mapbar { flex-wrap: wrap; right: 12px; } .mapbar .mapfind input { width: 150px; } .mapbar .mapfind .mapsr { width: min(340px, 90vw); } }

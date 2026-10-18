@@ -122,8 +122,38 @@ export async function showMap(fp) {
       const b = map.getBounds();
       applyFilter((p) => p.set('bbox', [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((x) => x.toFixed(4)).join(',')), 'photos');
     } }, icon('photo'), 'Show photos in this area'));
+  if (!M.placing) bar.prepend(mapSearch(map));  // (placing has the same search in its tray)
   if (M.placing && S.CAN_MANAGE) placeTray(map, fp, el);
   syncLightbox();
+}
+/** Find a place on the map: a town, landmark or address (the server's place search, offline towns too); the map goes
+ *  there, with a pin until the next search. */
+function mapSearch(map) {
+  const L = window.L;
+  let timer = 0, pin = null;
+  const results = h('div', { class: 'alist mapsr', hidden: true });
+  const go = (x) => {
+    results.hidden = true; input.value = x.name;
+    if (pin) map.removeLayer(pin);
+    pin = L.marker([x.lat, x.lon], { icon: L.divIcon({ className: '', html: '<div class="fpin"></div>', iconSize: [30, 42], iconAnchor: [15, 40] }) })
+      .addTo(map).bindTooltip(x.name);
+    map.setView([x.lat, x.lon], Math.min(Math.max(x.zoom || 12, 11), 17));
+  };
+  const look = async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { results.hidden = true; return; }
+    let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toast(e.message); return; }
+    if (input.value.trim() !== q) return;
+    results.hidden = false;
+    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => go(x) },
+      icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
+      : h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Nothing found.'));
+  };
+  // Enter goes straight to the best match
+  const input = h('input', { class: 'einput', type: 'search', placeholder: 'Find a place, e.g. Amsterdam', 'aria-label': 'Find a place on the map',
+    onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); look().then(() => results.querySelector('.frow')?.click()); } if (e.key === 'Escape') results.hidden = true; },
+    oninput: () => { clearTimeout(timer); timer = setTimeout(look, 450); } });
+  return h('div', { class: 'mapfind' }, icon('search'), input, results);
 }
 /** A marker dragged to a new spot (placing mode): the photo's location follows, with Undo. */
 async function moveMarker(mk, d, i) {

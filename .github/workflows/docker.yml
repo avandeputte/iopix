@@ -31,7 +31,7 @@ jobs:
           python -m pip install -q -e ".[test]"
           python -m pyflakes app
           python -c "import app.main"
-          for f in static/app.js static/sw.js static/js/*.js; do node --check "$f"; done  # ES modules: the entry, every module, the service worker
+          for f in static/app.js static/js/*.js; do node --input-type=module --check < "$f" || exit 1; done; node --check static/sw.js  # ES modules parsed as modules (a plain --check can miss errors), then the service worker
           for f in *.sh installer/*.sh; do sh -n "$f"; done
           bash -n proxmox/ct/iopix.sh proxmox/install/iopix-install.sh
       # the full test suite needs a digiKam library to cut its scratch copy from, so it runs
