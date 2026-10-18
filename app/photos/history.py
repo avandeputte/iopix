@@ -303,7 +303,7 @@ def _pending_from_sidecar(photo: dict):
     from there, so an old sidecar can never take a person or a face box off the photo."""
     from app.photos import consistency, edits
     from app.faces import facemgr
-    from app.data import state, index
+    from app.data import index
     side = photo["path"] + ".xmp"
     vals = consistency._exif_read([side]).get(side) or {}
     con = index.open_index()
@@ -373,7 +373,6 @@ def _restore_deleted(e: dict) -> dict:
         ch["add_tags"] = d["tags"]
     if ch:
         state_ch = {"rating": max(int(ch.get("rating") or 0), 0), **{k: v for k, v in ch.items() if k != "rating"}}
-        from app.data import state
         edits.save_pending([(new_id, state_ch)])
     _ = deletion, edits
     return {"restored": "deleted", "id": new_id}
