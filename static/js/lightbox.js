@@ -74,17 +74,24 @@ export function buildLightbox() {
     e.frame, e.prev, e.next, e.strip);
   lb.replaceChildren(e.stage, e.info);
   initGestures(e.stage);
-  let idle;
+  let idle, stripTimer = 0;
+  const holdStrip = () => { clearTimeout(stripTimer); stripTimer = 0; };
   e.stage.addEventListener('pointermove', (ev) => {
     e.stage.classList.remove('lb-idle');
     clearTimeout(idle);
     idle = setTimeout(() => e.stage.classList.add('lb-idle'), 2800);
-    if (ev.pointerType === 'mouse') {
-      const nearBottom = e.stage.clientHeight - ev.clientY + e.stage.getBoundingClientRect().top < 110;
-      e.strip.classList.toggle('show', nearBottom || ev.target.closest('.lb-strip') !== null);
-    }
+    if (ev.pointerType !== 'mouse') return;
+    const fromBottom = e.stage.getBoundingClientRect().bottom - ev.clientY;
+    if (e.strip.classList.contains('show')) {
+      // open: it stays while the pointer is on it, and drops once the pointer is clearly above it
+      if (!ev.target.closest('.lb-strip') && fromBottom > e.strip.offsetHeight + 8) { holdStrip(); e.strip.classList.remove('show'); }
+    } else if (fromBottom < 24 && !LB.detail?.video && !LB.faces) {
+      // only the very bottom edge, after a short rest there: a video's controls and faces low in the photo stay
+      // reachable (with a video playing or the faces shown, the grip opens it instead)
+      if (!stripTimer) stripTimer = setTimeout(() => { stripTimer = 0; e.strip.classList.add('show'); }, 300);
+    } else holdStrip();
   });
-  e.stage.addEventListener('pointerleave', () => { e.strip.classList.remove('show'); unpeek(); });
+  e.stage.addEventListener('pointerleave', () => { holdStrip(); e.strip.classList.remove('show'); unpeek(); });
   e.strip.addEventListener('pointerleave', unpeek);
 }
 
@@ -216,6 +223,47 @@ export function editMenu(ids, anchor, withCrop) {
   menu.style.left = left + 'px'; menu.style.top = top + 'px';
   const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
   setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+}
+/** A menu of actions under a button, anywhere on the page (kept inside the window). items: [label, fn, cls] or a
+ *  heading string; null entries are skipped. */
+export function popMenu(anchor, items) {
+  $('.facemenu')?.remove();
+  const menu = h('div', { class: 'facemenu', style: 'position:fixed' }, items.filter(Boolean).map((it) => typeof it === 'string' ? h('div', { class: 'fmsep' }, it)
+    : h('div', { class: 'fmi ' + (it[2] || ''), onclick: (e) => { e.stopPropagation(); menu.remove(); it[1](e); } }, it[0])));
+  document.body.append(menu);
+  const br = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = Math.min(menu.offsetHeight, innerHeight - 16);
+  menu.style.maxHeight = `${innerHeight - 16}px`; menu.style.overflowY = 'auto';
+  let left = br.right - mw, top = br.bottom + 4;
+  if (left < 8) left = Math.min(br.left, innerWidth - mw - 8);
+  if (top + mh > innerHeight - 8) top = Math.max(8, br.top - mh - 4);
+  menu.style.left = Math.max(8, left) + 'px'; menu.style.top = top + 'px';
+  const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', close, true); } };
+  setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+  return menu;
+}
+/** The info panel's Actions menu: everything that can be done with this photo, in one place. */
+export function photoActions(anchor, d) {
+  const editing = S.EDITING, manage = S.CAN_MANAGE;
+  const dateBox = () => { const box = LB.el.info.querySelector('.dateedit')?.parentElement; if (box) { box.hidden = false; box.scrollIntoView({ block: 'nearest' }); box.querySelector('input')?.focus(); } };
+  popMenu(anchor, [
+    manage && !d.video ? 'Faces' : null,
+    manage && S.FACE_DETECT && !d.video ? ['Detect faces', () => detectFaces([d.id])] : null,
+    manage && !d.video ? ['Add a face by hand…', () => startDrawFace()] : null,
+    editing ? 'Metadata' : null,
+    editing ? ['Change the date…', dateBox] : null,
+    editing ? [d.lat != null ? 'Change the location…' : 'Set the location…', () => locationDialog([d.id], d.lat != null ? { lat: d.lat, lon: d.lon, alt: d.alt } : null)] : null,
+    editing ? ['Apply a metadata template…', () => templatePicker([d.id])] : null,
+    manage ? ['All metadata…', () => metadataEditor(d)] : null,
+    manage ? 'File' : null,
+    manage ? ['Rename…', () => renamePhoto(d)] : null,
+    manage ? ['Move to a folder…', () => movePhotos([d.id], () => { LB.detail = null; details.delete(d.id); setTimeout(showItem, 1500); })] : null,
+    manage && S.LOSSLESS && !d.video ? ['Rotate, flip or crop…', () => editMenu([d.id], anchor, true)] : null,
+    manage && d.album && !d.video ? ['Use as folder cover', async () => { try { await post(`/api/folders/${d.album.id}/properties`, { icon: d.id }); toast(`Now the cover of “${d.album.name}” in Folders.`); S.keepView = true; pollSoon(600); } catch (e) { toast(e.message); } }] : null,
+    'Share',
+    ['Add to album…', () => albumDialog([d.id])],
+    ['Download the original', () => LB.el.dl.click()],
+    editing ? ['Edit log', () => { location.hash = `#/history?photo=${d.id}`; }] : null,
+  ]);
 }
 export async function refreshImages(id) {
   await Promise.all([fetch(`/thumb/${id}`, { cache: 'reload' }), fetch(`/preview/${id}`, { cache: 'reload' })]).catch(() => {});
@@ -412,7 +460,7 @@ export function showItem() {
     LB.ar = d.w / (d.h || 1);
     sizeFrame();
     if (isVideo === undefined) { isVideo = !!d.video; d.video ? mountVideo() : loadPreview(); }
-    el.ttl.replaceChildren(d.title || d.name, h('small', null, `${dfDay.format(date(d.ts))} · ${dfTime.format(date(d.ts))}`));
+    renderTitle();
     el.facesBtn.style.display = d.faces.length || d.faces_other?.length ? '' : 'none';
     el.addFaceBtn.style.display = S.CAN_MANAGE && !d.video ? '' : 'none';
     el.delBtn.style.display = S.CAN_MANAGE ? '' : 'none';
@@ -428,6 +476,11 @@ export function showItem() {
     new Image().src = `/thumb/${src.id[j]}`;
     if (src.video && !(j in src.video) && Math.abs(j - i) === 1) new Image().src = `/preview/${src.id[j]}`;
   }
+}
+/** The title and date over the photo, from LB.detail: drawn on opening and again after an edit of either. */
+export function renderTitle() {
+  const d = LB.detail;
+  if (d) LB.el.ttl.replaceChildren(d.title || d.name, h('small', null, `${dfDay.format(date(d.ts))} · ${dfTime.format(date(d.ts))}`));
 }
 export function updateFavBtn() {
   const on = ST.fav.has(LB.src.id[LB.i]);
@@ -796,7 +849,6 @@ export function renderInfo() {
   const addKv = (k, v) => { if (v != null && v !== '') kv.push(h('span', null, k), h('span', null, v)); };
   if (!S.EDITING) addKv('Rating', stars);
   if (d.creator) kv.push(h('span', null, 'Creator'), h('span', null, lnk(d.creator, { creator: d.creator })));
-  if (S.EDITING) kv.push(h('span', null, 'Template'), h('span', null, h('a', { class: 'lnk', onclick: () => templatePicker([d.id]) }, 'Apply a metadata template…')));
   addKv('Copyright', d.copyright);
   for (const [k, v] of Object.entries(cr)) if (!['creator', 'copyrightNotice'].includes(k)) addKv(k.replace('creatorContactInfo.', '').replace(/([A-Z])/g, ' $1').toLowerCase(), v);
   for (const [k, v] of Object.entries(ex.properties || {})) addKv(k, v);
@@ -824,7 +876,8 @@ export function renderInfo() {
   ].flat().filter(Boolean) : [];
   fill(el,
     h('div', { class: 'ihead' }, h('button', { class: 'iconbtn', title: 'Close info', onclick: toggleInfo }, icon('close')), 'Info',
-      h('button', { class: 'iconbtn' + (LB.prefs ? ' on' : ''), style: 'margin-left:auto', title: 'Choose what this panel shows', onclick: () => { LB.prefs = !LB.prefs; renderInfo(); } }, icon('gear'))),
+      h('button', { class: 'pillbtn iactions', style: 'margin-left:auto', title: 'Everything you can do with this photo', onclick: (e) => photoActions(e.currentTarget, d) }, icon('more'), 'Actions'),
+      h('button', { class: 'iconbtn' + (LB.prefs ? ' on' : ''), title: 'Choose what this panel shows', onclick: () => { LB.prefs = !LB.prefs; renderInfo(); } }, icon('gear'))),
     LB.prefs ? infoPrefsEditor(renderInfo) : null,
     show('caption') && d.title ? h('div', { class: 'title' }, d.title) : null,
     show('caption') && d.caption ? h('div', { class: 'muted', style: 'margin:6px 0 10px;white-space:pre-wrap' }, d.caption) : null,
@@ -848,7 +901,7 @@ export function renderInfo() {
         ...peopleTags.filter((t) => !faced.has(t.id)).map((t) => ({ kind: 'tagonly', tag: t.id, name: t.name }))];
       const canDetect = S.CAN_MANAGE && S.FACE_DETECT && !d.video;
       if (!rows.length && !canDetect) return null;
-      return [h('h4', null, 'People', canDetect ? h('a', { class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', title: 'Look for faces nobody has marked yet; faces already marked are kept', onclick: () => detectFaces([d.id]) }, 'detect faces') : null),
+      return [h('h4', null, 'People'),
         h('div', { class: 'facerows' }, rows.map((f) => h('div', { class: 'facerow', title: f.kind === 'confirmed' || f.kind === 'tagonly' ? (S.CAN_MANAGE ? 'Options for this face' : `Show all photos of ${f.name}`) : 'Show the face on the photo',
         onclick: (e) => {
           if (f.kind !== 'tagonly' && !LB.faces) toggleFaces();
@@ -875,8 +928,7 @@ export function renderInfo() {
     show('details') && kv.length ? [h('h4', null, 'Details'), h('div', { class: 'kv' }, kv)] : null,
     show('camera') && ckv.length ? [h('h4', null, 'Camera'), h('div', { class: 'kv' }, ckv)] : null,
     show('file') ? [h('h4', null, 'File'), h('div', { class: 'b muted', style: 'word-break:break-all;user-select:all;font-size:12.5px' }, d.path),
-      S.CAN_MANAGE ? h('div', { style: 'font-size:12.5px;margin-top:4px' }, h('a', { class: 'lnk', onclick: () => renamePhoto(d) }, 'Rename'), ' · ', h('a', { class: 'lnk', onclick: () => metadataEditor(d) }, 'All metadata'), ' · ', h('a', { class: 'lnk', onclick: () => movePhotos([d.id], () => { LB.detail = null; details.delete(d.id); setTimeout(showItem, 1500); }) }, 'Move to a folder'),
-        d.album && !d.video ? [' · ', h('a', { class: 'lnk', title: `Show this photo on “${d.album.name}” in Folders (digiKam's album icon)`, onclick: async () => { try { await post(`/api/folders/${d.album.id}/properties`, { icon: d.id }); toast('Folder cover set.'); S.keepView = true; pollSoon(600); } catch (e) { toast(e.message); } } }, 'Use as folder cover')] : null) : null] : null,
+    ] : null,
     ai.length ? [h('h4', null, 'AI analysis'), ai] : null,
     show('history') && S.EDITING ? (() => {  // last, folded; editors only; nothing shows for a photo never changed here
       const box = h('details', { class: 'hfold' });

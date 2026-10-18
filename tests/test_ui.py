@@ -452,19 +452,37 @@ def test_lightbox_film_strip_and_remembered_info_panel(page, server, lib):
     assert "show" not in (strip.get_attribute("class") or ""), "parked until the pointer comes near the bottom edge"
     box = page.locator("#lightbox .lb-stage").bounding_box()
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    # low in the photo (where a video's controls or a low face are) it stays parked
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 60)
+    page.wait_for_timeout(700)
+    assert "show" not in (strip.get_attribute("class") or ""), "only the bottom edge opens it"
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 20)
     page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 200)
     page.wait_for_selector("#lightbox .lb-strip:not(.show)", timeout=3000)
+    # with the faces shown the edge leaves it parked (faces low in the photo stay reachable); the grip opens it
+    page.keyboard.press("f")
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 6)
+    page.wait_for_timeout(700)
+    assert "show" not in (strip.get_attribute("class") or ""), "faces shown: the edge does not open the strip"
+    page.locator("#lightbox .lb-strip .grip").click()
+    page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 200)
+    page.wait_for_selector("#lightbox .lb-strip:not(.show)", timeout=3000)
+    page.keyboard.press("f")
     # hovering another thumbnail previews it over the stage; leaving the strip restores the view
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 20)
     page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
     reel.nth(1).hover(force=True)
-    page.wait_for_selector("#lightbox .lb-peek", timeout=3000)
-    assert page.locator("#lightbox .lb-peek").get_attribute("data-id") == reel.nth(1).get_attribute("src").split("/")[-1]
+    want = reel.nth(1).get_attribute("src").split("/")[-1]
+    # (the thumbnail that slid up under the resting pointer may be previewed first: the hovered one replaces it)
+    page.wait_for_function(f"document.querySelector('#lightbox .lb-peek')?.dataset.id === '{want}'", timeout=3000)
     assert page.locator("#lightbox .lb-strip .reel img.cur").get_attribute("data-i") == "0", "peeking does not move"
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 200)
     page.wait_for_selector("#lightbox .lb-peek", state="detached", timeout=3000)
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 10)
+    page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
+    page.wait_for_timeout(300)  # slid up
     reel.nth(1).click(force=True)
     page.wait_for_function("document.querySelector('#lightbox .lb-strip .reel img.cur')?.dataset.i === '1'", timeout=5000)
     assert page.locator("#lightbox .lb-peek").count() == 0
@@ -991,6 +1009,52 @@ def test_phone_layout_fits_the_screen(browser, server):
         ctx.close()
 
 
+def test_film_strip_leaves_video_controls_alone(page, server):
+    """With a video open, the bottom edge does not slide the film strip over the player's controls; the grip still opens it."""
+    import json as _json
+    r = _json.loads(urllib.request.urlopen(server + "/api/photos").read())
+    vids = [r["id"][int(k)] for k in r["video"]]
+    if not vids:
+        pytest.skip("no video in the scratch library")
+    _open_photo(page, server, vids[0])
+    page.wait_for_selector("#lightbox .lb-frame video", timeout=15000)
+    box = page.locator("#lightbox .lb-stage").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 6)
+    page.wait_for_timeout(700)
+    assert "show" not in (page.locator("#lightbox .lb-strip").get_attribute("class") or "")
+    if page.locator("#lightbox .lb-strip").is_visible():
+        page.locator("#lightbox .lb-strip .grip").click()
+        page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
+
+
+def test_video_date_change_shows_in_the_viewer(page, server):
+    """Setting a video's date from the info panel changes the date in the panel and over the picture at once."""
+    import json as _json
+    r = _json.loads(urllib.request.urlopen(server + "/api/photos").read())
+    vids = [r["id"][int(k)] for k in r["video"]]
+    if not vids:
+        pytest.skip("no video in the scratch library")
+    vid = vids[0]
+    _open_photo(page, server, vid)
+    page.keyboard.press("i")
+    page.wait_for_selector(".lb-info:not([hidden])", timeout=5000)
+    page.locator(".lb-info a.lnk", has_text="change").first.click()
+    page.locator(".lb-info .dateedit input[type=datetime-local]").fill("2009-09-09T17:00")
+    page.locator(".lb-info .dateedit button", has_text="Set date").click()
+    page.wait_for_function("document.querySelector('.lb-info .irow')?.innerText.includes('2009')", timeout=5000)
+    assert "2009" in page.locator("#lightbox .lb-top .ttl").inner_text(), "the date over the video follows"
+    import time as _time
+    for _ in range(40):  # the server's index takes the edit on its next rebuild
+        taken = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{vid}").read())["taken"]
+        if taken.startswith("2009-09-09T17:00"):
+            break
+        _time.sleep(0.25)
+    assert taken.startswith("2009-09-09T17:00"), taken
+    req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [vid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req).read()
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json
@@ -1372,8 +1436,17 @@ def test_all_metadata_and_adjust_panels_open(page, server, lib):
     page.locator("#grid .tile").first.click()
     page.wait_for_selector("#lightbox .lb-frame img", timeout=15000)
     page.keyboard.press("i")
-    page.wait_for_selector(".lb-info a:has-text('All metadata')", timeout=10000)
-    page.locator(".lb-info a:has-text('All metadata')").click()
+    # every action on the photo is in the info panel's Actions menu, not in links scattered over the panel
+    page.wait_for_selector(".lb-info .iactions", timeout=10000)
+    for old in ("All metadata", "Move to a folder", "Use as folder cover", "detect faces", "Apply a metadata template"):
+        assert page.locator(f".lb-info a:has-text('{old}')").count() == 0, old
+    page.locator(".lb-info .iactions").click()
+    labels = page.locator(".facemenu .fmi").all_inner_texts()
+    for want in ("Rename…", "Move to a folder…", "All metadata…", "Change the date…", "Apply a metadata template…", "Add to album…", "Download the original"):
+        assert want in labels, (want, labels)
+    box, win = page.locator(".facemenu").bounding_box(), page.viewport_size
+    assert box["x"] >= 0 and box["y"] >= 0 and box["x"] + box["width"] <= win["width"] and box["y"] + box["height"] <= win["height"], box
+    page.locator(".facemenu .fmi", has_text="All metadata").click()
     page.wait_for_selector(".mdmodal .mdgroup", timeout=15000)
     assert page.locator(".mdmodal .mdtable tr").count() > 5
     page.locator(".mdmodal button:has-text('Close')").click()

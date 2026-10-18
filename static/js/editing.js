@@ -5,7 +5,7 @@ import { G } from './grid.js';
 import { modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
 import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
-import { LB, details, getDetail, renderInfo, showItem } from './lightbox.js';
+import { LB, details, getDetail, renderInfo, renderTitle, showItem } from './lightbox.js';
 import { awaitReindex, pollStatus, start } from './main.js';
 
 export function applyLocal(d, ch) {
@@ -99,7 +99,7 @@ export async function editPhotos(ids, changes) {
   for (const id of ids) { if ('shift' in changes) details.delete(id); else details.get(id)?.then((d) => applyLocal(d, changes)); }
   if (LB.open && ids.includes(LB.src.id[LB.i])) {
     const d = await getDetail(LB.src.id[LB.i]);
-    if (LB.open && LB.src.id[LB.i] === d.id) { LB.detail = d; if (LB.info) renderInfo(); }  // unless the user has moved on meanwhile
+    if (LB.open && LB.src.id[LB.i] === d.id) { LB.detail = d; renderTitle(); if (LB.info) renderInfo(); }  // unless the user has moved on meanwhile
     flashEdit(changes);
   }
   if (r.failed.length) toast(`${r.failed.length} could not be changed: ${r.failed[0].error}`);

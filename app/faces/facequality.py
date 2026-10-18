@@ -16,8 +16,10 @@ taken first; every photo gets a change-log entry with a copy of its sidecar from
 Reported, not changed: the same person in two clearly separate places on one photo (usually a misnamed face),
 and rectangles that are empty or fall outside the image.
 """
+import datetime as dt
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -94,6 +96,9 @@ def scan() -> dict:
                              "apart": max(abs(a[k] - b[k]) for _va, a in g for _vb, b in g for k in range(4))})
         if len(groups) > 1:
             separate.append({"photo": img, "name": name, "rects": [list(g[0][1]) for g in groups]})
+    wrong = _wrongfolder()
+    acc_w = _accepted("wrongfolder")
+    wrong_shown = [u for u in wrong if acc_w.get(u["photo"]) != u["signature"]]
     noloc = _nolocation()
     acc_l = _accepted("nolocation")
     noloc_shown = [u for u in noloc if acc_l.get(u["photo"]) != u["signature"]]
@@ -106,6 +111,7 @@ def scan() -> dict:
     return {"checked": len(rows), "near": near, "separate": separate, "invalid": invalid, "unnamed": shown,
             "unnamed_accepted": len(unnamed) - len(shown), "untagged": untagged_shown, "untagged_accepted": len(untagged) - len(untagged_shown),
             "nolocation": noloc_shown, "nolocation_accepted": len(noloc) - len(noloc_shown),
+            "wrongfolder": wrong_shown, "wrongfolder_accepted": len(wrong) - len(wrong_shown),
             "at": int(time.time())}
 
 
@@ -135,6 +141,81 @@ def _nolocation() -> list:
     finally:
         con.close()
     return [{"photo": r[0], "ts": r[1], "name": r[2], "signature": "nogps"} for r in rows]
+
+
+# a folder segment that starts with a date: 2020, 202001, 2020-01, 2020-01-15 Trip, 20200115 (the deepest one counts)
+FOLDER_DATE = re.compile(r"^(1[89]\d\d|20\d\d)(?:[-_. ]?(0[1-9]|1[0-2])(?:[-_. ]?(0[1-9]|[12]\d|3[01]))?)?(?!\d|s\b)")
+EVENT_DAYS = 31   # a folder named for a day holds that day and the trip or event that started on it
+
+
+def folder_date(path: str):
+    """(year, month or None, day or None) that a folder's path names, from its deepest dated segment, or None."""
+    found = None
+    for seg in (path or "").strip("/").split("/"):
+        m = FOLDER_DATE.match(seg)
+        if m:
+            found = (int(m[1]), int(m[2]) if m[2] else None, int(m[3]) if m[3] else None)
+    return found
+
+
+def _folder_span(fd):
+    """The dates a folder's own date covers: a day and the month after it, a month, or a year; a day of slack on
+    each side for clocks and time zones."""
+    y, mo, d = fd
+    try:
+        if d:
+            start = dt.date(y, mo, d); end = start + dt.timedelta(days=EVENT_DAYS)
+        elif mo:
+            start = dt.date(y, mo, 1); end = (dt.date(y + (mo == 12), mo % 12 + 1, 1)) - dt.timedelta(days=1)
+        else:
+            start, end = dt.date(y, 1, 1), dt.date(y, 12, 31)
+    except ValueError:  # 2021-02-30
+        return None
+    return start - dt.timedelta(days=1), end + dt.timedelta(days=1)
+
+
+def _wrongfolder() -> list:
+    """Photos and videos whose date is outside the date their folder is named for (2005-01-01 in 2020/202001): the
+    date or the folder is wrong. [{photo, ts, name, taken, folder, folder_id, expect, suggest, signature}], the
+    furthest off first. suggest is the existing folder named for the photo's own date, when there is one."""
+    con = index.open_index()
+    try:
+        albums = con.execute("SELECT id, path, n FROM albums").fetchall()
+        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != ''").fetchall()
+    finally:
+        con.close()
+    spans, by_date = {}, {}
+    for aid, path, n in albums:
+        fd = folder_date(path)
+        if not fd:
+            continue
+        span = _folder_span(fd)
+        if span:
+            spans[aid] = (span, fd, path)
+            by_date.setdefault(fd, []).append((n or 0, aid, path))
+    out = []
+    for pid, ts, name, taken, aid in rows:
+        if aid not in spans:
+            continue
+        try:
+            day = dt.date.fromisoformat(taken[:10])
+        except ValueError:
+            continue
+        (start, end), fd, path = spans[aid]
+        if start <= day <= end:
+            continue
+        sug = None
+        for key in ((day.year, day.month, day.day), (day.year, day.month, None), (day.year, None, None)):
+            if by_date.get(key):
+                n, sid, spath = max(by_date[key])
+                sug = {"id": sid, "path": spath}
+                break
+        expect = f"{fd[0]:04d}" + (f"-{fd[1]:02d}" if fd[1] else "") + (f"-{fd[2]:02d}" if fd[2] else "")
+        off = min(abs((day - start).days), abs((day - end).days))
+        out.append({"photo": pid, "ts": ts, "name": name, "taken": taken[:19], "folder": path, "folder_id": aid, "expect": expect,
+                    "suggest": sug, "off": off, "signature": f"{taken[:10]}@{aid}"})
+    out.sort(key=lambda u: (-u["off"], u["folder"], u["name"]))
+    return out
 
 
 def _accepted(check: str) -> dict:
@@ -173,7 +254,7 @@ def accept(photos: list, check: str = "unnamed", on: bool = True) -> int:
     """Accept these photos' finding as it is (they leave the list until their faces change), or take it back."""
     from app.photos import history
     from app.data import vdb
-    if check not in ("unnamed", "untagged", "nolocation"):
+    if check not in ("unnamed", "untagged", "nolocation", "wrongfolder"):
         raise ValueError("Unknown check")
     want = {int(p) for p in photos}
     current = {u["photo"]: u["signature"] for u in scan()[check]} if on else {}
@@ -199,7 +280,7 @@ def items(check: str, offset: int = 0, limit: int = 120) -> dict:
     s = scan()
     if check == "near":
         rows = [{"photo": n["photo"], "name": n["name"], "apart": n["apart"]} for n in s["near"]]
-    elif check in ("separate", "invalid", "unnamed", "untagged", "nolocation"):
+    elif check in ("separate", "invalid", "unnamed", "untagged", "nolocation", "wrongfolder"):
         rows = s[check]
     else:
         raise ValueError("Unknown list")
@@ -217,6 +298,7 @@ def summary(s: dict = None, limit: int = 120) -> dict:
             "unnamed": {"count": len(s["unnamed"]), "faces": sum(u["faces"] for u in s["unnamed"]), "items": s["unnamed"][:limit], "accepted": s["unnamed_accepted"]},
             "untagged": {"count": len(s["untagged"]), "items": s["untagged"][:limit], "accepted": s["untagged_accepted"]},
             "nolocation": {"count": len(s["nolocation"]), "items": s["nolocation"][:limit], "accepted": s["nolocation_accepted"]},
+            "wrongfolder": {"count": len(s["wrongfolder"]), "items": s["wrongfolder"][:limit], "accepted": s["wrongfolder_accepted"]},
             "progress": dict(progress)}
 
 

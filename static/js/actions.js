@@ -3,7 +3,7 @@ import { $, api, date, dfDay, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, 
 import { S, ST, filterParams, go, loadState, onRoute, photosWith, pollSoon, toast, ualbumById } from './state.js';
 import { crumbs } from './search.js';
 import { G, renderGrid } from './grid.js';
-import { copyMetadata, editDialog, locationDialog, tagDialog } from './editing.js';
+import { copyMetadata, dateEditor, editDialog, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
 import { pageTitle, people } from './pages.js';
 import { LB, details, editMenu, openLightbox, showItem, toggleFaces, updateFavBtn } from './lightbox.js';
@@ -361,6 +361,33 @@ export async function showQuality() {
         { list: items, key: 'nolocation', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' · ', x.ts ? dfDay.format(date(x.ts)) : 'no date', ' · ',
           S.EDITING ? [h('a', { class: 'lnk', onclick: (ev) => place([x.photo], ev) }, 'Set location'), ' · '] : null,
           h('a', { class: 'lnk', onclick: (ev) => accept([x.photo], true, ev) }, 'Accept as it is'))) });
+    })(),
+    (() => {  // the date is outside the date the folder is named for: fix the date, move the file, or accept it
+      const u = q.wrongfolder || { count: 0, items: [], accepted: 0 }, items = u.items;
+      const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'wrongfolder', on }); toast(on ? `${plural(ids.length, 'photo')} accepted where ${ids.length === 1 ? 'it is' : 'they are'}.` : 'Shown again.'); } catch (e) { toast(e.message, null, null, 9000); return; } if (!gone(ev)) showQuality(); };
+      const moveTo = async (list, ev) => {
+        const by = new Map();
+        for (const x of list) if (x.suggest) (by.get(x.suggest.id) || by.set(x.suggest.id, []).get(x.suggest.id)).push(x.photo);
+        let n = 0, failed = 0;
+        for (const [album, ids] of by) { try { const r = await post('/api/photos/move', { ids, album }); n += r.moved.length; failed += r.failed.length; } catch (e) { toast(e.message, null, null, 9000); return; } }
+        ids_(list).forEach((i) => details.delete(i));
+        toast(`${plural(n, 'photo')} moved to the folder for ${n === 1 ? 'its' : 'their'} date${failed ? `; ${nf.format(failed)} could not be` : ''}.`, null, null, 7000);
+        S.keepView = true; pollSoon(600);
+        if (!gone(ev)) setTimeout(showQuality, 1500);
+      };
+      const ids_ = (list) => list.map((x) => x.photo);
+      const fixDate = (x, ev) => { const back = modal(`Date of ${x.name}`, h('p', { class: 'muted', style: 'margin-top:0' }, `In “${x.folder.replace(/^\//, '')}”, a folder for ${x.expect}.`),
+        dateEditor([x.photo], x.taken, () => { back.remove(); if (!gone(ev)) setTimeout(showQuality, 1200); }), h('div', { style: 'text-align:right;margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); };
+      const pick = (x, ev) => movePhotos([x.photo], () => { gone(ev); });
+      const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=wrongfolder'); if (acc.photos.length && confirm(`List the ${plural(acc.photos.length, 'accepted photo')} again?`)) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
+      return sec('Date doesn’t match the folder', u.count,
+        `Photos and videos whose date is outside the date their folder is named for, like a photo from 2005 in 2020/202001: either the date in the file is wrong, or the file is in the wrong folder. A folder named for a day also holds the month after it (a trip or an event).${u.accepted ? ` ${plural(u.accepted, 'photo')} you accepted ${u.accepted === 1 ? 'is' : 'are'} not listed.` : ''} Fix the date, move the file, or accept it where it is: it comes back only if its date or folder changes.`,
+        [items.length ? h('button', { class: 'pillbtn', onclick: () => accept(ids_(items)) }, 'Accept all shown') : null, again].filter(Boolean),
+        { list: items, key: 'wrongfolder', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' · taken ', x.ts ? dfDay.format(date(x.ts)) : x.taken.slice(0, 10), ' · in ',
+          h('a', { class: 'lnk', href: `#/photos?album=${x.folder_id}&sort=old` }, x.folder.replace(/^\//, '')), h('div', { style: 'font-size:12.5px;margin-top:2px' },
+          S.EDITING ? [h('a', { class: 'lnk', onclick: (ev) => fixDate(x, ev) }, 'Fix the date'), ' · '] : null,
+          S.CAN_MANAGE ? [x.suggest ? h('a', { class: 'lnk', title: 'Move the file (with its sidecar) to the folder for its date', onclick: (ev) => moveTo([x], ev) }, `Move to ${x.suggest.path.replace(/^\//, '')}`) : h('a', { class: 'lnk', onclick: (ev) => pick(x, ev) }, 'Move to a folder…'), ' · '] : null,
+          h('a', { class: 'lnk', onclick: (ev) => accept([x.photo], true, ev) }, 'Accept as it is')))) });
     })(),
     sec('Outside the photo or empty', q.invalid.count, 'A box that sticks out of the photo can be trimmed to its edges here, or moved and resized in the viewer (click the face, “Adjust the box”). Empty boxes are removed.', fitAll ? [fitAll] : null,
       { list: q.invalid.items, key: 'invalid', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' ',
