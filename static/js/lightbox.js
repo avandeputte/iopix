@@ -13,9 +13,19 @@ import { awaitReindex, pollStatus, start } from './main.js';
 export const LB = { open: false, src: null, i: 0, token: 0, info: store.get('info', '0') === '1', prefs: false, faces: false, objects: false, scale: 1, tx: 0, ty: 0, ar: 1.5, pushed: false, detail: null, play: 0, mini: null, hires: false };
 export const details = new Map();  // photo id -> promise of /api/photo/:id, bounded LRU-ish cache
 export const NATIVE = new Set(['JPG', 'PNG', 'GIF', 'WEBP']);
+// face changes made here in the last minute, per photo: a copy of the photo fetched from the server while the
+// index has not caught up yet must not show the old faces for a moment, so they are applied to it again
+export const RECENT_FACE_OPS = new Map();  // photo id -> [{op, at}]
+const reapplyRecent = (id, d) => {
+  const ops = (RECENT_FACE_OPS.get(id) || []).filter((x) => Date.now() - x.at < 60000);
+  if (!ops.length) { RECENT_FACE_OPS.delete(id); return d; }
+  RECENT_FACE_OPS.set(id, ops);
+  if (d && d.faces) ops.forEach((x) => applyFaceLocally(d, x.op));
+  return d;
+};
 export function getDetail(id) {
   if (!details.has(id)) {
-    details.set(id, api(`/api/photo/${id}`));
+    details.set(id, api(`/api/photo/${id}`).then((d) => reapplyRecent(id, d)));
     if (details.size > 400) details.delete(details.keys().next().value);
   }
   return details.get(id);
@@ -613,6 +623,8 @@ export function removeFace(f, d) {
 }
 export function faceOp(op, undo) {
   const id = op.image;
+  const rec = { op, at: Date.now() };
+  RECENT_FACE_OPS.set(id, [...(RECENT_FACE_OPS.get(id) || []), rec]);
   const shown = LB.open && LB.src.id[LB.i] === id ? LB.detail : null, cached = details.get(id);
   if (shown) applyFaceLocally(shown, op);
   if (cached && cached !== shown && typeof cached === 'object' && cached.faces) applyFaceLocally(cached, op);
@@ -623,6 +635,7 @@ export function faceOp(op, undo) {
   const prev = FACE_Q.get(id) || Promise.resolve();
   const mine = prev.then(() => post('/api/faces/op', op)).then(() => true, (e) => {
     toast(`That face change did not go through: ${e.message}`, null, null, 9000);
+    RECENT_FACE_OPS.set(id, (RECENT_FACE_OPS.get(id) || []).filter((x) => x !== rec));
     details.delete(id);
     if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id) { LB.detail = fresh; redrawPhoto(id); } });
     return false;

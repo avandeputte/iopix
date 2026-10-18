@@ -1410,3 +1410,23 @@ def test_search_box_enter_runs_the_search(page, server):
     page.wait_for_function("location.hash.includes('q=') || location.hash.includes('place') || location.hash.includes('tag')", timeout=10000)
     assert page.locator(".chip").count() >= 1
     assert not errors, errors
+
+
+def test_an_added_face_stays_on_screen_while_the_library_catches_up(page, server, lib):
+    pid = lib["with_faces"][0]
+    _open_photo(page, server, pid)
+    page.keyboard.press("f")
+    page.wait_for_timeout(800)
+    before = page.locator(".lb-frame .facebox").count()
+    page.locator("#lightbox button[title^='Add a face']").click()
+    box = page.locator("#lightbox .lb-frame").bounding_box()
+    page.mouse.move(box["x"] + 10, box["y"] + 10); page.mouse.down()
+    page.mouse.move(box["x"] + 60, box["y"] + 70, steps=4); page.mouse.up()
+    page.wait_for_selector(".modal .frow", timeout=5000)
+    page.locator(".modal .frow").first.click()
+    page.wait_for_function(f"document.querySelectorAll('.lb-frame .facebox').length > {before}", timeout=5000)
+    counts = []
+    for _ in range(16):  # the face change is saved, the index rebuilds, the page polls: the box must never vanish meanwhile
+        page.wait_for_timeout(500)
+        counts.append(page.locator(".lb-frame .facebox").count())
+    assert min(counts) > before, counts
