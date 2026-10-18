@@ -576,7 +576,7 @@ export async function showBursts(vp) {
 
 // ---- users: sign in / out, own password, first-admin setup, admin user management
 export async function loadUser() {
-  try { const me = await api('/api/auth/me'); S.USER = me.user; SETTINGS.user = me.user ? me.settings : null; S.IS_ADMIN = me.isAdmin; S.USERS_EXIST = me.usersExist; S.REQUIRE_LOGIN = !!me.requireLogin; } catch { S.USER = null; SETTINGS.user = null; }
+  try { const me = await api('/api/auth/me'); S.USER = me.user; SETTINGS.user = me.user ? me.settings : null; S.IS_ADMIN = me.isAdmin; S.USERS_EXIST = me.usersExist; S.REQUIRE_LOGIN = !!me.requireLogin; S.VIA_PROXY = !!me.viaProxy; } catch { S.USER = null; SETTINGS.user = null; }
   renderUserMenu();
 }
 // which bar item a view belongs to: Explore's sub-pages light Explore, the Faces page People, Maintenance's pages Maintenance
@@ -651,9 +651,10 @@ export function accountDialog() {
       S.IS_ADMIN ? h('button', { class: 'pillbtn', onclick: () => personPicker(async (t) => { try { S.USER = await post('/api/auth/person', { person: t.id }); renderUserMenu(); back.remove(); accountDialog(); } catch (e) { toast(e.message); } }) }, S.USER.person ? 'Change' : 'Link to a person')
         : h('span', { class: 'muted', style: 'font-size:12.5px' }, S.USER.person ? '' : '(an admin can link your account in Settings › Users)'),
       S.USER.person ? h('a', { class: 'lnk', href: hashFor('photos', photosWith({ tag: S.USER.person })), onclick: () => back.remove() }, 'Photos of me') : null),
-    h('h4', null, 'Change password'), h('div', { style: 'display:grid;gap:8px' }, cur, pw),
-    h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toast(e.message); } } }, 'Change password')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: async () => { back.remove(); await post('/api/auth/logout', {}); if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out'),
+    S.VIA_PROXY ? h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Signed in through the sign-in page in front of the viewer (your proxy); sign out there.') : null,
+    S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', { style: 'display:grid;gap:8px' }, cur, pw)],
+    S.VIA_PROXY ? null : h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toast(e.message); } } }, 'Change password')),
+    h('div', { class: 'modal-btns' }, S.VIA_PROXY ? null : h('button', { class: 'pillbtn', onclick: async () => { back.remove(); await post('/api/auth/logout', {}); if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out'),
       h('button', { class: 'pillbtn on', onclick: () => back.remove() }, 'Done')));
 }
 export function usersSection() {

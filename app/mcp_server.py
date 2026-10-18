@@ -461,6 +461,7 @@ def diagnostics(token: str) -> dict:
         "models": [{"key": m["key"], "installed": m["installed"], "revision": m.get("revision")} for m in models.listing()["models"]],
         "search": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done, "total": semantic.total, "model": semantic.chosen()},
         "users": {"exist": users.any_users(), "count": len(users.list_users())},
+        "proxySignIn": __import__("app.proxyauth", fromlist=["status"]).status(),
         "read_only": appstate.read_only(),
         "settings": _public_settings(),
         "log_file": str(config.LOG_FILE), "log_file_exists": config.LOG_FILE.exists(),

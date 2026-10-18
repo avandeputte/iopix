@@ -342,6 +342,30 @@ Two things to keep in mind on any proxy:
 
 With the proxy in place the addresses in this README change from `http://<host>:8600/...` to `https://photos.example.com/...`; set `VIEWER_URL=https://photos.example.com` so links in MCP results use it too.
 
+### Sign-in at the proxy (Cloudflare Access, Authelia, Authentik, oauth2-proxy…)
+
+When the proxy already makes people sign in, the viewer can take that sign-in instead of asking again. The proxy passes who signed in in a request header, and the viewer treats that person as signed in when an account exists for them. It matches the account's email address first, then its name. Set this in `iopix.env` (or the container's environment) and restart:
+
+| Setting | Meaning |
+| --- | --- |
+| `AUTH_PROXY` | `cloudflare`, `haproxy`, `nginx`, `caddy`, `traefik` or `header` (any other proxy); `off` by default |
+| `AUTH_PROXY_HEADER` | the header(s) with the user, comma-separated. Default for `cloudflare`: `Cf-Access-Authenticated-User-Email`; for the others: `Remote-User`, `X-Forwarded-User`, `X-Auth-Request-User`, `X-Auth-Request-Email`, `X-Forwarded-Email` |
+| `AUTH_PROXY_TRUSTED` | addresses or networks the proxy connects from, e.g. `172.18.0.0/16` for a Docker network; default `127.0.0.1,::1` (a proxy on the same machine) |
+| `AUTH_PROXY_CREATE` | `viewer` or `editor`: create an account with that role for someone the proxy lets in who has none; empty (default): they are not signed in |
+| `CF_ACCESS_TEAM`, `CF_ACCESS_AUD` | Cloudflare Access team domain (`myteam.cloudflareaccess.com`) and the application's AUD tag |
+
+The header is only believed from the proxy. A request that reaches the viewer any other way is ignored, whatever headers it carries. The one exception is Cloudflare Access with `CF_ACCESS_TEAM` and `CF_ACCESS_AUD` set: there the signed token Cloudflare adds to every request (`Cf-Access-Jwt-Assertion`) is checked against your team's keys, and the email is taken from that token. This is the recommended setup for a Cloudflare Tunnel. Without those two settings, `cloudflared` must connect from an address in `AUTH_PROXY_TRUSTED`.
+
+So the header can't be faked, the proxy must replace it on every request, and the viewer must not be reachable except through the proxy (bind it to `127.0.0.1` or firewall the port). Examples, with Authelia or a similar forward-auth service in front:
+
+- **Caddy**: `forward_auth authelia:9091 { uri /api/authz/forward-auth  copy_headers Remote-User Remote-Email }` before `reverse_proxy localhost:8600`
+- **Traefik**: a `forwardAuth` middleware with `authResponseHeaders: [Remote-User, Remote-Email]`
+- **nginx**: `auth_request` to the auth service, then `auth_request_set $user $upstream_http_remote_user; proxy_set_header Remote-User $user;`; with oauth2-proxy, `X-Auth-Request-Email` works as is
+- **HAProxy**: `http-request del-header Remote-User` first, then after the auth check (e.g. haproxy-auth-request) `http-request set-header Remote-User %[var(req.auth_response_header.remote_user)]`; with HAProxy's own basic auth, `http-request auth unless { http_auth(users) }` and `http-request set-header Remote-User %[http_auth_user]`
+- **Cloudflare Tunnel**: add an Access application with a policy for your hostname, then set `AUTH_PROXY=cloudflare`, `CF_ACCESS_TEAM` and `CF_ACCESS_AUD` (Zero Trust › Access › Applications › your app › Overview › Application Audience tag)
+
+Someone signed in this way sees no Sign out or Change password in the viewer, because signing out happens at the proxy. Turn on Require sign-in (Settings › Users) as well, so nobody gets in without the proxy's sign-in.
+
 ## MCP server
 
 The viewer is also an [MCP](https://modelcontextprotocol.io) server, on the same port, at `/mcp` (streamable HTTP), so an assistant such as Claude can search and inspect the library through the running app; nothing is installed or downloaded. The library tools are read-only and need no sign-in (they show only what an anonymous visitor sees in the web app): `library_overview`, `search_photos` (every filter the web app has, plus `looks_like` text and `similar_to` a photo), `count_by`, `get_photo`, `list_people`, `list_tags`, `list_albums`, `list_places`, `list_app_albums`, `find_duplicates` and `view_photo` (the picture itself); results carry links into the viewer (`VIEWER_URL`). The tools for operating it take the admin token (Maintenance › Viewer version › MCP update token, or `MCP_ADMIN_TOKEN`) because they reveal paths, log lines and settings: `diagnostics` (version, platform, database, external tools, disk, job queue, models, settings without secrets), `server_log` (the viewer's rotating `data/viewer.log`, filterable), `job_queue`, `photo_file` (one photo's files, sidecar, cache and backups), and `update_viewer`, the one tool that changes something (it runs `update.sh`; `check_for_update` is open and reports the outcome under `lastUpdate`). With Require sign-in on, every `/mcp` request must carry `Authorization: Bearer <token>` (see Users and permissions).

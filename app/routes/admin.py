@@ -264,7 +264,8 @@ def api_logout():
 def api_me(request: Request):
     u = request.state.user
     return {"user": u, "settings": users.get_settings(u["id"]) if u else {}, "usersExist": users.any_users(),
-            "isAdmin": users.is_admin(u), "canWrite": users.can_write(u), "signedIn": users.is_signed_in(u), "requireLogin": users.require_login()}
+            "isAdmin": users.is_admin(u), "canWrite": users.can_write(u), "signedIn": users.is_signed_in(u), "requireLogin": users.require_login(),
+            "viaProxy": bool(getattr(request.state, "via_proxy", False))}
 
 
 @router.post("/api/auth/settings")

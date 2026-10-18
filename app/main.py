@@ -19,11 +19,13 @@ from app.photos import tagmanager
 from app import thumbs
 from app.data import state as appstate
 from app import users
+from app import proxyauth
 from app import mcp_server
 from app import updates
 from app.ai import models as dlmodels
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
 from app.routes import browse, images, albums, editing, admin, review, organize, faces
 from app.core import state, _kick, _refresh, _auto, _watch, resolve, prewarmer, _setup_file_log, _models_arrived
 __all__ = ["app", "state", "_kick", "_refresh", "_auto", "_watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
@@ -96,6 +98,11 @@ async def _auth_guard(request: Request, call_next):
     or admin, settings and maintenance an admin, favorites and albums a signed-in user; all
     of that only once a user exists. Read-only mode refuses library writes for everyone."""
     user = users.user_from_token(request.cookies.get(users.COOKIE, "")) if request.cookies.get(users.COOKIE) else None
+    request.state.via_proxy = False
+    if proxyauth.mode() != "off":  # signed in at a reverse proxy (Cloudflare Access, Authelia...): that person, when vouched for
+        pu = proxyauth.user(request)
+        if pu:
+            user, request.state.via_proxy = pu, True
     request.state.user = user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner
