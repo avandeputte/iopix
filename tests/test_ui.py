@@ -1091,6 +1091,20 @@ def test_people_page_groups_and_arranging(page, server):
         assert g["members"] == [people[0]["id"], people[1]["id"], people[2]["id"]], g
         page.locator("button", has_text="Done").click()
         assert fam.locator(".card .nm").all_inner_texts() == [people[0]["name"], people[1]["name"], people[2]["name"]]
+        # sort by name or by photo count (one list), and the badge size; both remembered
+        page.locator("select[title=Sort]").select_option("name")
+        names = page.locator(".cards.people .card .nm").all_inner_texts()
+        assert names == sorted(names, key=str.lower) or names == sorted(names), names[:5]
+        assert page.locator(".pghead").count() == 0 and not page.locator("button", has_text="Arrange groups").is_visible()
+        page.locator("select[title=Sort]").select_option("count")
+        assert page.locator(".cards.people .card .nm").first.inner_text() == people[0]["name"]
+        card = page.locator(".cards.people .card").first
+        page.locator(".eseg[title='Badge size'] button", has_text="L").click(); big = card.bounding_box()["width"]
+        page.locator(".eseg[title='Badge size'] button", has_text="S").click(); small = card.bounding_box()["width"]
+        assert big > small * 1.5, (big, small)
+        page.reload(); page.wait_for_selector(".cards.people .card", timeout=10000)
+        assert page.locator("select[title=Sort]").input_value() == "count"
+        page.locator("select[title=Sort]").select_option("group"); page.locator(".eseg[title='Badge size'] button", has_text="M").click()
     finally:
         call(f"/api/people/groups/{gid}", method="DELETE")
 

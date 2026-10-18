@@ -859,3 +859,6 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .cards.people .card.arrange.over { outline: 2px solid var(--accent, #4a7dff); outline-offset: 2px; border-radius: 12px; }
 .cards.people .card .pmenu { position: absolute; top: 2px; right: 2px; width: 32px; height: 32px; background: var(--bg); box-shadow: var(--shadow); }
 .pghead .gtools .turn svg { transform: rotate(90deg); }  /* the left and right arrows, as up and down */
+.page.psz-s .cards.people { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); } .page.psz-s .cards.people .nm { font-size: 12px; }
+.page.psz-l .cards.people { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); } .page.psz-l .cards.people .nm { font-size: 14.5px; }
+@media (max-width: 800px) { .page.psz-s .cards.people { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); } .page.psz-l .cards.people { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }

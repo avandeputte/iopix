@@ -210,8 +210,15 @@ export async function showPeople() {
     }
     return sec;
   };
+  let sort = store.get('people-sort', 'group'), size = store.get('people-size', 'm');
   const draw = () => {
     const ok = (t) => !filter || t._n.includes(filter);
+    arrange && (arrange.hidden = sort !== 'group');
+    if (sort !== 'group' || (!groups.length && !editing)) {  // one list: by name, or the most photos first
+      const list = all.filter(ok).sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.nAll - a.nAll);
+      body.replaceChildren(section(null, list, null));
+      return;
+    }
     const grouped = new Set(groups.flatMap((g) => g.members));
     const secs = groups.map((g) => {
       const list = g.members.map((id) => byId.get(id)).filter((t) => t && ok(t));
@@ -223,10 +230,18 @@ export async function showPeople() {
   };
   const arrange = canEdit ? h('button', { class: 'pillbtn' + (editing ? ' on' : ''), onclick: () => { editing = S.arrangePeople = !editing; arrange.classList.toggle('on', editing); fill(arrange, editing ? 'Done' : 'Arrange groups'); newBtn.hidden = !editing; draw(); } }, editing ? 'Done' : 'Arrange groups') : null;
   const newBtn = h('button', { class: 'pillbtn', hidden: !editing, onclick: () => { const n = prompt('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) newGroup(n.trim()); } }, icon('add'), 'New group');
-  main.replaceChildren(h('div', { class: 'page' }, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
+  // sort and badge size, remembered
+  const sortSel = h('select', { class: 'sharepick', title: 'Sort', onchange: (e) => { sort = e.target.value; store.set('people-sort', sort);
+    if (sort !== 'group' && editing) { editing = S.arrangePeople = false; arrange.classList.remove('on'); fill(arrange, 'Arrange groups'); newBtn.hidden = true; }
+    draw(); } }, [['group', 'By group'], ['name', 'By name'], ['count', 'Most photos first']].map(([v, l]) => h('option', { value: v, selected: v === sort }, l)));
+  const pageEl = h('div', { class: `page psz-${size}` });
+  const seg = h('div', { class: 'eseg', title: 'Badge size' }, [['s', 'S'], ['m', 'M'], ['l', 'L']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
+    size = k; store.set('people-size', k); pageEl.className = `page psz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+  main.replaceChildren(pageEl);
+  fill(pageEl, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
-      h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), arrange, newBtn),
-    h('div', { style: 'height:14px' }), body));
+      h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), sortSel, seg, arrange, newBtn),
+    h('div', { style: 'height:14px' }), body);
   draw();
 }
 
