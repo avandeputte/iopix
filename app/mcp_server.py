@@ -577,6 +577,22 @@ def consistency_report(token: str, field: str = "", offset: int = 0, limit: int 
             **consistency.report(field or None, max(0, offset), max(1, min(limit, 2000)))}
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+def consistency_scan(token: str, rescan_all: bool = False) -> dict:
+    """Start the metadata consistency check in the background, as Maintenance > Metadata consistency's buttons do:
+    every photo (rescan_all) or those changed since they were last checked. consistency_report shows the progress and
+    the results. Needs the admin token."""
+    _need_token(token)
+    from app.photos import consistency
+    con = db()
+    try:
+        rows = [dict(r) for r in con.execute("SELECT id, path, name, video, hash, size, modified FROM photos ORDER BY ts DESC")]
+    finally:
+        con.close()
+    consistency.scan(rows, rescan_all=bool(rescan_all))
+    return {"queued": len(rows)}
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def consistency_sync(token: str, photo_ids: list[int], source: str, targets: list[str], fields: list[str]) -> dict:
     """Copy the given fields of the given photos from one source (db|sidecar|file) to the targets, exactly
