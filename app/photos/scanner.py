@@ -48,10 +48,10 @@ FLAT_KEYS = ("Subject", "Keywords")
 READ_TAGS = [
     "Make", "Model", "LensModel", "Lens", "LensID", "FNumber", "ApertureValue", "FocalLength", "FocalLengthIn35mmFormat",
     "ExposureTime", "ExposureProgram", "ExposureMode", "ISO", "Flash", "WhiteBalance", "ColorTemperature", "MeteringMode",
-    "SubjectDistance", "SubjectDistanceRange", "DateTimeOriginal", "CreateDate", "MediaCreateDate", "TrackCreateDate",
+    "SubjectDistance", "SubjectDistanceRange", "DateTimeOriginal", "CreationDate", "CreateDate", "MediaCreateDate", "TrackCreateDate",
     "Orientation", "ImageSize", "ImageWidth", "ImageHeight", "BitsPerSample", "GPSLatitude", "GPSLongitude", "GPSAltitude",
     "Rating", "XMP-dc:Title", "XMP-dc:Description", "ObjectName", "Caption-Abstract", "ImageDescription", "Headline",
-    *TAG_KEYS, *FLAT_KEYS, "PickLabel", "ColorLabel", "RegionInfo",
+    *TAG_KEYS, *FLAT_KEYS, "PickLabel", "ColorLabel", "RegionInfo", "RegionInfoMP",
     "Duration", "VideoFrameRate", "CompressorID", "AudioFormat", "AudioChannels", "AudioSampleRate",
     *[v[0] for v in edits.TEMPLATE_FIELDS.values()],
 ]
@@ -211,21 +211,48 @@ def _tag_paths(d: dict) -> list:
 
 
 def _regions(d: dict) -> list:
-    """[(name, (x, y, w, h) in the file's own pixel grid)] from the MWG region list."""
+    """[(name, (x, y, w, h) in the file's own pixel grid, (W, H)) or (name, None, None) for a name-only region], as
+    digiKam reads them (DMetadata::getItemFacesMap): the MWG region list, then Microsoft's MP regions for names the MWG
+    list does not have (name-only MP regions are people on the photo without a box). Not a face, or the whole frame:
+    left out. A region list without its image size is placed on the file's own size. "/" in a name becomes "\\"."""
+    fw, fh = _size(d)
+    out, names = [], set()
+
+    def name_of(v):
+        return str(v or "").strip().replace("/", "\\")
+
+    def add(name, cx, cy, w, h, W, H):
+        if None in (cx, cy, w, h) or not W or not H or w <= 0 or h <= 0:
+            return
+        if w >= 0.99 and h >= 0.99:  # the whole picture: not a face (digiKam ignores it too)
+            return
+        out.append((name, (round((cx - w / 2) * W), round((cy - h / 2) * H), round(w * W), round(h * H)), (int(W), int(H))))
+        if name:
+            names.add(name.lower())
     ri = d.get("RegionInfo")
-    if not isinstance(ri, dict):
-        return []
-    dims = ri.get("AppliedToDimensions") or {}
-    W, H = _num(dims.get("W")), _num(dims.get("H"))
-    out = []
-    for r in ri.get("RegionList") or []:
-        if not isinstance(r, dict) or (r.get("Type") not in (None, "Face")):
-            continue
-        a = r.get("Area") or {}
-        cx, cy, w, h = (_num(a.get(k)) for k in ("X", "Y", "W", "H"))
-        if None in (cx, cy, w, h) or not W or not H:
-            continue
-        out.append((str(r.get("Name") or "").strip(), (round((cx - w / 2) * W), round((cy - h / 2) * H), round(w * W), round(h * H)), (int(W), int(H))))
+    if isinstance(ri, dict):
+        dims = ri.get("AppliedToDimensions") or {}
+        W, H = _num(dims.get("W")) or fw, _num(dims.get("H")) or fh
+        for r in ri.get("RegionList") or []:
+            if not isinstance(r, dict) or (r.get("Type") not in (None, "Face")):
+                continue
+            a = r.get("Area") or {}
+            add(name_of(r.get("Name")), *(_num(a.get(k)) for k in ("X", "Y", "W", "H")), W, H)
+    mp = d.get("RegionInfoMP")
+    if isinstance(mp, dict):
+        for r in mp.get("Regions") or []:
+            if not isinstance(r, dict):
+                continue
+            name = name_of(r.get("PersonDisplayName"))
+            if not name or name.lower() in names:
+                continue
+            rect = [_num(x.strip()) for x in str(r.get("Rectangle") or "").split(",")] if r.get("Rectangle") else []
+            if len(rect) == 4 and None not in rect:  # MP rectangles are top-left based, as fractions of the picture
+                x, y, w, h = rect
+                add(name, x + w / 2, y + h / 2, w, h, fw, fh)
+            else:
+                out.append((name, None, None))
+                names.add(name.lower())
     return out
 
 
@@ -246,7 +273,10 @@ def rows_for(path: str, d: dict, category: int) -> dict:
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
     fmt = folders.FORMATS.get(ext, ("RAW-" + ext.upper()) if ext in folders.IMAGE_EXT else ext.upper())
     w, h = _size(d)
-    created = _date(_first(d, "DateTimeOriginal", "CreateDate", "MediaCreateDate", "TrackCreateDate"))
+    # a phone video's own local time (QuickTime Keys:CreationDate, with its offset) before the QuickTime dates, which
+    # are UTC: otherwise an iPhone video files hours off, into the wrong day or month
+    created = next((_date(d.get(k)) for k in ("DateTimeOriginal", "CreationDate", "CreateDate", "MediaCreateDate", "TrackCreateDate")
+                    if _date(d.get(k))), None)  # the first that is a real date (a "0000:00:00" placeholder is skipped)
     if not created:  # checkCreationDateFromMetadata: the file's own time when the metadata has none
         created = _dt.datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%dT%H:%M:%S.000")
     rating = _num(d.get("Rating"), int)
@@ -277,7 +307,7 @@ def rows_for(path: str, d: dict, category: int) -> dict:
     out["tags"] = _tag_paths(d)
     out["pick"] = _num(d.get("PickLabel"), int)
     out["color"] = _num(d.get("ColorLabel"), int)
-    out["faces"] = [(n, _upright(r, wh, out["info"]["orientation"])) for n, r, wh in _regions(d)] if category == 1 else []
+    out["faces"] = [(n, _upright(r, wh, out["info"]["orientation"]) if r is not None else None) for n, r, wh in _regions(d)] if category == 1 else []
     if category == 2:
         dur = _num(d.get("Duration"))
         rate = _num(d.get("VideoFrameRate"))
@@ -314,6 +344,20 @@ class _Tags:
         tid = self.con.execute("INSERT INTO Tags (pid, name) VALUES (?,?)", (pid, leaf)).lastrowid
         self.by_path[p] = tid
         return tid
+
+    def person_for(self, name: str, keyword_path: str = None) -> int:
+        """The person tag for a face named `name`: an existing person of that name; else the photo's own keyword
+        ending in that name, made a person (digiKam's commitFaces); else a new person under People."""
+        tid = self.persons.get(name.lower())
+        if tid:
+            return tid
+        if keyword_path:
+            tid = self.path(keyword_path)
+            if tid:
+                self.con.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', ?)", (tid, name))
+                self.persons[name.lower()] = tid
+                return tid
+        return self.person(name)
 
     def person(self, name: str) -> int:
         tid = self.persons.get(name.lower())
@@ -376,15 +420,21 @@ def _write_rows(con, iid: int, r: dict, tags: _Tags, special: dict, full: bool):
             tid = tags.by_path.get(INTERNAL + names[value])
             if tid:
                 want.add(tid)
+    # the photo's own keywords, for ItemScanner::commitFaces's first choice: a keyword whose last part is the name
+    own = {}
+    for p in r.get("tags") or []:
+        leaf = p.rsplit("/", 1)[-1].strip().lower()
+        if leaf and not p.startswith(INTERNAL):
+            own.setdefault(leaf, p)
     for name, rect in r["faces"]:
-        val = folders_rect(rect)
         if name:
-            tid = tags.person(name)
+            tid = tags.person_for(name, own.get(name.lower()))
             want.add(tid)
-            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, tid, "tagRegion", val))
-        elif special.get("unknownPerson"):
-            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, special["unknownPerson"], "autodetectedFace", val))
-            want.add(special["unknownPerson"])
+            if rect is not None:
+                con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, tid, "tagRegion", folders_rect(rect)))
+        elif rect is not None and special.get("unknownPerson"):
+            # an unnamed face, on digiKam's Unknown tag without assigning that tag (FaceTagsEditor::addManually)
+            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, special["unknownPerson"], "autodetectedFace", folders_rect(rect)))
     con.executemany("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?,?)", [(iid, t) for t in want])
 
 

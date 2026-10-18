@@ -226,7 +226,11 @@ def _new_values(regions: list, fn) -> tuple:
     return kept, dropped
 
 
-def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list, dropped: list, check_running: bool, restore_regions: list = None):
+INVERSE = {"right": "left", "left": "right", "180": "180", "fliph": "fliph", "flipv": "flipv"}
+
+
+def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list, dropped: list, check_running: bool, restore_regions: list = None,
+              add_regions: list = ()):
     from app.digikam import dbsync
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
@@ -241,6 +245,9 @@ def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list,
             con.execute("UPDATE ImageTagProperties SET value = ? WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (new, pid, tagid, prop, old))
         for tagid, prop, old in dropped:
             con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, old))
+        for tagid, prop, val in add_regions:
+            if not con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, val)).fetchone():
+                con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
 
 
 def _forget_checksum(pid: int):
@@ -386,8 +393,11 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
         nw, nh = w, h
         box = (x, y, w, h)
         # Pillow keeps no metadata: it comes back from the copy, with the new orientation and size
-        subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-charset", "filename=utf8", "-tagsfromfile", copy, "-all:all", "-xmp:all",
-                        "-Orientation#=1", "-IFD1:all=", f"-ExifImageWidth={nw}", f"-ExifImageHeight={nh}", p["path"]], capture_output=True, text=True, timeout=300)
+        res = subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-charset", "filename=utf8", "-tagsfromfile", copy, "-all:all", "-xmp:all",
+                              "-Orientation#=1", "-IFD1:all=", f"-ExifImageWidth={nw}", f"-ExifImageHeight={nh}", p["path"]], capture_output=True, text=True, timeout=300)
+        if res.returncode != 0:  # the cropped file would have lost its dates, position and the rest: put the original back
+            shutil.copy2(copy, p["path"])
+            raise SyncError("The metadata could not be copied into the cropped file; the photo is as it was")
     kept, dropped = _new_values(p["regions"], lambda r: crop_rect(r, box))
     size = os.stat(p["path"]).st_size
     _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running)
@@ -413,10 +423,29 @@ def undo(entry: dict, check_running: bool = True) -> dict:
     p = _photo(entry["photo"])
     _check(p)
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+    # the face boxes as they are now, turned back: face changes made since the edit (a face named, removed...) stay,
+    # instead of the boxes saved at the time coming back over them
+    d = entry.get("details") or {}
+    op = d.get("lossless")
+    W, H = upright_size(p["w"], p["h"], p["orientation"])
+    kept, dropped, restore = [], [], None
+    if op in INVERSE:
+        kept, dropped = _new_values(p["regions"], lambda r: turn_rect(r, INVERSE[op], W, H))
+    elif op == "crop" and d.get("box"):
+        cx, cy = d["box"][0], d["box"][1]
+        kept, dropped = _new_values(p["regions"], lambda r: (r[0] + cx, r[1] + cy, r[2], r[3]))
+        # and the faces the crop cut away, as they were (they cannot have changed since)
+        bw, bh = d["box"][2], d["box"][3]
+        lost = [tuple(r) for r in u.get("regions") or [] if _new_values([tuple(r)], lambda q: crop_rect(q, (cx, cy, bw, bh)))[1]]
+        restore = lost
+    else:  # an entry from before this was recorded: the saved boxes
+        restore = [tuple(r) for r in u.get("regions") or []]
     shutil.copy2(copy, p["path"])
     size = os.stat(p["path"]).st_size
-    regions = [tuple(r) for r in u.get("regions") or []]
-    _write_db(p["id"], u["width"], u["height"], u["orientation"], size, [], [], check_running, restore_regions=regions)
+    if restore is not None and op not in INVERSE and op != "crop":
+        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, [], [], check_running, restore_regions=restore)
+    else:
+        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, kept, dropped, check_running, add_regions=restore or [])
     _sidecar(p["path"], u["orientation"])
     facemgr.write_regions_many([p["id"]])
     thumbs.forget(p["id"])

@@ -78,6 +78,8 @@ def scan() -> dict:
             faces_of.setdefault(img, [0, 0])[1] += 1
         r = _rect(val)
         up_w, up_h = ((h, w) if (orient or 1) in (5, 6, 7, 8) else (w, h))
+        if prop == "autodetectedPerson":  # the suggestion's own row; its box is the person's autodetectedFace, checked there
+            continue
         if r is None or r[2] <= 0 or r[3] <= 0 or (up_w and up_h and (r[0] < -MARGIN or r[1] < -MARGIN or r[0] + r[2] > up_w + MARGIN or r[1] + r[3] > up_h + MARGIN)):
             invalid.append({"photo": img, "name": dkdb.tag_path(tags, tag).split("/")[-1] if tag in tags else "?", "rect": list(r) if r else None, "size": [up_w, up_h],
                             "fix": "fit" if r and r[2] > 0 and r[3] > 0 and up_w and up_h else "remove" if r else None})
@@ -487,6 +489,9 @@ def _run(todo: dict, db_path: Path, check_running: bool):
                             if v == n["keep"]:
                                 continue
                             con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = 'tagRegion' AND value = ?", (pid, n["tag"], v))
+                            # and its training and extended rows, as removing a face does (FaceTagsEditor)
+                            con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property IN ('faceToTrain', 'faceTagExtendedData') AND value = ?",
+                                        (pid, n["tag"], v))
                             gone += 1
                         # exact copies of the kept value: remove them all, put one back
                         same = sum(1 for v in n["drop"] if v == n["keep"])

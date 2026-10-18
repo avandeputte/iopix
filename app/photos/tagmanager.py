@@ -124,7 +124,7 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
         raise SyncError("Sidecar files from the previous tag change are still being updated. Try again in a moment.")
     backup_file = dkdb.backup(db_path, force=(op.get("op") in ("delete", "merge"))) if backup else None  # deleting or merging a tag is destructive
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    jobs, summary, merged_images = [], {"op": kind}, []
+    jobs, summary, merged_images, remap = [], {"op": kind}, [], {}
 
     with dbsync.write_transaction(db_path, check_running) as con:
         tree = _Tree(con)
@@ -164,11 +164,14 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
                 raise SyncError("That tag cannot be changed here.")
             if not con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone():
                 raise SyncError(f"“{tree.full(tid)}” is not marked as a person.")
-            boxes = con.execute("SELECT count(*) FROM ImageTagProperties WHERE tagid = ? AND property IN ('tagRegion', 'autodetectedPerson')", (tid,)).fetchone()[0]
+            boxes = con.execute("SELECT count(*) FROM ImageTagProperties WHERE tagid = ? AND property IN ('tagRegion', 'autodetectedFace')", (tid,)).fetchone()[0]
             if boxes:
-                raise SyncError(f"{boxes} face {'box carries' if boxes == 1 else 'boxes carry'} the name “{tree.rows[tid]['name']}”: rename or remove those faces first.")
-            con.execute("DELETE FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId')", (tid,))
-            summary.update(id=tid, path=tree.full(tid), photos=0, sidecars=0)
+                raise SyncError(f"{boxes} face {'box or suggestion carries' if boxes == 1 else 'boxes or suggestions carry'} the name “{tree.rows[tid]['name']}”: rename or remove those faces first.")
+            con.execute("DELETE FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId', 'faceEngineName', 'faceEngineUuid')", (tid,))
+            # its photos' sidecars list it as a person (a name-only face region): rewritten as a plain keyword
+            photos = _photos_with(con, [tid], roots)
+            jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            summary.update(id=tid, path=tree.full(tid), photos=len(photos))
         elif kind == "merge":
             # one person (or tag) entered twice ("Cynthia Hwang" and "Cynthia Wang"): everything on `id` moves to
             # `into` (photos, face boxes, suggestions), then `id` goes. Nothing becomes an unknown face.
@@ -207,6 +210,7 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
             con.execute("DELETE FROM TagProperties WHERE tagid = ?", (src,))
             con.execute("DELETE FROM Tags WHERE id = ?", (src,))
             jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            remap = {old: new}
             merged_images = list(dict.fromkeys(merged_images + list(photos)))
             from app.photos import history
             history.record([{"photo_id": iid, "action": "tag", "summary": f"Merged: {old} → {new}", "path": path} for iid, path in photos.items()])
@@ -235,6 +239,9 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
                 name = _check_name(op.get("name"))
                 free_name(tree.rows[tid]["pid"], name, ignore=tid)
                 con.execute("UPDATE Tags SET name = ? WHERE id = ?", (name, tid))
+                # a person's face name follows (TagModificationHelper does the same), or digiKam and the scanner
+                # keep matching faces named after the old one to this tag
+                con.execute("UPDATE TagProperties SET value = ? WHERE tagid = ? AND property IN ('person', 'faceEngineName')", (name, tid))
                 tree.rows[tid]["name"] = name
             elif kind == "move":
                 pid = int(op.get("parent") or 0)
@@ -256,12 +263,20 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
                     con.execute("DELETE FROM ImageTagProperties WHERE tagid = ?", (t,))
             # like digiKam, rewrite the full tag list of every affected item afterwards
             jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            remap = {old_full[t]: (None if kind == "delete" else tree.full(t)) for t in sub}
             from app.photos import history
             what = f"Tag deleted: {old_full[tid]}" if kind == "delete" else f"Tag {'renamed' if kind == 'rename' else 'moved'}: {old_full[tid]} → {tree.full(tid)}"
             history.record([{"photo_id": iid, "action": "tag", "summary": what, "path": path} for iid, path in photos.items()])
             summary.update(id=tid, path=old_full[tid], new_path=None if kind == "delete" else tree.full(tid),
                            tags=len(sub), photos=len(photos))
 
+    # pending edits that name the changed tags by path follow them; their photos' sidecars are rewritten too
+    touched = edits.remap_pending_tags(remap)
+    if touched:
+        have = {j[2] for j in jobs}
+        extra = [i for i in touched if i not in have]
+        if extra:
+            jobs += [(stamp, path, iid) for iid, path in dbsync._photo_paths(extra)]
     summary.update(sidecars=len(jobs), backup=str(backup_file) if backup_file else None)
     if kind == "merge":
         _after_merge(summary["id"], summary["into"], merged_images, db_path)
@@ -293,7 +308,8 @@ def _after_merge(src: int, dst: int, images: list, db_path):
 def _run_group(op: str, rows: list):
     """rows: [(image id, photo path)]. Keep a copy of each sidecar under this operation's
     folder (on top of edits' own first-change backup), then write each photo's complete
-    current tag list (what digiKam does after a tag changes)."""
+    current tag list and its face regions (what digiKam does after a tag changes: a renamed person's name is in the
+    regions too)."""
     for _, p in rows:
         side = p + ".xmp"
         if not os.path.isfile(side):
@@ -302,11 +318,11 @@ def _run_group(op: str, rows: list):
         if not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(side, dst)
-    failed = edits.rewrite_tags([{"id": i, "path": p} for i, p in rows])
+    from app.faces import facemgr
+    res = facemgr.write_regions_many([i for i, _p in rows])  # stamps the files it wrote: no digiKam rescan needed
+    failed = [i for i, v in res.items() if v != "written"]
     if failed:
         progress.setdefault("failed", []).extend(failed)
-    bad = set(failed or [])
-    dkdb.stamp_files([(i, p) for i, p in rows if i not in bad])  # the sidecars now list digiKam's tags: no rescan needed
 
 
 def start_worker():

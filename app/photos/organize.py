@@ -217,9 +217,11 @@ def restore(infos: list, check_running: bool = True) -> dict:
                     t["new"] = True
         fresh = [t for t in done if t.get("new")]
         if fresh:
+            from app.photos import scanner
             for t in fresh:
                 added = folders.register(t["album"], [folders.staged_entry(t["dest"])], check_running)
                 ids += [a["id"] for a in added]
+                scanner.complete([a["id"] for a in added], check_running)  # dates, position, tags, faces from file and sidecar
         from app.photos import history
         history.record([{"photo_id": t["id"], "action": "restore", "summary": "Restored from the trash", "path": str(t["dest"])} for t in done if t["id"] and not t.get("new")])
     return {"restored": ids, "failed": failed}
@@ -295,6 +297,9 @@ def move_photos(ids: list, album_id: int, check_running: bool = True, new_name: 
             for s in sides:
                 tail = s[len(r["path"]):] if s.startswith(r["path"]) else None
                 shutil.move(s, str(dst) + tail if tail else dst.with_suffix(".xmp"))
+            if str(dst) != r["path"]:
+                from app.photos import edits
+                edits.move_backups(r["path"], str(dst))
             moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"]})
         except (OSError, SyncError) as e:
             failed.append({"id": r["id"], "error": str(e)})
@@ -406,4 +411,6 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
     except BaseException:
         shutil.move(str(new_dir), str(src["dir"]))  # the database refused: the directory goes back
         raise
+    from app.photos import edits
+    edits.move_backups(str(src["dir"]), str(new_dir))  # the photos' sidecar and file backups follow the folder
     return {"id": src["id"], "path": new_rel, "folders": len(children)}

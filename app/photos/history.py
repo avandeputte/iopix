@@ -297,16 +297,39 @@ def _photo(pid: int):
 
 
 def _pending_from_sidecar(photo: dict):
-    """After a sidecar was put back: show (and later write to the database) what it says."""
+    """After a sidecar was put back: what it says about rating, title, caption and keyword tags becomes the photo's
+    pending edit (merged into any edit already pending; a field the sidecar does not hold is left alone). People are
+    not taken from it: faces live in digiKam's database, and the sidecar's regions and tag list are written again
+    from there, so an old sidecar can never take a person or a face box off the photo."""
     from app.photos import consistency, edits
-    from app.data import state
+    from app.faces import facemgr
+    from app.data import state, index
     side = photo["path"] + ".xmp"
     vals = consistency._exif_read([side]).get(side) or {}
-    db_tags = set(edits.digikam_tag_paths([photo["id"]]).get(photo["id"], []))
-    want = set(consistency._norm("tags", vals.get("tags")))
-    ch = {"rating": int(vals.get("rating") or 0), "title": consistency._norm("title", vals.get("title")) or "",
-          "caption": consistency._norm("caption", vals.get("caption")) or "", "add_tags": sorted(want - db_tags), "remove_tags": sorted(db_tags - want)}
-    state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (photo["id"], json.dumps(ch), int(time.time()))))
+    con = index.open_index()
+    try:
+        people = {r[0] for r in con.execute("SELECT full FROM tags WHERE person = 1")}
+    finally:
+        con.close()
+    with edits._lock:
+        db_tags = set(edits.digikam_tag_paths([photo["id"]]).get(photo["id"], []))
+        ch = dict(edits.pending().get(photo["id"], {}))
+        if vals.get("_present"):
+            if vals.get("rating") is not None:
+                ch["rating"] = int(vals.get("rating") or 0)
+            for f in ("title", "caption"):
+                if vals.get(f) is not None:
+                    ch[f] = consistency._norm(f, vals.get(f)) or ""
+            want = {t for t in consistency._norm("tags", vals.get("tags")) if t not in people and not t.startswith("People/")}
+            have = {t for t in db_tags if t not in people and not t.startswith("People/")}
+            ch["add_tags"], ch["remove_tags"] = sorted(want - have), sorted(have - want)
+            if not ch["add_tags"]:
+                ch.pop("add_tags")
+            if not ch["remove_tags"]:
+                ch.pop("remove_tags")
+        if ch:
+            state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (photo["id"], json.dumps(ch), int(time.time()))))
+    facemgr.write_regions_many([photo["id"]])  # people and face boxes back in, from the database
 
 
 def _restore_deleted(e: dict) -> dict:
@@ -336,10 +359,15 @@ def _restore_deleted(e: dict) -> dict:
     con = _v.connect()
     try:  # the photo's history continues under its new id
         con.execute("UPDATE photo_history SET photo_id = ? WHERE photo_id = ?", (new_id, e["photo"]))
+        # and its identity, so the next index build does not take the restored file (same fingerprint) for a
+        # renumbered photo and move (or drop) its rows a second time
+        con.execute("UPDATE photo_identity SET dk_id = ? WHERE dk_id = ?", (new_id, e["photo"]))
         con.commit()
     finally:
         con.close()
     record([{"photo_id": new_id, "action": "restore", "summary": f"Restored from deleted-photos ({backup.name})", "path": str(main_file)}])
+    from app.photos import scanner
+    scanner.complete([new_id])  # its full rows, as for an upload: dates, position, tags and faces from the file and sidecar
     ch = {k: d.get(k) for k in ("rating", "title", "caption") if d.get(k) not in (None, "")}
     if d.get("tags"):
         ch["add_tags"] = d["tags"]

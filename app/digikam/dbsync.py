@@ -139,12 +139,15 @@ def _set_copyright(con, image_id: int, template: dict):
 
 def _set_comment(con, image_id: int, ctype: int, text: str, date: str = None):
     """type 1 = caption, 3 = title; digiKam's default entry is language x-default with no author."""
+    # every x-default entry of this kind, whoever wrote it (the authorless one first): the sidecar holds one x-default
+    # value with no author, so the database keeps one too; other languages stay as they are
     rows = con.execute("SELECT id FROM ImageComments WHERE imageid = ? AND type = ? AND language = 'x-default' "
-                       "AND (author IS NULL OR author = '') ORDER BY id", (image_id, ctype)).fetchall()
+                       "ORDER BY CASE WHEN author IS NULL OR author = '' THEN 0 ELSE 1 END, id", (image_id, ctype)).fetchall()
     if not text:
         con.executemany("DELETE FROM ImageComments WHERE id = ?", rows)
     elif rows:
-        con.execute("UPDATE ImageComments SET comment = ?, date = coalesce(?, date) WHERE id = ?", (text, date, rows[0][0]))
+        con.execute("UPDATE ImageComments SET comment = ?, author = NULL, date = coalesce(?, date) WHERE id = ?", (text, date, rows[0][0]))
+        con.executemany("DELETE FROM ImageComments WHERE id = ?", rows[1:])
     else:
         con.execute("INSERT INTO ImageComments (imageid, type, language, author, date, comment) VALUES (?,?,?,?,?,?)",
                     (image_id, ctype, "x-default", None, date, text))
@@ -195,8 +198,8 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
                 skipped.append({"id": image_id, "reason": "no longer in the digiKam database"})
                 continue
             add = [(t, by_full.get(t)) for t in e.get("add_tags", [])]
-            rem = [(t, by_full.get(t)) for t in e.get("remove_tags", [])]
-            missing = [t for t, tid in add + rem if tid is None]
+            rem = [(t, by_full.get(t)) for t in e.get("remove_tags", []) if by_full.get(t) is not None]  # a tag digiKam lacks is off already
+            missing = [t for t, tid in add if tid is None]
             if missing or ("pick" in e and None in pick_ids) or ("color" in e and None in color_ids):
                 skipped.append({"id": image_id, "reason": f"tag not found in digiKam: {', '.join(missing) or 'label tags'}"})
                 continue
@@ -224,9 +227,12 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
             for _, tid in add:
                 con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?,?)", (image_id, tid))
             for _, tid in rem:
+                # a person with a face box on the photo stays: the box says they are in it, and only a face change
+                # (remove or rename the face) takes them off. A tag removal never deletes face regions.
+                if con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property IN ('tagRegion', 'autodetectedFace')",
+                               (image_id, tid)).fetchone():
+                    continue
                 con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (image_id, tid))
-                # a face region on a removed tag would be left dangling; keyword tags have none, but be safe
-                con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ?", (image_id, tid))
             applied.append(image_id)
     if applied:  # the database now says what the sidecars (and files) say: digiKam need not rescan them
         dkdb.stamp_files(_photo_paths(applied))

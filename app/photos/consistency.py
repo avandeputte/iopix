@@ -23,14 +23,15 @@ from app.digikam import dbsync, dkdb
 from app.photos import edits
 from app.data import index
 
-FIELDS = ["rating", "title", "caption", "tags"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
+CHECK_VERSION = 2  # bumped when the check compares more: every photo is looked at again by "Check new and changed photos"
+FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
 SOURCES = ["db", "sidecar", "file"]
 log = logging.getLogger("app.photos.consistency")
 progress = {"running": False, "done": 0, "total": 0, "mismatched": 0, "scanned_at": None, "error": None}
 _run = {"gen": 0}
 TAGS_XMP = ["XMP-digiKam:TagsList", "XMP-microsoft:LastKeywordXMP", "XMP-lr:HierarchicalSubject", "XMP-mediapro:CatalogSets"]
 READ_TAGS = ["-XMP-xmp:Rating", "-XMP-digiKam:PickLabel", "-XMP-digiKam:ColorLabel", "-XMP-dc:Title", "-XMP-dc:Description",
-             *["-" + t for t in TAGS_XMP]]
+             *["-" + t for t in TAGS_XMP], "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude", "-GPSAltitude"]
 # exiftool's JSON keys for READ_TAGS; the tag lists in the order digiKam prefers them
 TAG_KEYS = ("TagsList", "LastKeywordXMP", "HierarchicalSubject", "CatalogSets")
 VALUE_KEYS = ("Rating", "PickLabel", "ColorLabel", "Title", "Description", *TAG_KEYS)
@@ -46,7 +47,55 @@ def init():
 
 def _blank() -> dict:
     """What a photo with no metadata at all looks like (a fresh copy each time: tags is a list)."""
-    return {"rating": 0, "pick": 0, "color": 0, "title": "", "caption": "", "tags": []}
+    return {"rating": 0, "pick": 0, "color": 0, "title": "", "caption": "", "tags": [], "taken": None, "gps": "none"}
+
+
+def _taken(v):
+    """'2026:05:13 15:19:46.12+02:00' or '2026-05-13T15:19:46.000' as '2026-05-13T15:19:46', or None."""
+    t = str(v or "").strip()
+    if len(t) < 19 or not t[:4].isdigit() or t.startswith("0000"):
+        return None
+    return t[:4] + "-" + t[5:7] + "-" + t[8:10] + "T" + t[11:19]
+
+
+def _gps(lat, lon, alt):
+    """A position as compared and shown: 'lat, lon' (6 decimals) plus ', alt m' when there is one; 'none'."""
+    try:
+        if lat in (None, "") or lon in (None, ""):
+            return "none"
+        out = f"{float(lat):.6f}, {float(lon):.6f}"
+        return out + (f", {float(alt):.1f} m" if alt not in (None, "") else "")
+    except (TypeError, ValueError):
+        return "none"
+
+
+def _gps_parts(v):
+    """('lat, lon[, alt m]' or 'none') -> {lat, lon, alt} or None."""
+    if not v or v == "none":
+        return None
+    parts = [x.strip().removesuffix(" m").strip() for x in str(v).split(",")]
+    return {"lat": float(parts[0]), "lon": float(parts[1]), "alt": float(parts[2]) if len(parts) > 2 else None}
+
+
+def same_value(field: str, a, b) -> bool:
+    """Whether two normalised values say the same (positions within about a metre, altitude within a metre)."""
+    if field != "gps" or a == b:
+        return a == b
+    pa, pb = _gps_parts(a), _gps_parts(b)
+    if pa is None or pb is None:
+        return pa is pb
+    if abs(pa["lat"] - pb["lat"]) > 1e-5 or abs(pa["lon"] - pb["lon"]) > 1e-5:
+        return False
+    if (pa["alt"] is None) != (pb["alt"] is None):
+        return False
+    return pa["alt"] is None or abs(pa["alt"] - pb["alt"]) <= 1.0
+
+
+def edit_value(field: str, v):
+    """A normalised value as an edit carries it (edits.write_args / dbsync)."""
+    if field == "gps":
+        return _gps_parts(v)
+    return v
 
 
 def _norm(field: str, v):
@@ -61,6 +110,10 @@ def _norm(field: str, v):
     if field == "tags":
         items = v if isinstance(v, list) else ([v] if v else [])
         return sorted({str(t).replace("|", "/").strip() for t in items if str(t).strip()})
+    if field == "taken":
+        return _taken(v)
+    if field == "gps":
+        return v if v else None
     return (str(v).strip() if v else "")
 
 
@@ -86,12 +139,16 @@ def db_values(photo_ids: list) -> dict:
                 elif tid in tags and tid not in internal:
                     d["tags"].append(dkdb.tag_path(tags, tid))
             for pid, typ, text in src.execute(
-                    f"SELECT imageid, type, comment FROM ImageComments WHERE language = 'x-default' AND (author IS NULL OR author = '') "
-                    f"AND imageid IN ({chunk}) ORDER BY id"):
+                    f"SELECT imageid, type, comment FROM ImageComments WHERE language = 'x-default' AND type IN (1, 3) "
+                    f"AND imageid IN ({chunk}) ORDER BY CASE WHEN author IS NULL OR author = '' THEN 0 ELSE 1 END, id"):
                 d = out.setdefault(pid, _blank())
                 key = "title" if typ == 3 else "caption"
                 if not d[key]:
                     d[key] = text or ""
+            for pid, created in src.execute(f"SELECT imageid, creationDate FROM ImageInformation WHERE imageid IN ({chunk})"):
+                out.setdefault(pid, _blank())["taken"] = _taken(created)
+            for pid, lat, lon, alt in src.execute(f"SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({chunk})"):
+                out.setdefault(pid, _blank())["gps"] = _gps(lat, lon, alt)
     finally:
         src.close()
     return out
@@ -117,7 +174,11 @@ def _exif_read(paths: list) -> dict:
         out[r.get("SourceFile")] = {
             "rating": r.get("Rating"), "pick": r.get("PickLabel"), "color": r.get("ColorLabel"),
             "title": r.get("Title"), "caption": r.get("Description"), "tags": tags if tags is not None else [],
-            "_present": any(k in r for k in VALUE_KEYS),
+            # date and position: only when the copy has them (a sidecar without a date says nothing about it)
+            "taken": _taken(r.get("DateTimeOriginal")),
+            "gps": _gps(r.get("GPSLatitude"), r.get("GPSLongitude"), r.get("GPSAltitude")) if r.get("GPSLatitude") not in (None, "") else None,
+            "_present": any(k in r for k in VALUE_KEYS) or r.get("DateTimeOriginal") not in (None, "") or r.get("GPSLatitude") not in (None, ""),
+            "_tags_present": tags is not None,
         }
     return out
 
@@ -146,7 +207,7 @@ def compare(photos: list) -> list:
                 v = vals[s]
                 row[s] = None if v is None or (s == "file" and not v) else _norm(f, v.get(f))
             present = [row[s] for s in SOURCES if row[s] is not None]
-            same = all(x == present[0] for x in present)
+            same = all(same_value(f, x, present[0]) for x in present)
             fields[f] = {**row, "ok": same}
             if not same:
                 mism.append(f)
@@ -168,7 +229,7 @@ def _cstamp(p: dict) -> str:
         side = f"{st.st_size}.{int(st.st_mtime)}"
     except OSError:
         side = "-"
-    return f"{analysis._stamp(p)}|{side}"
+    return f"{CHECK_VERSION}|{analysis._stamp(p)}|{side}"
 
 
 def scan(photos: list, rescan_all: bool = True):
@@ -335,6 +396,10 @@ def _changes_from(values: dict, fields: list, db_tags: list) -> dict:
             have = set(db_tags)
             ch["add_tags"] = sorted(want - have)
             ch["remove_tags"] = sorted(have - want)
+        elif f in ("taken", "gps"):
+            v = _norm(f, values.get(f))
+            if v is not None:  # a copy without a date or position says nothing about it
+                ch[f] = edit_value(f, v)
         else:
             ch[f] = _norm(f, values.get(f))
     return ch
@@ -369,7 +434,26 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     read = _exif_read([p["path"] + suffix for p in photos]) if source != "db" else {}
 
     def source_values(p):
-        return dbv.get(p["id"]) if source == "db" else read.get(p["path"] + suffix)
+        if source == "db":
+            return dbv.get(p["id"])
+        v = read.get(p["path"] + suffix)
+        return v if v and v.get("_present") else None  # no metadata block at all: nothing to copy (never "blank")
+
+    # people are on a photo because of its faces, which live in digiKam's database: a sync never adds or removes a
+    # person from a sidecar or a file tag list, nor takes one off the photo in the database
+    from app.data import index as _ix
+    _c = _ix.open_index()
+    try:
+        people = {r[0] for r in _c.execute("SELECT full FROM tags WHERE person = 1")}
+    finally:
+        _c.close()
+    is_person = (lambda t: t in people or t.startswith("People/"))
+    db_people = {pid: [t for t in v.get("tags", []) if is_person(t)] for pid, v in
+                 (dbv if dbv else db_values([p["id"] for p in photos])).items()} if "tags" in fields else {}
+
+    def fields_for(src_vals):
+        # a file whose metadata has no tag list (IPTC keywords only, or none) says nothing about tags
+        return [f for f in fields if f != "tags" or source == "db" or src_vals.get("_tags_present")]
 
     if "db" in targets:
         pending = {}
@@ -379,7 +463,11 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
                 skipped.append({"id": p["id"], "reason": f"no {source} metadata to copy"})
                 continue
             cur = dbv.get(p["id"], {"tags": []})
-            ch = _changes_from(src_vals, fields, _norm("tags", cur.get("tags")))
+            ch = _changes_from(src_vals, fields_for(src_vals), _norm("tags", cur.get("tags")))
+            if "remove_tags" in ch:
+                ch["remove_tags"] = [t for t in ch["remove_tags"] if not is_person(t)]
+            if "add_tags" in ch:
+                ch["add_tags"] = [t for t in ch["add_tags"] if not is_person(t)]
             if "caption" in ch:
                 ch["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             pending[p["id"]] = ch
@@ -397,10 +485,15 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
                 if not any(s["id"] == p["id"] for s in skipped):
                     skipped.append({"id": p["id"], "reason": f"no {source} metadata to copy"})
                 continue
-            ch = {f: _norm(f, src_vals.get(f)) for f in fields if f != "tags"}
+            use = fields_for(src_vals)
+            ch = {f: _norm(f, src_vals.get(f)) for f in use if f not in ("tags", "taken", "gps")}
+            ch.update({k: v for k, v in _changes_from(src_vals, [f for f in use if f in ("taken", "gps")], []).items()})
             if "caption" in ch:
                 ch["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-            tag_paths = _norm("tags", src_vals.get("tags")) if "tags" in fields else None
+            tag_paths = None
+            if "tags" in use:
+                kw = [t for t in _norm("tags", src_vals.get("tags")) if not is_person(t)]
+                tag_paths = sorted(set(kw) | set(db_people.get(p["id"], [])))
             for t in file_targets:
                 if t == "sidecar":
                     try:
@@ -419,6 +512,8 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
         skipped += [{"id": i, "reason": "exiftool could not write this file"} for i in failed]
         done += [i for i in dict.fromkeys(owner.values()) if i not in failed]
     done = sorted(set(done))
+    if source == "db" and done:  # the database was chosen as the truth: edits not in it yet are given up for these fields
+        edits.drop_pending_fields(done, fields)
     recheck(done)
     from app.photos import history
     labels = {"db": "the database", "sidecar": "the sidecar", "file": "the image file"}

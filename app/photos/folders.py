@@ -155,12 +155,12 @@ def _probe(path: Path) -> dict:
     try:
         # -d formats the dates (it is a print conversion, so no global -n); Orientation# stays numeric
         res = subprocess.run([*edits.exiftool_cmd(), "-j", "-m", "-q", "-d", "%Y-%m-%dT%H:%M:%S",
-                              "-DateTimeOriginal", "-CreateDate", "-MediaCreateDate", "-Orientation#", "-ImageWidth", "-ImageHeight",
+                              "-DateTimeOriginal", "-Keys:CreationDate", "-CreateDate", "-MediaCreateDate", "-Orientation#", "-ImageWidth", "-ImageHeight",
                               "-ExifImageWidth", "-ExifImageHeight", "--", str(path)], capture_output=True, text=True, timeout=60)
         d = json.loads(res.stdout or "[{}]")[0]
     except (OSError, ValueError, subprocess.SubprocessError):
         d = {}
-    when = next((d[k] for k in ("DateTimeOriginal", "CreateDate", "MediaCreateDate") if d.get(k) and str(d[k])[:4].isdigit()), None)
+    when = next((d[k] for k in ("DateTimeOriginal", "CreationDate", "CreateDate", "MediaCreateDate") if d.get(k) and str(d[k])[:4].isdigit()), None)
     if not when:
         when = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(path.stat().st_mtime))
     return {"when": str(when)[:19] + ".000", "orientation": int(d.get("Orientation") or 1),
@@ -227,6 +227,8 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     added = register(album_id, staged, check_running)
     from app.photos import scanner
     scanner.complete([a["id"] for a in added], check_running)  # camera, place, keywords, faces, digiKam's hash, as digiKam's scan would
+    from app.photos import importer
+    importer.sidecars_from_db([a["id"] for a in added])
     from app.photos import history
     history.record([{"photo_id": a["id"], "action": "added", "summary": f"Uploaded into {folder.get('rel') or folder['dir']} (sidecar created)", "path": str(folder["dir"] / a["name"])} for a in added])
     return {"added": added, "skipped": skipped}

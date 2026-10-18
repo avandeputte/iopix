@@ -203,3 +203,28 @@ def test_heic_crops_by_re_encoding(client, lib):
         forget_identity([pid])
         heic.unlink(missing_ok=True); Path(str(heic) + ".xmp").unlink(missing_ok=True)
         index.build()
+
+
+def test_undoing_a_rotation_keeps_face_changes_made_since(client, lib):
+    """A face added after a rotation turns back with the picture when the rotation is undone, instead of the boxes
+    saved at rotation time coming back over it (which lost the new face and left its person without a box)."""
+    import sqlite3
+    pid, path, (tag, rect), (w, h, o) = _face_jpeg(lib)
+    W, H = lossless.upright_size(w, h, o)
+    r = client.post("/api/photos/transform", json={"ids": [pid], "op": "right"})
+    assert r.status_code == 200 and not r.json()["failed"], r.text
+    e = client.get(f"/api/history?photo={pid}&limit=1").json()["entries"][0]
+    con = sqlite3.connect(lib["db"])
+    person = con.execute("SELECT tagid FROM TagProperties WHERE property = 'person' AND value != '' AND tagid != ? LIMIT 1", (tag,)).fetchone()[0]
+    con.close()
+    new_rect = [10, 10, 60, 60]  # in the turned picture (H x W upright)
+    assert client.post("/api/faces/op", json={"op": "add", "image": pid, "rect": new_rect, "tag": person}).status_code == 200
+    r = client.post(f"/api/history/{e['id']}/restore", json={"kind": "undo"})
+    assert r.status_code == 200, r.text
+    _ii, _im, regs = _info(lib["db"], pid)
+    assert regs[tag] == rect, "the face that was there turned back"
+    assert regs[person] == lossless.turn_rect(tuple(new_rect), "left", H, W), "the face added since turned back too"
+    con = sqlite3.connect(lib["db"])
+    assert con.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (pid, person)).fetchone()
+    con.close()
+    client.post("/api/faces/op", json={"op": "remove", "image": pid, "rect": list(regs[person])})

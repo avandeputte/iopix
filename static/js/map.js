@@ -3,7 +3,7 @@ import { $, api, date, dfDay, dfTime, fill, h, icon, main, nf, plural, store } f
 import { S, applyFilter, filterParams, go, toast } from './state.js';
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
-import { openLightbox, syncLightbox } from './lightbox.js';
+import { details, getDetail, openLightbox, syncLightbox } from './lightbox.js';
 
 export const M = { data: null, map: null, token: 0 };
 
@@ -127,11 +127,15 @@ export async function showMap(fp) {
 }
 /** A marker dragged to a new spot (placing mode): the photo's location follows, with Undo. */
 async function moveMarker(mk, d, i) {
-  const was = { lat: d.lat[i], lon: d.lon[i] };
+  // the position before, at full precision and with its altitude (the map's marker list is rounded and has none):
+  // the move keeps the altitude, and Undo puts back exactly what was there
+  let det = null;
+  try { details.delete(d.id[i]); det = await getDetail(d.id[i]); } catch { /* the marker's own position below */ }
+  const was = det && det.lat != null ? { lat: det.lat, lon: det.lon, alt: det.alt ?? null } : { lat: d.lat[i], lon: d.lon[i], alt: null };
   const to = mk.getLatLng();
-  if (!(await editPhotos([d.id[i]], { gps: { lat: +to.lat.toFixed(7), lon: +to.lng.toFixed(7), alt: null } }))) { mk.setLatLng([was.lat, was.lon]); return; }
+  if (!(await editPhotos([d.id[i]], { gps: { lat: +to.lat.toFixed(7), lon: +to.lng.toFixed(7), alt: was.alt } }))) { mk.setLatLng([was.lat, was.lon]); return; }
   d.lat[i] = to.lat; d.lon[i] = to.lng;
-  toast('Location moved.', 'Undo', async () => { if (await editPhotos([d.id[i]], { gps: { lat: was.lat, lon: was.lon, alt: null } })) { mk.setLatLng([was.lat, was.lon]); d.lat[i] = was.lat; d.lon[i] = was.lon; } }, 8000);
+  toast('Location moved.', 'Undo', async () => { if (await editPhotos([d.id[i]], { gps: was })) { mk.setLatLng([was.lat, was.lon]); d.lat[i] = was.lat; d.lon[i] = was.lon; } }, 8000);
 }
 /** The tray of photos without a location: pick some, then click the map or drag them onto it. */
 async function placeTray(map, fp, el) {

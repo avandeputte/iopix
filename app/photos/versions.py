@@ -132,7 +132,7 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
         im.save(tmp, "JPEG", quality=95, icc_profile=im.info.get("icc_profile"), optimize=True)
         subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-charset", "filename=utf8", "-tagsfromfile", src, "-all:all", "-xmp:all",
                         "-unsafe", "-Orientation#=1", "-IFD1:all=", "-ThumbnailImage=", "-PreviewImage=", f"-ExifImageWidth={im.size[0]}", f"-ExifImageHeight={im.size[1]}",
-                        *(["-XMP-mwg-rs:RegionInfo=", "-XMP-MP:RegionInfoMP="] if p["angle"] else []), tmp], capture_output=True, text=True, timeout=300)
+                        "-XMP-mwg-rs:RegionInfo=", "-XMP-MP:RegionInfoMP=", tmp], capture_output=True, text=True, timeout=300)  # regions: rewritten below
         os.replace(tmp, dst)
     finally:
         if os.path.exists(tmp):
@@ -163,6 +163,15 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
             con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (int(pid), current))
             con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (int(pid), inter if derived else original))
             con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (vid, current))
+    # the original's edits not yet in digiKam's database are the version's too (its sidecar is a copy of the
+    # original's); then its sidecar regions and tag list are written from its own rows: upright, at its own size
+    import json as _json
+    from app.data import state as _state
+    from app.faces import facemgr
+    e = edits.pending().get(int(pid))
+    if e:
+        _state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (vid, _json.dumps(e), int(__import__("time").time()))))
+    facemgr.write_regions_many([vid])
     what = ", ".join(k for k in ("exposure", "contrast", "saturation", "warmth", "angle") if p[k]) + (", auto levels" if p["autolevel"] else "")
     history.record([{"photo_id": vid, "action": "added", "path": dst, "summary": f"New version of {name} ({what.strip(', ')})", "details": {"from": int(pid), **p}},
                     {"photo_id": int(pid), "action": "edit", "path": src, "summary": f"Version saved as {new_name}; this file is unchanged", "details": {"version": vid}}])

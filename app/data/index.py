@@ -188,7 +188,7 @@ def read_rows(src) -> dict:
             "imagetags": [tuple(r) for r in q("SELECT imageid, tagid FROM ImageTags")],
             "regions": [tuple(r) for r in q("SELECT imageid, tagid, property, value FROM ImageTagProperties "
                                             "WHERE property IN ('tagRegion', 'autodetectedFace', 'ignoredFace')")],
-            "comments": [tuple(r) for r in q("SELECT id, imageid, type, comment FROM ImageComments ORDER BY id")],
+            "comments": [tuple(r) for r in q("SELECT id, imageid, type, comment, language, author FROM ImageComments ORDER BY id")],
             "copyright": [tuple(r) for r in q("SELECT imageid, property, value FROM ImageCopyright")],
             "props": [tuple(r) for r in q("SELECT imageid, property, value FROM ImageProperties")],
             "images": [tuple(r) for r in q(IMAGE_SQL).fetchall()],
@@ -384,7 +384,7 @@ def build(dst_path: Path = config.INDEX_DB, source: tuple = None) -> dict:
     with _build_lock:
         stats = _build(dst_path, source)
     if stats["resolved_edits"] and Path(dst_path) == config.INDEX_DB:  # digiKam now agrees with these edits; stop tracking them
-        edits.resolved(stats["resolved_edits"])
+        edits.resolved(stats["resolved_edits"], stats.get("resolved_snapshot"))
     return stats
 
 
@@ -514,10 +514,19 @@ def _build(dst_path: Path, source: tuple) -> dict:
         elif prop == "ignoredFace" and tid == ignored_tag:
             faces.append((iid, tid, *rect, "ignored"))
 
-    title, caption = {}, {}
-    for _, iid, typ, text in raw["comments"]:
-        if text and text.strip():
-            (title if typ == 3 else caption).setdefault(iid, text.strip())
+    # digiKam's caption is type 1 and its title type 3 (2 is a headline, not shown); the x-default entry (the one the
+    # viewer edits and digiKam shows first), the authorless one if there are several; other languages are not shown
+    title, caption, rank = {}, {}, {}
+    for row in raw["comments"]:
+        _, iid, typ, text = row[:4]
+        lang, author = (row[4] if len(row) > 4 else "x-default"), (row[5] if len(row) > 5 else None)
+        if typ not in (1, 3) or not (text and text.strip()) or lang != "x-default":
+            continue
+        r = 0 if not author else 1
+        key = (iid, typ)
+        if key not in rank or r < rank[key]:
+            rank[key] = r
+            (title if typ == 3 else caption)[iid] = text.strip()
     copyright_ = defaultdict(dict)
     for iid, prop, val in raw["copyright"]:
         if val and val.strip():
@@ -533,7 +542,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
     photos, fts_rows, photo_tag_rows = [], [], []
     # edits made in the viewer live in sidecars; show them until digiKam's database catches up
     t1 = time.time()
-    pending, resolved = edits.pending(), []
+    pending, resolved, resolved_snapshot = edits.pending(), [], {}
     seen = analysis.results()  # sharpness, OCR text, objects... from the app's own analysis
     phases["analysis"] = time.time() - t1
     burst_rows = []
@@ -546,7 +555,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
         album = albums.get(album_id)
         if not album:
             continue
-        created_db, lat_db, lon_db = created, lat, lon  # digiKam's own values, before any pending edit is overlaid
+        created_db, lat_db, lon_db, alt_db = created, lat, lon, alt  # digiKam's own values, before any pending edit is overlaid
         e0 = pending.get(iid)
         if e0 and "taken" in e0:
             created = e0["taken"]
@@ -575,18 +584,25 @@ def _build(dst_path: Path, source: tuple) -> dict:
         if e:
             add = [tag_by_full[t] for t in e.get("add_tags", []) if t in tag_by_full]
             rem = [tag_by_full[t] for t in e.get("remove_tags", []) if t in tag_by_full]
+            # a tag path digiKam does not have (yet): the edit is not done, whatever the rest says
+            unknown_tags = any(t not in tag_by_full for t in e.get("add_tags", []))  # (removing a tag digiKam lacks is done)
             dbcr = copyright_.get(iid, {})
+            g = e.get("gps")
+            gps_same = ("gps" not in e or (g is None and lat_db is None)
+                        or (g is not None and lat_db is not None and abs(g["lat"] - lat_db) < 1e-6 and abs(g["lon"] - lon_db) < 1e-6
+                            and ((g.get("alt") is None and alt_db is None)
+                                 or (g.get("alt") is not None and alt_db is not None and abs(float(g["alt"]) - float(alt_db)) < 0.05))))
             same = (("rating" not in e or e["rating"] == rating)
                     and ("taken" not in e or e["taken"] == (created_db or "")[:19])
-                    and ("gps" not in e or (e["gps"] is None and lat_db is None) or
-                         (e["gps"] is not None and lat_db is not None and abs(e["gps"]["lat"] - lat_db) < 1e-6 and abs(e["gps"]["lon"] - lon_db) < 1e-6))
+                    and gps_same
                     and ("template" not in e or all((dbcr.get(k) or "") == (v or "") for k, v in e["template"].items()))
                     and ("pick" not in e or e["pick"] == p_pick) and ("color" not in e or e["color"] == p_color)
                     and ("title" not in e or (e["title"] or None) == p_title)
                     and ("caption" not in e or (e["caption"] or None) == p_caption)
-                    and all(t in tids for t in add) and not any(t in tids for t in rem))
+                    and all(t in tids for t in add) and not any(t in tids for t in rem) and not unknown_tags)
             if same:
                 resolved.append(iid)
+                resolved_snapshot[iid] = e
             else:
                 edited = 1
                 rating = e.get("rating", rating)
@@ -702,9 +718,9 @@ def _build(dst_path: Path, source: tuple) -> dict:
                                  ORDER BY p.video, (p.pick = 1), p.rating DESC, p.ts LIMIT 1))
         """)
         dst.execute("DELETE FROM albums WHERE n_all = 0")
-        stats = {"version": version, "built": int(time.time()), "photos": len(photos), "resolved_edits": resolved,
+        stats = {"version": version, "built": int(time.time()), "photos": len(photos), "resolved_edits": resolved, "resolved_snapshot": resolved_snapshot,
                  "build_seconds": round(time.time() - t0, 2)}
-        dst.executemany("INSERT INTO meta VALUES (?,?)", [(k, str(v)) for k, v in stats.items()])
+        dst.executemany("INSERT INTO meta VALUES (?,?)", [(k, str(v)) for k, v in stats.items() if k != "resolved_snapshot"])
         dst.commit()
         dst.execute("INSERT INTO fts(fts) VALUES ('optimize')")
         dst.commit()

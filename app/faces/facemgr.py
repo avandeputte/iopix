@@ -131,10 +131,27 @@ def _sidecar_worker():
             try:
                 res = write_regions_many(images, db_path)
                 bad = [i for i, v in res.items() if v != "written"]
+                for i in res:
+                    if i not in bad:
+                        _tries.pop(i, None)
                 if bad:
                     log.warning("face regions not written to the sidecars of %s: %s", bad[:10], {i: res[i] for i in bad[:3]})
+                    _retry(bad, db_path)
             except Exception as e:
                 log.warning("face regions not written to the sidecars of %s: %s", images[:10], e)
+                _retry(images, db_path)
+
+
+_tries = {}
+
+
+def _retry(images, db_path):
+    """Put photos whose sidecar could not be written back on the queue, a few times, a minute apart."""
+    again = [i for i in images if _tries.get(i, 0) < 3]
+    for i in images:
+        _tries[i] = _tries.get(i, 0) + 1
+    if again:
+        threading.Timer(60, queue_sidecars, args=(again, db_path)).start()
 
 
 def queue_sidecars(images: list, db_path=None):
@@ -200,8 +217,11 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     except Exception:
         paths = {}
     rows = []
-    for r in done:
-        src = next((o for o in ops if int(o.get("image") or 0) == r["image"] and o.get("op") == r.get("op")), {})
+    # results come one per op, in order: each change is logged with its own rectangle (two ops of one kind on one
+    # photo must not share the first one's, or undo would act on the wrong face)
+    for src, r in zip(ops, results):
+        if "error" in r or r.get("skipped"):
+            continue
         det = {k: v for k, v in r.items() if k in ("op", "tag", "name", "was", "from_tag")} | {"rect": src.get("rect")}
         if src.get("new_rect"):
             det["new_rect"] = src["new_rect"]
@@ -450,8 +470,15 @@ def _region_args(src, image: int, roots: dict, tags: dict, persons: set):
             if n not in with_region:
                 faces.append((n, None))
     w, h, orient = row[3] or 0, row[4] or 0, row[5] or 1
+    if not w or not h:  # digiKam has no size for it yet: the file's own (stored, unrotated, as digiKam keeps it)
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+        except Exception:
+            w = h = 0
     if not w or not h:
-        return None, "no image size known"
+        return path, []  # the regions cannot be placed; the tag list is still written
     # the database stores the unrotated size; the regions are upright
     up_w, up_h = (h, w) if orient in (5, 6, 7, 8) else (w, h)
     mwg, mp = [], []
@@ -487,23 +514,28 @@ def write_regions_many(images: list, db_path=None, files: bool = None, sidecars:
     # the tag list goes with the regions, as digiKam writes it: a named face is also a People/... tag on the photo,
     # and a sidecar with the regions but not the tags reads as a mismatch (and loses the name on a rescan)
     ok = [i for i, (path, _a) in built.items() if path is not None]
-    db_tags, pend = edits.digikam_tag_paths(ok) if ok else {}, edits.pending()
     paths = {}
-    for image, (path, args) in built.items():
-        if path is None:
-            out[image] = args
-            continue
-        tag_paths = edits.effective_tags(db_tags.get(image, []), pend.get(image, {}))
-        if sidecars:
-            side = edits._prepare(path)
-            jobs.append((side, args + edits.write_args({}, tag_paths, False))); owner[side] = image
-        if files and edits.can_write_file(path):
-            jobs.append((path, args + edits.write_args({}, tag_paths, True))); owner[path] = image
-        elif not sidecars:
-            out[image] = "not a file the viewer writes into"
-            continue
-        paths[image] = path
-    failed = {owner[t] for t in edits.run_exiftool(jobs)} if jobs else set()
+    with edits._lock:  # pending edits read and the sidecars written as one step: a tag edit made meanwhile is kept
+        db_tags, pend = edits.digikam_tag_paths(ok) if ok else {}, edits.pending()
+        for image, (path, args) in built.items():
+            if path is None:
+                out[image] = args
+                continue
+            tag_paths = edits.effective_tags(db_tags.get(image, []), pend.get(image, {}))
+            try:
+                if sidecars:
+                    side = edits._prepare(path)
+                    jobs.append((side, args + edits.write_args({}, tag_paths, False))); owner[side] = image
+                if files and edits.can_write_file(path):
+                    jobs.append((path, args + edits.write_args({}, tag_paths, True))); owner[path] = image
+                elif not sidecars:
+                    out[image] = "not a file the viewer writes into"
+                    continue
+            except OSError as e:  # this photo only (missing file, unmounted disk, no backup room); the others go on
+                out[image] = f"failed: {str(e)[:120]}"
+                continue
+            paths[image] = path
+        failed = {owner[t] for t in edits.run_exiftool(jobs)} if jobs else set()
     for image in paths:
         out[image] = "failed" if image in failed else "written"
     # digiKam need not rescan a file that now says what its database says

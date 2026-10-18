@@ -15,6 +15,11 @@ from app.data import index
 from app.digikam.dbsync import SyncError
 
 ROOT = "Places"
+
+
+def _part(name: str) -> str:
+    """A place name as a tag name: one line, no "/" or "|" (Biel/Bienne becomes Biel-Bienne), at most 120 characters."""
+    return " ".join(str(name).replace("/", "-").replace("|", "-").split())[:120]
 progress = {"running": False, "done": 0, "total": 0, "created": 0, "error": None}
 
 
@@ -32,16 +37,24 @@ def plan(photo_ids: list = None) -> dict:
             have.setdefault(pid, set()).add(tid)
     finally:
         con.close()
-    wanted, todo = set(), []
+    wanted, todo, untag = set(), [], []
+    # the paths this feature makes (Places/Country/Region/Town for some geotagged photo): only those can be stale
+    shaped = {"/".join([ROOT] + [_part(x) for x in (c, r, t) if x and _part(x)]) for _, t, r, c in rows}
     for pid, place, region, country in rows:
-        parts = [ROOT] + [p for p in (country, region, place) if p]
+        parts = [ROOT] + [_part(p) for p in (country, region, place) if p and _part(p)]
         full = "/".join(parts)
         for i in range(1, len(parts) + 1):  # the root "Places" tag included
             wanted.add("/".join(parts[:i]))
         if full not in have.get(pid, set()):
             todo.append((pid, full))
+        # a place tag from an earlier position (the photo was moved since): it goes. Only tags of this feature's
+        # shape (country, region, town); deeper ones someone added by hand (Places/France/Paris/Louvre) stay
+        stale = sorted(t for t in have.get(pid, set()) if t != full and t in shaped and not full.startswith(t + "/") and not t.startswith(full + "/"))
+        if stale:
+            untag.append((pid, stale))
     missing = sorted(t for t in wanted if t not in existing)
-    return {"photos": len(rows), "to_tag": len(todo), "missing_tags": missing, "existing_tags": len(wanted) - len(missing), "_todo": todo}
+    return {"photos": len(rows), "to_tag": len(todo), "to_untag": len(untag), "missing_tags": missing, "existing_tags": len(wanted) - len(missing),
+            "_todo": todo, "_untag": untag}
 
 
 def _tag_id_in_digikam(full: str) -> int:
@@ -92,6 +105,19 @@ def run(photo_ids: list = None):
             for full, photos in groups.items():
                 edits.apply(photos, {"add_tags": [full]})
                 progress["done"] += len(photos)
+            stale = {}
+            for pid, tags in p["_untag"]:
+                stale.setdefault(tuple(tags), []).append(pid)
+            if stale:
+                con = index.open_index()
+                try:
+                    allp = {r[0]: r[1] for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({','.join(str(i) for v in stale.values() for i in v)})")}
+                finally:
+                    con.close()
+                for tags, ids in stale.items():
+                    photos = [{"id": i, "path": allp[i]} for i in ids if i in allp]
+                    if photos:
+                        edits.apply(photos, {"remove_tags": list(tags)})
         except Exception as e:
             progress["error"] = str(e)[:300]
         finally:

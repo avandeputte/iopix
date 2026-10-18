@@ -1384,7 +1384,8 @@ def test_explore_rediscover_and_no_settings(page, server):
     order = page.evaluate("[...document.querySelectorAll('#main h2')].map((e) => e.textContent)")
     i = next(k for k, t in enumerate(order) if t.startswith("Rediscover"))
     assert i == 0 or order[i - 1].startswith("On this day"), order
-    assert order[i + 1].startswith("Places") or order[i + 1].startswith("People"), "right before Places (or People when there are no places)"
+    nxt = order[i + 1] if not order[i + 1].startswith("Then and now") else order[i + 2]  # (shown when someone's faces span years)
+    assert nxt.startswith("Places") or nxt.startswith("People"), "right before Places (or People when there are no places)"
     assert page.locator("#main h2", has_text="Editing").count() == 0 and page.locator("#main input[type=checkbox]").count() == 0, "no settings on Explore"
     assert page.locator("#main a.pill", has_text="Settings").count() == 0 and page.locator("#main a.pill", has_text="Maintenance").count() == 0
     _ = first

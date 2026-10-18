@@ -226,6 +226,33 @@ def make_sidecar(path: str) -> bool:
         return False
 
 
+def sidecars_from_db(ids: list):
+    """Once a new file's rows are written (scanner.complete, which also reads IPTC and EXIF): its sidecar says the
+    same as digiKam's database, caption, title, date, position, tags and face regions included. exiftool's copy of
+    the file's metadata holds only what the file had as XMP, so an IPTC-only JPEG would get an empty one."""
+    from app.faces import facemgr
+    ids = [int(i) for i in ids]
+    if not ids:
+        return
+    vals = edits.db_state(ids)
+    from app.digikam import dbsync
+    jobs = []
+    for pid, path in dbsync._photo_paths(ids):
+        side, v = path + ".xmp", vals.get(pid) or {}
+        if not os.path.exists(side):
+            continue
+        ch = {k: v[k] for k in ("rating", "title", "caption") if v.get(k)}
+        if v.get("taken"):
+            ch["taken"] = v["taken"]
+        if v.get("gps"):
+            ch["gps"] = v["gps"]
+        if ch:
+            jobs.append((side, edits.write_args(ch, None, False)))
+    if jobs:
+        edits.run_exiftool(jobs)
+    facemgr.write_regions_many(ids, files=False)  # tags and faces
+
+
 def run(token: str, key: str = None, include: list = None, skip_duplicates: bool = True, root_id: int = None, check_running: bool = True) -> dict:
     """Import the staged files (all, or the names in include). Returns {added: [{id, name, path, folder}], skipped: [{name, reason}]}."""
     from app.digikam import dbsync
@@ -270,6 +297,7 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
             regs = folders.register(album_id, staged, check_running)
             from app.photos import scanner
             scanner.complete([a["id"] for a in regs], check_running)  # the full rows digiKam's scan would write
+            sidecars_from_db([a["id"] for a in regs])
             for a, (final, _c, _e, dst, _i) in zip(regs, staged):
                 added.append({"id": a["id"], "name": final, "path": str(dst), "folder": rel})
             history.record([{"photo_id": a["id"], "action": "added", "summary": f"Imported into {rel} (sidecar created)", "path": str(dst)} for a, (_f, _c, _e, dst, _i) in zip(regs, staged)])

@@ -3,8 +3,6 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime
-from datetime import timedelta
 
 from fastapi import APIRouter
 from fastapi import HTTPException
@@ -74,6 +72,20 @@ async def api_metadata_reread(photo_id: int):
     return r
 
 
+def _current_tag_paths(tag_ids: list, fallback: dict) -> list:
+    """Tag paths as digiKam's database has them right now (a tag renamed or moved a moment ago, before the index caught
+    up, must not be written under its old path); the index's paths when digiKam's database cannot be read."""
+    try:
+        src = dkdb.connect(write=False)
+        try:
+            tree = dkdb.tag_tree(src)
+        finally:
+            src.close()
+        return [dkdb.tag_path(tree, t) if t in tree else fallback[t] for t in tag_ids]
+    except Exception:
+        return [fallback[t] for t in tag_ids]
+
+
 @router.post("/api/edit")
 async def api_edit(request: Request):
     """Change metadata for one or more photos. Written to XMP sidecars (and into the image
@@ -101,22 +113,11 @@ async def api_edit(request: Request):
         if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", t):
             raise HTTPException(400, "Date must be YYYY-MM-DDTHH:MM:SS")
         ch["taken"] = t
-    if raw.get("shift"):  # seconds, applied to each photo's own date
+    if raw.get("shift"):  # seconds, applied to each photo's own latest date inside edits.apply (under its lock)
         try:
-            delta = timedelta(seconds=int(raw["shift"]))
+            ch["shift"] = int(raw["shift"])
         except (TypeError, ValueError):
             raise HTTPException(400, "Shift must be a number of seconds")
-        con0 = db()
-        try:
-            for r in con0.execute(f"SELECT id, taken FROM photos WHERE id IN ({','.join(map(str, ids)) or 'NULL'})"):
-                try:
-                    per_photo[r["id"]] = {"taken": (datetime.fromisoformat(r["taken"][:19]) + delta).strftime("%Y-%m-%dT%H:%M:%S")}
-                except ValueError:
-                    pass
-        finally:
-            con0.close()
-        if not per_photo:
-            raise HTTPException(400, "None of these photos has a date to shift")
     if "gps" in raw:
         g = raw["gps"]
         if g:
@@ -135,12 +136,15 @@ async def api_edit(request: Request):
     con = db()
     try:
         for k in ("add_tags", "remove_tags"):
-            tag_ids = [int(t) for t in raw.get(k, [])]
+            try:
+                tag_ids = [int(t) for t in raw.get(k, [])]
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Tags are given by id")
             if tag_ids:
-                rows = con.execute(f"SELECT full FROM tags WHERE person = 0 AND id IN ({','.join(map(str, tag_ids))})").fetchall()
+                rows = con.execute(f"SELECT id, full FROM tags WHERE person = 0 AND id IN ({','.join(map(str, tag_ids))})").fetchall()
                 if len(rows) != len(set(tag_ids)):
                     raise HTTPException(400, "Only existing keyword tags can be edited here (people tags stay in digiKam)")
-                ch[k] = [r[0] for r in rows]
+                ch[k] = _current_tag_paths([r[0] for r in rows], {r[0]: r[1] for r in rows})
         photos = [dict(r) for r in con.execute(
             f"SELECT id, path FROM photos WHERE id IN ({','.join(map(str, ids)) or 'NULL'})")]
     finally:
@@ -323,6 +327,7 @@ def api_placetags_plan(ids: str = None):
     sel = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     p = placetags.plan(sel)
     p.pop("_todo", None)
+    p.pop("_untag", None)
     return {**p, "progress": placetags.progress, "digikamRunning": dbsync.digikam_running(), "root": placetags.ROOT}
 
 

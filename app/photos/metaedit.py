@@ -104,6 +104,7 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
         undone = g.verify()
     if bad or undone:
         raise SyncError("exiftool could not write " + ("the image data would have changed; the file is as it was" if undone else ", ".join(os.path.basename(b) for b in bad)))
+    _mirror_gps_and_date(p["path"], changes, in_file)
     reread(p["id"], check_running)
     history.record([{"photo_id": p["id"], "action": "edit", "path": p["path"], "sidecar": snap,
                      "summary": "Metadata edited: " + ", ".join(f"{c['group']}:{c['tag']}" for c in changes)[:400],
@@ -111,11 +112,50 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
     return {"id": p["id"], "changed": len(changes), "file": in_file}
 
 
+def _mirror_gps_and_date(path: str, changes: list, in_file: bool):
+    """A position or date changed here in one copy (EXIF GPS / DateTimeOriginal in the file, or XMP-exif in the
+    sidecar) is written into the other the way the location and date dialogs write them; otherwise the reread that
+    follows takes the sidecar's (older) value and the copies disagree."""
+    names = {c["tag"].lower() for c in changes}
+    gps = any(n.startswith("gps") for n in names)
+    date = any(n in ("datetimeoriginal", "createdate", "datecreated") for n in names)
+    if not (gps or date):
+        return
+    edited_in_file = any(not c["group"].startswith("XMP-") for c in changes)
+    src = path if edited_in_file else path + ".xmp"
+    try:
+        out = subprocess.run([*edits.exiftool_cmd(), "-j", "-n", "-q", "-GPSLatitude", "-GPSLongitude", "-GPSAltitude", "-DateTimeOriginal", src],
+                             capture_output=True, text=True, timeout=60).stdout
+        v = json.loads(out or "[{}]")[0]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return
+    ch = {}
+    if gps:
+        lat, lon = v.get("GPSLatitude"), v.get("GPSLongitude")
+        ch["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(v["GPSAltitude"]) if v.get("GPSAltitude") not in (None, "") else None} \
+            if lat not in (None, "") and lon not in (None, "") else None
+    if date and v.get("DateTimeOriginal"):
+        t = str(v["DateTimeOriginal"])[:19]
+        ch["taken"] = t[:10].replace(":", "-") + "T" + t[11:19]
+    jobs = []
+    if edited_in_file and os.path.exists(path + ".xmp"):
+        jobs.append((path + ".xmp", edits.write_args(ch, None, False)))
+    elif not edited_in_file and in_file:
+        jobs.append((path, edits.write_args(ch, None, True)))
+    if jobs and ch:
+        edits.run_exiftool(jobs)
+
+
 def reread(pid: int, check_running: bool = True) -> dict:
     """The photo's rows filled again from its file and sidecar, as digiKam's Read Metadata From File does."""
     from app.digikam import dbsync
     from app.photos import scanner
     p = _photo(pid)
+    from app.faces import facemgr
+    with facemgr._side_cond:  # a face change still waiting for its sidecar: written first, or the reread would undo it
+        waiting = facemgr._side_queue.pop(int(p["id"]), "none")
+    if waiting != "none":
+        facemgr.write_regions_many([p["id"]])
     meta = scanner.read([p["path"]])
     con = dkdb.connect()
     try:
@@ -125,6 +165,12 @@ def reread(pid: int, check_running: bool = True) -> dict:
         con.close()
     rows = scanner.rows_for(p["path"], meta.get(p["path"]) or {}, cat[0] if cat else 1)
     with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+        # what files and sidecars do not hold, and a reread must not lose: captions in other languages, and the faces
+        # digiKam keeps in its database only (unknown, ignored and suggested ones)
+        keep_comments = con.execute("SELECT type, language, author, date, comment FROM ImageComments WHERE imageid = ? AND language != 'x-default'",
+                                    (p["id"],)).fetchall()
+        keep_faces = con.execute("SELECT tagid, property, value FROM ImageTagProperties WHERE imageid = ? AND property IN "
+                                 "('autodetectedFace', 'autodetectedPerson', 'ignoredFace')", (p["id"],)).fetchall()
         tags = scanner._Tags(con)
         try:
             from app.faces.facemgr import _special
@@ -132,6 +178,17 @@ def reread(pid: int, check_running: bool = True) -> dict:
         except SyncError:
             special = {}
         scanner._write_rows(con, p["id"], rows, tags, special, full=True)
+        for c in keep_comments:
+            if not con.execute("SELECT 1 FROM ImageComments WHERE imageid = ? AND type = ? AND language = ? AND coalesce(author, '') = coalesce(?, '')",
+                               (p["id"], c[0], c[1], c[2])).fetchone():
+                con.execute("INSERT INTO ImageComments (imageid, type, language, author, date, comment) VALUES (?,?,?,?,?,?)", (p["id"], *c))
+        named = {v for (v,) in con.execute("SELECT value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion'", (p["id"],))}
+        for tid, prop, val in keep_faces:
+            rect = val.split(",", 2)[2] if prop == "autodetectedPerson" and val.count(",") >= 2 else val
+            if rect in named:  # that face is named in the file now
+                continue
+            if not con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (p["id"], tid, prop, val)).fetchone():
+                con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (p["id"], tid, prop, val))
         st = dkdb.file_stamp(p["path"])
         con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",
                     (scanner.unique_hash(p["path"], version), st[1] if st else None, st[0] if st else None, p["id"]))

@@ -79,8 +79,8 @@ export async function copyMetadata(ids) {
     if (boxes.labels.checked) { ch.pick = s.pick || 0; ch.color = s.color || 0; }
     if (boxes.title.checked) ch.title = s.title || '';
     if (boxes.caption.checked) ch.caption = s.caption || '';
-    if (boxes.tags.checked) { const t = s.tags.filter((x) => !x.person).map((x) => x.full); if (t.length) ch.add_tags = t; }
-    if (boxes.gps.checked) ch.gps = s.lat != null ? { lat: s.lat, lon: s.lon, alt: s.alt ?? null } : null;
+    if (boxes.tags.checked) { const t = s.tags.filter((x) => !x.person).map((x) => x.id); if (t.length) ch.add_tags = t; }  // ids, as /api/edit takes them
+    if (boxes.gps.checked && s.lat != null) ch.gps = { lat: s.lat, lon: s.lon, alt: s.alt ?? null };  // a photo without a location removes none
     if (boxes.taken.checked && s.taken) ch.taken = s.taken.slice(0, 19);
     if (boxes.rights.checked) { const tpl = {}; if (s.creator) tpl.creator = s.creator; if (s.copyright) tpl.copyrightNotice = s.copyright; if (Object.keys(tpl).length) ch.template = tpl; }
     const targets = ids.filter((x) => x !== src);

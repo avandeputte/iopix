@@ -206,7 +206,7 @@ export function analysisSection(view, part = 'jobs') {
 }
 
 export const SRC_LABEL = { db: 'Database', sidecar: 'Sidecar', file: 'Image file' };
-export const FIELD_LABEL = { rating: 'Rating', title: 'Title', caption: 'Caption', tags: 'Tags' };
+export const FIELD_LABEL = { rating: 'Rating', title: 'Title', caption: 'Caption', tags: 'Tags', taken: 'Date', gps: 'Location' };
 export async function showConsistency() {
   let field = '', offset = 0, selected = new Set(), d, wasRunning = false, pollT = 0;
   const head = h('div'), list = h('div'), more = h('button', { class: 'pillbtn', style: 'margin:16px 0', onclick: () => load(true) }, 'Show more');
@@ -305,7 +305,7 @@ export async function showConsistency() {
         tile('teal', 'check', s.scanned, 'photos checked', null),
         tile('rose', 'dup', s.mismatched, s.mismatched === 1 ? 'photo disagrees' : 'photos disagree', ''),
         tile('amber', 'text', s.no_sidecar, 'without a sidecar', 'nosidecar'),
-        ...Object.entries(s.by_field).filter(([, n]) => n).map(([f, n]) => tile('indigo', { rating: 'star', tags: 'tag' }[f] || 'edit', n, `differ in ${(FIELD_LABEL[f] || f).toLowerCase()}`, f))) : h('p', { class: 'muted' }, 'Nothing scanned yet.'),
+        ...Object.entries(s.by_field).filter(([, n]) => n).map(([f, n]) => tile('indigo', { rating: 'star', tags: 'tag', taken: 'calendar', gps: 'place' }[f] || 'edit', n, `differ in ${(FIELD_LABEL[f] || f).toLowerCase()}`, f))) : h('p', { class: 'muted' }, 'Nothing scanned yet.'),
       s.scanned ? h('h2', { class: 'sec' }, field === 'nosidecar' ? 'Photos without a sidecar' : field ? `Photos whose ${(FIELD_LABEL[field] || field).toLowerCase()} differs` : 'Photos that disagree',
         h('span', { class: 'muted', style: 'font-size:13px;font-weight:400;margin-left:10px' }, nf.format(d.total)),
         h('span', { class: 'sp' }),
@@ -355,6 +355,7 @@ export async function placeTagsDialog(ids) {
   const body = h('div');
   const draw = () => fill(body,
     h('p', null, `${nf.format(p.to_tag)} of ${nf.format(p.photos)} geotagged photos would get a place tag they do not have yet.`),
+    p.to_untag ? h('p', null, `${nf.format(p.to_untag)} photos have a place tag from an earlier position, which would be removed.`) : null,
     p.missing_tags.length ? h('p', null, `${nf.format(p.missing_tags.length)} new tags would be created under “${p.root}” (${nf.format(p.existing_tags)} already exist), for example: `, h('i', null, p.missing_tags.slice(0, 5).join(', '), p.missing_tags.length > 5 ? ', …' : '')) : h('p', null, 'All the needed tags already exist.'),
     p.missing_tags.length && p.digikamRunning ? h('p', { class: 'warn' }, 'digiKam is running. Quit it first; the new tags go into its database.') : null,
     p.progress.running ? h('p', { class: 'enote' }, `Running: ${nf.format(p.progress.done)} / ${nf.format(p.progress.total)} photos tagged, ${p.progress.created} tags created.`) : null,

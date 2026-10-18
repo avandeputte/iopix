@@ -128,11 +128,66 @@ def forget(photo_ids):
         appstate._write(lambda c: c.executemany("DELETE FROM pending_edits WHERE photo_id = ?", ids))
 
 
-def resolved(photo_ids):
+def remap_pending_tags(mapping: dict) -> list:
+    """After tags were renamed, moved, merged or deleted in digiKam's database: the pending edits that name them by
+    path follow ({old path: new path, or None for a deleted tag}). Returns the photos whose edits changed, whose
+    sidecars should then be rewritten."""
+    if not mapping:
+        return []
+    def follow(t):
+        return mapping[t] if t in mapping else t
+    with _lock:
+        cur, rows, touched = pending(), [], []
+        for pid, e in cur.items():
+            if not (set(e.get("add_tags", [])) | set(e.get("remove_tags", []))) & set(mapping):
+                continue
+            e = dict(e)
+            for k in ("add_tags", "remove_tags"):
+                if k in e:
+                    e[k] = list(dict.fromkeys(n for n in (follow(t) for t in e[k]) if n))
+                    if not e[k]:
+                        e.pop(k)
+            rows.append((pid, json.dumps(e), int(time.time())))
+            touched.append(pid)
+        if rows:
+            appstate._write(lambda c: c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", rows))
+    return touched
+
+
+def drop_pending_fields(photo_ids, fields):
+    """Give up these fields of the photos' pending edits (tags: the tag additions and removals)."""
+    keys = set(fields) | ({"add_tags", "remove_tags"} if "tags" in fields else set()) | ({"caption_date"} if "caption" in fields else set())
+    with _lock:
+        cur = pending()
+        rows, gone = [], []
+        for pid in photo_ids:
+            e = cur.get(int(pid))
+            if not e:
+                continue
+            e = {k: v for k, v in e.items() if k not in keys}
+            (rows.append((int(pid), json.dumps(e), int(time.time()))) if e else gone.append(int(pid)))
+        if rows:
+            appstate._write(lambda c: c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", rows))
+        forget(gone)
+
+
+def resolved(photo_ids, snapshot: dict = None):
     """digiKam's database now matches these edits: forget them and drop their
-    backups, so a later edit starts from a fresh backup."""
+    backups, so a later edit starts from a fresh backup. With `snapshot` ({id: the edit as it was when compared}),
+    an edit that changed since (a new edit made while the index was being built) is kept."""
     from app.data import index  # index imports this module; only needed here
     ids = [int(i) for i in photo_ids]
+    if snapshot is not None:
+        with _lock:
+            now = pending()
+            ids = [i for i in ids if i in snapshot and now.get(i) == snapshot[i]]
+            return _resolved(ids, index)
+    return _resolved(ids, index)
+
+
+def _resolved(ids, index):
+    if not ids:
+        return
     try:
         con = index.open_index()
         try:
@@ -179,6 +234,22 @@ def backup_original(photo_path: str) -> Path:
     shutil.copy2(photo_path, tmp)
     os.replace(tmp, dst)
     return dst
+
+
+def move_backups(old_path: str, new_path: str):
+    """A photo (or a folder of them) moved or renamed: its backups follow, so Revert and the change log's restore
+    links still find them, and the next edit does not take an already-edited file for the original."""
+    for root in (BACKUP_DIR, FILE_BACKUP_DIR):
+        suffix = ".xmp" if root == BACKUP_DIR and not os.path.isdir(new_path) else ""
+        for tail in ("", ".created") if suffix else ("",):
+            src = root / (str(_rel(old_path)) + suffix + tail)
+            if src.exists():
+                dst = root / (str(_rel(new_path)) + suffix + tail)
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(dst))
+                except OSError:
+                    pass  # a backup left behind is harmless
 
 
 def ensure_backup(target: str):
@@ -305,7 +376,7 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
         a += _set("XMP-digiKam:ColorLabel", c) + _set("XMP-xmp:Label", COLOR_TEXT[c]) + _set("XMP-photoshop:Urgency", c)
     if "title" in ch:
         t = ch["title"] or ""
-        a += _set("XMP-dc:Title", t) + _set("XMP-acdsee:Caption", t)
+        a += _set("XMP-dc:Title-x-default", t) + _set("XMP-acdsee:Caption", t)  # x-default only: other languages stay
         if in_file:
             a += _set("IPTC:ObjectName", t[:64] if t.isprintable() else "")
             a += _set("IFD0:XPTitle", "")  # digiKam removes it unless it writes through exiftool
@@ -313,7 +384,8 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
         c = ch["caption"] or ""
         a += _set("XMP-digiKam:CaptionsAuthorNames", "")
         a += _set("XMP-digiKam:CaptionsDateTimeStamps", ch.get("caption_date", "") if c else "")
-        a += (_set("XMP-dc:Description", c) + _set("XMP-exif:UserComment", c) + _set("XMP-tiff:ImageDescription", c)
+        # the x-default entry only: a caption in another language stays, as digiKam keeps it
+        a += (_set("XMP-dc:Description-x-default", c) + _set("XMP-exif:UserComment-x-default", c) + _set("XMP-tiff:ImageDescription-x-default", c)
               + _set("XMP-acdsee:Notes", c) + _set("XMP-acdsee:Author", ""))
         if in_file:
             a += (_set("File:Comment", c) + _set("IFD0:ImageDescription", c) + _set("ExifIFD:UserComment", c)
@@ -322,19 +394,21 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
         t = ch["taken"]  # "YYYY-MM-DDTHH:MM:SS"
         x = t.replace("-", ":", 2).replace("T", " ")  # exiftool's form
         a += (_set("XMP-exif:DateTimeOriginal", t) + _set("XMP-photoshop:DateCreated", t) + _set("XMP-tiff:DateTime", t)
-              + _set("XMP-xmp:CreateDate", t) + _set("XMP-xmp:ModifyDate", t) + _set("XMP-xmp:MetadataDate", t)
-              + _set("XMP-video:DateTimeOriginal", t) + _set("XMP-video:DateUTC", t) + _set("XMP-video:ModificationDate", t))
+              + _set("XMP-xmp:CreateDate", t) + _set("XMP-xmp:ModifyDate", t) + _set("XMP-xmp:MetadataDate", t))
+        # (digiKam's Exiv2 also writes Xmp.video dates; exiftool has no such namespace, and the dates above carry it)
         if in_file:
             a += (_set("IFD0:ModifyDate", x) + _set("ExifIFD:DateTimeOriginal", x)
-                  + _set("IPTC:DateCreated", x[:10]) + _set("IPTC:TimeCreated", x[11:19]))
+                  + _set("IPTC:DateCreated", x[:10]) + _set("IPTC:TimeCreated", x[11:19] + "+00:00"))
     if "gps" in ch:  # MetaEngine::setGPSInfo / removeGPSInfo
         g = ch["gps"]
         if g:
             lat, lon = float(g["lat"]), float(g["lon"])
             la, lo = f"{abs(lat):.8f} {'N' if lat >= 0 else 'S'}", f"{abs(lon):.8f} {'E' if lon >= 0 else 'W'}"
+            # a new position replaces the old one whole (heading, GPS time, precision...), as digiKam's database does
+            a += ["-XMP-exif:GPS*="] + (["-GPS:all="] if in_file else [])
             a += _set("XMP-exif:GPSLatitude", la) + _set("XMP-exif:GPSLongitude", lo)
             if g.get("alt") is not None:
-                a += _set("XMP-exif:GPSAltitude", abs(float(g["alt"]))) + _set("XMP-exif:GPSAltitudeRef", 1 if float(g["alt"]) < 0 else 0)
+                a += _set("XMP-exif:GPSAltitude", abs(float(g["alt"]))) + [f"-XMP-exif:GPSAltitudeRef#={1 if float(g['alt']) < 0 else 0}"]
             else:
                 a += _set("XMP-exif:GPSAltitude", "") + _set("XMP-exif:GPSAltitudeRef", "")
             if in_file:
@@ -342,7 +416,7 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
                       + _set("GPS:GPSLongitude", abs(lon)) + _set("GPS:GPSLongitudeRef", "E" if lon >= 0 else "W")
                       + _set("GPS:GPSVersionID", "2 0 0 0") + _set("GPS:GPSMapDatum", "WGS-84"))
                 if g.get("alt") is not None:
-                    a += _set("GPS:GPSAltitude", abs(float(g["alt"]))) + _set("GPS:GPSAltitudeRef", 1 if float(g["alt"]) < 0 else 0)
+                    a += _set("GPS:GPSAltitude", abs(float(g["alt"]))) + [f"-GPS:GPSAltitudeRef#={1 if float(g['alt']) < 0 else 0}"]
                 else:
                     a += _set("GPS:GPSAltitude", "") + _set("GPS:GPSAltitudeRef", "")
         else:
@@ -509,7 +583,8 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
     if not available():
         raise RuntimeError("Editing is not available (exiftool not found or EDITING=0)")
     changes = dict(changes)
-    per_photo = per_photo or {}
+    per_photo = dict(per_photo or {})
+    shift = changes.pop("shift", None)
     if "caption" in changes:
         changes["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     in_files = writes_files()
@@ -518,6 +593,20 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
     snaps = {}
     with _lock:
         old = pending()
+        if shift:  # each photo's own date moved, from its latest value (a pending one, else digiKam's), under the lock
+            from datetime import datetime, timedelta
+            fresh = db_state([p["id"] for p in photos if "taken" not in old.get(p["id"], {})])
+            for p in photos:
+                base = old.get(p["id"], {}).get("taken") or (fresh.get(p["id"]) or {}).get("taken")
+                if not base:
+                    continue  # no date to shift: left out
+                try:
+                    per_photo[p["id"]] = {"taken": (datetime.fromisoformat(base[:19]) + timedelta(seconds=int(shift))).strftime("%Y-%m-%dT%H:%M:%S")}
+                except ValueError:
+                    continue
+            photos = [p for p in photos if p["id"] in per_photo]
+            if not photos:
+                return {"edited": 0, "failed": [], "files": in_files}
         mine = {p["id"]: {**changes, **per_photo.get(p["id"], {})} for p in photos}
         merged = {pid: _merge(old.get(pid, {}), ch) for pid, ch in mine.items()}
         tags_changed = bool(changes.get("add_tags") or changes.get("remove_tags"))
@@ -539,8 +628,13 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
             if in_files and can_write_file(p["path"]):
                 jobs.append((p["path"], write_args(mine[p["id"]], paths, True)))
                 owner[p["path"]] = p["id"]
-        bad = {owner[t] for t in run_exiftool(jobs)}
+        bad_targets = set(run_exiftool(jobs))
+        # the sidecar is the copy digiKam reads; when only the image file could not be written, the edit stands
+        # (and is reported), instead of leaving a changed sidecar behind an edit called failed
+        bad = {owner[t] for t in bad_targets if t.endswith(".xmp")}
+        file_bad = [owner[t] for t in bad_targets if not t.endswith(".xmp") and owner[t] not in bad]
         failed += [{"id": i, "error": "exiftool could not write this file"} for i in bad]
+        failed += [{"id": i, "error": "saved in the sidecar, but the image file could not be written", "sidecar": True} for i in file_bad]
         ok = [i for i in dict.fromkeys(owner.values()) if i not in bad]
         if ok:
             now = int(time.time())
@@ -608,51 +702,104 @@ def rewrite_tags(photos: list) -> list:
     pending viewer edits) to its sidecar, and to the file if enabled. Used after a
     tag was renamed, moved or deleted. Returns the ids that failed."""
     in_files = writes_files()
-    old = pending()
-    db_tags = digikam_tag_paths([p["id"] for p in photos])
-    jobs, owner = [], {}
-    for p in photos:
-        side = p["path"] + ".xmp"
-        paths = effective_tags(db_tags.get(p["id"], []), old.get(p["id"], {}))
-        if os.path.isfile(side):
-            jobs.append((side, write_args({}, paths, False)))
-            owner[side] = p["id"]
-        if in_files and os.path.isfile(p["path"]) and can_write_file(p["path"]):
-            jobs.append((p["path"], write_args({}, paths, True)))
-            owner[p["path"]] = p["id"]
-    return [owner[t] for t in run_exiftool(jobs)]
+    with _lock:  # pending edits and digiKam's tags read and written as one step: an edit made meanwhile is not lost
+        old = pending()
+        db_tags = digikam_tag_paths([p["id"] for p in photos])
+        jobs, owner = [], {}
+        for p in photos:
+            side = p["path"] + ".xmp"
+            paths = effective_tags(db_tags.get(p["id"], []), old.get(p["id"], {}))
+            if os.path.isfile(side):
+                jobs.append((side, write_args({}, paths, False)))
+                owner[side] = p["id"]
+            if in_files and os.path.isfile(p["path"]) and can_write_file(p["path"]):
+                jobs.append((p["path"], write_args({}, paths, True)))
+                owner[p["path"]] = p["id"]
+        return [owner[t] for t in run_exiftool(jobs)]
+
+
+def db_state(image_ids: list) -> dict:
+    """{id: {rating, pick, color, title, caption, tags, taken, gps}} as digiKam's database holds them (read-only): what
+    a sidecar and file say once the viewer's own edits are taken back. gps is {lat, lon, alt} or None."""
+    from app.photos import consistency
+    vals = consistency.db_values([int(i) for i in image_ids])
+    for v in vals.values():
+        v["gps"] = None
+    try:
+        src = dkdb.connect(write=False)
+    except Exception:
+        return vals
+    try:  # the position at full precision (db_values rounds it for comparing)
+        for i in range(0, len(image_ids), 500):
+            chunk = ",".join(str(int(x)) for x in image_ids[i:i + 500])
+            for pid, lat, lon, alt in src.execute(f"SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({chunk})"):
+                if pid in vals and lat is not None and lon is not None:
+                    vals[pid]["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(alt) if alt is not None else None}
+    finally:
+        src.close()
+    return vals
+
+
+def _db_copyright(pid: int) -> dict:
+    """{property: value} of the photo's ImageCopyright rows in digiKam's database."""
+    try:
+        src = dkdb.connect(write=False)
+    except Exception:
+        return {}
+    try:
+        return {p: v or "" for p, v in src.execute("SELECT property, value FROM ImageCopyright WHERE imageid = ?", (int(pid),))}
+    finally:
+        src.close()
 
 
 def revert(photos: list) -> dict:
-    """Put back the sidecar, and the image file if its metadata was rewritten, as they
-    were before the viewer first changed them."""
+    """Take back the viewer's edits that digiKam's database does not have yet: the sidecar (and the image file, when
+    the viewer wrote into it) get digiKam's values again for every field the edit changed, and the face regions and
+    tag list are rewritten from the database, so face changes made since (which are in the database) stay."""
     done, failed = [], []
+    from app.faces import facemgr
     with _lock:
+        edits = pending()
+        db = db_state([p["id"] for p in photos])
+        in_files = writes_files()
         for p in photos:
-            side, backup = p["path"] + ".xmp", _backup_path(p["path"])
+            pid, side = p["id"], p["path"] + ".xmp"
+            backup = _backup_path(p["path"])
             created = Path(str(backup) + ".created")
-            orig = file_backup_path(p["path"])
-            restored = False
+            e = edits.get(pid)
+            if e is None and not backup.exists() and not created.exists():
+                continue
+            d = db.get(pid, {})
+            ch = {k: d.get(k) for k in ("rating", "pick", "color", "title", "caption") if k in (e or {})}
+            if e and "taken" in e and d.get("taken"):
+                ch["taken"] = d["taken"]
+            if e and "gps" in e:
+                ch["gps"] = d.get("gps")
+            if e and e.get("template"):
+                ch["template"] = {k: _db_copyright(pid).get(k, "") for k in e["template"]}
             try:
-                if backup.exists():
-                    shutil.copy2(backup, side)
-                    backup.unlink()
-                    restored = True
-                elif created.exists():
-                    os.remove(side)
+                jobs = []
+                if created.exists() and not backup.exists():
+                    if os.path.exists(side):
+                        os.remove(side)  # the viewer made it; digiKam never had one
                     created.unlink()
-                    restored = True
-                if orig.exists():
-                    shutil.copy2(orig, p["path"])
-                    orig.unlink()
-                    restored = True
-                if restored:
-                    done.append(p["id"])
-            except OSError as e:  # the edit stays remembered, so it can be retried
-                failed.append({"id": p["id"], "error": str(e)})
+                elif ch and os.path.exists(side):
+                    jobs.append((side, write_args(ch, None, False)))
+                if ch and in_files and os.path.isfile(p["path"]) and can_write_file(p["path"]):
+                    jobs.append((p["path"], write_args(ch, None, True)))
+                if jobs and run_exiftool(jobs):
+                    raise OSError("exiftool could not write the earlier values back")
+                backup.unlink(missing_ok=True)
+                done.append(pid)
+            except OSError as e_:  # the edit stays remembered, so it can be retried
+                failed.append({"id": pid, "error": str(e_)})
         forget(done)
+    # tags and faces: the database's, now that the edits are forgotten (one exiftool run for all)
+    keep = [pid for pid in done if os.path.exists(next(p["path"] for p in photos if p["id"] == pid) + ".xmp")]
+    if keep:
+        facemgr.write_regions_many(keep)
     from app.photos import history
     paths = {p["id"]: p["path"] for p in photos}
-    history.record([{"photo_id": pid, "action": "revert", "summary": "Viewer edits undone: sidecar (and file) put back as they were before the viewer first changed them",
+    history.record([{"photo_id": pid, "action": "revert", "summary": "Viewer edits undone: the sidecar (and file) say what digiKam's database says again",
                      "path": paths.get(pid)} for pid in done])
     return {"reverted": len(done), "failed": failed}

@@ -171,3 +171,67 @@ def test_an_empty_or_missing_root_is_left_alone(lib, monkeypatch, tmp_path):
     con = sqlite3.connect(lib["db"])
     assert con.execute("SELECT count(*) FROM Images WHERE status = 1").fetchone()[0] > 100, "nothing was marked removed"
     con.close()
+
+
+def test_regions_are_read_as_digikam_reads_them():
+    """MWG regions, then MP regions for names MWG lacks (name-only ones too); the whole frame and non-faces left out;
+    a list without its size placed on the file's size; "/" in a name becomes a backslash."""
+    from app.photos import scanner
+    d = {"ImageWidth": 1000, "ImageHeight": 500,
+         "RegionInfo": {"RegionList": [
+             {"Name": "Ann", "Type": "Face", "Area": {"X": 0.5, "Y": 0.5, "W": 0.1, "H": 0.2}},
+             {"Name": "Frame", "Type": "Face", "Area": {"X": 0.5, "Y": 0.5, "W": 1, "H": 1}},
+             {"Name": "Pet", "Type": "Pet", "Area": {"X": 0.2, "Y": 0.2, "W": 0.1, "H": 0.1}},
+             {"Name": "A/B", "Area": {"X": 0.25, "Y": 0.5, "W": 0.1, "H": 0.2}}]},
+         "RegionInfoMP": {"Regions": [{"PersonDisplayName": "Ann", "Rectangle": "0.1, 0.1, 0.1, 0.1"},
+                                      {"PersonDisplayName": "Bob", "Rectangle": "0.1, 0.2, 0.2, 0.4"},
+                                      {"PersonDisplayName": "Cid"}]}}
+    got = {n: (r, wh) for n, r, wh in scanner._regions(d)}
+    assert got["Ann"] == ((450, 200, 100, 100), (1000, 500)), "placed on the file's size when AppliedToDimensions is missing"
+    assert "Frame" not in got and "Pet" not in got
+    assert "A\\B" in got
+    assert got["Bob"] == ((100, 100, 200, 200), (1000, 500)) and got["Cid"] == (None, None), "MP regions, a name-only one too"
+
+
+def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(lib):
+    """A face named "Zz Kw Person" on a photo that has the keyword People/Zz Fam/Zz Kw Person: that keyword becomes the
+    person (one tag, not two); an unnamed face is an Unknown face without the Unknown tag on the photo."""
+    import sqlite3
+    from app.digikam import dbsync, dkdb
+    from app.photos import scanner
+    from app.faces.facemgr import _special
+    d = {"ImageWidth": 1000, "ImageHeight": 500, "TagsList": ["People/Zz Fam/Zz Kw Person"],
+         "RegionInfo": {"AppliedToDimensions": {"W": 1000, "H": 500}, "RegionList": [
+             {"Name": "Zz Kw Person", "Type": "Face", "Area": {"X": 0.5, "Y": 0.5, "W": 0.1, "H": 0.2}},
+             {"Type": "Face", "Area": {"X": 0.2, "Y": 0.5, "W": 0.1, "H": 0.2}}]}}
+    dk = sqlite3.connect(lib["db"])
+    album = dk.execute("SELECT album FROM Images WHERE status = 1 LIMIT 1").fetchone()[0]
+    iid = dk.execute("INSERT INTO Images (album, name, status, category) VALUES (?, 'zz-scan-probe.jpg', 1, 1)", (album,)).lastrowid
+    dk.commit(); dk.close()
+    probe = Path(lib["root"]) / "zz-scan-probe.jpg"
+    from PIL import Image as _I
+    _I.new("RGB", (1000, 500)).save(probe)
+    try:
+        rows = scanner.rows_for(str(probe), d, 1)
+        with dbsync.write_transaction(dkdb.sqlite_path(), False) as con:
+            scanner._write_rows(con, iid, rows, scanner._Tags(con), _special(con), full=True)
+        dk = sqlite3.connect(lib["db"])
+        tags = {r[1]: r[0] for r in dk.execute("SELECT id, name FROM Tags WHERE name = 'Zz Kw Person'")}
+        assert len(dk.execute("SELECT id FROM Tags WHERE name = 'Zz Kw Person'").fetchall()) == 1, "one tag, not two"
+        tid = tags["Zz Kw Person"]
+        assert dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone()
+        assert dk.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = 'tagRegion'", (iid, tid)).fetchone()
+        unknown = dk.execute("SELECT tagid FROM TagProperties WHERE property = 'unknownPerson'").fetchone()[0]
+        assert dk.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = 'autodetectedFace'", (iid, unknown)).fetchone()
+        assert not dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (iid, unknown)).fetchone(), "the Unknown tag is not assigned"
+        dk.close()
+    finally:
+        probe.unlink(missing_ok=True)
+        dk = sqlite3.connect(lib["db"])
+        for t in ("ImageTags", "ImageTagProperties", "ImageInformation", "ImageMetadata", "ImagePositions", "ImageComments", "ImageCopyright"):
+            dk.execute(f"DELETE FROM {t} WHERE imageid = ?", (iid,))
+        dk.execute("DELETE FROM Images WHERE id = ?", (iid,))
+        ids = [t for (t,) in dk.execute("SELECT id FROM Tags WHERE name IN ('Zz Kw Person', 'Zz Fam')")]
+        dk.executemany("DELETE FROM TagProperties WHERE tagid = ?", [(t,) for t in ids])
+        dk.executemany("DELETE FROM Tags WHERE id = ?", [(t,) for t in sorted(ids, reverse=True)])
+        dk.commit(); dk.close()
