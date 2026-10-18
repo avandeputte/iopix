@@ -167,10 +167,12 @@ async function placeTray(map, fp, el) {
   const place = async (latlng) => {
     if (!sel.size) { toast('Select photos in the tray first.'); return; }
     const picked = [...sel], at = { lat: +latlng.lat.toFixed(7), lon: +latlng.lng.toFixed(7), alt: null };
+    if (townOnly.checked) at.accuracy = +accSel.value;  // approximate: the town's centre, how far off it may be
     if (!(await editPhotos(picked, { gps: at }))) return;
     for (const id of picked) { const k = ids.indexOf(id); if (k >= 0) ids.splice(k, 1); }
     sel.clear(); draw();
-    const pin = L.circleMarker([at.lat, at.lon], { radius: 9, color: '#1a73e8', fillOpacity: .6 }).addTo(map).bindTooltip(`${picked.length} placed`);
+    const pin = (at.accuracy ? L.circle([at.lat, at.lon], { radius: at.accuracy, color: '#c77d00', weight: 1, fillOpacity: 0.12 })
+      : L.circleMarker([at.lat, at.lon], { radius: 9, color: '#1a73e8', fillOpacity: .6 })).addTo(map).bindTooltip(`${picked.length} placed${at.accuracy ? ' (approximate)' : ''}`);
     toast(`${plural(picked.length, 'photo')} placed.`, 'Undo', async () => { if (await editPhotos(picked, { gps: null })) { map.removeLayer(pin); ids.unshift(...picked); draw(); } }, 10000);
   };
   map.on('click', (e) => place(e.latlng));
@@ -178,6 +180,10 @@ async function placeTray(map, fp, el) {
   el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
   el.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.getData('text/plain') === 'iopix-place') place(map.mouseEventToLatLng(e)); });
   el.style.cursor = 'crosshair';
+  // only the town is known: the photos go to the town's centre, saved as approximate (no altitude, an accuracy radius)
+  const townOnly = h('input', { type: 'checkbox', onchange: () => { accSel.disabled = !townOnly.checked; search.placeholder = townOnly.checked ? 'Find the town' : 'Find a place, landmark or address'; } });
+  const accSel = h('select', { class: 'sharepick', disabled: true, title: 'How far from the spot the photos may have been taken' },
+    [[1000, '~1 km'], [2000, '~2 km'], [5000, '~5 km'], [10000, '~10 km'], [25000, '~25 km']].map(([v, l]) => h('option', { value: v, selected: v === 2000 }, l)));
   // find a place: a name, landmark or address (the same search as Set location), then the map zooms there
   let st = 0;
   const results = h('div', { class: 'alist', hidden: true, style: 'max-height:180px' });
@@ -207,14 +213,15 @@ async function placeTray(map, fp, el) {
       h('div', { class: 'muted', style: 'font-size:11.5px;margin-top:4px' }, 'Right-click (or long-press) elsewhere to move the pin.'));
     pin.bindPopup(label, { closeButton: false, offset: [0, -34] }).openPopup();
     pin.on('click', (e) => { L.DomEvent.stopPropagation(e); if (sel.size) place(e.latlng); else pin.openPopup(); });
-    map.setView([x.lat, x.lon], x.name === 'This spot' ? map.getZoom() : Math.max(x.zoom || 0, 18));
+    map.setView([x.lat, x.lon], x.name === 'This spot' ? map.getZoom() : townOnly.checked ? 12 : Math.max(x.zoom || 0, 18));  // a town: all of it
   };
   // thumbnail size, remembered
   const px = () => +store.get('tray-size', '70');
   const sizer = h('input', { type: 'range', min: 60, max: 200, step: 10, value: px(), title: 'Thumbnail size', style: 'flex:1',
     oninput: () => { store.set('tray-size', sizer.value); grid.style.setProperty('--tsz', sizer.value + 'px'); } });
   grid.style.setProperty('--tsz', px() + 'px');
-  fill(tray, h('div', { class: 'mapsearch' }, search, results), h('div', { class: 'mthead' }, count, h('span', { class: 'sp' }), h('button', { class: 'pillbtn', onclick: () => { ids.slice(0, shown).forEach((x) => sel.add(x)); draw(); } }, 'Select shown'),
+  fill(tray, h('div', { class: 'mapsearch' }, search, results),
+    h('label', { class: 'mttown', title: 'Find the town, then put the photos on its pin: they are saved as approximate' }, townOnly, 'Only the town is known', accSel), h('div', { class: 'mthead' }, count, h('span', { class: 'sp' }), h('button', { class: 'pillbtn', onclick: () => { ids.slice(0, shown).forEach((x) => sel.add(x)); draw(); } }, 'Select shown'),
     h('button', { class: 'pillbtn', onclick: () => { sel.clear(); draw(); } }, 'Clear')), hint,
     h('label', { class: 'mtsize' }, icon('photo'), sizer, icon('photo')), grid);
   draw();

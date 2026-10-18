@@ -1580,6 +1580,24 @@ def test_map_place_mode_shows_the_tray(page, server):
         a, b = lay.first.bounding_box(), page.locator(".maptray").bounding_box()
         assert a["x"] + a["width"] <= b["x"] or a["y"] >= b["y"] + b["height"] or a["x"] >= b["x"] + b["width"] or a["y"] + a["height"] <= b["y"], (a, b)
     assert "without a location" in page.locator(".maptray .mthead b").inner_text() or page.locator(".maptray .tgrid img").count() >= 0
+    # only the town is known: photos dropped on the map are saved as approximate
+    tiles = page.locator(".maptray .tgrid img")
+    page.wait_for_timeout(800)
+    if tiles.count():
+        import json as _json
+        pid = int(tiles.first.get_attribute("src").rsplit("/", 1)[-1])
+        tiles.first.click()
+        page.locator(".maptray .mttown input[type=checkbox]").check()
+        page.locator(".maptray .mttown select").select_option("5000")
+        page.locator(".leaflet-container").first.click(position={"x": 120, "y": 300})
+        for _ in range(40):
+            d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{pid}").read())
+            if d.get("extra", {}).get("gpsAccuracy"):
+                break
+            page.wait_for_timeout(250)
+        assert d["extra"]["gpsAccuracy"] == 5000 and d["alt"] is None, d.get("extra")
+        req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [pid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()
     page.locator(".mapbar button:has-text('Done placing')").click()
     page.wait_for_selector(".mapbar button:has-text('Place photos')", timeout=10000)
     assert page.locator(".maptray").count() == 0
