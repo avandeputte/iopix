@@ -152,3 +152,29 @@ def test_face_change_answers_before_the_sidecar_is_written(client, lib):
     side = open(path + ".xmp", encoding="utf-8").read()
     assert "mwg-rs" in side or "RegionInfo" in side
     client.post("/api/faces/op", json={"op": "move", "image": pid, "rect": [x + 2, y, w, h], "new_rect": [x, y, w, h]})
+
+
+def test_a_keyword_tag_marked_as_a_person_can_be_unmarked(lib, client):
+    """digiKam marks a tag as a person once a face is named with it ("Food"): Not a person removes the mark (the tag
+    and its photos stay), and is refused while a face box still carries the name."""
+    import sqlite3
+    from app.digikam.dbsync import SyncError
+    dk = sqlite3.connect(lib["db"])
+    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-food-probe"}, check_running=False)["id"]
+    dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', 'zz-food-probe')", (tid,))
+    dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'faceEngineId', 'zz-food-probe')", (tid,))
+    img = dk.execute("SELECT id FROM Images WHERE status = 1 LIMIT 1").fetchone()[0]
+    dk.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, 'tagRegion', '<rect x=\"1\" y=\"1\" width=\"5\" height=\"5\"/>')", (img, tid))
+    dk.commit()
+    try:
+        with pytest.raises(SyncError, match="face box"):
+            tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+        dk.execute("DELETE FROM ImageTagProperties WHERE tagid = ?", (tid,)); dk.commit()
+        tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+        assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId')", (tid,)).fetchone()
+        assert dk.execute("SELECT 1 FROM Tags WHERE id = ?", (tid,)).fetchone(), "the tag stays"
+        with pytest.raises(SyncError, match="not marked"):
+            tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+    finally:
+        dk.close()
+        tagmanager.apply({"op": "delete", "id": tid}, check_running=False)

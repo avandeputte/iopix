@@ -140,6 +140,55 @@ def set_favorites(items: list, on: bool):
         _write(lambda c: c.executemany("DELETE FROM favorite_photos WHERE photo_id = ?", [(i,) for i, _ in items]))
 
 
+# ---- People groups (the People page's sections; digiKam is not touched)
+
+def people_groups() -> list:
+    """[{id, name, members: [tag ids in order]}] in the order chosen."""
+    con = connect()
+    try:
+        groups = [{"id": r[0], "name": r[1], "members": []} for r in con.execute("SELECT id, name FROM people_groups ORDER BY position, id")]
+        by = {g["id"]: g for g in groups}
+        for gid, tid in con.execute("SELECT group_id, tag_id FROM people_group_members ORDER BY group_id, position, tag_id"):
+            if gid in by:
+                by[gid]["members"].append(tid)
+        return groups
+    finally:
+        con.close()
+
+
+def create_people_group(name: str) -> int:
+    def go(c):
+        pos = (c.execute("SELECT max(position) FROM people_groups").fetchone()[0] or 0) + 1
+        return c.execute("INSERT INTO people_groups (name, position, created) VALUES (?,?,?)", (name, pos, int(time.time()))).lastrowid
+    return _write(go)
+
+
+def update_people_group(group_id: int, name: str = None, members: list = None) -> bool:
+    """Rename a group and/or set its members (tag ids, in order; replaces the list). False if there is no such group."""
+    def go(c):
+        if not c.execute("SELECT 1 FROM people_groups WHERE id = ?", (group_id,)).fetchone():
+            return False
+        if name is not None:
+            c.execute("UPDATE people_groups SET name = ? WHERE id = ?", (name, group_id))
+        if members is not None:
+            c.execute("DELETE FROM people_group_members WHERE group_id = ?", (group_id,))
+            seen = list(dict.fromkeys(int(t) for t in members))
+            c.executemany("INSERT INTO people_group_members (group_id, tag_id, position) VALUES (?,?,?)", [(group_id, t, k) for k, t in enumerate(seen)])
+        return True
+    return _write(go)
+
+
+def delete_people_group(group_id: int):
+    def go(c):
+        c.execute("DELETE FROM people_group_members WHERE group_id = ?", (group_id,))
+        c.execute("DELETE FROM people_groups WHERE id = ?", (group_id,))
+    _write(go)
+
+
+def order_people_groups(ids: list):
+    _write(lambda c: c.executemany("UPDATE people_groups SET position = ? WHERE id = ?", [(k, int(i)) for k, i in enumerate(ids)]))
+
+
 def create_album(name: str, owner_id: int = None, shared: bool = True) -> int:
     return _write(lambda c: c.execute("INSERT INTO viewer_albums (name, created, owner_id, is_shared) VALUES (?,?,?,?)",
                                       (name, int(time.time()), owner_id, 1 if shared else 0)).lastrowid)

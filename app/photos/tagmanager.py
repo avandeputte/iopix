@@ -112,12 +112,12 @@ def _photos_with(con, tag_ids, roots):
 
 def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: bool = True, backup: bool = True) -> dict:
     """op: {op: add, parent, name} | {op: rename, id, name} | {op: move, id, parent} | {op: delete, id}
-       | {op: icon, id, photo}. Returns a summary including how many sidecar files will be updated.
+       | {op: icon, id, photo} | {op: notperson, id}. Returns a summary including how many sidecar files will be updated.
     `backup=False` is for callers that run several operations in a row and took one
     database backup themselves before the first."""
     db_path = Path(db_path or dkdb.sqlite_path())
     kind = op.get("op")
-    if kind not in ("add", "rename", "move", "delete", "icon"):
+    if kind not in ("add", "rename", "move", "delete", "icon", "notperson"):
         raise SyncError("Unknown tag operation.")
     dbsync.preflight(db_path, check_running, "tags")
     if queue and pending_jobs():
@@ -156,6 +156,19 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
             else:
                 con.execute("UPDATE Tags SET iconkde = ?, icon = NULL WHERE id = ?", ("", tid))
             summary.update(id=tid, path=tree.full(tid), photo=photo, photos=0, sidecars=0)
+        elif kind == "notperson":
+            # a keyword tag digiKam marked as a person (its "person" property, set when a face was once named with
+            # it): the mark goes, the tag and its photos stay. Refused while face boxes still carry the name.
+            tid = int(op.get("id") or 0)
+            if tid not in tree.rows or tid in tree.protected or tid in tree.internal:
+                raise SyncError("That tag cannot be changed here.")
+            if not con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone():
+                raise SyncError(f"“{tree.full(tid)}” is not marked as a person.")
+            boxes = con.execute("SELECT count(*) FROM ImageTagProperties WHERE tagid = ? AND property IN ('tagRegion', 'autodetectedPerson')", (tid,)).fetchone()[0]
+            if boxes:
+                raise SyncError(f"{boxes} face {'box carries' if boxes == 1 else 'boxes carry'} the name “{tree.rows[tid]['name']}”: rename or remove those faces first.")
+            con.execute("DELETE FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId')", (tid,))
+            summary.update(id=tid, path=tree.full(tid), photos=0, sidecars=0)
         elif kind == "add":
             pid = int(op.get("parent") or 0)
             # a tag may be created under a family group, and a person directly under the People root

@@ -6,7 +6,7 @@ import { folderPicker, modal, pickedShared, sharingPick } from './actions.js';
 import { detectFaces } from './editing.js';
 import { downloadDialog } from './download.js';
 import { tiles } from './map.js';
-import { openLightbox, personPicker, syncLightbox } from './lightbox.js';
+import { openLightbox, personPicker, popMenu, syncLightbox } from './lightbox.js';
 import { boot, pollStatus, start } from './main.js';
 
 export function card({ img, fallback, name, sub, onclick }) {
@@ -121,18 +121,106 @@ export async function showExplore() {
   } catch { /* optional section */ }
 }
 
-export function showPeople() {
-  const all = people();
-  const cards = h('div', { class: 'cards people' });
-  const draw = (f) => cards.replaceChildren(...all.filter((t) => !f || t._n.includes(f)).map(personCard));
+/** People: everyone named in the library, in the groups chosen here (Family, Friends, Classmates... in the viewer's
+ *  database, not digiKam's), then everyone else by number of photos. Editors arrange the groups: drag people into a
+ *  group and within it, or use a card's menu (touch screens). */
+export async function showPeople() {
+  const all = people(), byId = new Map(all.map((t) => [t.id, t]));
+  let groups = [], canEdit = false, editing = false, filter = '';  // editing survives a redraw (S.arrangePeople)
+  try { const r = await api('/api/people/groups'); groups = r.groups; canEdit = r.canEdit && S.CAN_MANAGE; } catch { /* the groups are optional */ }
+  if (S.route.view !== 'people') return;
+  editing = canEdit && !!S.arrangePeople;
+  const body = h('div');
   const todo = h('div', { class: 'pills', style: 'margin:6px 0 4px' });
   api('/api/faces/summary').then((s) => fill(todo,
     s.suggested[0] ? h('a', { class: 'pill', href: '#/faces?tab=suggested' }, 'Suggestions to confirm', h('b', null, `${nf.format(s.suggested[1])} in ${nf.format(s.suggested[0])} photos`)) : null,
     s.unknown[0] ? h('a', { class: 'pill', href: '#/faces?tab=unknown' }, 'Unnamed faces', h('b', null, `${nf.format(s.unknown[1])} in ${nf.format(s.unknown[0])} photos`)) : null,
     s.ignored[0] ? h('a', { class: 'pill', href: '#/faces?tab=ignored' }, 'Ignored faces', h('b', null, nf.format(s.ignored[1]))) : null)).catch(() => {});
+  const save = async (g, change) => {
+    try { await post(`/api/people/groups/${g.id}`, change); } catch (e) { toast(e.message, null, null, 9000); }
+  };
+  const saveOrder = async () => { try { await post('/api/people/groups/order', { ids: groups.map((g) => g.id) }); } catch (e) { toast(e.message, null, null, 9000); } };
+  // move person `tid` into group `to` (null: out of `from`) before person `before` (null: at the end)
+  const place = (tid, from, to, before) => {
+    if (from && from !== to) { from.members = from.members.filter((x) => x !== tid); save(from, { members: from.members }); }
+    if (to) {
+      const m = to.members.filter((x) => x !== tid), k = before != null ? m.indexOf(before) : -1;
+      m.splice(k < 0 ? m.length : k, 0, tid); to.members = m; save(to, { members: m });
+    }
+    draw();
+  };
+  let drag = null;  // {tid, from}
+  const cardFor = (t, g) => {
+    const c = personCard(t);
+    if (!editing) return c;
+    c.onclick = null; c.classList.add('arrange'); c.draggable = true;
+    c.ondragstart = (e) => { drag = { tid: t.id, from: g }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(t.id)); c.classList.add('dragging'); };
+    c.ondragend = () => { drag = null; c.classList.remove('dragging'); body.querySelectorAll('.over').forEach((x) => x.classList.remove('over')); };
+    c.ondragover = (e) => { if (drag && g) { e.preventDefault(); e.stopPropagation(); c.classList.add('over'); } };
+    c.ondragleave = () => c.classList.remove('over');
+    c.ondrop = (e) => { if (!drag || !g) return; e.preventDefault(); e.stopPropagation(); const d = drag; drag = null; if (d.tid !== t.id) place(d.tid, d.from, g, t.id); };
+    // the same without dragging: which groups, and the place within this one
+    c.append(h('button', { class: 'iconbtn pmenu', title: 'Groups and order', onclick: (e) => {
+      e.stopPropagation();
+      const k = g ? g.members.indexOf(t.id) : -1;
+      popMenu(e.currentTarget, [
+        groups.length ? 'Groups' : null,
+        ...groups.map((x) => [`${x.members.includes(t.id) ? '✓ ' : ''}${x.name}`, () => {
+          x.members = x.members.includes(t.id) ? x.members.filter((y) => y !== t.id) : [...x.members, t.id];
+          save(x, { members: x.members }); draw(); }]),
+        g && k > 0 ? 'Order' : g && k < g.members.length - 1 ? 'Order' : null,
+        g && k > 0 ? ['Move earlier', () => { g.members.splice(k - 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }); draw(); }] : null,
+        g && k >= 0 && k < g.members.length - 1 ? ['Move later', () => { g.members.splice(k + 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }); draw(); }] : null,
+        ['New group with this person…', async () => { const n = prompt('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) await newGroup(n.trim(), [t.id]); }],
+      ]);
+    } }, icon('more')));
+    return c;
+  };
+  const newGroup = async (name, members = []) => {
+    let r; try { r = await post('/api/people/groups', { name }); } catch (e) { toast(e.message, null, null, 9000); return; }
+    const g = { id: r.id, name, members };
+    groups.push(g); if (members.length) await save(g, { members });
+    draw();
+  };
+  const section = (g, list, title) => {
+    const cards = h('div', { class: 'cards people' }, list.map((t) => cardFor(t, g)));
+    const k = g ? groups.indexOf(g) : -1;
+    const tools = editing && g ? h('span', { class: 'gtools' },
+      h('button', { class: 'iconbtn', title: 'Rename this group', onclick: () => { const n = prompt('Group name', g.name); if (n && n.trim() && n.trim() !== g.name) { g.name = n.trim(); save(g, { name: g.name }); draw(); } } }, icon('edit')),
+      k > 0 ? h('button', { class: 'iconbtn turn', title: 'Move this group up', onclick: () => { groups.splice(k - 1, 0, groups.splice(k, 1)[0]); saveOrder(); draw(); } }, icon('left')) : null,
+      k < groups.length - 1 ? h('button', { class: 'iconbtn turn', title: 'Move this group down', onclick: () => { groups.splice(k + 1, 0, groups.splice(k, 1)[0]); saveOrder(); draw(); } }, icon('right')) : null,
+      h('button', { class: 'iconbtn', title: 'Delete this group (the people stay)', onclick: async () => {
+        if (!confirm(`Delete the group “${g.name}”? The people in it stay; only the group goes.`)) return;
+        try { await fetch(`/api/people/groups/${g.id}`, { method: 'DELETE' }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); }); } catch (e) { toast(e.message); return; }
+        groups = groups.filter((x) => x !== g); draw(); } }, icon('trash'))) : null;
+    const sec = h('section', { class: 'pgroup' + (editing ? ' editing' : '') },
+      title ? h('h2', { class: 'pghead' }, title, h('span', { class: 'muted' }, nf.format(list.length)), tools) : null,
+      editing && g && !list.length ? h('div', { class: 'muted pgempty' }, 'Drag people here, or use a person’s ⋯ menu.') : null, cards);
+    if (editing) {  // drop on the section itself: at the end of this group (or out of the group, for Everyone else)
+      sec.ondragover = (e) => { if (drag) { e.preventDefault(); sec.classList.add('over'); } };
+      sec.ondragleave = (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('over'); };
+      sec.ondrop = (e) => { if (!drag) return; e.preventDefault(); sec.classList.remove('over'); const d = drag; drag = null; if (g) place(d.tid, d.from, g, null); else if (d.from) place(d.tid, d.from, null, null); };
+    }
+    return sec;
+  };
+  const draw = () => {
+    const ok = (t) => !filter || t._n.includes(filter);
+    const grouped = new Set(groups.flatMap((g) => g.members));
+    const secs = groups.map((g) => {
+      const list = g.members.map((id) => byId.get(id)).filter((t) => t && ok(t));
+      return list.length || editing ? section(g, list, g.name) : null;
+    });
+    const rest = all.filter((t) => !grouped.has(t.id) && ok(t));
+    secs.push(rest.length || editing ? section(null, rest, groups.length ? 'Everyone else' : null) : null);
+    body.replaceChildren(...secs.filter(Boolean));
+  };
+  const arrange = canEdit ? h('button', { class: 'pillbtn' + (editing ? ' on' : ''), onclick: () => { editing = S.arrangePeople = !editing; arrange.classList.toggle('on', editing); fill(arrange, editing ? 'Done' : 'Arrange groups'); newBtn.hidden = !editing; draw(); } }, editing ? 'Done' : 'Arrange groups') : null;
+  const newBtn = h('button', { class: 'pillbtn', hidden: !editing, onclick: () => { const n = prompt('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) newGroup(n.trim()); } }, icon('add'), 'New group');
   main.replaceChildren(h('div', { class: 'page' }, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
-    h('input', { class: 'pagefilter', placeholder: 'Find a person…', oninput: (e) => draw(norm(e.target.value)) }), h('div', { style: 'height:14px' }), cards));
-  draw('');
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
+      h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), arrange, newBtn),
+    h('div', { style: 'height:14px' }), body));
+  draw();
 }
 
 export const UPLOAD_ACCEPT = '.jpg,.jpeg,.png,.gif,.tif,.tiff,.webp,.heic,.heif,.avif,.bmp,.dng,.cr2,.cr3,.nef,.arw,.raf,.orf,.rw2,.mov,.mp4,.m4v,.avi,.mkv,.webm,.3gp,.mts';

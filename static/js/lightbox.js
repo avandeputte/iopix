@@ -813,7 +813,7 @@ export function adjustFace(f, d) {
   LB.el.stage.append(bar);
 }
 export async function setTagIcon(t, photoId) {
-  if (!confirm(`Use this photo as the ${t.person ? 'badge picture' : 'thumbnail'} for “${t.name}”? This is saved in digiKam’s database (digiKam must be closed; a backup is made first).`)) return;
+  if (!t.person && !confirm(`Use this photo as the thumbnail for “${t.name}”? This is saved in digiKam’s database (digiKam must be closed; a backup is made first).`)) return;
   await tagOp({ op: 'icon', id: t.id, photo: photoId }, t);
   if (LB.open) { details.delete(LB.src.id[LB.i]); showItem(); }
 }

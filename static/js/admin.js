@@ -794,7 +794,7 @@ export const albumIdByPath = (path) => S.META.albums.find((a) => a.path === path
 export async function tagOp(op, t) {
   let r;
   try { r = await post('/api/tags/op', op); } catch (e) { toast(e.message, null, null, 9000); return; }
-  toast(op.op === 'icon' ? `“${r.path}” now uses this photo.` : op.op === 'add' ? `Created “${r.path}”.` : `${{ rename: 'Renamed', move: 'Moved', delete: 'Deleted' }[op.op]} “${r.path}”${r.new_path ? ` → “${r.new_path}”` : ''}.` +
+  toast(op.op === 'icon' ? `“${r.path}” now uses this photo.` : op.op === 'notperson' ? `“${r.path}” is a keyword tag again, no longer listed under People.` : op.op === 'add' ? `Created “${r.path}”.` : `${{ rename: 'Renamed', move: 'Moved', delete: 'Deleted' }[op.op]} “${r.path}”${r.new_path ? ` → “${r.new_path}”` : ''}.` +
     (r.sidecars ? ` Updating ${nf.format(r.photos)} photos’ sidecars in the background.` : ''), null, null, 8000);
   await awaitReindex();
   $('#taglist')?.remove();  // the tag datalist is rebuilt from the new tag list on next use
@@ -867,6 +867,7 @@ export function showTags() {
         act('add', 'Add a tag inside this one', () => { const n = prompt(`New tag inside “${t.name}”`); if (n) tagOp({ op: 'add', parent: t.id, name: n }); }),
         act('edit', 'Rename', () => { const n = prompt('Rename tag', t.name); if (n && n !== t.name) tagOp({ op: 'rename', id: t.id, name: n }, t); }),
         h('button', { class: 'pillbtn tmove', title: 'Move this tag (with its sub-tags) under another tag, or to the top level', onclick: (e) => { e.stopPropagation(); moveTagDialog(t); } }, icon('folder'), 'Move'),
+        t.person && !t.full.startsWith('People/') ? h('button', { class: 'pillbtn tmove', title: 'digiKam marked this tag as a person (a face was once named with it): make it a keyword tag again, off the People page', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'notperson', id: t.id }, t); } }, 'Not a person') : null,
         isPerson ? null : act('trash', 'Delete', () => { const kidsN = S.META.tags.filter((x) => x.full.startsWith(t.full + '/')).length;
           if (confirm(`Delete the tag “${t.full}”${kidsN ? ` and its ${kidsN} sub-tags` : ''}?\n\nIt will be removed from ${nf.format(t.nAll)} photos (the photos themselves are not touched).`)) tagOp({ op: 'delete', id: t.id }, t); })) : null,
       h('span', { class: 'ct' }, nf.format(t.nAll)));

@@ -1055,6 +1055,46 @@ def test_video_date_change_shows_in_the_viewer(page, server):
     urllib.request.urlopen(req).read()
 
 
+def test_people_page_groups_and_arranging(page, server):
+    """People shows the groups first, in their order, then everyone else; Arrange groups lets an editor drag a person
+    into a group, or use the person's menu, and the groups are saved."""
+    import json as _json
+    def call(path, body=None, method=None):
+        req = urllib.request.Request(server + path, data=_json.dumps(body).encode() if body is not None else None,
+                                     headers={"Content-Type": "application/json"}, method=method)
+        return _json.loads(urllib.request.urlopen(req).read())
+    meta = call("/api/meta")
+    people = sorted((t for t in meta["tags"] if t.get("person") and t.get("n") and not any(c.get("pid") == t["id"] for c in meta["tags"])), key=lambda t: -t["nAll"])
+    assert len(people) >= 3
+    gid = call("/api/people/groups", {"name": "Zz Family"})["id"]
+    call(f"/api/people/groups/{gid}", {"members": [people[1]["id"]]})
+    try:
+        page.goto(server + "/#/people")
+        page.wait_for_selector(".pgroup .pghead", timeout=10000)
+        heads = page.locator(".pghead").all_inner_texts()
+        assert any(x.startswith("Zz Family") for x in heads) and heads[-1].startswith("Everyone else"), heads
+        fam = page.locator(".pgroup", has=page.locator(".pghead", has_text="Zz Family"))
+        assert fam.locator(".card .nm").all_inner_texts() == [people[1]["name"]]
+        page.locator("button", has_text="Arrange groups").click()
+        rest = page.locator(".pgroup", has=page.locator(".pghead", has_text="Everyone else"))
+        # drag someone from Everyone else onto the group's first card: placed before it
+        rest.locator(".card", has_text=people[0]["name"]).first.drag_to(fam.locator(".card").first)
+        page.wait_for_function(f"[...document.querySelectorAll('.pgroup')].some((s) => s.querySelector('.pghead')?.innerText.startsWith('Zz Family') && s.querySelectorAll('.card').length === 2)", timeout=5000)
+        # the menu: add a third person to the group
+        rest.locator(".card", has_text=people[2]["name"]).first.locator(".pmenu").click()
+        page.locator(".facemenu .fmi", has_text="Zz Family").click()
+        for _ in range(20):
+            g = next(x for x in call("/api/people/groups")["groups"] if x["id"] == gid)
+            if len(g["members"]) == 3:
+                break
+            page.wait_for_timeout(200)
+        assert g["members"] == [people[0]["id"], people[1]["id"], people[2]["id"]], g
+        page.locator("button", has_text="Done").click()
+        assert fam.locator(".card .nm").all_inner_texts() == [people[0]["name"], people[1]["name"], people[2]["name"]]
+    finally:
+        call(f"/api/people/groups/{gid}", method="DELETE")
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json

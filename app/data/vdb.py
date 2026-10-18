@@ -124,6 +124,14 @@ TABLES = {
     "quality_accepted": (["photo_id", "check_name", "signature", "user_name", "ts"],
                          "CREATE TABLE IF NOT EXISTS quality_accepted (photo_id INTEGER, check_name TEXT, signature TEXT, user_name TEXT, ts INTEGER, PRIMARY KEY (photo_id, check_name))",
                          "CREATE TABLE IF NOT EXISTS quality_accepted (photo_id BIGINT, check_name VARCHAR(32), signature VARCHAR(191), user_name VARCHAR(191), ts BIGINT, PRIMARY KEY (photo_id, check_name))"),
+    # the People page's own groups (Family, Friends, Classmates...): digiKam's person tags (tag ids), in the order
+    # chosen; a person may be in several groups. Nothing here is written to digiKam.
+    "people_groups": (["id", "name", "position", "created"],
+                      "CREATE TABLE IF NOT EXISTS people_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, created INTEGER)",
+                      "CREATE TABLE IF NOT EXISTS people_groups (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(191) NOT NULL, position INT NOT NULL DEFAULT 0, created BIGINT)"),
+    "people_group_members": (["group_id", "tag_id", "position"],
+                             "CREATE TABLE IF NOT EXISTS people_group_members (group_id INTEGER, tag_id INTEGER, position INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (group_id, tag_id))",
+                             "CREATE TABLE IF NOT EXISTS people_group_members (group_id INT, tag_id BIGINT, position INT NOT NULL DEFAULT 0, PRIMARY KEY (group_id, tag_id))"),
     "metadata_check": (["photo_id", "stamp", "data", "mismatch", "has_sidecar", "file_xmp", "checked"],
                     "CREATE TABLE IF NOT EXISTS metadata_check (photo_id INTEGER PRIMARY KEY, stamp TEXT, data TEXT, mismatch INTEGER, has_sidecar INTEGER, file_xmp INTEGER, checked INTEGER)",
                     "CREATE TABLE IF NOT EXISTS metadata_check (photo_id BIGINT PRIMARY KEY, stamp VARCHAR(191), data MEDIUMTEXT, mismatch INT, has_sidecar INT, file_xmp INT, checked BIGINT)"),

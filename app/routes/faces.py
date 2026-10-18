@@ -14,6 +14,8 @@ from app.faces import facemgr
 from app.faces import facevecs
 from app.ai import neardups
 from app import thumbs
+from app import users
+from app.data import state as appstate
 from app.core import IMG_CACHE
 from app.core import DB_ERRORS
 from app.core import db
@@ -73,6 +75,71 @@ async def api_face_op(request: Request):
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
     _kick.set()
     return res
+
+
+# --------------------------------------------------------------------------
+# People groups: the People page's sections (Family, Friends...), kept in the viewer's database
+# --------------------------------------------------------------------------
+
+def _groups_writer(request: Request):
+    if not users.can_write(request.state.user):
+        raise HTTPException(403, "Arranging people needs an editor or admin account")
+
+
+def _group_name(body: dict) -> str:
+    name = str(body.get("name") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "A group needs a name")
+    return name
+
+
+@router.get("/api/people/groups")
+def api_people_groups(request: Request):
+    """{groups: [{id, name, members: [person tag ids in order]}], canEdit}."""
+    return {"groups": appstate.people_groups(), "canEdit": bool(users.can_write(request.state.user))}
+
+
+@router.post("/api/people/groups")
+async def api_people_group_create(request: Request):
+    """Body {name}: a new group, last in the order."""
+    _groups_writer(request)
+    return {"id": appstate.create_people_group(_group_name(await request.json()))}
+
+
+@router.post("/api/people/groups/order")
+async def api_people_groups_order(request: Request):
+    """Body {ids: [group ids]}: the order of the groups on the People page."""
+    _groups_writer(request)
+    appstate.order_people_groups([int(i) for i in (await request.json()).get("ids") or []])
+    return {"ok": True}
+
+
+@router.post("/api/people/groups/{group_id}")
+async def api_people_group_update(group_id: int, request: Request):
+    """Body {name?, members?: [person tag ids in order]}: rename the group and/or set who is in it."""
+    _groups_writer(request)
+    body = await request.json()
+    name = _group_name(body) if "name" in body else None
+    members = body.get("members")
+    if members is not None:
+        members = [int(t) for t in members][:5000]
+        con = db()
+        try:
+            people = {r[0] for r in con.execute(f"SELECT id FROM tags WHERE person = 1 AND id IN ({','.join(map(str, members)) or 'NULL'})")}
+        finally:
+            con.close()
+        members = [t for t in members if t in people]  # people only; a tag that is no longer a person drops out
+    if not appstate.update_people_group(group_id, name, members):
+        raise HTTPException(404, "No such group")
+    return {"ok": True}
+
+
+@router.delete("/api/people/groups/{group_id}")
+def api_people_group_delete(group_id: int, request: Request):
+    """The group goes; the people in it stay where they are in digiKam."""
+    _groups_writer(request)
+    appstate.delete_people_group(group_id)
+    return {"ok": True}
 
 
 @router.get("/api/faces/nearby")
