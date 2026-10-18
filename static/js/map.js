@@ -25,13 +25,13 @@ export function loadLeaflet(cluster) {
 export async function loadMaps() { if (S.mapsLoaded) return S.MAPS; try { S.MAPS = await api('/api/maps'); if (S.MAPS.error) toast(S.MAPS.error, null, null, 8000); } catch { /* keep OSM */ } S.mapsLoaded = true; return S.MAPS; }
 export const tiles = () => window.L.tileLayer(S.MAPS.url, { maxZoom: S.MAPS.maxZoom, attribution: S.MAPS.attribution });
 /** Map and Satellite base layers with a switcher; the choice is remembered. Returns the layer shown. */
-export function baseLayers(map) {
+export function baseLayers(map, position = 'topright') {
   const L = window.L, road = tiles();
   const sat = S.MAPS.satellite ? L.tileLayer(S.MAPS.satellite.url, { maxZoom: S.MAPS.satellite.maxZoom, attribution: S.MAPS.satellite.attribution }) : null;
   const first = sat && store.get('map-layer', 'map') === 'satellite' ? sat : road;
   first.addTo(map);
   if (sat) {
-    L.control.layers({ Map: road, Satellite: sat }, null, { position: 'topright', collapsed: false }).addTo(map);
+    L.control.layers({ Map: road, Satellite: sat }, null, { position, collapsed: false }).addTo(map);
     map.on('baselayerchange', (e) => store.set('map-layer', e.layer === sat ? 'satellite' : 'map'));
   }
   return first;
@@ -66,7 +66,7 @@ export async function showMap(fp) {
   M.data = d;
   await loadMaps();
   const map = M.map = L.map(el, { worldCopyJump: true }).setView([30, 0], 2);
-  baseLayers(map);
+  baseLayers(map, 'bottomleft');  // the top right belongs to the placing tray
   const dot = L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] });
   const group = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 55, showCoverageOnHover: false, zoomToBoundsOnClick: false });
   const marker = (dd, i) => L.marker([dd.lat[i], dd.lon[i]], { icon: dot, idx: i, draggable: !!M.placing }).on('click', () => openLightbox(M.data, i, true))
