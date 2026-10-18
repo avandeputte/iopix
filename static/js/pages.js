@@ -201,7 +201,7 @@ export async function showPeople() {
         try { await fetch(`/api/people/groups/${g.id}`, { method: 'DELETE' }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); }); } catch (e) { toast(e.message); return; }
         groups = groups.filter((x) => x !== g); draw(); } }, icon('trash'))) : null;
     const sec = h('section', { class: 'pgroup' + (editing ? ' editing' : '') },
-      title ? h('h2', { class: 'pghead' }, title, h('span', { class: 'muted' }, nf.format(list.length)), tools) : null,
+      title ? h('h2', { class: 'sec pghead' }, title, h('span', { class: 'muted' }, nf.format(list.length)), tools) : null,
       editing && g && !list.length ? h('div', { class: 'muted pgempty' }, 'Drag people here, or use a person’s ⋯ menu.') : null, cards);
     if (editing) {  // drop on the section itself: at the end of this group (or out of the group, for Everyone else)
       sec.ondragover = (e) => { if (drag) { e.preventDefault(); sec.classList.add('over'); } };
@@ -210,37 +210,55 @@ export async function showPeople() {
     }
     return sec;
   };
-  let sort = store.get('people-sort', 'group'), size = store.get('people-size', 'm');
+  let sort = store.get('people-sort', 'group'), size = store.get('people-size', 'm'), within = store.get('people-within', 'arranged');
+  const byName = (a, b) => a.name.localeCompare(b.name), byCount = (a, b) => b.nAll - a.nAll;
+  // the order inside a section: as arranged (groups only), by name, or the most photos first
+  const order = (list, arranged) => within === 'name' ? [...list].sort(byName) : within === 'count' || !arranged ? [...list].sort(within === 'count' ? byCount : byName) : list;
+  // a person's family: the tag above them under People (People/Yu/Carissa Yu), as digiKam's people are often filed
+  const familyOf = (t) => { const parts = t.full.split('/'); return parts[0] === 'People' && parts.length > 2 ? parts[parts.length - 2] : null; };
   const draw = () => {
     const ok = (t) => !filter || t._n.includes(filter);
-    arrange && (arrange.hidden = sort !== 'group');
+    if (arrange) arrange.hidden = sort !== 'group';
+    withinSel.hidden = !(sort === 'group' || sort === 'family');
+    withinSel.options[0].hidden = sort === 'family';
+    if (sort === 'family') {
+      const fams = new Map();
+      for (const t of all.filter(ok)) { const f = familyOf(t) || ''; if (!fams.has(f)) fams.set(f, []); fams.get(f).push(t); }
+      const names = [...fams.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+      const secs = names.map((f) => section(null, order(fams.get(f), false), f));
+      if (fams.has('')) secs.push(section(null, order(fams.get(''), false), names.length ? 'No family name' : null));
+      body.replaceChildren(...secs);
+      return;
+    }
     if (sort !== 'group' || (!groups.length && !editing)) {  // one list: by name, or the most photos first
-      const list = all.filter(ok).sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.nAll - a.nAll);
+      const list = all.filter(ok).sort(sort === 'name' ? byName : byCount);
       body.replaceChildren(section(null, list, null));
       return;
     }
     const grouped = new Set(groups.flatMap((g) => g.members));
     const secs = groups.map((g) => {
       const list = g.members.map((id) => byId.get(id)).filter((t) => t && ok(t));
-      return list.length || editing ? section(g, list, g.name) : null;
+      return list.length || editing ? section(g, editing ? list : order(list, true), g.name) : null;
     });
     const rest = all.filter((t) => !grouped.has(t.id) && ok(t));
-    secs.push(rest.length || editing ? section(null, rest, groups.length ? 'Everyone else' : null) : null);
+    secs.push(rest.length || editing ? section(null, within === 'name' ? order(rest, false) : rest, groups.length ? 'Everyone else' : null) : null);
     body.replaceChildren(...secs.filter(Boolean));
   };
+  const withinSel = h('select', { class: 'sharepick', title: 'Order within each section', onchange: (e) => { within = e.target.value; store.set('people-within', within); draw(); } },
+    [['arranged', 'As arranged'], ['name', 'Name'], ['count', 'Most photos']].map(([v, l]) => h('option', { value: v, selected: v === within }, `Within: ${l.toLowerCase()}`)));
   const arrange = canEdit ? h('button', { class: 'pillbtn' + (editing ? ' on' : ''), onclick: () => { editing = S.arrangePeople = !editing; arrange.classList.toggle('on', editing); fill(arrange, editing ? 'Done' : 'Arrange groups'); newBtn.hidden = !editing; draw(); } }, editing ? 'Done' : 'Arrange groups') : null;
   const newBtn = h('button', { class: 'pillbtn', hidden: !editing, onclick: () => { const n = prompt('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) newGroup(n.trim()); } }, icon('add'), 'New group');
   // sort and badge size, remembered
   const sortSel = h('select', { class: 'sharepick', title: 'Sort', onchange: (e) => { sort = e.target.value; store.set('people-sort', sort);
     if (sort !== 'group' && editing) { editing = S.arrangePeople = false; arrange.classList.remove('on'); fill(arrange, 'Arrange groups'); newBtn.hidden = true; }
-    draw(); } }, [['group', 'By group'], ['name', 'By name'], ['count', 'Most photos first']].map(([v, l]) => h('option', { value: v, selected: v === sort }, l)));
+    draw(); } }, [['group', 'By group'], ['family', 'By family name'], ['name', 'By name'], ['count', 'Most photos first']].map(([v, l]) => h('option', { value: v, selected: v === sort }, l)));
   const pageEl = h('div', { class: `page psz-${size}` });
   const seg = h('div', { class: 'eseg', title: 'Badge size' }, [['s', 'S'], ['m', 'M'], ['l', 'L']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
     size = k; store.set('people-size', k); pageEl.className = `page psz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
   main.replaceChildren(pageEl);
   fill(pageEl, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' },
-      h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), sortSel, seg, arrange, newBtn),
+      h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), sortSel, withinSel, seg, arrange, newBtn),
     h('div', { style: 'height:14px' }), body);
   draw();
 }

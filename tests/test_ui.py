@@ -1104,7 +1104,25 @@ def test_people_page_groups_and_arranging(page, server):
         assert big > small * 1.5, (big, small)
         page.reload(); page.wait_for_selector(".cards.people .card", timeout=10000)
         assert page.locator("select[title=Sort]").input_value() == "count"
-        page.locator("select[title=Sort]").select_option("group"); page.locator(".eseg[title='Badge size'] button", has_text="M").click()
+        # by family name: one section per family (the tag above the person under People), named after it
+        page.locator("select[title=Sort]").select_option("family")
+        fams = sorted({t["full"].split("/")[-2] for t in people if t["full"].startswith("People/") and t["full"].count("/") >= 2})
+        if fams:
+            import re as _re
+            heads = [_re.sub(r"\s*[\d,]+$", "", x.replace("\n", " ").strip()) for x in page.locator(".pghead").all_inner_texts()]
+            assert [h_ for h_ in heads if h_ != "No family name"] == fams, (heads, fams)
+        # within a group: as arranged, by name, or the most photos first
+        page.locator("select[title=Sort]").select_option("group")
+        within = page.locator("select[title='Order within each section']")
+        within.select_option("name")
+        got = fam.locator(".card .nm").all_inner_texts()
+        assert got == sorted(got), got
+        within.select_option("count")
+        assert fam.locator(".card .nm").first.inner_text() == people[0]["name"]
+        within.select_option("arranged")
+        assert fam.locator(".card .nm").all_inner_texts() == [people[0]["name"], people[1]["name"], people[2]["name"]]
+        assert "sec" in (fam.locator("h2").get_attribute("class") or ""), "the app's section heading"
+        page.locator(".eseg[title='Badge size'] button", has_text="M").click()
     finally:
         call(f"/api/people/groups/{gid}", method="DELETE")
 

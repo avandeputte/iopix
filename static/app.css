@@ -850,8 +850,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .pgroup { margin-bottom: 22px; border-radius: 14px; }
 .pgroup.editing { padding: 8px 10px 12px; border: 1px dashed var(--line); }
 .pgroup.over { background: var(--bg2); border-color: var(--accent, #4a7dff); }
-.pghead { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 4px 0 12px; }
-.pghead .muted { font-size: 13px; font-weight: 400; }
+.pgroup .pghead { margin: 0 0 12px; }  /* the app's section heading (h2.sec), first in its section */
 .pghead .gtools { margin-left: auto; display: flex; gap: 2px; }
 .pgempty { padding: 18px 4px; font-size: 13px; }
 .cards.people .card.arrange { position: relative; cursor: grab; }
