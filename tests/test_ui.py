@@ -978,6 +978,15 @@ def test_phone_layout_fits_the_screen(browser, server):
         assert abs(nav["height"] - 56) < 1 and abs(nav["y"] + nav["height"] - 852) < 1 and abs(main["y"] + main["height"] - nav["y"]) < 1.5, (nav, main)
         label = page.locator("#nav a", has_text="Photos").bounding_box()
         assert label["y"] + label["height"] <= 852 + 1, label  # the 1 px top border overlaps the link's bottom padding, not its label
+        # the viewer's top bar: with every button a photo can show (faces, add a face...), none runs off the right edge
+        page.evaluate("document.documentElement.classList.remove('vpshort')")
+        import json as _json
+        pid = _json.loads(urllib.request.urlopen(server + "/api/photos").read())["id"][0]
+        page.goto(server + f"/#/photos?p={pid}"); page.wait_for_selector("#lightbox .lb-top", timeout=10000); page.wait_for_timeout(600)
+        page.evaluate("document.querySelectorAll('#lightbox .lb-top .iconbtn').forEach((b) => { b.hidden = false; if (b.style.display === 'none') b.style.display = ''; })")
+        shown = [b.bounding_box() for b in page.locator("#lightbox .lb-top .iconbtn").all() if b.is_visible()]
+        assert len(shown) >= 10, len(shown)
+        assert all(box["x"] + box["width"] <= 393 + 0.5 and box["width"] >= 30 for box in shown), shown
     finally:
         ctx.close()
 

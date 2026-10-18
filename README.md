@@ -4,6 +4,27 @@
 
 A web front end for a digiKam library, for browsing, searching and managing photos from any browser: FastAPI + a single-page vanilla JS app. It reads digiKam's database and your photos, keeps everything it builds in its own `data/` folder, and writes to the library only for the editing features you turn on.
 
+![Explore: library totals, photos from this day in past years and a shuffle of older ones](docs/screenshots/explore.jpg)
+
+| | |
+| --- | --- |
+| ![The photo viewer with its info panel: rating, title, caption, named faces, tags and details](docs/screenshots/viewer.jpg) | ![People: everyone named in the library, from digiKam's face regions](docs/screenshots/people.jpg) |
+| **Viewer** with the info panel: rating, caption, faces, tags, location | **People** from digiKam's face regions |
+| ![Search: a search for temples across tags, captions, places and what is in the photos](docs/screenshots/search.jpg) | ![Map: every geotagged photo in clusters](docs/screenshots/map.jpg) |
+| **Search** by what is in the photos | **Map** of every geotagged photo |
+| ![Places: countries, then regions and towns, worked out offline from each photo's GPS position](docs/screenshots/places.jpg) | ![Folders: digiKam's albums as they are on disk](docs/screenshots/folders.jpg) |
+| **Places** worked out offline from GPS positions | **Folders** as they are on disk |
+| ![The edit log: every change with its before and after values, undo and the backups](docs/screenshots/edit-log.jpg) | ![Maintenance: import, the file scanner, lossless edits, the trash and digiKam's database](docs/screenshots/maintenance.jpg) |
+| **Edit log** with undo for every change | **Maintenance** |
+
+<p>
+<img src="docs/screenshots/phone-explore.jpg" width="24%" alt="Explore on a phone">
+<img src="docs/screenshots/phone-viewer.jpg" width="24%" alt="The viewer on a phone">
+<img src="docs/screenshots/phone-explore-dark.jpg" width="24%" alt="Explore on a phone, dark theme">
+</p>
+
+The screenshots show a demo library of freely licensed photos (see [the credits](docs/screenshots/CREDITS.md)); the people's names are invented. [Demo library and screenshots](#demo-library-and-screenshots) says how to rebuild it.
+
 ## Run
 
 ```sh
@@ -364,6 +385,19 @@ Other clients that take an MCP URL use `http://<host>:8600/mcp` directly (set `V
 
 About 180 tests in ~95 s (the browser tests are most of that). At start the suite cuts a small scratch library (240 photos from a few albums: JPEG, HEIC, PNG, MOV, with faces, tags and GPS) from a real digiKam library by copying the database and letting digiKam's own cascade triggers remove the rest; every test runs against that copy with the viewer's data folder in a temporary directory, so nothing can touch the real library. `DIGIKAM_TEST_DB` and `DIGIKAM_TEST_ROOT` point it at another library (default: `~/Pictures/digikamDB/digikam4.db` and `~/Pictures/photos`). Covered: filters and search, the job queue, settings and read-only mode, the models registry (network stubbed), the read API, tag and face writes against digiKam's rows and backups, new folders and uploads, first-start model downloads and switching the search model, users and permissions, album roots and the digiKam database settings, the viewer database on SQLite and MySQL (the MySQL half runs when a test server is given) and the migration from `state.db` + `analysis.db`, map providers and place search, the MCP endpoint over HTTP, self-update, the library tables and working without digiKam (offline, Sync with digiKam off, merging changes back, photo ids following a renumbered photo), face detection against existing regions, deleting and restoring photos, the change log with undo, the image-data checksum guard, location suggestions and the place search fallbacks, and browser tests with Playwright (headless Chromium; `python -m playwright install chromium` once) for the grid, lightbox, face toggle, People rows and menus, the person picker, read-only mode, Settings and Maintenance.
 
+## Demo library and screenshots
+
+The screenshots above come from a demo library, never from a real one, and can be retaken at any time:
+
+```sh
+.venv/bin/python tools/demo/build_demo.py        # ~1,000 freely licensed photos with dates, places, keywords -> ~/iopix-demo
+tools/demo/serve_demo.sh                          # the viewer on that library alone, at http://127.0.0.1:8610
+.venv/bin/python tools/demo/people.py apply       # the recurring people get their invented names (tools/demo/people.json)
+.venv/bin/python tools/demo/screenshots.py        # docs/screenshots/*.jpg (add --dark for the dark theme)
+```
+
+`build_demo.py` takes travel photos from Wikimedia Commons (Quality images near each place) and people photos from a CC0 StockSnap series and from Unsplash (a free access key in `UNSPLASH_KEY` or `~/.unsplash-key`), writes the metadata into each file with exiftool, creates an empty digiKam database for it and lists every author and license in `CREDITS.md`. Downloads are cached in `~/iopix-demo-sources`, so a rebuild is quick. The demo server keeps everything (its digiKam database, the viewer's data, the analysis results) under `~/iopix-demo`, apart from the models, which it shares with the checkout.
+
 ## Layout
 
 ```
@@ -382,6 +416,7 @@ app/geo/        places, address search, GPX tracks, map providers
 static/         the web app: index.html, app.js (the entry) and js/ (one ES module per area: core, state, search, grid,
                 actions, editing, download, pages, admin, map, filters, lightbox, main), app.css, icons, PWA manifest, service worker
 tests/          pytest suite (API on a scratch library, browser tests with Playwright)
+tools/demo/     the demo library and the documentation screenshots       docs/screenshots/: the screenshots and their credits
 setup.sh        the installer: asks, installs, downloads, starts the service      run.sh: foreground start
 update.sh       updates an installed copy in place (git or tarball), keeps settings and data
 pyproject.toml  dependencies (base + optional groups)

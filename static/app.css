@@ -699,7 +699,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
   .modal { width: 100%; max-width: none; max-height: calc(100dvh - env(safe-area-inset-top) - 24px); overflow-y: auto; border-radius: 18px 18px 0 0; padding: 16px 16px calc(14px + env(safe-area-inset-bottom)); }
   .modal.wide { width: 100%; }
   .lb-top { padding: env(safe-area-inset-top) 4px 0 4px; height: calc(56px + env(safe-area-inset-top)); gap: 0; }
-  .lb-top .iconbtn { width: 40px; height: 40px; }
+  .lb-top .iconbtn { width: auto; flex: 0 1 40px; min-width: 32px; height: 40px; }  /* ten buttons on a 390px phone: they narrow rather than run off the edge */
   .lb-top button[title^="Slideshow"], .lb-top button[title^="Show detected objects"] { display: none; }  /* nine buttons do not fit: the two least used go */
   .lb-info { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
   .lb-strip { padding-bottom: env(safe-area-inset-bottom); }
