@@ -3,7 +3,7 @@ import { $, api, date, dfDay, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, 
 import { S, ST, filterParams, go, loadState, onRoute, photosWith, pollSoon, toast, ualbumById } from './state.js';
 import { crumbs } from './search.js';
 import { G, renderGrid } from './grid.js';
-import { copyMetadata, dateEditor, editDialog, locationDialog, tagDialog } from './editing.js';
+import { copyMetadata, dateEditor, editDialog, editPhotos, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
 import { pageTitle, people } from './pages.js';
 import { LB, details, editMenu, openLightbox, showItem, toggleFaces, updateFavBtn } from './lightbox.js';
@@ -361,6 +361,30 @@ export async function showQuality() {
         { list: items, key: 'nolocation', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' · ', x.ts ? dfDay.format(date(x.ts)) : 'no date', ' · ',
           S.EDITING ? [h('a', { class: 'lnk', onclick: (ev) => place([x.photo], ev) }, 'Set location'), ' · '] : null,
           h('a', { class: 'lnk', onclick: (ev) => accept([x.photo], true, ev) }, 'Accept as it is'))) });
+    })(),
+    (() => {  // a date that cannot be right (1900, the future, 1970-01-01 00:00:00): set the right one, or accept it
+      const u = q.baddate || { count: 0, items: [], accepted: 0 }, items = u.items;
+      const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'baddate', on }); toast(on ? `${plural(ids.length, 'date')} accepted as ${ids.length === 1 ? 'it is' : 'they are'}.` : 'Shown again.'); } catch (e) { toast(e.message, null, null, 9000); return; } if (!gone(ev)) showQuality(); };
+      const fixDate = (x, ev) => { const back = modal(`Date of ${x.name}`, h('p', { class: 'muted', style: 'margin-top:0' }, `Now ${x.taken.replace('T', ' ')}: ${x.reason}.`),
+        dateEditor([x.photo], x.taken.startsWith('1') && +x.taken.slice(0, 4) < 1901 ? null : x.taken, () => { back.remove(); if (!gone(ev)) setTimeout(showQuality, 1200); }),
+        h('div', { style: 'text-align:right;margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); };
+      const useFolder = async (list, ev) => {
+        let n = 0;
+        for (const x of list) { if (x.folder_date && await editPhotos([x.photo], { taken: x.folder_date })) n++; }
+        if (list.length > 1) toast(`${plural(n, 'photo')} dated from ${n === 1 ? 'its' : 'their'} folder.`);
+        if (!gone(ev)) setTimeout(showQuality, 1200);
+      };
+      const withFolder = items.filter((x) => x.folder_date);
+      const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=baddate'); if (acc.photos.length && confirm(`List the ${plural(acc.photos.length, 'accepted photo')} again?`)) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
+      return sec('Implausible date', u.count,
+        `Photos and videos dated before 1901, in the future, or exactly at a clock’s starting point (1 January 1970 at midnight and the like): a date the camera or a program wrote when it knew none.${u.accepted ? ` ${plural(u.accepted, 'photo')} you accepted ${u.accepted === 1 ? 'is' : 'are'} not listed.` : ''} A folder named for that year counts as meant (scans of old prints). Set the right date, take the folder’s date, or accept it as it is.`,
+        [withFolder.length && S.EDITING ? h('button', { class: 'pillbtn', onclick: () => { if (confirm(`Date ${plural(withFolder.length, 'photo')} from the folder ${withFolder.length === 1 ? 'it is' : 'they are'} in (its date, at noon)?`)) useFolder(withFolder); } }, `Take the folder’s date for ${nf.format(withFolder.length)}`) : null,
+          items.length ? h('button', { class: 'pillbtn', onclick: () => accept(items.map((x) => x.photo)) }, 'Accept all shown') : null, again].filter(Boolean),
+        { list: items, key: 'baddate', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' · ', x.taken.replace('T', ' '), ' · ', x.reason, ' · in ',
+          h('a', { class: 'lnk', href: `#/photos?album=${x.folder_id}&sort=old` }, x.folder.replace(/^\//, '') || 'the library root'), h('div', { style: 'font-size:12.5px;margin-top:2px' },
+          S.EDITING ? [h('a', { class: 'lnk', onclick: (ev) => fixDate(x, ev) }, 'Set the date'), ' · '] : null,
+          S.EDITING && x.folder_date ? [h('a', { class: 'lnk', onclick: (ev) => useFolder([x], ev) }, `Use the folder’s date (${x.folder_date.slice(0, 10)})`), ' · '] : null,
+          h('a', { class: 'lnk', onclick: (ev) => accept([x.photo], true, ev) }, 'Accept as it is')))) });
     })(),
     (() => {  // the date is outside the date the folder is named for: fix the date, move the file, or accept it
       const u = q.wrongfolder || { count: 0, items: [], accepted: 0 }, items = u.items;

@@ -165,12 +165,10 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
             con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (vid, current))
     # the original's edits not yet in digiKam's database are the version's too (its sidecar is a copy of the
     # original's); then its sidecar regions and tag list are written from its own rows: upright, at its own size
-    import json as _json
-    from app.data import state as _state
     from app.faces import facemgr
     e = edits.pending().get(int(pid))
     if e:
-        _state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (vid, _json.dumps(e), int(__import__("time").time()))))
+        edits.save_pending([(vid, e)])
     facemgr.write_regions_many([vid])
     what = ", ".join(k for k in ("exposure", "contrast", "saturation", "warmth", "angle") if p[k]) + (", auto levels" if p["autolevel"] else "")
     history.record([{"photo_id": vid, "action": "added", "path": dst, "summary": f"New version of {name} ({what.strip(', ')})", "details": {"from": int(pid), **p}},

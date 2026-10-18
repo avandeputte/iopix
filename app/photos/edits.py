@@ -83,6 +83,22 @@ def signature() -> str:
         con.close()
 
 
+def _next_ts(c) -> int:
+    """The stamp for a pending edit written now: never equal to the newest one, so two edits within the same second
+    still change signature() (and the index shows the second)."""
+    newest = c.execute("SELECT coalesce(max(ts), 0) FROM pending_edits").fetchone()[0] or 0
+    return max(int(time.time()), int(newest) + 1)
+
+
+def save_pending(rows: list):
+    """rows: [(photo id, edit dict)]: remembered (replacing what was there), with a fresh stamp."""
+    if rows:
+        def go(c):
+            ts = _next_ts(c)
+            c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", [(int(pid), json.dumps(e), ts) for pid, e in rows])
+        appstate._write(go)
+
+
 def pending() -> dict:
     """photo_id -> remembered edit."""
     from app.data import vdb
@@ -150,7 +166,7 @@ def remap_pending_tags(mapping: dict) -> list:
             rows.append((pid, json.dumps(e), int(time.time())))
             touched.append(pid)
         if rows:
-            appstate._write(lambda c: c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", rows))
+            save_pending([(r[0], json.loads(r[1])) for r in rows])
     return touched
 
 
@@ -167,7 +183,7 @@ def drop_pending_fields(photo_ids, fields):
             e = {k: v for k, v in e.items() if k not in keys}
             (rows.append((int(pid), json.dumps(e), int(time.time()))) if e else gone.append(int(pid)))
         if rows:
-            appstate._write(lambda c: c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", rows))
+            save_pending([(r[0], json.loads(r[1])) for r in rows])
         forget(gone)
 
 
@@ -637,9 +653,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
         failed += [{"id": i, "error": "saved in the sidecar, but the image file could not be written", "sidecar": True} for i in file_bad]
         ok = [i for i in dict.fromkeys(owner.values()) if i not in bad]
         if ok:
-            now = int(time.time())
-            appstate._write(lambda c: c.executemany(
-                "INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", [(pid, json.dumps(merged[pid]), now) for pid in ok]))
+            save_pending([(pid, merged[pid]) for pid in ok])
             _recheck(ok)
     _log_edits(ok, photos, mine, before, snaps, in_files)
     return {"edited": len(ok), "failed": failed, "files": in_files}

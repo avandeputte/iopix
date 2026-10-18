@@ -328,7 +328,7 @@ def _pending_from_sidecar(photo: dict):
             if not ch["remove_tags"]:
                 ch.pop("remove_tags")
         if ch:
-            state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (photo["id"], json.dumps(ch), int(time.time()))))
+            edits.save_pending([(photo["id"], ch)])
     facemgr.write_regions_many([photo["id"]])  # people and face boxes back in, from the database
 
 
@@ -374,6 +374,6 @@ def _restore_deleted(e: dict) -> dict:
     if ch:
         state_ch = {"rating": max(int(ch.get("rating") or 0), 0), **{k: v for k, v in ch.items() if k != "rating"}}
         from app.data import state
-        state._write(lambda c: c.execute("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", (new_id, json.dumps(state_ch), int(time.time()))))
+        edits.save_pending([(new_id, state_ch)])
     _ = deletion, edits
     return {"restored": "deleted", "id": new_id}

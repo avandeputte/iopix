@@ -98,6 +98,9 @@ def scan() -> dict:
                              "apart": max(abs(a[k] - b[k]) for _va, a in g for _vb, b in g for k in range(4))})
         if len(groups) > 1:
             separate.append({"photo": img, "name": name, "rects": [list(g[0][1]) for g in groups]})
+    bad_dates = _baddate()
+    acc_d = _accepted("baddate")
+    bad_shown = [u for u in bad_dates if acc_d.get(u["photo"]) != u["signature"]]
     wrong = _wrongfolder()
     acc_w = _accepted("wrongfolder")
     wrong_shown = [u for u in wrong if acc_w.get(u["photo"]) != u["signature"]]
@@ -114,6 +117,7 @@ def scan() -> dict:
             "unnamed_accepted": len(unnamed) - len(shown), "untagged": untagged_shown, "untagged_accepted": len(untagged) - len(untagged_shown),
             "nolocation": noloc_shown, "nolocation_accepted": len(noloc) - len(noloc_shown),
             "wrongfolder": wrong_shown, "wrongfolder_accepted": len(wrong) - len(wrong_shown),
+            "baddate": bad_shown, "baddate_accepted": len(bad_dates) - len(bad_shown),
             "at": int(time.time())}
 
 
@@ -220,6 +224,43 @@ def _wrongfolder() -> list:
     return out
 
 
+# dates cameras and programs write when they know none: the start of the Mac, Unix, DOS and Y2K clocks
+PLACEHOLDER_DATES = ("1904-01-01T00:00:00", "1970-01-01T00:00:00", "1980-01-01T00:00:00", "2000-01-01T00:00:00")
+EARLIEST_YEAR = 1901  # a photo dated before this is almost always a missing or broken date (1900-01-01 and the like)
+
+
+def _baddate() -> list:
+    """Photos and videos whose date cannot be right: before 1901, in the future, or exactly a clock's starting point
+    (1970-01-01 00:00:00...). A date its folder is named for (a /1970 folder of scans) is taken as meant.
+    [{photo, ts, name, taken, folder, folder_id, reason, folder_date, signature}]."""
+    con = index.open_index()
+    try:
+        albums = {aid: path for aid, path in con.execute("SELECT id, path FROM albums")}
+        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != ''").fetchall()
+    finally:
+        con.close()
+    soon = (dt.datetime.now() + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+    out = []
+    for pid, ts, name, taken, aid in rows:
+        t = taken[:19]
+        if t[:4] < str(EARLIEST_YEAR):
+            reason = f"dated {t[:4]}"
+        elif t > soon:
+            reason = "dated in the future"
+        elif t in PLACEHOLDER_DATES:
+            reason = "a camera's or program's default date"
+        else:
+            continue
+        path = albums.get(aid, "")
+        fd = folder_date(path)
+        if fd and fd[0] == int(t[:4]) and reason != "dated in the future":
+            continue  # the folder is named for that year: meant (scans of old prints, a year-only date)
+        out.append({"photo": pid, "ts": ts, "name": name, "taken": t, "folder": path, "folder_id": aid, "reason": reason,
+                    "folder_date": f"{fd[0]:04d}-{(fd[1] or 1):02d}-{(fd[2] or 1):02d}T12:00:00" if fd else None, "signature": t})
+    out.sort(key=lambda u: (u["taken"], u["folder"], u["name"]))
+    return out
+
+
 def _accepted(check: str) -> dict:
     """{photo: signature} the owner accepted for this check."""
     from app.data import vdb
@@ -256,7 +297,7 @@ def accept(photos: list, check: str = "unnamed", on: bool = True) -> int:
     """Accept these photos' finding as it is (they leave the list until their faces change), or take it back."""
     from app.photos import history
     from app.data import vdb
-    if check not in ("unnamed", "untagged", "nolocation", "wrongfolder"):
+    if check not in ("unnamed", "untagged", "nolocation", "wrongfolder", "baddate"):
         raise ValueError("Unknown check")
     want = {int(p) for p in photos}
     current = {u["photo"]: u["signature"] for u in scan()[check]} if on else {}
@@ -282,7 +323,7 @@ def items(check: str, offset: int = 0, limit: int = 120) -> dict:
     s = scan()
     if check == "near":
         rows = [{"photo": n["photo"], "name": n["name"], "apart": n["apart"]} for n in s["near"]]
-    elif check in ("separate", "invalid", "unnamed", "untagged", "nolocation", "wrongfolder"):
+    elif check in ("separate", "invalid", "unnamed", "untagged", "nolocation", "wrongfolder", "baddate"):
         rows = s[check]
     else:
         raise ValueError("Unknown list")
@@ -301,6 +342,7 @@ def summary(s: dict = None, limit: int = 120) -> dict:
             "untagged": {"count": len(s["untagged"]), "items": s["untagged"][:limit], "accepted": s["untagged_accepted"]},
             "nolocation": {"count": len(s["nolocation"]), "items": s["nolocation"][:limit], "accepted": s["nolocation_accepted"]},
             "wrongfolder": {"count": len(s["wrongfolder"]), "items": s["wrongfolder"][:limit], "accepted": s["wrongfolder_accepted"]},
+            "baddate": {"count": len(s["baddate"]), "items": s["baddate"][:limit], "accepted": s["baddate_accepted"]},
             "progress": dict(progress)}
 
 
