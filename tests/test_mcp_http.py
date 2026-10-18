@@ -85,3 +85,14 @@ def test_consistency_tools_need_the_token(client):
     assert not ok.get("isError") and "summary" in ok["content"][0]["text"]
     r = _rpc(client, "tools/call", {"name": "consistency_sync", "arguments": {"token": tok, "photo_ids": [], "source": "db", "targets": ["db"], "fields": ["title"]}}, id=42)["result"]
     assert r.get("isError"), "the source cannot also be a target"
+
+
+def test_rewrite_sidecars_tool(client, lib):
+    """rewrite_sidecars needs the admin token and rewrites the given photos' sidecars from digiKam's database."""
+    import pytest as _pytest
+    from mcp.server.mcpserver.exceptions import ToolError
+    from app import mcp_server, updates
+    with _pytest.raises(ToolError):
+        mcp_server.rewrite_sidecars("wrong", [lib["ids"][0]])
+    r = mcp_server.rewrite_sidecars(updates.admin_token(), lib["ids"][:2])
+    assert r["photos"] == 2 and r["tags_failed"] == [] and set(r["regions"]) == {str(i) for i in lib["ids"][:2]}, r

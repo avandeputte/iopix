@@ -590,6 +590,22 @@ def consistency_sync(token: str, photo_ids: list[int], source: str, targets: lis
         raise ToolError(str(e))
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
+    """Rewrite these photos' XMP sidecars (tag list and face regions) from digiKam's database, as the viewer does
+    after a tag or face change: for when the database was changed outside the viewer. Each sidecar is backed up
+    before its first change. Returns {photos, tags_failed, regions}. Needs the admin token."""
+    _need_token(token)
+    from app.digikam import dbsync
+    from app.faces import facemgr
+    from app.photos import edits
+    ids = [int(i) for i in photo_ids][:5000]
+    paths = dict(dbsync._photo_paths(ids))
+    failed = edits.rewrite_tags([{"id": i, "path": p} for i, p in paths.items()])
+    regions = facemgr.write_regions_many(list(paths))
+    return {"photos": len(paths), "tags_failed": failed, "regions": {str(k): v for k, v in regions.items()}}
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def face_quality(token: str) -> dict:
     """Face metadata quality (Maintenance > Face quality): regions of one person stored twice a few pixels apart

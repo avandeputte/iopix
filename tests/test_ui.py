@@ -1039,7 +1039,7 @@ def test_video_date_change_shows_in_the_viewer(page, server):
     _open_photo(page, server, vid)
     page.keyboard.press("i")
     page.wait_for_selector(".lb-info:not([hidden])", timeout=5000)
-    page.locator(".lb-info a.lnk", has_text="change").first.click()
+    page.locator(".lb-info .iactions").click(); page.locator(".facemenu .fmi", has_text="Change the date").click()
     page.locator(".lb-info .dateedit input[type=datetime-local]").fill("2009-09-09T17:00")
     page.locator(".lb-info .dateedit button", has_text="Set date").click()
     page.wait_for_function("document.querySelector('.lb-info .irow')?.innerText.includes('2009')", timeout=5000)
