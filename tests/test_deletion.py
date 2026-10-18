@@ -6,7 +6,8 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from app import config, index, state
+from app import config
+from app.data import index, state
 
 
 def test_delete_needs_confirmation(client, lib):

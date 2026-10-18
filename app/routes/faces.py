@@ -6,22 +6,22 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import config
-from .. import dbsync
-from .. import edits
-from .. import facedetect
-from .. import facemgr
-from .. import facevecs
-from .. import neardups
-from .. import thumbs
-from ..core import IMG_CACHE
-from ..core import DB_ERRORS
-from ..core import db
-from ..core import _kick
-from ..core import jresp
-from ..core import _photo_row
-from ..core import _face_detect_allowed
-from ..core import _rebuild_after_write
+from app import config
+from app.digikam import dbsync
+from app.photos import edits
+from app.faces import facedetect
+from app.faces import facemgr
+from app.faces import facevecs
+from app.ai import neardups
+from app import thumbs
+from app.core import IMG_CACHE
+from app.core import DB_ERRORS
+from app.core import db
+from app.core import _kick
+from app.core import jresp
+from app.core import _photo_row
+from app.core import _face_detect_allowed
+from app.core import _rebuild_after_write
 
 
 router = APIRouter()

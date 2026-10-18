@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from app import index
+from app.data import index
 
 
 def _row(db, pid):

@@ -1,7 +1,8 @@
 """Map provider: OpenStreetMap by default; Google Maps when chosen with a key, with the tile
 session created server-side and place search going to Google's geocoder; a failing session
 falls back to OpenStreetMap with a message; the key is never shown back."""
-from app import geocode, maps, state
+from app.geo import geocode, maps
+from app.data import state
 
 
 def _reset():
@@ -87,7 +88,7 @@ def test_google_requests_carry_the_viewer_address_as_referer(client, monkeypatch
 def test_place_search_falls_back_from_google_to_openstreetmap(monkeypatch):
     """A Google key restricted to browser referrers is refused by Google's server-side APIs: the search
     then answers from OpenStreetMap and says why, instead of finding nothing."""
-    from app import geocode, maps
+    from app.geo import geocode, maps
     geocode._cache.clear()
     monkeypatch.setattr(maps, "provider", lambda: "google")
     monkeypatch.setattr(maps, "geocode", lambda q: (_ for _ in ()).throw(RuntimeError("REQUEST_DENIED: API keys with referer restrictions cannot be used with this API.")))
@@ -104,7 +105,7 @@ def test_place_search_falls_back_from_google_to_openstreetmap(monkeypatch):
 
 
 def test_elevation_endpoint(client, monkeypatch):
-    from app import maps
+    from app.geo import maps
     monkeypatch.setattr(maps, "elevation", lambda lat, lon: {"alt": 367.0, "source": "Open-Meteo", "note": None})
     r = client.get("/api/elevation", params={"lat": 40.49, "lon": -80.23})
     assert r.status_code == 200 and r.json()["alt"] == 367.0
@@ -112,7 +113,7 @@ def test_elevation_endpoint(client, monkeypatch):
 
 
 def test_location_suggestions_come_from_photos_nearest_in_time(client, lib):
-    from app import index
+    from app.data import index
     con = index.open_index()
     rows = con.execute("SELECT id, ts FROM photos WHERE lat IS NOT NULL ORDER BY ts").fetchall()
     con.close()
@@ -126,7 +127,7 @@ def test_location_suggestions_come_from_photos_nearest_in_time(client, lib):
 
 
 def test_landmark_endpoint(client, lib, monkeypatch):
-    from app import maps
+    from app.geo import maps
     monkeypatch.setattr(maps, "key", lambda: "k")
     monkeypatch.setattr(maps, "landmarks", lambda jpeg: [{"name": "Eiffel Tower", "score": 0.93, "lat": 48.8584, "lon": 2.2945}] if jpeg[:2] == b"\xff\xd8" else [])
     r = client.post("/api/location/landmark", json={"id": lib["ids"][0]})

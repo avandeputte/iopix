@@ -1,6 +1,7 @@
 """Settings and viewer state live in the viewer's own database: defaults,
 round trips, the read cache, and the read-only switch."""
-from app import config, state
+from app import config
+from app.data import state
 
 
 def test_setting_default_and_roundtrip():

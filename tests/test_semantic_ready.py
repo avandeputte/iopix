@@ -1,7 +1,7 @@
 """Content search only counts as available when a model is really on disk: a
 models folder holding other downloads (YOLOX, BLIP) must not make the viewer
 try to load CLIP and fail at every start (seen on a fresh Linux install)."""
-from app import semantic
+from app.ai import semantic
 
 
 def test_models_folder_alone_is_not_clip(tmp_path, monkeypatch):

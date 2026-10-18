@@ -1,6 +1,6 @@
 """The viewer's own log (data/viewer.log, rotating; see main._setup_file_log), read for Maintenance ›
 Server log and the MCP server_log tool."""
-from . import config
+from app import config
 
 PAGE_REQUEST = " uvicorn.access: "
 

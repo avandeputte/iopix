@@ -1291,7 +1291,7 @@ def test_import_page_plans_then_imports_a_dropped_photo(page, server, lib, tmp_p
 
 def test_rotate_key_turns_the_photo_and_undo_from_the_toast(page, server, lib):
     from test_lossless import _face_jpeg, _info
-    from app import lossless
+    from app.photos import lossless
     if not lossless.jpegtran():
         pytest.skip("jpegtran is not installed here")
     pid, path, (tag, rect), (w, h, o) = _face_jpeg(lib)

@@ -1,7 +1,8 @@
 """The digiKam database connection is a setting the admin can change at runtime: settings
 override the environment, the password is stored but never shown, a test connection reports
 counts without saving, and saving kicks the index."""
-from app import dkdb, state
+from app.digikam import dkdb
+from app.data import state
 
 
 def _clear():
@@ -62,7 +63,7 @@ def test_test_connection_sqlite_and_mysql(client, monkeypatch, lib):
 def test_mysql_change_fingerprint_sees_edits_in_place(monkeypatch):
     """On MySQL the viewer notices its own tag edits (badge picture, rename, move) and face changes,
     not only added or removed rows, so the index is rebuilt and the UI shows them."""
-    from app import dkdb
+    from app.digikam import dkdb
     monkeypatch.setattr(dkdb, "is_mysql", lambda: True)
     rows = {"icon": 86}
     class Cur:
@@ -90,7 +91,7 @@ def test_mysql_change_fingerprint_sees_edits_in_place(monkeypatch):
 def test_mysql_dump_only_for_destructive_operations(monkeypatch, tmp_path):
     """MySQL: ordinary changes take no dump (whatever the mode); destructive ones (force=True) take a fresh one
     each time in auto and daily (the old name for auto); skip never dumps."""
-    from app import dkdb
+    from app.digikam import dkdb
     monkeypatch.setattr(dkdb, "BACKUP_DIR", tmp_path)
     monkeypatch.setattr(dkdb, "is_mysql", lambda: True)
     mode = {"backup": "daily"}

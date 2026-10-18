@@ -2,7 +2,9 @@
 similarities; the viewer proposes no names (groups only), both pages degrade without data."""
 import numpy as np
 
-from app import facevecs, index, neardups, vdb
+from app.faces import facevecs
+from app.data import index, vdb
+from app.ai import neardups
 
 
 def _unknown_faces(n):
@@ -70,7 +72,7 @@ def test_near_duplicate_sets(client, lib):
         con.commit()
     finally:
         con.close()
-    from app import state
+    from app.data import state
     state.set_setting("near_dups_gen", "x"); state.set_setting("near_dups_level", "normal")
     g = neardups.groups()
     assert [x["n"] for x in g] == [3, 2] and g[0]["score"] == 0.98

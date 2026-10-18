@@ -10,22 +10,22 @@ from contextlib import asynccontextmanager
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from . import analysis
-from . import config
-from . import consistency
-from . import edits
-from . import history
-from . import tagmanager
-from . import thumbs
-from . import state as appstate
-from . import users
-from . import mcp_server
-from . import updates
-from . import models as dlmodels
+from app.ai import analysis
+from app import config
+from app.photos import consistency
+from app.photos import edits
+from app.photos import history
+from app.photos import tagmanager
+from app import thumbs
+from app.data import state as appstate
+from app import users
+from app import mcp_server
+from app import updates
+from app.ai import models as dlmodels
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from .routes import browse, images, albums, editing, admin, review, organize, faces
-from .core import state, _kick, _refresh, _auto, _watch, resolve, prewarmer, _setup_file_log, _models_arrived
+from app.routes import browse, images, albums, editing, admin, review, organize, faces
+from app.core import state, _kick, _refresh, _auto, _watch, resolve, prewarmer, _setup_file_log, _models_arrived
 __all__ = ["app", "state", "_kick", "_refresh", "_auto", "_watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
 
 @asynccontextmanager
@@ -43,8 +43,8 @@ async def lifespan(_app):
     _refresh(initial=True)
     threading.Thread(target=thumbs.prune_previews, daemon=True).start()
     threading.Thread(target=_watch, name="reindex", daemon=True).start()
-    from . import scanner
-    from .core import _rebuild_after_write
+    from app.photos import scanner
+    from app.core import _rebuild_after_write
     scanner.start(_rebuild_after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
     updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them

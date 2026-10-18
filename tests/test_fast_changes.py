@@ -2,7 +2,9 @@
 straight from digiKam's database, and the viewer's copy of the library follows in the background."""
 import time
 
-from app import config, index, library
+from app import config
+from app.data import index
+from app.digikam import library
 
 
 def _backups():

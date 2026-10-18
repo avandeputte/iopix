@@ -22,7 +22,7 @@ try:
 except Exception:  # HEIC files will fall back to a placeholder
     pillow_heif = None
 
-from . import config
+from app import config
 
 Image.MAX_IMAGE_PIXELS = None
 FFMPEG = shutil.which("ffmpeg")
@@ -212,7 +212,7 @@ class Prewarmer:
             self.last = time.time()
 
         def run():
-            from . import jobs
+            from app import jobs
             if gen != self._gen:
                 return
             self.started = self.last = time.time()
@@ -221,7 +221,7 @@ class Prewarmer:
             if gen == self._gen:
                 self.running = False
 
-        from . import jobs
+        from app import jobs
         jobs.submit("thumbs", run)  # one background job at a time
 
 

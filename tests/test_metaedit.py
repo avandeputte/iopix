@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from app import index
+from app.data import index
 
 
 def _jpeg(lib):

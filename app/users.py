@@ -21,7 +21,8 @@ import re
 import secrets
 import time
 
-from . import config, state
+from app import config
+from app.data import state
 
 ROLES = ("viewer", "editor", "admin")
 COOKIE = "dkv_session"

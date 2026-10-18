@@ -15,44 +15,44 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import analysis
-from .. import caption
-from .. import config
-from .. import dbsync
-from .. import detector
-from .. import dkdb
-from .. import edits
-from .. import merge
-from .. import facedetect
-from .. import facevecs
-from .. import library
-from .. import index
-from .. import vdb
-from .. import thumbs
-from .. import state as appstate
-from .. import jobs as bgjobs
-from .. import geocode
-from .. import maps
-from .. import users
-from .. import updates
-from .. import models as dlmodels
-from ..semantic import ENGINES
-from ..semantic import semantic
-from ..semantic import enabled as semantic_enabled
-from ..semantic import _ready as semantic_ready
-from ..core import DB_ERRORS
-from ..core import state
-from ..core import prewarmer
-from ..core import db
-from ..core import _start_prewarm
-from ..core import _kick
-from ..core import app_name
-from ..core import _face_detect_allowed
-from ..core import _rebuild_after_write
+from app.ai import analysis
+from app.ai import caption
+from app import config
+from app.digikam import dbsync
+from app.ai import detector
+from app.digikam import dkdb
+from app.photos import edits
+from app.digikam import merge
+from app.faces import facedetect
+from app.faces import facevecs
+from app.digikam import library
+from app.data import index
+from app.data import vdb
+from app import thumbs
+from app.data import state as appstate
+from app import jobs as bgjobs
+from app.geo import geocode
+from app.geo import maps
+from app import users
+from app import updates
+from app.ai import models as dlmodels
+from app.ai.semantic import ENGINES
+from app.ai.semantic import semantic
+from app.ai.semantic import enabled as semantic_enabled
+from app.ai.semantic import _ready as semantic_ready
+from app.core import DB_ERRORS
+from app.core import state
+from app.core import prewarmer
+from app.core import db
+from app.core import _start_prewarm
+from app.core import _kick
+from app.core import app_name
+from app.core import _face_detect_allowed
+from app.core import _rebuild_after_write
 
-from ..core import _compute_tag_covers
+from app.core import _compute_tag_covers
 
-from .browse import _photos_cached
+from app.routes.browse import _photos_cached
 
 router = APIRouter()
 
@@ -91,7 +91,7 @@ async def api_settings(request: Request):
     if "file_scanner" in body:  # watch the album folders for files added, changed or removed outside the viewer
         appstate.set_setting("file_scanner", "1" if body["file_scanner"] else "0")
         if body["file_scanner"]:
-            from .. import scanner
+            from app.photos import scanner
             scanner.run_soon()
     if "scan_interval" in body:
         try:
@@ -593,7 +593,7 @@ def api_restart():
 @router.get("/api/log")
 def api_log(lines: int = 300, level: str = "any", contains: str = "", requests: int = 0):
     """Maintenance › Server log: the end of data/viewer.log, filtered (admins)."""
-    from .. import logs
+    from app import logs
     return logs.tail(lines, contains[:200], level if level in ("any", "warning", "error") else "any", bool(requests))
 
 
@@ -640,7 +640,7 @@ def api_maintenance(request: Request):
 
 
 def _scanner_state() -> dict:
-    from .. import scanner
+    from app.photos import scanner
     return {"enabled": scanner.enabled(), "interval": scanner.interval(), "running": scanner.progress["running"], "last": scanner.progress["last"]}
 
 
@@ -652,7 +652,7 @@ def api_scan_status():
 @router.post("/api/scan")
 async def api_scan_run():
     """Scan the album folders now (also when the setting is off): new, changed and vanished files and folders."""
-    from .. import scanner
+    from app.photos import scanner
     if not config.DB_WRITE:
         raise HTTPException(403, "Writing to digiKam's database is turned off (DB_WRITE=0)")
     if scanner.progress["running"]:

@@ -16,7 +16,8 @@ import threading
 import time
 import traceback
 
-from . import config, state
+from app import config
+from app.data import state
 
 ORDER = ["thumbs", "pixels", "embeddings", "vision", "facedetect", "faces", "neardups", "captions"]
 

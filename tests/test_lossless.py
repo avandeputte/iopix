@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from app import index, lossless
+from app.data import index
+from app.photos import lossless
 
 
 def _face_jpeg(lib):
@@ -45,7 +46,7 @@ def _info(db, pid):
 
 
 def _vid(pid):
-    from app import vdb
+    from app.data import vdb
     con = vdb.connect()
     try:
         r = con.execute("SELECT vid FROM photo_identity WHERE dk_id = ?", (pid,)).fetchone()

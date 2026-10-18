@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from app import edits, index, scanner
+from app.photos import edits, scanner
+from app.data import index
 
 
 def _db(lib):
@@ -156,7 +157,7 @@ def test_scan_finds_new_changed_and_vanished_files(client, lib, tmp_path):
 
 
 def test_an_empty_or_missing_root_is_left_alone(lib, monkeypatch, tmp_path):
-    from app import dkdb
+    from app.digikam import dkdb
     empty = tmp_path / "unmounted"
     empty.mkdir()
     con = dkdb.connect()

@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from app import facedetect, facevecs, index, models, state, thumbs, vdb
+from app.faces import facedetect, facevecs
+from app.data import index, state, vdb
+from app.ai import models
+from app import thumbs
 
 MODELS = Path("/private/tmp/claude-501/-Users-alex-Pictures/cd6ab508-dd1f-4df1-999c-d6fe0a83fe5c/scratchpad/models")
 

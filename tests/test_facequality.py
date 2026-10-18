@@ -7,7 +7,10 @@ import time
 
 import pytest
 
-from app import dkdb, edits, facemgr, facequality, index
+from app.digikam import dkdb
+from app.photos import edits
+from app.faces import facemgr, facequality
+from app.data import index
 
 
 def _regions(db, pid, tag):
@@ -69,7 +72,7 @@ def test_report_endpoint_is_for_admins_and_lists_counts(client, lib):
 def test_image_files_with_the_duplicates_are_rewritten_too(client, lib):
     if not edits.available():
         pytest.skip("exiftool is not available here")
-    from app import vdb
+    from app.data import vdb
     ic = index.open_index()
     jpegs = {r[0] for r in ic.execute("SELECT id FROM photos WHERE lower(path) LIKE '%.jpg' OR lower(path) LIKE '%.jpeg'")}
     ic.close()
@@ -161,7 +164,8 @@ def test_photos_with_only_unnamed_faces_can_be_accepted_or_ignored(client, lib):
 
 
 def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, lib):
-    from app import analysis, vdb
+    from app.ai import analysis
+    from app.data import vdb
     q = client.get("/api/quality").json()["untagged"]
     assert {"count", "items", "accepted"} <= set(q)
     # object detection saw two people on a photo nobody is tagged on

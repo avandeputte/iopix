@@ -8,23 +8,23 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import config
-from .. import dbsync
-from .. import deletion
-from .. import edits
-from .. import folders
-from .. import index
-from .. import lossless
-from .. import thumbs
-from .. import state as appstate
-from .. import users
-from ..core import IMG_CACHE
-from ..core import DB_ERRORS
-from ..core import db
-from ..core import _kick
-from ..core import _organize_allowed
-from ..core import _run_organize
-from ..core import _rebuild_after_write
+from app import config
+from app.digikam import dbsync
+from app.photos import deletion
+from app.photos import edits
+from app.photos import folders
+from app.data import index
+from app.photos import lossless
+from app import thumbs
+from app.data import state as appstate
+from app import users
+from app.core import IMG_CACHE
+from app.core import DB_ERRORS
+from app.core import db
+from app.core import _kick
+from app.core import _organize_allowed
+from app.core import _run_organize
+from app.core import _rebuild_after_write
 
 
 router = APIRouter()
@@ -54,7 +54,7 @@ async def api_photos_transform(request: Request):
 async def api_photo_adjust(request: Request):
     """Body {id, exposure, contrast, saturation, warmth, angle, autolevel}: save an adjusted copy as a new version
     (name_v1.jpg beside it, linked as digiKam links versions); the original is not changed."""
-    from .. import versions
+    from app.photos import versions
     _organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
@@ -93,7 +93,7 @@ async def api_photos_crop(request: Request):
 @router.post("/api/photos/trash")
 async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     ids = [int(i) for i in (await request.json()).get("ids") or []][:20000]
     if not ids:
@@ -106,7 +106,7 @@ async def api_photos_trash(request: Request):
 @router.get("/api/trash")
 def api_trash(request: Request):
     """What is in the trash (every album root), newest first."""
-    from .. import organize
+    from app.photos import organize
     if not users.can_write(request.state.user):
         raise HTTPException(403 if request.state.user else 401, "Editors only")
     items = organize.listing()
@@ -116,7 +116,7 @@ def api_trash(request: Request):
 @router.get("/api/trash/thumb")
 def api_trash_thumb(info: str):
     """A thumbnail of a trashed file, named by its .dtrashinfo record (which must sit in an album root's trash)."""
-    from .. import organize
+    from app.photos import organize
     item = next((t for t in organize.listing() if t["info"] == info), None)
     if not item or not item["exists"]:
         raise HTTPException(404)
@@ -143,7 +143,7 @@ def api_trash_thumb(info: str):
 @router.post("/api/trash/restore")
 async def api_trash_restore(request: Request):
     """Body {infos: [.dtrashinfo paths]}: put those photos back where they were."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     infos = [str(i) for i in (await request.json()).get("infos") or []][:20000]
     r = await run_in_threadpool(_run_organize, organize.restore, infos)
@@ -154,7 +154,7 @@ async def api_trash_restore(request: Request):
 @router.post("/api/trash/empty")
 async def api_trash_empty(request: Request):
     """Body {infos: [...]} or {all: true}: delete those trash entries for good."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     infos = None if body.get("all") is True else [str(i) for i in body.get("infos") or []][:20000]
@@ -168,7 +168,7 @@ async def api_trash_empty(request: Request):
 @router.post("/api/photos/move")
 async def api_photos_move(request: Request):
     """Body {ids, album}: move the photos (and their sidecars) into that folder; ids and everything attached stay."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     ids = [int(i) for i in body.get("ids") or []][:20000]
@@ -182,7 +182,7 @@ async def api_photos_move(request: Request):
 @router.post("/api/photos/rename")
 async def api_photos_rename(request: Request):
     """Body {id, name}: a new file name (the extension stays)."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
@@ -206,7 +206,7 @@ async def api_folder_properties(album_id: int, request: Request):
 @router.post("/api/photos/rename-pattern")
 async def api_photos_rename_pattern(request: Request):
     """Body {ids, pattern: date|date-name|date-seq}: rename the files by the date they were taken (ids kept, undo per photo)."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     ids = [int(i) for i in (body.get("ids") or [])][:2000]
@@ -220,7 +220,7 @@ async def api_photos_rename_pattern(request: Request):
 @router.post("/api/folders/{album_id}/rename")
 async def api_folder_rename(album_id: int, request: Request):
     """Body {name}: rename the folder on disk and in the database (subfolders follow)."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
@@ -231,7 +231,7 @@ async def api_folder_rename(album_id: int, request: Request):
 @router.post("/api/folders/{album_id}/move")
 async def api_folder_move(album_id: int, request: Request):
     """Body {parent}: move the folder (with everything in it) under another folder of the same album root."""
-    from .. import organize
+    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
@@ -313,7 +313,7 @@ async def api_folder_create(request: Request):
 @router.get("/api/import/layouts")
 def api_import_layouts(request: Request):
     """The folder layouts an import can use, and the one in use."""
-    from .. import importer
+    from app.photos import importer
     return {"layouts": importer.layouts(), "layout": importer.layout()}
 
 
@@ -321,7 +321,7 @@ def api_import_layouts(request: Request):
 async def api_import_stage(request: Request):
     """Multipart `files` (and an optional `token` to add to an import started earlier): the files are kept
     aside and looked at; nothing goes into the library yet. Returns the plan."""
-    from .. import importer
+    from app.photos import importer
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
     form = await request.form()
@@ -341,7 +341,7 @@ async def api_import_stage(request: Request):
 
 @router.get("/api/import/{token}")
 def api_import_plan(token: str, layout: str = None):
-    from .. import importer
+    from app.photos import importer
     try:
         return importer.plan(token, layout if layout in importer.LAYOUTS else None)
     except dbsync.SyncError as e:
@@ -351,7 +351,7 @@ def api_import_plan(token: str, layout: str = None):
 @router.post("/api/import/{token}/run")
 async def api_import_run(token: str, request: Request):
     """Body {layout?, include?: [names], duplicates?: 'skip'|'import', remember?: bool}: import the staged files."""
-    from .. import importer
+    from app.photos import importer
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
     body = await request.json() if (await request.body()) else {}
@@ -370,7 +370,7 @@ async def api_import_run(token: str, request: Request):
 
 @router.post("/api/import/{token}/discard")
 def api_import_discard(token: str):
-    from .. import importer
+    from app.photos import importer
     importer.discard(token)
     return {"ok": True}
 
@@ -378,7 +378,7 @@ def api_import_discard(token: str):
 @router.post("/share")
 async def share_target(request: Request):
     """The installed app as a share target (Android): files shared to it are staged, then the Import page opens."""
-    from .. import importer
+    from app.photos import importer
     if not users.can_write(request.state.user):  # the share sheet cannot show a JSON error: the page explains
         return RedirectResponse("/#/import?error=signin", status_code=303)
     if appstate.read_only() or not (config.DB_WRITE and edits.available()):

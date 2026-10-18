@@ -7,7 +7,9 @@ import sqlite3
 
 import pytest
 
-from app import analysis, state, users, vdb
+from app.ai import analysis
+from app.data import state, vdb
+from app import users
 
 
 def _mysql_cfg():

@@ -74,7 +74,7 @@ def test_a_failing_job_does_not_stop_the_worker():
 def test_thread_budget_is_bounded(monkeypatch):
     n = os.cpu_count() or 4
     assert 1 <= jobs.threads() <= max(1, n - 1)
-    from app import state
+    from app.data import state
     state.set_setting("bg_threads", "999")
     assert jobs.threads() == max(1, n - 1)
     state.set_setting("bg_threads", "0")

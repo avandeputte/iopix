@@ -4,7 +4,10 @@ what digiKam would not allow, and keep the index in step."""
 
 import pytest
 
-from app import config, dkdb, facemgr, tagmanager
+from app import config
+from app.digikam import dkdb
+from app.faces import facemgr
+from app.photos import tagmanager
 
 
 def _tags(con):
@@ -116,7 +119,7 @@ def test_batch_runs_in_one_transaction(dk):
 
 def test_container_mode_writes_without_asking(client, dk):
     """DIGIKAM_CHECK=ask/none (containers): the viewer cannot see digiKam, so it neither checks nor asks."""
-    from app import state
+    from app.data import state
     assert client.get("/api/status").json()["digikamCheck"] == "none"
     state.set_setting("digikam_closed_until", "0")  # no vouch in force
     r = client.post("/api/tags/op", json={"op": "add", "parent": 0, "name": "zz-ask-probe"})
@@ -126,7 +129,8 @@ def test_container_mode_writes_without_asking(client, dk):
 def test_face_change_answers_before_the_sidecar_is_written(client, lib):
     """The web app's face change returns right after the database write; the sidecar follows in the background."""
     import time as _t
-    from app import edits, facemgr
+    from app.photos import edits
+    from app.faces import facemgr
     if not edits.available():
         import pytest
         pytest.skip("exiftool is not available here")
@@ -143,7 +147,7 @@ def test_face_change_answers_before_the_sidecar_is_written(client, lib):
             break
         _t.sleep(0.1)
     _t.sleep(1.5)
-    from app import index
+    from app.data import index
     ic = index.open_index(); path = ic.execute("SELECT path FROM photos WHERE id = ?", (pid,)).fetchone()[0]; ic.close()
     side = open(path + ".xmp", encoding="utf-8").read()
     assert "mwg-rs" in side or "RegionInfo" in side

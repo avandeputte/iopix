@@ -3,7 +3,7 @@ every row carried over, a copy kept in db-backups."""
 import json
 import sqlite3
 
-from app import vdb
+from app.data import vdb
 
 
 def test_old_ai_tables_are_migrated_with_their_rows(tmp_path, monkeypatch):

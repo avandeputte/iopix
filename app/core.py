@@ -15,22 +15,22 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
 
-from . import analysis
-from . import concepts
-from . import config
-from . import dbsync
-from . import dkdb
-from . import edits
-from . import facedetect
-from . import facevecs
-from . import index
-from . import vdb
-from . import thumbs
-from . import state as appstate
-from . import models as dlmodels
-from .semantic import semantic
-from .semantic import enabled as semantic_enabled
-from .query import build_where
+from app.ai import analysis
+from app.ai import concepts
+from app import config
+from app.digikam import dbsync
+from app.digikam import dkdb
+from app.photos import edits
+from app.faces import facedetect
+from app.faces import facevecs
+from app.data import index
+from app.data import vdb
+from app import thumbs
+from app.data import state as appstate
+from app.ai import models as dlmodels
+from app.ai.semantic import semantic
+from app.ai.semantic import enabled as semantic_enabled
+from app.data.query import build_where
 
 CACHES: list = []  # lru caches cleared when the index changes (the browsing routes register theirs)
 
@@ -208,7 +208,7 @@ def _watch():
             _refresh(initial=kicked)
         except Exception as e:  # e.g. a wrong database setting (MySQL unreachable): the watcher must outlive it
             state["error"] = str(e)[:300]
-            logging.getLogger("app.index").warning("index refresh failed: %s", e)
+            logging.getLogger("app.data.index").warning("index refresh failed: %s", e)
 
 
 def _models_arrived(keys: list):
@@ -320,7 +320,7 @@ def _organize_allowed():
 
 
 def _run_organize(fn, *args):
-    from . import organize
+    from app.photos import organize
     try:
         return fn(*args)
     except dbsync.SyncError as e:
@@ -338,6 +338,6 @@ def _rebuild_after_write():
     try:
         index.build()
     except Exception as e:  # the watcher retries; the cause goes to the log
-        logging.getLogger("app.index").warning("rebuild after a database write failed: %s", e)
+        logging.getLogger("app.data.index").warning("rebuild after a database write failed: %s", e)
     state["version"] = None
     _kick.set()

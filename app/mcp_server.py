@@ -19,10 +19,12 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import config, edits, index, thumbs, updates
-from . import state as appstate
-from .query import DATE_RE, SORTS, build_where
-from .semantic import semantic, enabled as semantic_enabled
+from app import config, thumbs, updates
+from app.photos import edits
+from app.data import index
+from app.data import state as appstate
+from app.data.query import DATE_RE, SORTS, build_where
+from app.ai.semantic import semantic, enabled as semantic_enabled
 
 VIEWER = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # for the links in results
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -439,8 +441,10 @@ def diagnostics(token: str) -> dict:
     import shutil as sh
     import sys
     import time
-    from . import __version__, dkdb, jobs, models, users
-    from .analysis import progress as analysis_progress
+    from app import __version__, jobs, users
+    from app.digikam import dkdb
+    from app.ai import models
+    from app.ai.analysis import progress as analysis_progress
     try:
         free = sh.disk_usage(str(config.DATA_DIR)).free
     except OSError:
@@ -455,7 +459,7 @@ def diagnostics(token: str) -> dict:
         "disk_free_gb": round(free / 1e9, 1) if free is not None else None,
         "jobs": {**q, "running_for_min": round((time.time() - q["since"]) / 60, 1) if q.get("since") else None},
         "analysis_progress": {k: {"running": v["running"], "done": v["done"], "total": v["total"]} for k, v in analysis_progress.items()},
-        "consistency": {"progress": dict(__import__("app.consistency", fromlist=["progress"]).progress), "summary": __import__("app.consistency", fromlist=["summary"]).summary()},
+        "consistency": {"progress": dict(__import__("app.photos.consistency", fromlist=["progress"]).progress), "summary": __import__("app.photos.consistency", fromlist=["summary"]).summary()},
         "models": [{"key": m["key"], "installed": m["installed"], "revision": m.get("revision")} for m in models.listing()["models"]],
         "search": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done, "total": semantic.total, "model": semantic.chosen()},
         "users": {"exist": users.any_users(), "count": len(users.list_users())},
@@ -490,7 +494,7 @@ def server_log(token: str, lines: int = 200, contains: str = "", level: Literal[
     """The last lines of the viewer's own log (data/viewer.log, rotating). `contains` keeps only lines
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
     _need_token(token)
-    from . import logs
+    from app import logs
     try:
         return logs.tail(min(int(lines), 2000), contains, level)
     except OSError as e:
@@ -504,8 +508,8 @@ def job_queue(token: str) -> dict:
     completed item (a stall shows as a large 'idle_seconds')."""
     _need_token(token)
     import time
-    from . import jobs
-    from .analysis import progress as analysis_progress
+    from app import jobs
+    from app.ai.analysis import progress as analysis_progress
     q = jobs.status()
     now = time.time()
     out = {"running": q["running"], "queued": q["queued"], "threads": q["threads"], "cores": q["cores"],
@@ -513,7 +517,7 @@ def job_queue(token: str) -> dict:
            "analysis": {k: {"running": v["running"], "done": v["done"], "total": v["total"]} for k, v in analysis_progress.items()},
            "search": {"running": semantic.running, "done": semantic.done, "total": semantic.total}}
     try:  # the thumbnail prewarmer lives in the web app; present when this runs inside it
-        from .main import prewarmer
+        from app.main import prewarmer
         out["thumbnails"] = {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total,
                              "idle_seconds": round(now - prewarmer.last) if prewarmer.last else None, "current": list(prewarmer.current.values())[:3]}
     except Exception:
@@ -559,7 +563,7 @@ def photo_file(token: str, photo_id: int) -> dict:
 def check_for_update() -> dict:
     """Installed version and commit versus GitHub's main branch (network), and the outcome of the
     last update run (lastUpdate: ok, text, at)."""
-    from . import __version__
+    from app import __version__
     return {"version": __version__, **updates.check(), "lastUpdate": updates.last_result()}
 
 
@@ -569,7 +573,7 @@ def consistency_report(token: str, field: str = "", offset: int = 0, limit: int 
     caption or tags differ between digiKam's database, the XMP sidecar and the image file, with each
     source's value. field narrows it to one of rating|title|caption|tags. Needs the admin token."""
     _need_token(token)
-    from . import consistency
+    from app.photos import consistency
     return {"progress": dict(consistency.progress), "summary": consistency.summary(),
             **consistency.report(field or None, max(0, offset), max(1, min(limit, 2000)))}
 
@@ -580,7 +584,8 @@ def consistency_sync(token: str, photo_ids: list[int], source: str, targets: lis
     as the consistency page's Sync does: sidecars and files are backed up first; writing the database needs
     digiKam closed and is backed up too. Returns {synced, skipped}. Needs the admin token."""
     _need_token(token)
-    from . import consistency, dbsync
+    from app.photos import consistency
+    from app.digikam import dbsync
     try:
         return consistency.sync([int(i) for i in photo_ids][:20000], source, targets, fields)
     except (ValueError, dbsync.SyncError) as e:
@@ -593,7 +598,7 @@ def face_quality(token: str) -> dict:
     (near), the same person in two separate places (separate), empty or out-of-photo rectangles (invalid), and
     the progress of the last clean-up. Needs the admin token."""
     _need_token(token)
-    from . import facequality
+    from app.faces import facequality
     return facequality.summary(limit=20)
 
 
@@ -605,8 +610,10 @@ def face_cleanup(token: str, files: bool = False) -> dict:
     the cleaned photos that still carry the duplicates are rewritten too (each backed up first, pixels checked
     unchanged). Runs in the background; face_quality shows progress. Needs the admin token."""
     _need_token(token)
-    from . import config, dbsync, facequality
-    from . import state as appstate
+    from app import config
+    from app.digikam import dbsync
+    from app.faces import facequality
+    from app.data import state as appstate
     if not config.DB_WRITE or appstate.read_only():
         raise ToolError("Writing to digiKam's database is turned off")
     try:

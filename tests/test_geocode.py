@@ -1,7 +1,7 @@
 """Place search for the location dialog: Nominatim results are reshaped and cached,
 a dead connection falls back to the offline towns, and the endpoint validates input."""
 
-from app import geocode
+from app.geo import geocode
 
 
 def test_short_query_is_empty(client):

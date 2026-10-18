@@ -3,7 +3,8 @@ is in it (files without a thumbnail do not block it forever), and on an install 
 had a CLIP index the new index answers from the start instead of nothing."""
 import numpy as np
 
-from app import semantic, state
+from app.ai import semantic
+from app.data import state
 
 
 def _fresh(tmp_path, monkeypatch, clip_index: bool):

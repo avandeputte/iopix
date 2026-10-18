@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from app import dkdb, edits, index, state
+from app.digikam import dkdb
+from app.photos import edits
+from app.data import index, state
 
 
 def _count(table: str) -> int:
@@ -166,7 +168,7 @@ def test_viewer_data_follows_a_photo_digikam_renumbered(client, lib):
 
 
 def test_applying_an_edit_rebuilds_so_it_no_longer_shows_as_waiting(client, photo_id):
-    from app import edits
+    from app.photos import edits
     if not edits.available():
         pytest.skip("exiftool not available")
     assert client.post("/api/edit", json={"ids": [photo_id], "changes": {"caption": "Applied caption probe"}}).status_code == 200
@@ -178,7 +180,9 @@ def test_applying_an_edit_rebuilds_so_it_no_longer_shows_as_waiting(client, phot
 
 
 def test_sync_off_folders_and_faces_go_to_the_library(client, lib):
-    from app import edits, facemgr, library
+    from app.photos import edits
+    from app.faces import facemgr
+    from app.digikam import library
     if not edits.available():
         pytest.skip("exiftool not available")
     index.ensure_fresh()
@@ -218,7 +222,10 @@ def test_sync_off_folders_and_faces_go_to_the_library(client, lib):
 def test_changes_made_with_sync_off_merge_back_into_digikam(client, lib):
     """A tag, a face and a folder made with sync off; sync on: the merge writes them into digiKam's database
     (new ids there), then the library is digiKam's again with nothing left to merge."""
-    from app import facemgr, library, main, tagmanager
+    from app.faces import facemgr
+    from app.digikam import library
+    from app import main
+    from app.photos import tagmanager
     index.ensure_fresh()
     dbf = Path(lib["db"])
     pid = lib["ids"][2]
@@ -260,7 +267,8 @@ def test_changes_made_with_sync_off_merge_back_into_digikam(client, lib):
 def test_library_follows_digikam_row_by_row(client, lib):
     """Bringing the library up to date writes only the rows that differ (none when nothing changed), and
     leaves it identical to digiKam's tables, duplicates in the keyless tables included."""
-    from app import dkdb, library, vdb
+    from app.digikam import dkdb, library
+    from app.data import vdb
     index.refresh_library()
     src = dkdb.connect(real=True)
     try:

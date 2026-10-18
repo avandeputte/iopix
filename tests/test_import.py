@@ -5,7 +5,9 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from app import dkdb, edits, index
+from app.digikam import dkdb
+from app.photos import edits
+from app.data import index
 
 
 def _src(lib):
@@ -33,7 +35,7 @@ def _dated(lib, tmp_path, stamp="1999:12:31 10:00:00"):
 
 def forget_identity(ids):
     """Test photos removed behind the viewer's back lose their viewer ids too (the mirror test counts them)."""
-    from app import vdb
+    from app.data import vdb
     con = vdb.connect()
     try:
         for i in ids:

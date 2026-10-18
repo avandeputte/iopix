@@ -4,10 +4,10 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
 
-from .. import state as appstate
-from .. import users
-from ..core import db
-from ..core import jresp
+from app.data import state as appstate
+from app import users
+from app.core import db
+from app.core import jresp
 
 
 router = APIRouter()

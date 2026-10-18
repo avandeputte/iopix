@@ -5,13 +5,13 @@ from fastapi import HTTPException
 from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
-from .. import config
-from .. import dbsync
-from .. import history
-from .. import state as appstate
-from ..core import DB_ERRORS
-from ..core import _kick
-from ..core import _rebuild_after_write
+from app import config
+from app.digikam import dbsync
+from app.photos import history
+from app.data import state as appstate
+from app.core import DB_ERRORS
+from app.core import _kick
+from app.core import _rebuild_after_write
 
 
 router = APIRouter()
@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get("/api/quality")
 def api_quality():
     """Maintenance › Metadata quality: face regions stored twice, the same person in two places, broken rectangles."""
-    from .. import facequality
+    from app.faces import facequality
     try:
         return facequality.summary()
     except (*DB_ERRORS, dbsync.SyncError) as e:
@@ -29,7 +29,7 @@ def api_quality():
 @router.post("/api/quality/accept")
 async def api_quality_accept(request: Request):
     """Body {photos: [ids], check: "unnamed", on: true}: accept these findings as they are (on: false takes it back)."""
-    from .. import facequality
+    from app.faces import facequality
     body = await request.json()
     try:
         n = await run_in_threadpool(facequality.accept, body.get("photos") or [], body.get("check", "unnamed"), bool(body.get("on", True)))
@@ -41,7 +41,7 @@ async def api_quality_accept(request: Request):
 @router.get("/api/quality/items")
 def api_quality_items(check: str, offset: int = 0, limit: int = 120):
     """The next entries of one Face quality list."""
-    from .. import facequality
+    from app.faces import facequality
     try:
         return facequality.items(check, offset, limit)
     except ValueError as e:
@@ -51,14 +51,14 @@ def api_quality_items(check: str, offset: int = 0, limit: int = 120):
 @router.get("/api/quality/accepted")
 def api_quality_accepted(check: str = "unnamed"):
     """The photos accepted as they are for a check."""
-    from .. import facequality
+    from app.faces import facequality
     return {"photos": sorted(facequality._accepted(check))}
 
 
 @router.post("/api/quality/ignore")
 async def api_quality_ignore(request: Request):
     """Body {photos: [ids]}: every unnamed face on them becomes "not a face to name"."""
-    from .. import facequality
+    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     body = await request.json()
@@ -73,7 +73,7 @@ async def api_quality_ignore(request: Request):
 @router.post("/api/quality/fit")
 async def api_quality_fit(request: Request):
     """Body {photos?: [ids]}: trim face rectangles that stick out of their photo to its edges, remove empty ones."""
-    from .. import facequality
+    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     body = await request.json() if (await request.body()) else {}
@@ -89,7 +89,7 @@ async def api_quality_fit(request: Request):
 async def api_quality_fix(request: Request):
     """Body {files: false}: remove the near-duplicate face regions (one kept per group) and rewrite those sidecars;
     {files: true}: then the image files that still carry the duplicates. In the background."""
-    from .. import facequality
+    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     files = bool((await request.json() if (await request.body()) else {}).get("files"))

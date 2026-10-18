@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from app import consistency
+from app.photos import consistency
 
 
 def _wait_done(timeout=60):
@@ -49,7 +49,7 @@ def test_results_naming_a_dropped_field_do_not_break_the_report(client):
     """Stored results from before pick and colour were dropped may still name them: they are left out
     of the counts and the list (a photo that only disagreed on those is not listed)."""
     import json
-    from app import analysis
+    from app.ai import analysis
     rec = lambda pid, mism: (pid, "s", json.dumps({"id": pid, "name": f"p{pid}", "path": f"/x/{pid}.jpg", "has_sidecar": True, "file_xmp": False, "file_editable": False,
                                                     "fields": {f: {"db": 0, "sidecar": 1, "file": None, "ok": f not in mism} for f in ("rating", "pick", "title")}, "mismatch": mism}), len(mism), 1, 0, 1)
     with analysis._writer() as con:
@@ -64,7 +64,7 @@ def test_results_naming_a_dropped_field_do_not_break_the_report(client):
 
 def test_photos_without_a_sidecar_are_listed_and_can_get_one(client, lib):
     import time
-    from app import consistency, edits
+    from app.photos import consistency, edits
     if not edits.available():
         pytest.skip("exiftool not available")
     from pathlib import Path

@@ -11,21 +11,21 @@ from fastapi import HTTPException
 from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
-from .. import config
-from .. import consistency
-from .. import dbsync
-from .. import dkdb
-from .. import edits
-from .. import gpx
-from .. import placetags
-from .. import tagmanager
-from .. import state as appstate
-from ..core import DB_ERRORS
-from ..core import db
-from ..core import resolve
-from ..core import _kick
-from ..core import _form_items
-from ..core import _rebuild_after_write
+from app import config
+from app.photos import consistency
+from app.digikam import dbsync
+from app.digikam import dkdb
+from app.photos import edits
+from app.geo import gpx
+from app.photos import placetags
+from app.photos import tagmanager
+from app.data import state as appstate
+from app.core import DB_ERRORS
+from app.core import db
+from app.core import resolve
+from app.core import _kick
+from app.core import _form_items
+from app.core import _rebuild_after_write
 
 
 router = APIRouter()
@@ -37,7 +37,7 @@ router = APIRouter()
 @router.get("/api/metadata/{photo_id}")
 def api_metadata(photo_id: int):
     """Every metadata field of the photo's file and sidecar (exiftool, grouped), with which ones can be edited."""
-    from .. import metaedit
+    from app.photos import metaedit
     try:
         return metaedit.read(photo_id)
     except dbsync.SyncError as e:
@@ -48,7 +48,7 @@ def api_metadata(photo_id: int):
 async def api_metadata_write(photo_id: int, request: Request):
     """Body {changes: [{group, tag, value}]}: write fields (XMP to the sidecar, EXIF/GPS/IPTC to the file), then read the
     photo's database rows again from its metadata."""
-    from .. import metaedit
+    from app.photos import metaedit
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Editing is turned off")
     body = await request.json()
@@ -63,7 +63,7 @@ async def api_metadata_write(photo_id: int, request: Request):
 @router.post("/api/metadata/{photo_id}/reread")
 async def api_metadata_reread(photo_id: int):
     """digiKam's Read Metadata From File: the photo's database rows filled again from its file and sidecar."""
-    from .. import metaedit
+    from app.photos import metaedit
     if not config.DB_WRITE:
         raise HTTPException(403, "Writing to digiKam's database is turned off (DB_WRITE=0)")
     try:

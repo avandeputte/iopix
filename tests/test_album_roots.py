@@ -1,7 +1,9 @@
 """Album roots: digiKam's recorded path can be mapped to where the folder is mounted here,
 per root, from Settings; the single-root PHOTOS_ROOT default still applies otherwise."""
 
-from app import config, dkdb, state
+from app import config
+from app.digikam import dkdb
+from app.data import state
 
 
 def test_default_single_root_uses_photos_root(client, lib):

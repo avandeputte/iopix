@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app import models
+from app.ai import models
 
 
 class _Resp(io.BytesIO):
@@ -88,7 +88,7 @@ def test_listing_shape():
 
 
 def test_choice_groups_and_defaults(monkeypatch):
-    from app import state
+    from app.data import state
     for group, c in models.CHOICES.items():
         opts = models.options(group)
         assert c["default"] in opts and len(opts) >= 2, group

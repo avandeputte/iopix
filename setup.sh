@@ -190,7 +190,7 @@ fi
 say "Models"
 for key in $(echo "$AUTO_MODELS" | tr ',' ' '); do
   echo "downloading $key"
-  HF_HUB_OFFLINE=0 "$VPY" -m app.models download "$key" || echo "  download of $key failed; retry later from Maintenance > Models and data"
+  HF_HUB_OFFLINE=0 "$VPY" -m app.ai.models download "$key" || echo "  download of $key failed; retry later from Maintenance > Models and data"
 done
 [ -n "$SEARCH_MODEL" ] && "$VPY" -c "from app import state; state.init(); state.set_setting('search_model', '$SEARCH_MODEL')"
 

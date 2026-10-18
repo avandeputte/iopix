@@ -1,6 +1,6 @@
 """query.build_where: every filter binds its value as a parameter, invalid
 values are ignored rather than raised, and the generated SQL is stable."""
-from app import query
+from app.data import query
 
 
 def where(**kw):
@@ -66,7 +66,7 @@ def test_text_query_also_covers_concept_photos_when_given():
 
 
 def test_concept_names_matching_a_search():
-    from app import concepts
+    from app.ai import concepts
     assert concepts.matching("audience") == ["audience"]
     assert "beach" in concepts.matching("Beach") and "tropical beach with palm trees" in concepts.matching("beach")
     assert concepts.matching("ice hockey") == ["ice hockey"], "a multi-word query matches by whole name only"

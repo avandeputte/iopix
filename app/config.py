@@ -53,7 +53,7 @@ for _p in (DIGIKAM_DB_DIR, PHOTOS_ROOT):
     if DATA_DIR == _p or _p in DATA_DIR.parents:
         raise SystemExit(f"DATA_DIR ({DATA_DIR}) must not be inside the read-only library folder {_p}")
 # AUTO_MODELS: models to download on first start when missing, e.g. "siglip2,yolox,geonames"
-# (keys as in app/models.py). Containers and installers set it; the Mac service leaves it empty.
+# (keys as in app/ai/models.py). Containers and installers set it; the Mac service leaves it empty.
 AUTO_MODELS = [k.strip() for k in os.environ.get("AUTO_MODELS", "").split(",") if k.strip()]
 LOG_FILE = DATA_DIR / "viewer.log"  # rotating copy of the server's own log lines (Maintenance / MCP can show it)
 # READ_ONLY=1 locks the viewer to browsing: no edits, tags, faces or database writes, whatever the settings say

@@ -3,7 +3,7 @@ another, unknown keys ignored, and the completion hook sees what arrived."""
 import threading
 import time
 
-from app import models
+from app.ai import models
 
 
 def _wait(pred, timeout=5.0):

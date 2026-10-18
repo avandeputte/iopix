@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from app import edits, index
+from app.photos import edits
+from app.data import index
 
 
 def test_an_edit_is_logged_and_can_be_undone(client, lib):
@@ -74,7 +75,7 @@ def _face_rows(db, pid):
 def test_face_changes_can_be_undone(client, lib, op):
     """Every face change in the change log offers Undo, which puts the photo's faces back as they were."""
     import re
-    from app import facemgr
+    from app.faces import facemgr
     pid = lib["with_faces"][4]
     before = _face_rows(lib["db"], pid)
     val = next(v for t, p, v in before if p == "tagRegion")
@@ -94,7 +95,7 @@ def test_face_changes_can_be_undone(client, lib, op):
 
 
 def test_older_face_entries_without_undo_data_are_undone_from_their_details(client, lib):
-    from app import facemgr
+    from app.faces import facemgr
     assert facemgr.inverse_ops({"op": "remove", "was": "confirmed", "from_tag": 26, "rect": [1, 2, 3, 4]}) == [{"op": "add", "rect": [1, 2, 3, 4], "tag": 26}]
     assert facemgr.inverse_ops({"op": "name", "tag": 194, "was": "confirmed", "from_tag": 89, "rect": [1, 2, 3, 4]}) == [{"op": "name", "rect": [1, 2, 3, 4], "tag": 89}]
     assert facemgr.inverse_ops({"op": "add", "tag": 26, "rect": [1, 2, 3, 4]}) == [{"op": "remove", "rect": [1, 2, 3, 4]}]
@@ -105,9 +106,9 @@ def test_older_face_entries_without_undo_data_are_undone_from_their_details(clie
 def test_backed_up_image_file_can_be_restored_from_any_change(client, lib):
     """A change whose photo has its original in file-backups offers "Restore original file", whatever kind of change it is."""
     import shutil
-    from app import edits, history as h
+    from app.photos import edits, history as h
     pid = lib["ids"][7]
-    ic = __import__("app.index", fromlist=["open_index"]).open_index()
+    ic = __import__("app.data.index", fromlist=["open_index"]).open_index()
     path = ic.execute("SELECT path FROM photos WHERE id = ?", (pid,)).fetchone()[0]; ic.close()
     b = edits.file_backup_path(path)
     b.parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +125,7 @@ def test_backed_up_image_file_can_be_restored_from_any_change(client, lib):
 
 def test_edit_log_search_by_words_person_user_and_time(client, lib):
     import time
-    from app import history
+    from app.photos import history
     pid = lib["with_faces"][0]
     history.record([{"photo_id": pid, "action": "edit", "summary": "Searchable zebra change", "user": "tester-x"}])
     r = client.get("/api/history?q=zebra").json()

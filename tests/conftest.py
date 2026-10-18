@@ -81,7 +81,7 @@ def _digikam_vouched_closed():
     """DIGIKAM_CHECK=ask (Docker mode): the owner vouches that digiKam is closed for a while,
     exactly as the Settings page does; the tests vouch before every test."""
     import time
-    from app import state
+    from app.data import state
     state.init()  # the app's startup normally creates the tables; a test may run before any client exists
     state.set_setting("digikam_closed_until", str(time.time() + 3600))
     yield
@@ -90,7 +90,8 @@ def _digikam_vouched_closed():
 @pytest.fixture(autouse=True)
 def _no_users_by_default():
     """Most tests run in the open (no users) mode the app has before the first admin is created."""
-    from app import state, users
+    from app.data import state
+    from app import users
     state.init(); users.init()
     con = state.connect(); con.execute("DELETE FROM user_accounts"); con.commit(); con.close()
     yield
@@ -100,7 +101,7 @@ def _no_users_by_default():
 def fresh(client):
     """No accounts and no session cookie before and after: the open mode the app has before the
     first admin exists, for tests that create their own accounts."""
-    from app import state
+    from app.data import state
     def clear():
         con = state.connect(); con.execute("DELETE FROM user_accounts"); con.commit(); con.close()
         client.cookies.clear()

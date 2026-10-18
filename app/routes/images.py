@@ -12,14 +12,14 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 
-from .. import thumbs
-from ..core import THUMB_COLS
-from ..core import IMG_CACHE
-from ..core import db
-from ..core import resolve
-from ..core import _form_items
-from ..core import _photo_row
-from ..core import _cached_image
+from app import thumbs
+from app.core import THUMB_COLS
+from app.core import IMG_CACHE
+from app.core import db
+from app.core import resolve
+from app.core import _form_items
+from app.core import _photo_row
+from app.core import _cached_image
 
 
 router = APIRouter()
@@ -191,7 +191,7 @@ def _zip_response(items, sidecars: int, name: str):
     if part < 0 or part >= len(parts):
         raise HTTPException(404, "No such part")
     rows = parts[part]
-    from .. import export
+    from app.photos import export
     # export options (x-prefixed: "size" and "fmt" are search filters)
     opts = {"size": int(d.get("xsize") or 0), "fmt": d.get("xfmt") or "keep", "quality": int(d.get("xquality") or 90),
             "nogps": d.get("nogps") == "1"}

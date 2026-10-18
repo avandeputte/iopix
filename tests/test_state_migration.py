@@ -2,7 +2,7 @@
 viewer.db with every row, and parks the old files instead of deleting them."""
 import sqlite3
 
-from app import state
+from app.data import state
 
 
 def test_two_files_become_one(tmp_path, monkeypatch):
@@ -28,7 +28,7 @@ def test_two_files_become_one(tmp_path, monkeypatch):
     park = state.migrate_legacy()
     assert park and park.parent.name == "db-backups" and (park / "state.db").exists() and (park / "analysis.db").exists()
     assert not old_state.exists() and not old_an.exists() and new.exists()
-    from app import vdb
+    from app.data import vdb
     vc = vdb.VConn(sqlite3.connect(new), False, True)
     vdb.rename_old_tables(vc); vc.commit(); vc.raw.close()  # what vdb.init does next at start
     con = sqlite3.connect(new)

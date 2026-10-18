@@ -14,35 +14,35 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 
-from .. import analysis
-from .. import concepts
-from .. import config
-from .. import edits
-from .. import facedetect
-from .. import index
-from .. import lossless
-from .. import moments
-from .. import places
-from .. import tagmanager
-from .. import state as appstate
-from .. import jobs as bgjobs
-from .. import users
-from .. import updates
-from .. import __version__ as APP_VERSION
-from ..semantic import semantic
-from ..semantic import enabled as semantic_enabled
-from ..query import SORTS
-from ..core import state
-from ..core import prewarmer
-from ..core import db
-from ..core import resolve
-from ..core import _public_version
-from ..core import jresp
-from ..core import app_name
-from ..core import _app_stamp
-from ..core import CACHES
+from app.ai import analysis
+from app.ai import concepts
+from app import config
+from app.photos import edits
+from app.faces import facedetect
+from app.data import index
+from app.photos import lossless
+from app.ai import moments
+from app.geo import places
+from app.photos import tagmanager
+from app.data import state as appstate
+from app import jobs as bgjobs
+from app import users
+from app import updates
+from app import __version__ as APP_VERSION
+from app.ai.semantic import semantic
+from app.ai.semantic import enabled as semantic_enabled
+from app.data.query import SORTS
+from app.core import state
+from app.core import prewarmer
+from app.core import db
+from app.core import resolve
+from app.core import _public_version
+from app.core import jresp
+from app.core import app_name
+from app.core import _app_stamp
+from app.core import CACHES
 
-from ..core import _tag_covers
+from app.core import _tag_covers
 
 router = APIRouter()
 
@@ -357,7 +357,7 @@ def api_photo(photo_id: int, request: Request):
         d["similar"] = semantic_enabled()
         d["concepts"] = concepts.for_photo(photo_id) if semantic_enabled() else []
         d["boxes"] = analysis.boxes(photo_id)
-        from .. import versions
+        from app.photos import versions
         d["versions"] = versions.versions_of(photo_id)  # digiKam's version family (ImageRelations), when there is one
         if d.get("burst"):
             d["burst_size"] = con.execute("SELECT count(*) FROM photos WHERE burst = ?", (d["burst"],)).fetchone()[0]

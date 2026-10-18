@@ -1,6 +1,7 @@
 """Shared and private albums: shared ones are seen by everyone and created, changed and deleted only by
 editors and admins; private ones are seen and changed only by the user who made them, whatever their role."""
-from app import state, users
+from app.data import state
+from app import users
 
 
 def _login(client, name, pw):

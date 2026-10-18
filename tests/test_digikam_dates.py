@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from app import dkdb, edits, facemgr
+from app.digikam import dkdb
+from app.photos import edits
+from app.faces import facemgr
 
 
 def test_face_change_updates_the_file_date_digikam_compares(client, lib):
@@ -26,7 +28,7 @@ def test_face_change_updates_the_file_date_digikam_compares(client, lib):
     path = con.execute("SELECT r.specificPath || a.relativePath || '/' || i.name FROM Images i JOIN Albums a ON a.id = i.album "
                        "JOIN AlbumRoots r ON r.id = a.albumRoot WHERE i.id = ?", (pid,)).fetchone()[0]
     con.close()
-    from app import index
+    from app.data import index
     ic = index.open_index()
     path = ic.execute("SELECT path FROM photos WHERE id = ?", (pid,)).fetchone()[0]
     ic.close()

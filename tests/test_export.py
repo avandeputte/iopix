@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from app import edits, export
+from app.photos import edits, export
 
 
 def _ids_with_gps(client, lib, n=3):

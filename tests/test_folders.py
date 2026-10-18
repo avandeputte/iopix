@@ -3,7 +3,7 @@ an upload puts the file in the folder and registers it for digiKam's full scan (
 modificationDate) with the basics the viewer shows meanwhile. Writes go to the scratch copy."""
 import time
 
-from app import dkdb
+from app.digikam import dkdb
 
 
 def _wait_meta_album(client, path, timeout=8):

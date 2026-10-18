@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from app import facedetect, index, models, state
+from app.faces import facedetect
+from app.data import index, state
+from app.ai import models
 
 # a folder holding the detector files under their registry names (symlinks are fine); tests skip what is missing
 MODELS = Path("/private/tmp/claude-501/-Users-alex-Pictures/cd6ab508-dd1f-4df1-999c-d6fe0a83fe5c/scratchpad/models")

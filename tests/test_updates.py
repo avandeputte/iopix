@@ -69,7 +69,7 @@ def test_run_passes_the_ref_and_keeps_the_outcome(client, monkeypatch, tmp_path)
 def test_daily_check_banner_and_setting(client, monkeypatch):
     """The banner data appears in the status (for admins, with the setting on) once a check found a newer
     commit; switching the setting off forgets it and stops the viewer contacting GitHub."""
-    from app import state
+    from app.data import state
     monkeypatch.setattr(updates, "local_commit", lambda: "abcdef1234567890")
     monkeypatch.setattr(updates, "_fetch", lambda url: {"sha": "fedcba1234567890", "commit": {"committer": {"date": "2026-10-16T00:00:00Z"}, "message": "v9.9.9: something new\n\nbody"}})
     state.set_setting("update_check", "1")

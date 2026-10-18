@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app import edits, pixelguard
+from app.photos import edits, pixelguard
 
 
 def _jpeg(lib, tmp_path) -> Path:

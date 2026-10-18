@@ -3,7 +3,8 @@ flags tell the front end, viewer-only state still works, and the switch
 cannot be turned off when locked by the environment."""
 import pytest
 
-from app import config, state
+from app import config
+from app.data import state
 
 WRITES = [
     ("/api/edit", {"ids": [1], "rating": 3}),
