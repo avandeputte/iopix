@@ -118,9 +118,10 @@ def _set_position(con, image_id: int, g):
         return
     lat, lon = float(g["lat"]), float(g["lon"])
     alt = float(g["alt"]) if g.get("alt") is not None else None
+    acc = float(g["accuracy"]) if g.get("accuracy") else None  # how far off it may be, in metres (ImagePositions.accuracy)
     con.execute("REPLACE INTO ImagePositions (imageid, latitude, latitudeNumber, longitude, longitudeNumber, altitude, "
-                "orientation, tilt, roll, accuracy, description) VALUES (?,?,?,?,?,?,NULL,NULL,NULL,NULL,NULL)",
-                (image_id, gps_text(True, lat), lat, gps_text(False, lon), lon, alt))
+                "orientation, tilt, roll, accuracy, description) VALUES (?,?,?,?,?,?,NULL,NULL,NULL,?,NULL)",
+                (image_id, gps_text(True, lat), lat, gps_text(False, lon), lon, alt, acc))
 
 
 def _set_copyright(con, image_id: int, template: dict):

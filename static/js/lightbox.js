@@ -254,7 +254,7 @@ export function photoActions(anchor, d) {
     d.lat != null ? ['Photos nearby', () => filterFromLightbox({ bbox: [d.lat - 0.01, d.lon - 0.015, d.lat + 0.01, d.lon + 0.015].map((x) => x.toFixed(4)).join(',') })] : null,
     editing ? 'Metadata' : null,
     editing ? ['Change the date…', dateBox] : null,
-    editing ? [d.lat != null ? 'Change the location…' : 'Set the location…', () => locationDialog([d.id], d.lat != null ? { lat: d.lat, lon: d.lon, alt: d.alt } : null)] : null,
+    editing ? [d.lat != null ? 'Change the location…' : 'Set the location…', () => locationDialog([d.id], d.lat != null ? { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: d.extra?.gpsAccuracy } : null)] : null,
     editing ? ['Apply a metadata template…', () => templatePicker([d.id])] : null,
     manage ? ['All metadata…', () => metadataEditor(d)] : null,
     manage ? 'File' : null,
@@ -931,9 +931,11 @@ export function renderInfo() {
       if (S.EDITING) c.append(h('button', { class: 'tx', title: 'Remove this tag', onclick: (e) => { e.stopPropagation(); saveOne({ remove_tags: [t.id] }); } }, icon('close'))); return c; })),
       S.EDITING ? h('div', { style: 'margin-top:8px' }, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null,
     show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('a', { class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
-    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('a', { class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt }) }, 'change') : null),
+    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('a', { class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'change') : null),
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
         d.region ? [', ', lnk(d.region, { region: d.region })] : null, d.country ? [', ', lnk(d.country, { country: d.country })] : null) : null,
+      ex.gpsAccuracy ? h('div', { class: 'approx', title: 'Only the town is known: the pin marks its centre' }, icon('place'),
+        `Approximate location · within about ${ex.gpsAccuracy >= 1000 ? `${+(ex.gpsAccuracy / 1000).toFixed(1)} km` : `${Math.round(ex.gpsAccuracy)} m`}`) : null,
       mapEl,
       h('div', { class: 'irow' }, icon('place'), h('div', null, h('div', { class: 'a' }, `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`),
         h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${Math.round(d.alt)} m altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
@@ -965,7 +967,13 @@ export function renderInfo() {
       if (token !== LB.token || !mapEl.isConnected) return;
       LB.mini = L.map(mapEl, { zoomControl: false, attributionControl: false, scrollWheelZoom: false }).setView([d.lat, d.lon], 13);
       tiles().addTo(LB.mini);
-      L.marker([d.lat, d.lon], { icon: L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(LB.mini);
+      const acc = (d.extra || {}).gpsAccuracy;
+      if (acc) {  // an approximate position: the area it may be in, not a pin pretending to know the spot
+        const c = L.circle([d.lat, d.lon], { radius: acc, color: '#c77d00', weight: 1, fillOpacity: 0.12 }).addTo(LB.mini);
+        LB.mini.fitBounds(c.getBounds(), { padding: [6, 6] });
+      } else {
+        L.marker([d.lat, d.lon], { icon: L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(LB.mini);
+      }
     }).catch(() => { mapEl.remove(); });
   }
 }

@@ -164,7 +164,7 @@ IMAGE_SQL = """
            ii.rating, ii.creationDate, ii.orientation, ii.width, ii.height, ii.format,
            m.make, m.model, m.lens, m.aperture, m.focalLength, m.focalLength35, m.exposureTime,
            m.sensitivity, m.flash, m.whiteBalance, m.meteringMode, m.exposureProgram,
-           p.latitudeNumber, p.longitudeNumber, p.altitude, p.orientation AS gpsOrientation,
+           p.latitudeNumber, p.longitudeNumber, p.altitude, p.orientation AS gpsOrientation, p.accuracy AS gpsAccuracy,
            v.duration, v.videoCodec, v.frameRate, v.audioCompressor, v.aspectRatio
     FROM Images i
     LEFT JOIN ImageInformation ii ON ii.imageid = i.id
@@ -551,7 +551,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
     album_n = defaultdict(int)
     for (iid, album_id, name, size, uhash, mod, category, rating, created, orient, w, h, fmt,
          make, model, lens, aperture, focal, focal35, exposure, iso, flash, wb, metering, program,
-         lat, lon, alt, gps_orientation, duration, vcodec, fps, acodec, aspect) in rows:
+         lat, lon, alt, gps_orientation, gps_accuracy, duration, vcodec, fps, acodec, aspect) in rows:
         album = albums.get(album_id)
         if not album:
             continue
@@ -561,6 +561,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
             created = e0["taken"]
         if e0 and "gps" in e0:
             lat, lon, alt = (e0["gps"]["lat"], e0["gps"]["lon"], e0["gps"].get("alt")) if e0["gps"] else (None, None, None)
+            gps_accuracy = (e0["gps"] or {}).get("accuracy")
         mdt = _parse_dt(mod)
         ts, y, mo, d = _parse_dt(created) or mdt or (0, 1970, 1, 1)
         if not w or not h:
@@ -626,6 +627,8 @@ def _build(dst_path: Path, source: tuple) -> dict:
             extra["video"] = {k: v for k, v in (("codec", vcodec), ("fps", fps), ("audio", acodec)) if v}
         if gps_orientation is not None:
             extra["orientationGps"] = gps_orientation  # compass direction the camera faced, when the file records it
+        if gps_accuracy and lat is not None:
+            extra["gpsAccuracy"] = gps_accuracy  # metres: an approximate position (only the town known, say)
         for k, v in (("whiteBalance", wb), ("metering", metering), ("program", program), ("orientation", orient)):
             if v is not None:
                 extra[k] = v

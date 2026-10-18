@@ -1179,6 +1179,36 @@ def test_explore_photo_size_and_section_lengths(page, server):
     page.locator(".eseg button", has_text="M").click()
 
 
+def test_only_the_town_is_known_saves_an_approximate_location(page, server, lib):
+    """Set location › Only the town is known: no altitude, a radius, saved as the position's accuracy; the info panel
+    then says the location is approximate."""
+    import json as _json
+    pid = lib["ids"][2]
+    _open_photo(page, server, pid)
+    page.keyboard.press("i")
+    page.wait_for_selector(".lb-info .iactions", timeout=10000)
+    page.locator(".lb-info .iactions").click()
+    page.locator(".facemenu .fmi", has_text="location").first.click()
+    page.wait_for_selector(".modal h3:has-text('Set location')", timeout=5000)
+    town = page.locator(".modal label", has_text="Only the town is known").locator("input[type=checkbox]")
+    town.check()
+    assert page.locator(".modal input[placeholder='altitude m']").is_disabled()
+    page.locator(".modal input[placeholder='latitude']").fill("40.3834")
+    page.locator(".modal input[placeholder='longitude']").fill("-80.0459")
+    page.locator(".modal select[title^='How far']").select_option("5000")
+    page.locator(".modal button", has_text="Save location").click()
+    page.wait_for_selector(".lb-info .approx", timeout=10000)
+    assert "5 km" in page.locator(".lb-info .approx").inner_text()
+    for _ in range(40):
+        d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{pid}").read())
+        if d.get("extra", {}).get("gpsAccuracy") == 5000:
+            break
+        page.wait_for_timeout(250)
+    assert d["extra"]["gpsAccuracy"] == 5000 and d["alt"] is None
+    req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [pid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req).read()
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json

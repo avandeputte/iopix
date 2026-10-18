@@ -186,3 +186,31 @@ def test_batched_face_changes_log_their_own_rectangles(lib, pid_tag):
     finally:
         facemgr.apply_many([{"op": "remove", "image": p["id"], "rect": a}, {"op": "remove", "image": p["id"], "rect": b}], check_running=False)
     _ = dkdb
+
+
+def test_an_approximate_position_keeps_its_accuracy_everywhere(client, lib):
+    """Only the town is known: the position carries how far off it may be, in the sidecar (GPSHPositioningError), in
+    digiKam's database (ImagePositions.accuracy) and in what the viewer shows; an exact position afterwards drops it."""
+    p = _photo(lib)
+    try:
+        r = client.post("/api/edit", json={"ids": [p["id"]], "changes": {"gps": {"lat": 40.3834, "lon": -80.0459, "alt": None, "accuracy": 2000}}})
+        assert r.status_code == 200 and r.json()["edited"] == 1, r.text
+        side = _read(p["path"] + ".xmp", "-XMP-exif:GPSHPositioningError", "-GPSAltitude")
+        assert side["GPSHPositioningError"] == 2000 and "GPSAltitude" not in side, side
+        for _ in range(40):
+            d = client.get(f"/api/photo/{p['id']}").json()
+            if d.get("extra", {}).get("gpsAccuracy"):
+                break
+            time.sleep(0.25)
+        assert d["extra"]["gpsAccuracy"] == 2000, "shown as approximate"
+        _apply(p)
+        con = sqlite3.connect(lib["db"])
+        assert con.execute("SELECT accuracy FROM ImagePositions WHERE imageid = ?", (p["id"],)).fetchone()[0] == 2000
+        con.close()
+        assert _diff(p) == {}, _diff(p)
+        client.post("/api/edit", json={"ids": [p["id"]], "changes": {"gps": {"lat": 40.3834, "lon": -80.0459, "alt": 300}}})
+        assert "GPSHPositioningError" not in _read(p["path"] + ".xmp", "-XMP-exif:GPSHPositioningError"), "an exact position is not approximate"
+        _apply(p)
+    finally:
+        client.post("/api/edit", json={"ids": [p["id"]], "changes": {"gps": None}})
+        _apply(p)

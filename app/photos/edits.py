@@ -427,7 +427,11 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
                 a += _set("XMP-exif:GPSAltitude", abs(float(g["alt"]))) + [f"-XMP-exif:GPSAltitudeRef#={1 if float(g['alt']) < 0 else 0}"]
             else:
                 a += _set("XMP-exif:GPSAltitude", "") + _set("XMP-exif:GPSAltitudeRef", "")
+            if g.get("accuracy"):  # an approximate position: how far off it may be, in metres (EXIF 2.3's horizontal error)
+                a += _set("XMP-exif:GPSHPositioningError", round(float(g["accuracy"]), 1))
             if in_file:
+                if g.get("accuracy"):
+                    a += _set("GPS:GPSHPositioningError", round(float(g["accuracy"]), 1))
                 a += (_set("GPS:GPSLatitude", abs(lat)) + _set("GPS:GPSLatitudeRef", "N" if lat >= 0 else "S")
                       + _set("GPS:GPSLongitude", abs(lon)) + _set("GPS:GPSLongitudeRef", "E" if lon >= 0 else "W")
                       + _set("GPS:GPSVersionID", "2 0 0 0") + _set("GPS:GPSMapDatum", "WGS-84"))

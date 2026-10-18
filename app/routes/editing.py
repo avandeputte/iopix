@@ -129,6 +129,12 @@ async def api_edit(request: Request):
                 raise HTTPException(400, "Latitude or longitude out of range")
             alt = g.get("alt")
             ch["gps"] = {"lat": round(lat, 7), "lon": round(lon, 7), "alt": (round(float(alt), 1) if alt not in (None, "") else None)}
+            try:  # an approximate position (only the town is known): how far off it may be, in metres
+                acc = float(g.get("accuracy") or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "accuracy is a number of metres")
+            if acc > 0:
+                ch["gps"]["accuracy"] = round(min(acc, 1_000_000), 1)
         else:
             ch["gps"] = None
     if isinstance(raw.get("template"), dict):

@@ -12,7 +12,7 @@ export function applyLocal(d, ch) {
   if ('rating' in ch) d.rating = ch.rating > 0 ? ch.rating : -1;
   for (const k of ['title', 'caption']) if (k in ch) d[k] = ch[k] || null;
   if ('taken' in ch) { d.taken = ch.taken; d.ts = Math.floor(Date.UTC(+ch.taken.slice(0, 4), +ch.taken.slice(5, 7) - 1, +ch.taken.slice(8, 10), +ch.taken.slice(11, 13), +ch.taken.slice(14, 16), +ch.taken.slice(17, 19)) / 1000); d.day = ch.taken.slice(0, 10); }
-  if ('gps' in ch) { d.lat = ch.gps ? ch.gps.lat : null; d.lon = ch.gps ? ch.gps.lon : null; d.alt = ch.gps ? ch.gps.alt : null; }
+  if ('gps' in ch) { d.lat = ch.gps ? ch.gps.lat : null; d.lon = ch.gps ? ch.gps.lon : null; d.alt = ch.gps ? ch.gps.alt : null; (d.extra ||= {}).gpsAccuracy = ch.gps?.accuracy || undefined; }
   if (ch.template) { d.creator = ch.template.creator || null; d.copyright = ch.template.copyrightNotice || null; (d.extra ||= {}).copyright = Object.fromEntries(Object.entries(ch.template).filter(([, v]) => v)); }
   for (const id of ch.remove_tags || []) d.tags = d.tags.filter((t) => t.id !== id);
   for (const id of ch.add_tags || []) { const t = S.tagById.get(id); if (t && !d.tags.some((x) => x.id === id)) d.tags.push({ id, name: t.name, full: t.full, person: 0 }); }
@@ -258,6 +258,27 @@ export async function locationDialog(ids, current, after) {
     }, 400);
   };
   const mapEl = h('div', { class: 'imap', style: 'height:360px;margin:10px 0' });
+  // only the town is known: the pin goes to the town's centre (search for it), with no altitude and how far off it may
+  // be, saved as the position's accuracy (EXIF GPSHPositioningError, digiKam's ImagePositions.accuracy)
+  const accSel = h('select', { class: 'sharepick', title: 'How far from the pin the photo may have been taken', onchange: () => drawCircle() },
+    [[1000, 'within about 1 km'], [2000, 'within about 2 km'], [5000, 'within about 5 km'], [10000, 'within about 10 km'], [25000, 'within about 25 km']]
+      .map(([v, l]) => h('option', { value: v, selected: v === (current?.accuracy ? [1000, 2000, 5000, 10000, 25000].reduce((a, b) => Math.abs(b - current.accuracy) < Math.abs(a - current.accuracy) ? b : a) : 2000) }, l)));
+  const townOnly = h('input', { type: 'checkbox', checked: !!current?.accuracy, onchange: () => setTownMode() });
+  let circle = null;
+  const drawCircle = () => {
+    if (circle) { circle.remove(); circle = null; }
+    if (!map || !townOnly.checked || !lat.value || !lon.value) return;
+    circle = window.L.circle([+lat.value, +lon.value], { radius: +accSel.value, color: '#c77d00', weight: 1, fillOpacity: 0.12 }).addTo(map);
+    map.fitBounds(circle.getBounds(), { padding: [20, 20], maxZoom: 14 });
+  };
+  const setTownMode = () => {
+    const on = townOnly.checked;
+    accSel.disabled = !on;
+    alt.disabled = on;
+    if (on) { alt.value = ''; altAuto = false; fill(altNote, 'no altitude for an approximate position'); search.placeholder = 'Search the town, e.g. “Mt Lebanon, PA”'; }
+    else { altAuto = alt.value === ''; fill(altNote); search.placeholder = 'Search an address or place, e.g. “Mt Lebanon High School”'; fetchAlt(); }
+    drawCircle();
+  };
   // address or landmark search (OpenStreetMap Nominatim through the server; GeoNames towns offline)
   let searchTimer = 0;
   const results = h('div', { class: 'alist', style: 'max-height:160px;margin-top:4px', hidden: true });
@@ -301,15 +322,17 @@ export async function locationDialog(ids, current, after) {
     h('p', { class: 'muted' }, ids.length > 1 ? `The same position goes to all ${nf.format(ids.length)} selected photos, replacing any they already have. ` : '', 'Click the map or drag the pin, or type coordinates. Saved to the sidecar (and file, if on) and shown in digiKam after its database is updated.'),
     h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px' }, search,
       h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognises', onclick: suggest }, icon('spark'), 'Suggest location')), results, sugBox,
+    h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;flex-wrap:wrap' }, townOnly, h('b', null, 'Only the town is known'),
+      accSel, h('span', { class: 'muted', style: 'font-size:12.5px' }, 'the pin marks the town’s centre; the photo is shown as approximate')),
     mapEl,
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, lat, lon, alt, altNote,
       h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; alt.value = d.alt ?? ''; altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
       h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
       current ? h('button', { class: 'pillbtn', onclick: async () => { if (confirm('Remove the location from ' + (ids.length > 1 ? 'these photos' : 'this photo') + '?')) { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); } } }, 'Remove location') : null,
-      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: { lat: la, lon: lo, alt: alt.value === '' ? null : +alt.value } })) after?.(); } }, icon('place'), 'Save location')));
+      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : +alt.value } })) after?.(); } }, icon('place'), 'Save location')));
   let map, marker;
-  const place = () => { fetchAlt(); if (!map || !lat.value || !lon.value) return; const ll = [+lat.value, +lon.value]; marker ? marker.setLatLng(ll) : (marker = L.marker(ll, { draggable: true }).addTo(map).on('dragend', () => { const p = marker.getLatLng(); lat.value = p.lat.toFixed(6); lon.value = p.lng.toFixed(6); fetchAlt(); })); map.setView(ll, Math.max(map.getZoom(), 12)); };
+  const place = () => { fetchAlt(); if (!map || !lat.value || !lon.value) return; const ll = [+lat.value, +lon.value]; marker ? marker.setLatLng(ll) : (marker = L.marker(ll, { draggable: true }).addTo(map).on('dragend', () => { const p = marker.getLatLng(); lat.value = p.lat.toFixed(6); lon.value = p.lng.toFixed(6); fetchAlt(); drawCircle(); })); map.setView(ll, townOnly.checked ? Math.min(Math.max(map.getZoom(), 10), 13) : Math.max(map.getZoom(), 12)); drawCircle(); };
   // a pasted "40.4441, -79.9623" (comma, semicolon or space separated; N/S/E/W suffixes allowed) fills both fields
   const pastePair = (e) => {
     const t = (e.clipboardData || window.clipboardData)?.getData('text') || '';
@@ -322,6 +345,7 @@ export async function locationDialog(ids, current, after) {
     if (map) map.setView([la, lo], Math.max(map.getZoom(), 12));
   };
   lat.onpaste = lon.onpaste = pastePair;
+  setTownMode();  // the controls as the photo's position is (approximate or exact)
   try { await loadLeaflet(false); } catch { mapEl.replaceChildren(h('div', { class: 'empty' }, 'The map needs an internet connection; coordinates can still be typed.')); return; }
   const L = window.L;
   await loadMaps();
@@ -330,6 +354,7 @@ export async function locationDialog(ids, current, after) {
   map.on('click', (e) => { lat.value = e.latlng.lat.toFixed(6); lon.value = e.latlng.lng.toFixed(6); place(); });
   lat.onchange = lon.onchange = place;
   place();
+  drawCircle();
 }
 export async function gpxDialog(ids) {
   const file = h('input', { type: 'file', accept: '.gpx,application/gpx+xml' });

@@ -49,7 +49,7 @@ READ_TAGS = [
     "Make", "Model", "LensModel", "Lens", "LensID", "FNumber", "ApertureValue", "FocalLength", "FocalLengthIn35mmFormat",
     "ExposureTime", "ExposureProgram", "ExposureMode", "ISO", "Flash", "WhiteBalance", "ColorTemperature", "MeteringMode",
     "SubjectDistance", "SubjectDistanceRange", "DateTimeOriginal", "CreationDate", "CreateDate", "MediaCreateDate", "TrackCreateDate",
-    "Orientation", "ImageSize", "ImageWidth", "ImageHeight", "BitsPerSample", "GPSLatitude", "GPSLongitude", "GPSAltitude",
+    "Orientation", "ImageSize", "ImageWidth", "ImageHeight", "BitsPerSample", "GPSLatitude", "GPSLongitude", "GPSAltitude", "GPSHPositioningError",
     "Rating", "XMP-dc:Title", "XMP-dc:Description", "ObjectName", "Caption-Abstract", "ImageDescription", "Headline",
     *TAG_KEYS, *FLAT_KEYS, "PickLabel", "ColorLabel", "RegionInfo", "RegionInfoMP",
     "Duration", "VideoFrameRate", "CompressorID", "AudioFormat", "AudioChannels", "AudioSampleRate",
@@ -295,7 +295,8 @@ def rows_for(path: str, d: dict, category: int) -> dict:
             "subjectDistance": _num(d.get("SubjectDistance")), "subjectDistanceCategory": _num(d.get("SubjectDistanceRange"), int)}
     out["metadata"] = meta if any(v is not None for v in meta.values()) else None
     lat, lon = _num(d.get("GPSLatitude")), _num(d.get("GPSLongitude"))
-    out["position"] = {"lat": lat, "lon": lon, "alt": _num(d.get("GPSAltitude"))} if lat is not None and lon is not None and (lat or lon) else None
+    out["position"] = {"lat": lat, "lon": lon, "alt": _num(d.get("GPSAltitude")), "accuracy": _num(d.get("GPSHPositioningError"))} \
+        if lat is not None and lon is not None and (lat or lon) else None
     out["title"] = _first(d, "Title", "ObjectName")
     out["caption"] = _first(d, "Description", "Caption-Abstract", "ImageDescription")
     out["headline"] = _first(d, "Headline")
@@ -395,8 +396,8 @@ def _write_rows(con, iid: int, r: dict, tags: _Tags, special: dict, full: bool):
     con.execute("DELETE FROM ImagePositions WHERE imageid = ?", (iid,))
     if r["position"]:
         p = r["position"]
-        con.execute("INSERT INTO ImagePositions (imageid, latitude, latitudeNumber, longitude, longitudeNumber, altitude) VALUES (?,?,?,?,?,?)",
-                    (iid, gps_text(True, p["lat"]), p["lat"], gps_text(False, p["lon"]), p["lon"], p["alt"]))
+        con.execute("INSERT INTO ImagePositions (imageid, latitude, latitudeNumber, longitude, longitudeNumber, altitude, accuracy) VALUES (?,?,?,?,?,?,?)",
+                    (iid, gps_text(True, p["lat"]), p["lat"], gps_text(False, p["lon"]), p["lon"], p["alt"], p.get("accuracy")))
     con.execute("DELETE FROM ImageComments WHERE imageid = ?", (iid,))
     for ctype, text in ((1, r["caption"]), (2, r["headline"]), (3, r["title"])):  # DatabaseComment: Comment, Headline, Title
         if text:
