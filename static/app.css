@@ -170,10 +170,11 @@ body.filters-open #scrub { right: 354px; }
 /* a static justified gallery (On this day): rows fill the width like the photo grid, no scrollbars.
    Each tile grows with its aspect ratio; the filler keeps the last row from stretching. */
 .jrows { display: flex; flex-wrap: wrap; gap: 4px; border-radius: 10px; overflow: hidden; }
-.jrows .tile { height: 150px; flex: var(--ar) 1 calc(var(--ar) * 150px); min-width: 0; }
+.jrows .tile { height: var(--jh, 150px); flex: var(--ar) 1 calc(var(--ar) * var(--jh, 150px)); min-width: 0; }
+.page.jsz-s { --jh: 100px; } .page.jsz-m { --jh: 150px; } .page.jsz-l { --jh: 220px; }  /* Explore's photo size */
 .jrows .tile img { width: 100%; height: 100%; object-fit: cover; }
 .jrows::after { content: ""; flex: 10 1 auto; }
-@media (max-width: 800px) { .jrows .tile { height: 110px; flex-basis: calc(var(--ar) * 110px); } }
+@media (max-width: 800px) { .jrows .tile { height: var(--jh, 110px); flex-basis: calc(var(--ar) * var(--jh, 110px)); } .page.jsz-s { --jh: 72px; } .page.jsz-m { --jh: 110px; } .page.jsz-l { --jh: 160px; } }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 17px; cursor: pointer; }
 .pill b { font-weight: 400; color: var(--fg2); font-size: 12px; }

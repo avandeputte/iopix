@@ -34,10 +34,10 @@ export async function showExplore() {
     h('span', { class: 'sic' }, icon(ic)), h('div', null, h('b', null, value), h('span', null, label)));
   // section headings with a coloured icon; the pill group below a heading shares its hue
   const sec = (hue, ic, title, link, linkLabel) => h('h2', { style: `--hue:var(--c-${hue})` }, h('span', { class: 'hic' }, icon(ic)), title, link ? h('a', { href: link }, linkLabel) : null);
-  // Rediscover: a dozen photos picked at random from the whole library, new ones on every visit or with Shuffle
+  // Rediscover: three dozen photos picked at random from the whole library, new ones on every visit or with Shuffle
   const rediscover = h('div', { hidden: true });
   const shuffle = async () => {
-    let r; try { r = await api('/api/random?n=12'); } catch { return; }
+    let r; try { r = await api('/api/random?n=36'); } catch { return; }
     if (!r.id.length || !rediscover.isConnected) return;
     const tiles = r.id.map((id, i) => h('div', { class: 'tile', style: `--ar:${Math.max(0.5, Math.min(2.2, r.w[i] / (r.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(r.ts[i])),
       onclick: () => openLightbox({ id: r.id }, i, true) }, h('img', { src: `/thumb/${id}`, alt: '', loading: 'lazy' })));
@@ -61,8 +61,15 @@ export async function showExplore() {
   };
   setTimeout(drawThenNow, 0);
   const group = (hue, ...kids) => h('div', { class: 'pills', style: `--hue:var(--c-${hue})` }, ...kids);
-  main.replaceChildren(h('div', { class: 'page' },
-    pageTitle('explore', 'purple', 'Explore'),
+  // the size of the photos in On this day and Rediscover, remembered
+  const sizes = [['s', 'S'], ['m', 'M'], ['l', 'L']];
+  let jsz = store.get('explore-size', 'm');
+  const page = h('div', { class: `page jsz-${jsz}` });
+  const seg = h('div', { class: 'eseg', title: 'Photo size', style: 'margin-left:auto' }, sizes.map(([k, l]) => h('button', { class: k === jsz ? 'on' : '', onclick: (e) => {
+    jsz = k; store.set('explore-size', k); page.className = `page jsz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+  main.replaceChildren(page);
+  fill(page,
+    pageTitle('explore', 'purple', 'Explore', seg),
     h('div', { class: 'stats' },
       stat('blue', 'photo', nf.format(S.META.total - S.META.videos), 'photos', '#/photos'),
       stat('purple', 'video', nf.format(S.META.videos), 'videos', hashFor('photos', photosWith({ type: 'video' }))),
@@ -97,7 +104,7 @@ export async function showExplore() {
     group('teal', S.META.lenses.slice(0, 40).map(([c, n]) => pill(c, n, { lens: c }))),
     S.META.creators.length ? [sec('rose', 'copyright', 'Photographers'), group('rose', S.META.creators.slice(0, 30).map(([c, n]) => pill(c, n, { creator: c })))] : null,
     sec('slate', 'photo', 'File types'),
-    group('slate', S.META.formats.map(([c, n]) => pill(c, n, { fmt: c })))));
+    group('slate', S.META.formats.map(([c, n]) => pill(c, n, { fmt: c }))));
   api('/api/events').then((ev) => {
     const list = ev.events.filter((e) => e.kind === 'trip').slice(0, 8);
     if (S.route.view !== 'explore' || !list.length) return;
@@ -113,7 +120,7 @@ export async function showExplore() {
   try {
     const d = await api(`/api/photos?md=${md}`);
     if (S.route.view !== 'explore' || !d.count) return;
-    for (let i = 0; i < Math.min(d.count, 24); i++) {  // a few rows; "See all" has the rest
+    for (let i = 0; i < Math.min(d.count, 8); i++) {  // one row or so; "See all" has the rest
       strip.append(h('div', { class: 'tile', style: `--ar:${Math.max(0.5, Math.min(2.2, d.w[i] / (d.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(d.ts[i])),
         onclick: () => go('photos', photosWith({ md, p: d.id[i] })) }, h('img', { src: `/thumb/${d.id[i]}`, loading: 'lazy', alt: '' })));
     }

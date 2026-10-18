@@ -1125,6 +1125,28 @@ def test_person_without_a_face_box_has_a_menu_to_take_them_off(page, server, lib
     assert not any(t["id"] == person for t in call(f"/api/photo/{img}")["tags"]), "taken off in digiKam's database too"
 
 
+def test_explore_photo_size_and_section_lengths(page, server):
+    """Explore: at most 8 photos in On this day, more in Rediscover, and an S/M/L photo size that is remembered."""
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("#main .jrows .tile", timeout=15000)
+    page.wait_for_timeout(800)
+    rows = page.locator("#main .jrows")
+    counts = [rows.nth(i).locator(".tile").count() for i in range(rows.count())]
+    assert max(counts) > 12 or max(counts) == page.evaluate("(async () => (await (await fetch('/api/random?n=36')).json()).id.length)()"), counts
+    otd = page.locator("#main h2", has_text="On this day")
+    if otd.count():
+        assert otd.locator("xpath=..").locator(".tile").count() <= 8
+    tile = page.locator("#main .jrows .tile").first
+    page.locator(".eseg button", has_text="L").click()
+    big = tile.bounding_box()["height"]
+    page.locator(".eseg button", has_text="S").click()
+    small = tile.bounding_box()["height"]
+    assert big > small * 1.8, (big, small)
+    page.reload(); page.wait_for_selector("#main .jrows .tile", timeout=15000)
+    assert "on" in page.locator(".eseg button", has_text="S").get_attribute("class"), "the size is remembered"
+    page.locator(".eseg button", has_text="M").click()
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json
@@ -1322,7 +1344,7 @@ def test_explore_rediscover_and_no_settings(page, server):
     page.goto(server + "/#/explore")
     page.wait_for_selector("h2:has-text('Rediscover')", timeout=15000)
     sec = page.locator("h2:has-text('Rediscover') + .jrows")
-    assert 1 <= sec.locator(".tile").count() <= 12
+    assert 1 <= sec.locator(".tile").count() <= 36
     first = sec.locator(".tile img").first.get_attribute("src")
     page.locator("h2:has-text('Rediscover') a", has_text="Shuffle").click()
     page.wait_for_timeout(800)
