@@ -17,7 +17,6 @@ permissions:
 env:
   IMAGE: ghcr.io/avandeputte/iopix
   # the image name from before the rename keeps receiving the same builds, so existing stacks keep updating
-  LEGACY_IMAGE: ghcr.io/avandeputte/digikam-viewer
 
 jobs:
   tests:
@@ -34,7 +33,7 @@ jobs:
           python -c "import app.main"
           for f in static/app.js static/sw.js static/js/*.js; do node --check "$f"; done  # ES modules: the entry, every module, the service worker
           for f in *.sh installer/*.sh; do sh -n "$f"; done
-          bash -n proxmox/ct/iopix.sh proxmox/ct/digikam-viewer.sh proxmox/install/iopix-install.sh migrate-to-iopix.sh
+          bash -n proxmox/ct/iopix.sh proxmox/install/iopix-install.sh
       # the full test suite needs a digiKam library to cut its scratch copy from, so it runs
       # on a developer machine: .venv/bin/python -m pytest tests
 
@@ -57,7 +56,6 @@ jobs:
         with:
           images: |
             ${{ env.IMAGE }}
-            ${{ env.LEGACY_IMAGE }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

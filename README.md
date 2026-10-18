@@ -1,6 +1,6 @@
 # iopix
 
-*A web companion for your digiKam library.* iopix was called digiKam Viewer until version 1.17; see [Renamed from digiKam Viewer](#renamed-from-digikam-viewer).
+*A web companion for your digiKam library.*
 
 A web front end for a digiKam library, for browsing, searching and managing photos from any browser: FastAPI + a single-page vanilla JS app. It reads digiKam's database and your photos, keeps everything it builds in its own `data/` folder, and writes to the library only for the editing features you turn on.
 
@@ -22,8 +22,6 @@ A web front end for a digiKam library, for browsing, searching and managing phot
 <img src="docs/screenshots/phone-viewer.jpg" width="24%" alt="The viewer on a phone">
 <img src="docs/screenshots/phone-explore-dark.jpg" width="24%" alt="Explore on a phone, dark theme">
 </p>
-
-The screenshots show a demo library of freely licensed photos (see [the credits](docs/screenshots/CREDITS.md)); the people's names are invented. [Demo library and screenshots](#demo-library-and-screenshots) says how to rebuild it.
 
 ## Run
 
@@ -116,16 +114,6 @@ Derived from these:
 - **Daily check:** with Settings › Check for updates daily (on by default; `UPDATE_CHECK=0` locks it off) the viewer asks GitHub once a day whether a newer version exists and shows admins a banner with a link to the update; only the public commit list is fetched, nothing about the install is sent.
 - **Server log:** Maintenance › Viewer › Server log shows the end of the viewer's own log (`data/viewer.log`), filtered by level or text, with page requests hidden unless asked, and downloads the whole file. Edits applied to digiKam's database, refusals and failures are logged there.
 - **From the app:** Maintenance › Viewer version shows the installed commit, "Check for updates" compares it with GitHub's main branch, and "Update now" runs `update.sh` (not in Docker, which says to pull instead). The viewer restarts itself when the update finishes.
-
-### Renamed from digiKam Viewer
-
-Version 1.17 renamed the project iopix: the repository (github.com/avandeputte/iopix; the old address redirects), the container image (`ghcr.io/avandeputte/iopix`; the old image name keeps receiving the same builds), the install folder (`/opt/iopix`), the systemd service (`iopix`), the settings file (`iopix.env`) and the `IOPIX_*` variables. Nothing breaks for an existing install: `update.sh` keeps updating an install under the old names, which also still accepts `digikam-viewer.env`, the `digikam-viewer` service and the `DIGIKAM_VIEWER_*` variables. To move it to the new names, run as root where it runs (inside the Proxmox container, `update` does it):
-
-```sh
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/iopix/main/migrate-to-iopix.sh)"
-```
-
-It updates the code, stops the old service, moves `/opt/digikam-viewer` to `/opt/iopix` (leaving a symlink behind), renames the settings file with its paths, installs `iopix.service` with the same user and port, and starts it. The data folder moves unchanged, so users, favorites, edits, the library copy, AI results, thumbnails and models all stay. Docker stacks keep their `dkv-data` volume; change the image line to `ghcr.io/avandeputte/iopix:latest` when convenient.
 
 ## Users and permissions
 
@@ -294,7 +282,7 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `MCP_ADMIN_TOKEN` | unset | the admin token for the MCP diagnostics and update tools (and for `/mcp` when sign-in is required); otherwise one is generated once and shown under Maintenance › Viewer version |
 | `VIEWER_URL` | `http://localhost:8600` | the address used for the links in MCP results |
 | `VIEWER_DB_TYPE` / `VIEWER_DB_HOST` / `VIEWER_DB_PORT` / `VIEWER_DB_DATABASE` / `VIEWER_DB_USER` / `VIEWER_DB_PASSWORD` | unset | the viewer's own database on MySQL/MariaDB instead of `data/viewer.db` (Settings › Viewer database writes the same thing to `data/viewer-db.json`) |
-| `IOPIX_REPO` / `IOPIX_BRANCH` | `avandeputte/iopix` / `main` | where update checks and `update.sh` fetch from (`DIGIKAM_VIEWER_*` still work) |
+| `IOPIX_REPO` / `IOPIX_BRANCH` | `avandeputte/iopix` / `main` | where update checks and `update.sh` fetch from |
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -385,19 +373,6 @@ Other clients that take an MCP URL use `http://<host>:8600/mcp` directly (set `V
 
 About 180 tests in ~95 s (the browser tests are most of that). At start the suite cuts a small scratch library (240 photos from a few albums: JPEG, HEIC, PNG, MOV, with faces, tags and GPS) from a real digiKam library by copying the database and letting digiKam's own cascade triggers remove the rest; every test runs against that copy with the viewer's data folder in a temporary directory, so nothing can touch the real library. `DIGIKAM_TEST_DB` and `DIGIKAM_TEST_ROOT` point it at another library (default: `~/Pictures/digikamDB/digikam4.db` and `~/Pictures/photos`). Covered: filters and search, the job queue, settings and read-only mode, the models registry (network stubbed), the read API, tag and face writes against digiKam's rows and backups, new folders and uploads, first-start model downloads and switching the search model, users and permissions, album roots and the digiKam database settings, the viewer database on SQLite and MySQL (the MySQL half runs when a test server is given) and the migration from `state.db` + `analysis.db`, map providers and place search, the MCP endpoint over HTTP, self-update, the library tables and working without digiKam (offline, Sync with digiKam off, merging changes back, photo ids following a renumbered photo), face detection against existing regions, deleting and restoring photos, the change log with undo, the image-data checksum guard, location suggestions and the place search fallbacks, and browser tests with Playwright (headless Chromium; `python -m playwright install chromium` once) for the grid, lightbox, face toggle, People rows and menus, the person picker, read-only mode, Settings and Maintenance.
 
-## Demo library and screenshots
-
-The screenshots above come from a demo library, never from a real one, and can be retaken at any time:
-
-```sh
-.venv/bin/python tools/demo/build_demo.py        # ~1,000 freely licensed photos with dates, places, keywords -> ~/iopix-demo
-tools/demo/serve_demo.sh                          # the viewer on that library alone, at http://127.0.0.1:8610
-.venv/bin/python tools/demo/people.py apply       # the recurring people get their invented names (tools/demo/people.json)
-.venv/bin/python tools/demo/screenshots.py        # docs/screenshots/*.jpg (add --dark for the dark theme)
-```
-
-`build_demo.py` takes travel photos from Wikimedia Commons (Quality images near each place) and people photos from a CC0 StockSnap series and from Unsplash (a free access key in `UNSPLASH_KEY` or `~/.unsplash-key`), writes the metadata into each file with exiftool, creates an empty digiKam database for it and lists every author and license in `CREDITS.md`. Downloads are cached in `~/iopix-demo-sources`, so a rebuild is quick. The demo server keeps everything (its digiKam database, the viewer's data, the analysis results) under `~/iopix-demo`, apart from the models, which it shares with the checkout.
-
 ## Layout
 
 ```
@@ -416,7 +391,6 @@ app/geo/        places, address search, GPX tracks, map providers
 static/         the web app: index.html, app.js (the entry) and js/ (one ES module per area: core, state, search, grid,
                 actions, editing, download, pages, admin, map, filters, lightbox, main), app.css, icons, PWA manifest, service worker
 tests/          pytest suite (API on a scratch library, browser tests with Playwright)
-tools/demo/     the demo library and the documentation screenshots       docs/screenshots/: the screenshots and their credits
 setup.sh        the installer: asks, installs, downloads, starts the service      run.sh: foreground start
 update.sh       updates an installed copy in place (git or tarball), keeps settings and data
 pyproject.toml  dependencies (base + optional groups)

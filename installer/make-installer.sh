@@ -15,7 +15,7 @@ OUT="dist/iopix-install.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/iopix"
-cp -R app static pyproject.toml README.md setup.sh run.sh update.sh migrate-to-iopix.sh "$TMP/iopix/"
+cp -R app static pyproject.toml README.md setup.sh run.sh update.sh "$TMP/iopix/"
 git rev-parse HEAD > "$TMP/iopix/COMMIT" 2>/dev/null || echo unknown > "$TMP/iopix/COMMIT"
 find "$TMP/iopix" -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$TMP/iopix" -name '.DS_Store' -delete 2>/dev/null || true

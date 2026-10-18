@@ -81,13 +81,6 @@ function update_script() {
   header_info
   check_container_storage
   check_container_resources
-  if [[ ! -d /opt/iopix/app && -d /opt/digikam-viewer/app ]]; then
-    # installed under the name before the rename: move it to /opt/iopix and the iopix service first
-    msg_info "Moving the digiKam Viewer install to /opt/iopix"
-    curl -fsSL "https://raw.githubusercontent.com/avandeputte/iopix/main/migrate-to-iopix.sh" -o /tmp/migrate-to-iopix.sh
-    if bash /tmp/migrate-to-iopix.sh; then msg_ok "Moved to /opt/iopix"; else msg_error "migrate-to-iopix.sh failed; see the lines above"; exit 1; fi
-    exit
-  fi
   if [[ ! -d /opt/iopix/app ]]; then
     msg_error "No ${APP} Installation Found!"
     exit

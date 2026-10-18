@@ -61,7 +61,6 @@ LINE=$(grep -a -n '^__PAYLOAD_BELOW__$' "$0" | head -1 | cut -d: -f1)  # -a: the
 [ -n "$LINE" ] || die "payload missing: build this file with installer/make-installer.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 tail -n +$((LINE + 1)) "$0" | tar xzf - -C "$TMP"
-[ "$PREFIX" = /opt/iopix ] && [ -d /opt/digikam-viewer/app ] && [ ! -L /opt/digikam-viewer ] && die "an install from before the rename is in /opt/digikam-viewer: move it first with $TMP/iopix/migrate-to-iopix.sh (or pass --prefix /opt/digikam-viewer to upgrade it in place)"
 rm -rf "$PREFIX/app.new"; mv "$TMP/iopix" "$PREFIX/app.new"
 if [ -d "$PREFIX/app" ]; then rm -rf "$PREFIX/app.old"; mv "$PREFIX/app" "$PREFIX/app.old"; fi
 mv "$PREFIX/app.new" "$PREFIX/app"; rm -rf "$PREFIX/app.old"

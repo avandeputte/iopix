@@ -64,11 +64,11 @@ else
   # stage everything first, then swap, so a failure never leaves a half-updated install;
   # keep settings, data and the environment (they live outside these items)
   STAGE="$APP/.update-stage"; rm -rf "$STAGE"; mkdir -p "$STAGE"
-  for item in app static pyproject.toml README.md setup.sh run.sh update.sh migrate-to-iopix.sh installer/iopix.service; do
+  for item in app static pyproject.toml README.md setup.sh run.sh update.sh installer/iopix.service; do
     [ -e "$SRC/$item" ] && { mkdir -p "$STAGE/$(dirname "$item")"; cp -R "$SRC/$item" "$STAGE/$item"; }
   done
   [ -d "$STAGE/app" ] && [ -d "$STAGE/static" ] || die "the downloaded tarball looks incomplete"
-  for item in app static pyproject.toml README.md setup.sh run.sh update.sh migrate-to-iopix.sh; do
+  for item in app static pyproject.toml README.md setup.sh run.sh update.sh; do
     [ -e "$STAGE/$item" ] || continue
     rm -rf "$APP/$item.old"; [ -e "$APP/$item" ] && mv "$APP/$item" "$APP/$item.old"
     mv "$STAGE/$item" "$APP/$item"; rm -rf "$APP/$item.old"
@@ -77,7 +77,7 @@ else
   rm -rf "$STAGE"
   echo "$R" > COMMIT
 fi
-chmod 755 setup.sh update.sh run.sh migrate-to-iopix.sh 2>/dev/null || true
+chmod 755 setup.sh update.sh run.sh 2>/dev/null || true
 
 say "Refreshing the Python packages"
 VPY="$APP/.venv/bin/python"
@@ -105,7 +105,6 @@ say "Restarting the service"
 SVC=""; for s in iopix digikam-viewer; do command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$s" 2>/dev/null && { SVC="$s"; break; }; done
 if [ -n "$SVC" ]; then
   systemctl restart "$SVC" && echo "  systemd: restarted $SVC"
-  [ "$SVC" = digikam-viewer ] && echo "  (installed under the old name; ./migrate-to-iopix.sh moves it to /opt/iopix and the iopix service)"
 elif [ "$(uname -s)" = Darwin ]; then
   L="$(launchctl list 2>/dev/null | grep -o 'com\.[a-z.]*\(iopix\|digikam-viewer\)' | head -1)"
   if [ -n "$L" ]; then launchctl kickstart -k "gui/$(id -u)/$L" && echo "  launchd: restarted $L"; else echo "  no service found; restart the viewer yourself"; fi
