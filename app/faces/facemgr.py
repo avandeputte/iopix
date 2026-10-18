@@ -472,8 +472,8 @@ def _region_args(src, image: int, roots: dict, tags: dict, persons: set):
 
 
 def write_regions_many(images: list, db_path=None, files: bool = None, sidecars: bool = True) -> dict:
-    """Rewrite the face regions of these photos' sidecars (and image files when `files`, by default the "write
-    into files" setting) from the database, in one exiftool run. Returns {image: written|failed|why}."""
+    """Rewrite the face regions and the tag list of these photos' sidecars (and image files when `files`, by default
+    the "write into files" setting) from the database, in one exiftool run. Returns {image: written|failed|why}."""
     db_path = Path(db_path or dkdb.sqlite_path())
     files = edits.writes_files() if files is None else files
     out, jobs, owner = {}, [], {}
@@ -484,16 +484,21 @@ def write_regions_many(images: list, db_path=None, files: bool = None, sidecars:
         built = {int(i): _region_args(src, int(i), roots, tags, persons) for i in dict.fromkeys(images)}
     finally:
         src.close()
+    # the tag list goes with the regions, as digiKam writes it: a named face is also a People/... tag on the photo,
+    # and a sidecar with the regions but not the tags reads as a mismatch (and loses the name on a rescan)
+    ok = [i for i, (path, _a) in built.items() if path is not None]
+    db_tags, pend = edits.digikam_tag_paths(ok) if ok else {}, edits.pending()
     paths = {}
     for image, (path, args) in built.items():
         if path is None:
             out[image] = args
             continue
+        tag_paths = edits.effective_tags(db_tags.get(image, []), pend.get(image, {}))
         if sidecars:
             side = edits._prepare(path)
-            jobs.append((side, args)); owner[side] = image
+            jobs.append((side, args + edits.write_args({}, tag_paths, False))); owner[side] = image
         if files and edits.can_write_file(path):
-            jobs.append((path, args)); owner[path] = image
+            jobs.append((path, args + edits.write_args({}, tag_paths, True))); owner[path] = image
         elif not sidecars:
             out[image] = "not a file the viewer writes into"
             continue

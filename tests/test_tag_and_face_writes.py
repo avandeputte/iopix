@@ -252,3 +252,35 @@ def test_merging_two_entries_of_one_person(lib, client):
             time.sleep(0.1)
         for t in (b, kw):
             tagmanager.apply({"op": "delete", "id": t}, check_running=False, queue=False)
+
+
+def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
+    """digiKam writes a named face both as a region and as a People/... tag; the sidecar must carry both, or the
+    consistency check sees the tags missing (and a rescan from the sidecar would lose them)."""
+    import json as _json
+    import sqlite3
+    import subprocess
+    from app.photos import edits
+    dk = sqlite3.connect(lib["db"])
+    try:
+        person = dk.execute("SELECT tagid FROM TagProperties WHERE property = 'person' AND value != '' LIMIT 1").fetchone()[0]
+        img = dk.execute("SELECT id FROM Images WHERE status = 1 AND category = 1 AND id NOT IN (SELECT imageid FROM ImageTagProperties WHERE property IN ('tagRegion', 'autodetectedFace')) LIMIT 1").fetchone()[0]
+    finally:
+        dk.close()
+    path = dict(__import__("app.digikam.dbsync", fromlist=["_photo_paths"])._photo_paths([img]))[img]
+    full = edits.digikam_tag_paths([img])[img]
+    r = facemgr.apply({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": person}, check_running=False)
+    try:
+        assert r["sidecar"] == "written", r
+        out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", "-XMP-lr:HierarchicalSubject", "-XMP-mwg-rs:RegionName", path + ".xmp"], capture_output=True, text=True).stdout
+        d = _json.loads(out)[0]
+        want = [p for p in edits.digikam_tag_paths([img])[img] if p not in full]
+        tags = d.get("TagsList") or []
+        tags = tags if isinstance(tags, list) else [tags]
+        assert want and all(w in tags for w in want), (want, d)
+        assert d.get("RegionName"), d
+    finally:
+        facemgr.apply({"op": "remove", "image": img, "rect": [5, 5, 40, 40]}, check_running=False)
+    out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
+    tags = _json.loads(out)[0].get("TagsList") or []
+    assert not any(w in (tags if isinstance(tags, list) else [tags]) for w in want), "removing the face takes the tag out of the sidecar too"
