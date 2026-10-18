@@ -96,3 +96,18 @@ def test_rewrite_sidecars_tool(client, lib):
         mcp_server.rewrite_sidecars("wrong", [lib["ids"][0]])
     r = mcp_server.rewrite_sidecars(updates.admin_token(), lib["ids"][:2])
     assert r["photos"] == 2 and r["tags_failed"] == [] and set(r["regions"]) == {str(i) for i in lib["ids"][:2]}, r
+
+
+def test_edit_photos_tool_sets_the_date_in_sidecar_and_database(client, lib):
+    import sqlite3
+    from app import mcp_server, updates
+    from app.photos import edits
+    pid = lib["ids"][-1]
+    con = sqlite3.connect(lib["db"]); before = con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0]; con.close()
+    r = mcp_server.edit_photos(updates.admin_token(), [pid], taken="2015-04-04T12:37:05")
+    assert r["edited"] == 1 and r["database"]["applied"] == 1, r
+    con = sqlite3.connect(lib["db"])
+    assert con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0].startswith("2015-04-04T12:37:05")
+    con.close()
+    mcp_server.edit_photos(updates.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
+    edits.forget([pid])

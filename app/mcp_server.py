@@ -577,6 +577,42 @@ def consistency_report(token: str, field: str = "", offset: int = 0, limit: int 
             **consistency.report(field or None, max(0, offset), max(1, min(limit, 2000)))}
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, caption: Optional[str] = None, title: Optional[str] = None,
+                rating: Optional[int] = None, apply_to_database: bool = True) -> dict:
+    """Change the date taken ("YYYY-MM-DDTHH:MM:SS"), caption, title or rating of these photos exactly as the web app
+    does: written to each sidecar (and the file when the viewer writes into files), in the edit log with undo, and with
+    apply_to_database written into digiKam's database right away (digiKam closed). Needs the admin token."""
+    _need_token(token)
+    import re
+    from app.digikam import dbsync
+    ch = {}
+    if taken is not None:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", taken):
+            raise ToolError("taken must be YYYY-MM-DDTHH:MM:SS")
+        ch["taken"] = taken
+    for k, v in (("caption", caption), ("title", title)):
+        if v is not None:
+            ch[k] = v.strip()
+    if rating is not None:
+        ch["rating"] = max(0, min(5, int(rating)))
+    if not ch:
+        raise ToolError("Nothing to change")
+    con = db()
+    try:
+        photos = [dict(r) for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({','.join(str(int(i)) for i in photo_ids) or 'NULL'})")]
+    finally:
+        con.close()
+    res = edits.apply(photos, ch)
+    if apply_to_database and res["edited"]:
+        pend = edits.pending()
+        try:
+            res["database"] = dbsync.apply_pending(pending={p["id"]: pend[p["id"]] for p in photos if p["id"] in pend})
+        except dbsync.SyncError as e:
+            res["database"] = {"error": str(e)}
+    return res
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def consistency_scan(token: str, rescan_all: bool = False) -> dict:
     """Start the metadata consistency check in the background, as Maintenance > Metadata consistency's buttons do:
