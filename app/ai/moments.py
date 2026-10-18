@@ -117,7 +117,7 @@ def events_and_trips(con) -> list:
         return (date.fromisoformat(b) - date.fromisoformat(a)).days
 
     def cover(photos):
-        still = [r for r in photos if not r["video"] and r["pick"] != 1] or photos
+        still = [r for r in photos if not r["video"]] or photos
         best = max(still, key=lambda r: (r["rating"] or 0))
         return (best if (best["rating"] or 0) > 0 else still[len(still) // 2])["id"]
 

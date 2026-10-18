@@ -80,8 +80,8 @@ def _photos_cached(version: str, key: str) -> bytes:
 
 @router.get("/api/random")
 def api_random(request: Request, n: int = 12):
-    """Explore › Rediscover: photos picked at random from the whole library (stills, not rejected): {id, w, h, ts}."""
-    where, params, _rank = resolve([("type", "photo"), ("norejected", "1")])
+    """Explore › Rediscover: photos picked at random from the whole library (stills): {id, w, h, ts}."""
+    where, params, _rank = resolve([("type", "photo")])
     con = db()
     try:
         rows = con.execute(f"SELECT id, w, h, ts FROM photos WHERE {where} ORDER BY random() LIMIT ?", [*params, max(1, min(int(n), 60))]).fetchall()

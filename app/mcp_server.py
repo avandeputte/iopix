@@ -127,8 +127,6 @@ def _items(con, f: dict) -> list:
             add(param, f[key])
     if f.get("pick_label"):
         add("pick", PICKS.index(f["pick_label"]))
-    if f.get("hide_rejected"):
-        add("norejected", 1)
     if f.get("media_type") in ("photo", "video"):
         add("type", f["media_type"])
     if f.get("has_location") is not None:
@@ -183,7 +181,7 @@ FILTER_DOC = """
       album: album name, path such as "/2022/202205 Prom", or id; sub-albums are included
       date_from / date_to: "YYYY-MM-DD" inclusive; year, month (1-12); month_day "MM-DD" for "on this day"
       camera, lens, photographer, file_format (JPG, HEIF, MOV, ...): exact values as shown by count_by
-      min_rating: 1-5; pick_label: none/rejected/pending/accepted; hide_rejected
+      min_rating: 1-5; pick_label: none/pending/accepted
       media_type: "photo" or "video"; has_location: true/false; untagged: true
       bbox: [south, west, north, east] in degrees
       iso_min/iso_max, aperture_min/aperture_max, focal_min/focal_max (35mm equivalent when known)
@@ -224,8 +222,8 @@ def search_photos(
     date_from: Optional[str] = None, date_to: Optional[str] = None, year: Optional[int] = None,
     month: Optional[int] = None, month_day: Optional[str] = None, camera: Optional[str] = None,
     lens: Optional[str] = None, photographer: Optional[str] = None, file_format: Optional[str] = None,
-    min_rating: Optional[int] = None, pick_label: Optional[Literal["none", "rejected", "pending", "accepted"]] = None,
-    hide_rejected: bool = False, media_type: Optional[Literal["photo", "video"]] = None,
+    min_rating: Optional[int] = None, pick_label: Optional[Literal["none", "pending", "accepted"]] = None,
+    media_type: Optional[Literal["photo", "video"]] = None,
     has_location: Optional[bool] = None, untagged: bool = False, bbox: Optional[list[float]] = None,
     iso_min: Optional[float] = None, iso_max: Optional[float] = None, aperture_min: Optional[float] = None,
     aperture_max: Optional[float] = None, focal_min: Optional[float] = None, focal_max: Optional[float] = None,
@@ -264,7 +262,7 @@ def count_by(
     exclude_tags: Optional[list[str]] = None, album: Optional[str] = None,
     date_from: Optional[str] = None, date_to: Optional[str] = None, year: Optional[int] = None,
     month: Optional[int] = None, camera: Optional[str] = None, lens: Optional[str] = None,
-    min_rating: Optional[int] = None, hide_rejected: bool = False,
+    min_rating: Optional[int] = None,
     media_type: Optional[Literal["photo", "video"]] = None, has_location: Optional[bool] = None,
     place: Optional[str] = None, region: Optional[str] = None, country: Optional[str] = None,
     favorites_only: bool = False, limit: int = 50,

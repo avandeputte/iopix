@@ -111,11 +111,11 @@ export async function showExplore() {
     detected.hidden = false;
   }).catch(() => {});
   try {
-    const d = await api(`/api/photos?md=${md}&norejected=1`);
+    const d = await api(`/api/photos?md=${md}`);
     if (S.route.view !== 'explore' || !d.count) return;
     for (let i = 0; i < Math.min(d.count, 24); i++) {  // a few rows; "See all" has the rest
       strip.append(h('div', { class: 'tile', style: `--ar:${Math.max(0.5, Math.min(2.2, d.w[i] / (d.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(d.ts[i])),
-        onclick: () => go('photos', photosWith({ md, norejected: 1, p: d.id[i] })) }, h('img', { src: `/thumb/${d.id[i]}`, loading: 'lazy', alt: '' })));
+        onclick: () => go('photos', photosWith({ md, p: d.id[i] })) }, h('img', { src: `/thumb/${d.id[i]}`, loading: 'lazy', alt: '' })));
     }
     otd.hidden = false;
   } catch { /* optional section */ }

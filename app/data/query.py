@@ -144,8 +144,6 @@ def build_where(items) -> tuple[str, list]:
     if _num(one("rating")) is not None:
         where.append("rating >= ?")
         params.append(int(_num(one("rating"))))
-    if one("norejected") == "1":
-        where.append("pick != 1")
     if one("type") == "video":
         where.append("video = 1")
     elif one("type") == "photo":

@@ -101,7 +101,7 @@ Heavy work runs through one queue, one job at a time, in this order: thumbnails,
 Derived from these:
 
 - **Detected content**: Explore › Detected content files photos under 752 everyday subjects in 13 groups (landscapes, buildings, rooms, people, events, soccer, other sports, animals, food, vehicles and travel, objects, documents, photo style). These are guesses from the embeddings, not stored labels.
-- **Bursts & best shots**: frames taken within 2 seconds on the same camera that also look alike (embedding similarity ≥ 0.80 when content search is on) are grouped; the best frame is the sharpest, nudged by face quality. "Show only the best frame of each burst" is a filter; with editing on, the rest of a burst can be rejected in one click.
+- **Bursts & best shots**: frames taken within 2 seconds on the same camera that also look alike (embedding similarity ≥ 0.80 when content search is on) are grouped; the best frame is the sharpest, nudged by face quality. "Show only the best frame of each burst" is a filter.
 - **Events & trips**: trips are runs of days photographed more than 75 km from the town where most of your photos are taken; events are other days with 20 or more photos, named after the title most of them share, else their main tag, else the town.
 - **Search model**: `setup.sh` proposes SigLIP 2 (CLIP indexes about 4x faster); the Docker image and the installers download SigLIP 2 first and use it; with neither chosen the viewer uses CLIP. Switch between installed models under Maintenance › AI analysis; the library is re-indexed in the background and search switches when complete. You can switch back at any time.
 

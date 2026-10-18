@@ -25,7 +25,6 @@ export function chipList(p) {
     else if (k === 'type') add(k, v, v === 'video' ? 'Videos' : 'Photos only', { ic: v === 'video' ? 'video' : 'photo' });
     else if (k === 'geo') add(k, v, v === '1' ? 'Has location' : 'No location', { ic: 'place' });
     else if (k === 'untagged') add(k, v, 'Untagged', { ic: 'tag' });
-    else if (k === 'norejected') add(k, v, 'Hide rejected');
     else if (k === 'bbox') add(k, v, 'Map area', { ic: 'place' });
     else if (k === 'trail') add(k, v, `Trail for ${v}`, { ic: 'map' });
     else if (k === 'faces') add(k, v, { unknown: 'Unnamed faces', suggested: 'Face suggestions', ignored: 'Ignored faces', confirmed: 'Named faces' }[v] || v, { ic: 'face' });
