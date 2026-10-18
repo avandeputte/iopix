@@ -1430,3 +1430,24 @@ def test_an_added_face_stays_on_screen_while_the_library_catches_up(page, server
         page.wait_for_timeout(500)
         counts.append(page.locator(".lb-frame .facebox").count())
     assert min(counts) > before, counts
+
+
+def test_set_location_dialog_fits_and_who_is_this_lists_nearby_people(page, server, lib):
+    import json as _json
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(server + "/#/photos?sort=old")
+    page.wait_for_selector("#grid .tile img", timeout=20000)
+    t = page.locator("#grid .tile").first
+    t.hover(); t.locator(".tcheck").click(force=True)
+    page.locator("#selbar button[title='Set location']").click()
+    page.wait_for_selector(".modal .imap", timeout=10000)
+    page.wait_for_timeout(800)
+    modal = page.locator(".modal").last.bounding_box()
+    for b in page.locator(".modal button").all():
+        bb = b.bounding_box()
+        if bb:
+            assert bb["x"] + bb["width"] <= modal["x"] + modal["width"] + 1, (b.inner_text(), bb, modal)
+    page.locator(".modal button", has_text="Cancel").last.click()
+    pid = lib["with_faces"][0]
+    r = _json.loads(urllib.request.urlopen(f"{server}/api/faces/nearby?photo={pid}").read())
+    assert isinstance(r["people"], list) and all("tag" in x for x in r["people"])

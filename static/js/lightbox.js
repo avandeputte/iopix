@@ -554,7 +554,7 @@ export function faceMenu(box, f, d) {
   $('.facemenu')?.remove();
   const rect = () => [f.x, f.y, f.w, f.h];
   const item = (label, fn, danger) => h('div', { class: 'fmi' + (danger ? ' danger' : ''), onclick: (e) => { e.stopPropagation(); menu.remove(); fn(); } }, label);
-  const nameIt = () => personPicker((t) => faceOp({ op: 'name', image: d.id, rect: rect(), tag: t.id }));
+  const nameIt = () => personPicker((t) => faceOp({ op: 'name', image: d.id, rect: rect(), tag: t.id }), d.id);
   const items = f.kind === 'confirmed' ? [
     item(`Show all photos of ${f.name}`, () => filterFromLightbox({ tag: f.tag })),
     d.id !== S.tagById.get(f.tag)?.icon ? item(`Use as ${f.name}’s badge picture`, () => setTagIcon(S.tagById.get(f.tag) || { id: f.tag, name: f.name, person: 1 }, d.id)) : null,
@@ -651,16 +651,23 @@ export function faceOp(op, undo) {
     if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id && !FACE_Q.has(id)) { LB.detail = fresh; redrawPhoto(id); } });
   });
 }
-export function personPicker(onPick) {
+export function personPicker(onPick, photoId) {
   // the "People" root carries digiKam's person property too, but it is not someone a face can be named after
   const people = S.META.tags.filter((t) => t.person && t.full !== 'People' && t.full.split('/')[0] === 'People');
   const inp = h('input', { class: 'pagefilter', style: 'margin:0;width:100%', placeholder: 'Type a name…' });
   const list = h('div', { class: 'alist', style: 'max-height:40vh;margin-top:8px' });
   const families = S.META.tags.filter((t) => !t.person && t.full.startsWith('People/') && t.full.split('/').length === 2);
+  // the people of the nearby photos in the same folder, nearest in time first: most likely the same people
+  let near = [];
+  if (photoId) api(`/api/faces/nearby?photo=${photoId}`).then((r) => { near = r.people.map((x) => x.tag).filter((id) => S.tagById.has(id)); draw(); }).catch(() => {});
   const draw = () => {
     const f = norm(inp.value);
-    const hits = people.filter((t) => !f || t._n.includes(f)).sort((a, b) => b.nAll - a.nAll).slice(0, 30);
-    fill(list, hits.map((t) => h('div', { class: 'frow', onclick: () => { back.remove(); onPick(t); } }, h('img', { src: faceUrl(t.id), loading: 'lazy', alt: '' }), h('span', { class: 'nm' }, t.name, h('span', { hidden: true }, '  ' + t.full.split('/').slice(1, -1).join(' › '))), h('span', { class: 'ct' }, nf.format(t.nAll)))),
+    const rank = (t) => { const k = near.indexOf(t.id); return k < 0 ? 1e9 : k; };
+    const hits = people.filter((t) => !f || t._n.includes(f)).sort((a, b) => (rank(a) - rank(b)) || (b.nAll - a.nAll)).slice(0, 30);
+    const nearCount = hits.filter((t) => near.includes(t.id)).length;
+    fill(list, nearCount ? h('div', { class: 'muted pphead' }, 'In nearby photos of this folder') : null,
+      hits.map((t, k) => [k === nearCount && nearCount ? h('div', { class: 'muted pphead' }, 'Everyone') : null,
+        h('div', { class: 'frow' + (k < nearCount ? ' near' : ''), onclick: () => { back.remove(); onPick(t); } }, h('img', { src: faceUrl(t.id), loading: 'lazy', alt: '' }), h('span', { class: 'nm' }, t.name, h('span', { hidden: true }, '  ' + t.full.split('/').slice(1, -1).join(' › '))), h('span', { class: 'ct' }, nf.format(t.nAll)))]),
       f && !hits.some((t) => t._n === f) ? h('div', { class: 'frow', onclick: () => createPerson(inp.value.trim()) }, icon('add'), h('span', { class: 'nm' }, `New person “${inp.value.trim()}”…`)) : null);
   };
   const createPerson = (name) => {
@@ -687,7 +694,7 @@ export function nameNextFace() {
   const f = faceRegions(d).find((x) => x.kind === 'unknown' || x.kind === 'suggested');
   if (!f) { startDrawFace(); return; }
   if (!LB.faces) toggleFaces();
-  personPicker((t) => faceOp({ op: 'name', image: d.id, rect: [f.x, f.y, f.w, f.h], tag: t.id }));
+  personPicker((t) => faceOp({ op: 'name', image: d.id, rect: [f.x, f.y, f.w, f.h], tag: t.id }), d.id);
 }
 export function startDrawFace() {
   const { stage, frame } = LB.el, d = LB.detail;
@@ -704,7 +711,7 @@ export function startDrawFace() {
     const p = toImg(e); const x = Math.round(Math.min(start[0], p[0])), y = Math.round(Math.min(start[1], p[1])), w = Math.round(Math.abs(p[0] - start[0])), hh = Math.round(Math.abs(p[1] - start[1]));
     start = null; stop();
     if (w < 8 || hh < 8) { box.remove(); return; }
-    personPicker((t) => { box.remove(); faceOp({ op: 'add', image: d.id, rect: [x, y, w, hh], tag: t.id }); });
+    personPicker((t) => { box.remove(); faceOp({ op: 'add', image: d.id, rect: [x, y, w, hh], tag: t.id }); }, d.id);
   };
   const stop = () => { stage.removeEventListener('pointerdown', down, true); stage.removeEventListener('pointermove', move, true); stage.removeEventListener('pointerup', up, true); stage.style.cursor = ''; };
   stage.style.cursor = 'crosshair';

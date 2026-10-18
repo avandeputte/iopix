@@ -75,6 +75,27 @@ async def api_face_op(request: Request):
     return res
 
 
+@router.get("/api/faces/nearby")
+def api_faces_nearby(photo: int, limit: int = 12):
+    """The people in the photos around this one in the same folder (named faces or person tags), the nearest in
+    time and the most frequent first: [{tag, n}]. For the "Who is this?" list."""
+    con = db()
+    try:
+        row = con.execute("SELECT album_id, ts FROM photos WHERE id = ?", (photo,)).fetchone()
+        if not row:
+            return {"people": []}
+        rows = con.execute(
+            "SELECT t.id, count(*) AS n, min(abs(p.ts - ?)) AS gap FROM photos p "
+            "JOIN (SELECT photo_id, tag_id FROM faces WHERE kind = 'confirmed' UNION SELECT pt.photo_id, pt.tag_id FROM photo_tags pt "
+            "      JOIN tags tt ON tt.id = pt.tag_id AND tt.person = 1) x ON x.photo_id = p.id "
+            "JOIN tags t ON t.id = x.tag_id AND t.person = 1 AND t.full != 'People' "
+            "WHERE p.album_id = ? AND p.id != ? GROUP BY t.id ORDER BY gap / 3600 ASC, n DESC LIMIT ?",
+            (row["ts"] or 0, row["album_id"], photo, max(1, min(limit, 40)))).fetchall()
+    finally:
+        con.close()
+    return {"people": [{"tag": r[0], "n": r[1]} for r in rows]}
+
+
 @router.post("/api/faces/batch")
 async def api_face_batch(request: Request):
     """Many face changes in one transaction with one backup: {ops: [...]} (see facemgr.apply_many)."""
