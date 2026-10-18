@@ -1095,6 +1095,36 @@ def test_people_page_groups_and_arranging(page, server):
         call(f"/api/people/groups/{gid}", method="DELETE")
 
 
+def test_person_without_a_face_box_has_a_menu_to_take_them_off(page, server, lib):
+    """A person tagged on a photo with no face box is listed under People with a menu: take them off the photo."""
+    import json as _json, sqlite3, time as _time
+    def call(path, body=None):
+        req = urllib.request.Request(server + path, data=_json.dumps(body).encode() if body is not None else None, headers={"Content-Type": "application/json"})
+        return _json.loads(urllib.request.urlopen(req).read())
+    dk = sqlite3.connect(lib["db"])
+    person, name = dk.execute("SELECT p.tagid, t.name FROM TagProperties p JOIN Tags t ON t.id = p.tagid WHERE p.property = 'person' AND p.value != '' LIMIT 1").fetchone()
+    img = dk.execute("SELECT id FROM Images WHERE status = 1 AND category = 1 AND id NOT IN (SELECT imageid FROM ImageTagProperties WHERE tagid = ?) AND id NOT IN (SELECT imageid FROM ImageTags WHERE tagid = ?) LIMIT 1", (person, person)).fetchone()[0]
+    dk.close()
+    call("/api/faces/op", {"op": "tagonly", "image": img, "tag": person})
+    for _ in range(40):
+        if any(t["id"] == person for t in call(f"/api/photo/{img}")["tags"]):
+            break
+        _time.sleep(0.25)
+    _open_photo(page, server, img)
+    page.keyboard.press("i")
+    row = page.locator(".lb-info .facerow", has_text=name)
+    row.wait_for(timeout=10000)
+    assert "no face box" in row.inner_text()
+    row.click()
+    page.locator(".facemenu .fmi", has_text="take").click()
+    page.wait_for_function(f"![...document.querySelectorAll('.lb-info .facerow')].some((r) => r.innerText.includes({_json.dumps(name)}))", timeout=5000)
+    for _ in range(40):
+        if not any(t["id"] == person for t in call(f"/api/photo/{img}")["tags"]):
+            break
+        _time.sleep(0.25)
+    assert not any(t["id"] == person for t in call(f"/api/photo/{img}")["tags"]), "taken off in digiKam's database too"
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json

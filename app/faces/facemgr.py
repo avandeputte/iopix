@@ -164,6 +164,8 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     add:     a new region for person `tag`
     detected: a new unknown face (face detection), unless a face already sits at that exact rectangle
     move:    change the rectangle of an existing face to new_rect
+    untag:   take person `tag` off the photo when no face region carries them (a person tagged without a box)
+    tagonly: put person `tag` on the photo without a face region (what undoing untag does)
     Returns one summary per op; a failed op has an "error" and the others still apply.
     background: return right after the database write and rewrite the sidecars afterwards (what the web app
     asks for, so a face change shows at once); otherwise each op carries its sidecar outcome."""
@@ -171,7 +173,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     if not ops:
         return []
     for op in ops:
-        if op.get("op") not in ("name", "confirm", "ignore", "unknown", "remove", "add", "move", "detected", "suggest"):
+        if op.get("op") not in ("name", "confirm", "ignore", "unknown", "remove", "add", "move", "detected", "suggest", "untag", "tagonly"):
             raise SyncError("Unknown face operation")
     dbsync.preflight(db_path, check_running, "faces")
     results, touched = [], []
@@ -190,7 +192,8 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     from app.photos import history
     labels = {"name": "Face named {name}", "confirm": "Suggested face confirmed as {name}", "ignore": "Face marked as ignored", "unknown": "Face name removed (now unknown)",
               "remove": "Face region removed", "add": "Face added for {name}", "move": "Face region moved", "detected": "Unnamed face added by face detection",
-              "suggest": "Suggestion for {name} put back"}
+              "suggest": "Suggestion for {name} put back", "untag": "{name} taken off the photo (no face box)",
+              "tagonly": "{name} put back on the photo (no face box)"}
     done = [r for r in results if "error" not in r and not r.get("skipped")]
     try:
         paths = dict(dbsync._photo_paths(list({r["image"] for r in done})))
@@ -207,6 +210,11 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
                      "summary": labels.get(r.get("op"), "Face changed").format(name=(r.get("name") or "").split("/")[-1] or "a person"),
                      "details": det, "undo": {"face_ops": inv} if inv else None})
     history.record(rows)
+    # a person tagged without a box lives in the sidecar's tag list, not its regions: rewrite that list too
+    tag_only = [{"id": r["image"], "path": paths[r["image"]]} for r in done if r.get("op") in ("untag", "tagonly") and paths.get(r["image"])]
+    if tag_only:
+        from app.photos import edits
+        edits.rewrite_tags(tag_only)
     if background:
         queue_sidecars(list(dict.fromkeys(touched)), db_path)
         for r in results:
@@ -229,6 +237,8 @@ def inverse_ops(d: dict) -> list:
     """The face operations that take a photo back to how it was before the recorded change d (its history
     details: op, rect, tag, was, from_tag, new_rect). Empty when the change cannot be undone that way."""
     op, at, was, before = d.get("op"), d.get("rect"), d.get("was"), d.get("from_tag")
+    if op in ("untag", "tagonly") and d.get("tag"):
+        return [{"op": "tagonly" if op == "untag" else "untag", "tag": d["tag"]}]
     if not at:
         return []
 
@@ -294,6 +304,20 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         _add_prop(con, image, new_tag, "autodetectedFace", rect)
         _add_prop(con, image, sp["unconfirmedPerson"], "autodetectedPerson", f"{new_tag},autodetectedFace,{rect}")
         summary.update(tag=new_tag, name=_full(con, new_tag))
+        return summary
+    if kind_op in ("untag", "tagonly"):
+        person = int(op.get("tag") or 0)
+        if person in sp.values() or not con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (person,)).fetchone():
+            raise SyncError("That is not a person.")
+        if con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property IN ('tagRegion', 'autodetectedFace')", (image, person)).fetchone():
+            raise SyncError("A face box carries that person: remove or rename the face instead.")
+        if kind_op == "untag":
+            if not con.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (image, person)).fetchone():
+                raise SyncError("That person is not on the photo.")
+            con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (image, person))
+        else:
+            con.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (image, person))
+        summary.update(tag=person, name=_full(con, person))
         return summary
     if kind_op == "add":
         new_tag = int(op.get("tag") or 0)

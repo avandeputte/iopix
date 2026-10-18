@@ -646,6 +646,15 @@ export function faceMenu(box, f, d) {
 /** A face change shows at once: the photo's details are changed here first, the request follows in the
  *  background (one at a time per photo, in order), and only a failure brings the server's version back. */
 export const FACE_Q = new Map();  // photo id -> promise of the last change sent for it
+/** A person tagged on the photo without a face box: show their photos, mark their face, or take them off the photo. */
+export function tagOnlyMenu(anchor, f, d) {
+  popMenu(anchor, [
+    `${f.name} · no face box`,
+    ['Show all photos of ' + f.name, () => filterFromLightbox({ tag: f.tag })],
+    !d.video ? [`Mark ${f.name}’s face…`, () => startDrawFace()] : null,
+    [`Not in this photo: take ${f.name} off`, () => faceOp({ op: 'untag', image: d.id, tag: f.tag }, () => faceOp({ op: 'tagonly', image: d.id, tag: f.tag })), 'danger'],
+  ]);
+}
 export function applyFaceLocally(d, op) {
   const same = (f) => f.x === op.rect?.[0] && f.y === op.rect?.[1] && f.w === op.rect?.[2] && f.h === op.rect?.[3];
   const t = op.tag ? S.tagById.get(op.tag) : null;
@@ -663,6 +672,8 @@ export function applyFaceLocally(d, op) {
   else if (op.op === 'remove' && was) { if (was.kind === 'confirmed') dropTag(was.tag); }
   else if (op.op === 'detected') d.faces_other.push({ ...at(op.rect), kind: 'unknown', tag: null, name: null });
   else if (op.op === 'suggest') d.faces_other.push({ ...at(op.rect), kind: 'suggested', tag: op.tag, name: t?.name || '…' });
+  else if (op.op === 'untag') d.tags = d.tags.filter((x) => x.id !== op.tag);
+  else if (op.op === 'tagonly') keepTag(op.tag);
   else if (op.op === 'move' && was) { const moved = { ...was, ...at(op.new_rect) }; if (was.kind === 'confirmed') { delete moved.kind; d.faces.push(moved); } else d.faces_other.push(moved); }
 }
 export function redrawPhoto(id) {
@@ -683,7 +694,7 @@ export function faceOp(op, undo) {
   if (cached && cached !== shown && typeof cached === 'object' && cached.faces) applyFaceLocally(cached, op);
   redrawPhoto(id);
   const name = op.tag ? S.tagById.get(op.tag)?.name : null;
-  const said = { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.' }[op.op];
+  const said = { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `${name} put back.` }[op.op];
   if (said) undo ? toast(said, 'Undo', undo, 7000) : toast(said);
   const prev = FACE_Q.get(id) || Promise.resolve();
   const mine = prev.then(() => post('/api/faces/op', op)).then(() => true, (e) => {
@@ -906,11 +917,12 @@ export function renderInfo() {
         onclick: (e) => {
           if (f.kind !== 'tagonly' && !LB.faces) toggleFaces();
           if (S.CAN_MANAGE && f.kind !== 'tagonly') faceMenu(e.currentTarget, f, d);
+          else if (S.CAN_MANAGE && f.kind === 'tagonly') tagOnlyMenu(e.currentTarget, f, d);
           else if (f.kind === 'confirmed' || f.kind === 'tagonly') filterFromLightbox({ tag: f.tag });
         } },
         h('img', { src: f.kind === 'tagonly' ? faceUrl(f.tag) : `/facecrop/${d.id}/${f.x}/${f.y}/${f.w}/${f.h}.jpg`, alt: '' }),
         h('span', { class: 'nm' }, f.kind === 'confirmed' || f.kind === 'tagonly' ? f.name : f.kind === 'suggested' ? [h('i', null, 'Suggestion: '), f.name] : h('i', null, 'Unknown face')),
-        S.CAN_MANAGE && f.kind !== 'tagonly' ? h('span', { class: 'muted', style: 'font-size:12px' }, 'options ▾') : null)))];
+        S.CAN_MANAGE ? h('span', { class: 'muted', style: 'font-size:12px' }, f.kind === 'tagonly' ? 'no face box ▾' : 'options ▾') : null)))];
     })() : null,
     show('tags') && (tags.length || S.EDITING) ? [h('h4', null, 'Tags'), h('div', { class: 'ichips' }, tags.map((t) => { const c = chip(t);
       if (S.EDITING) c.append(h('button', { class: 'tx', title: 'Remove this tag', onclick: (e) => { e.stopPropagation(); saveOne({ remove_tags: [t.id] }); } }, icon('close'))); return c; })),

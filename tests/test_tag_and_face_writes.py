@@ -178,3 +178,26 @@ def test_a_keyword_tag_marked_as_a_person_can_be_unmarked(lib, client):
     finally:
         dk.close()
         tagmanager.apply({"op": "delete", "id": tid}, check_running=False)
+
+
+def test_a_person_tagged_without_a_face_box_can_be_taken_off_the_photo(lib, client):
+    """A person on a photo with no face region (digiKam allows it) can be taken off, and put back by undo; a person
+    with a face box on the photo is refused (the face is removed or renamed instead)."""
+    import sqlite3
+    from app.digikam.dbsync import SyncError
+    dk = sqlite3.connect(lib["db"])
+    try:
+        person = dk.execute("SELECT tagid FROM TagProperties WHERE property = 'person' AND value != '' LIMIT 1").fetchone()[0]
+        img = dk.execute("SELECT id FROM Images WHERE status = 1 AND id NOT IN (SELECT imageid FROM ImageTagProperties WHERE tagid = ?) LIMIT 1", (person,)).fetchone()[0]
+        dk.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (img, person)); dk.commit()
+        r = facemgr.apply({"op": "untag", "image": img, "tag": person}, check_running=False)
+        assert r["tag"] == person and not dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (img, person)).fetchone()
+        assert facemgr.inverse_ops({"op": "untag", "tag": person}) == [{"op": "tagonly", "tag": person}]
+        facemgr.apply({"op": "tagonly", "image": img, "tag": person}, check_running=False)
+        assert dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (img, person)).fetchone(), "undo puts them back"
+        facemgr.apply({"op": "untag", "image": img, "tag": person}, check_running=False)
+        boxed = dk.execute("SELECT imageid, tagid FROM ImageTagProperties WHERE property = 'tagRegion' LIMIT 1").fetchone()
+        with pytest.raises(SyncError, match="face box"):
+            facemgr.apply({"op": "untag", "image": boxed[0], "tag": boxed[1]}, check_running=False)
+    finally:
+        dk.close()
