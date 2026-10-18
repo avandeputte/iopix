@@ -201,3 +201,54 @@ def test_a_person_tagged_without_a_face_box_can_be_taken_off_the_photo(lib, clie
             facemgr.apply({"op": "untag", "image": boxed[0], "tag": boxed[1]}, check_running=False)
     finally:
         dk.close()
+
+
+def test_merging_two_entries_of_one_person(lib, client):
+    """The same person entered twice: merging moves photos, face boxes and suggestions to the one kept, drops
+    duplicates, deletes the other tag, and the People groups follow."""
+    import sqlite3
+    from app.data import state as appstate
+    from app.digikam.dbsync import SyncError
+    dk = sqlite3.connect(lib["db"])
+    try:
+        a = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Hwang"}, check_running=False)["id"]
+        b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Wang"}, check_running=False)["id"]
+        kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-keyword"}, check_running=False)["id"]
+        for t, n in ((a, "zz-Cynthia Hwang"), (b, "zz-Cynthia Wang")):
+            dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', ?)", (t, n))
+        imgs = [r[0] for r in dk.execute("SELECT id FROM Images WHERE status = 1 LIMIT 3")]
+        r1, r2 = '<rect x="10" y="10" width="50" height="50"/>', '<rect x="200" y="10" width="50" height="50"/>'
+        for img in imgs:
+            dk.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (img, a))
+        dk.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (imgs[0], b))
+        dk.execute("INSERT INTO ImageTagProperties VALUES (?, ?, 'tagRegion', ?)", (imgs[0], a, r1))
+        dk.execute("INSERT INTO ImageTagProperties VALUES (?, ?, 'tagRegion', ?)", (imgs[0], b, r1))  # the same box twice
+        dk.execute("INSERT INTO ImageTagProperties VALUES (?, ?, 'tagRegion', ?)", (imgs[1], a, r2))
+        unconf = dk.execute("SELECT tagid FROM TagProperties WHERE property = 'unconfirmedPerson'").fetchone()
+        if unconf:
+            dk.execute("INSERT INTO ImageTagProperties VALUES (?, ?, 'autodetectedPerson', ?)", (imgs[2], unconf[0], f"{a},autodetectedFace,{r2}"))
+        dk.commit()
+        gid = appstate.create_people_group("zz-merge")
+        appstate.update_people_group(gid, members=[a])
+        with pytest.raises(SyncError, match="person"):
+            tagmanager.apply({"op": "merge", "id": a, "into": kw}, check_running=False)
+        r = tagmanager.apply({"op": "merge", "id": a, "into": b}, check_running=False)
+        assert r["photos"] == 3 and r["backup"], r
+        assert not dk.execute("SELECT 1 FROM Tags WHERE id = ?", (a,)).fetchone() and not dk.execute("SELECT 1 FROM ImageTags WHERE tagid = ?", (a,)).fetchone()
+        assert {x[0] for x in dk.execute("SELECT imageid FROM ImageTags WHERE tagid = ?", (b,))} == set(imgs)
+        assert sorted(x[0] for x in dk.execute("SELECT value FROM ImageTagProperties WHERE tagid = ? AND property = 'tagRegion'", (b,))) == sorted([r1, r2]), "moved, the duplicate dropped"
+        if unconf:
+            assert dk.execute("SELECT value FROM ImageTagProperties WHERE imageid = ? AND property = 'autodetectedPerson'", (imgs[2],)).fetchone()[0].startswith(f"{b},")
+        assert next(g for g in appstate.people_groups() if g["id"] == gid)["members"] == [b]
+    finally:
+        appstate.delete_people_group(gid)
+        dk.execute("DELETE FROM ImageTagProperties WHERE tagid = ? OR (property = 'autodetectedPerson' AND value LIKE ?)", (b, f"{b},%"))
+        dk.execute("DELETE FROM TagProperties WHERE tagid IN (?, ?)", (a, b)); dk.commit()
+        dk.close()
+        import time
+        for _ in range(300):  # the merged photos' sidecars are rewritten in the background first
+            if not tagmanager.pending_jobs():
+                break
+            time.sleep(0.1)
+        for t in (b, kw):
+            tagmanager.apply({"op": "delete", "id": t}, check_running=False, queue=False)

@@ -112,19 +112,19 @@ def _photos_with(con, tag_ids, roots):
 
 def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: bool = True, backup: bool = True) -> dict:
     """op: {op: add, parent, name} | {op: rename, id, name} | {op: move, id, parent} | {op: delete, id}
-       | {op: icon, id, photo} | {op: notperson, id}. Returns a summary including how many sidecar files will be updated.
+       | {op: icon, id, photo} | {op: notperson, id} | {op: merge, id, into}. Returns a summary including how many sidecar files will be updated.
     `backup=False` is for callers that run several operations in a row and took one
     database backup themselves before the first."""
     db_path = Path(db_path or dkdb.sqlite_path())
     kind = op.get("op")
-    if kind not in ("add", "rename", "move", "delete", "icon", "notperson"):
+    if kind not in ("add", "rename", "move", "delete", "icon", "notperson", "merge"):
         raise SyncError("Unknown tag operation.")
     dbsync.preflight(db_path, check_running, "tags")
     if queue and pending_jobs():
         raise SyncError("Sidecar files from the previous tag change are still being updated. Try again in a moment.")
-    backup_file = dkdb.backup(db_path, force=(op.get("op") == "delete")) if backup else None  # deleting a tag is destructive
+    backup_file = dkdb.backup(db_path, force=(op.get("op") in ("delete", "merge"))) if backup else None  # deleting or merging a tag is destructive
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    jobs, summary = [], {"op": kind}
+    jobs, summary, merged_images = [], {"op": kind}, []
 
     with dbsync.write_transaction(db_path, check_running) as con:
         tree = _Tree(con)
@@ -169,6 +169,48 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
                 raise SyncError(f"{boxes} face {'box carries' if boxes == 1 else 'boxes carry'} the name “{tree.rows[tid]['name']}”: rename or remove those faces first.")
             con.execute("DELETE FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId')", (tid,))
             summary.update(id=tid, path=tree.full(tid), photos=0, sidecars=0)
+        elif kind == "merge":
+            # one person (or tag) entered twice ("Cynthia Hwang" and "Cynthia Wang"): everything on `id` moves to
+            # `into` (photos, face boxes, suggestions), then `id` goes. Nothing becomes an unknown face.
+            src, dst = int(op.get("id") or 0), int(op.get("into") or 0)
+            for t in (src, dst):
+                editable(t, allow_people=True)
+            if src == dst:
+                raise SyncError("Choose two different tags.")
+            if (src in tree.people) != (dst in tree.people):
+                raise SyncError("A person can only be merged with a person, and a keyword tag with a keyword tag.")
+            if src in tree.people and not con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (dst,)).fetchone():
+                raise SyncError(f"“{tree.full(dst)}” is not a person.")
+            if tree.subtree(src) != [src]:
+                raise SyncError(f"“{tree.full(src)}” has tags inside it; move them out first.")
+            photos = _photos_with(con, [src], roots)
+            images = [r[0] for r in con.execute("SELECT DISTINCT imageid FROM ImageTags WHERE tagid = ?", (src,))]
+            for img in images:
+                con.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (img, dst))
+            con.execute("DELETE FROM ImageTags WHERE tagid = ?", (src,))
+            # face boxes and the like: moved, unless the same one is already there for `into`
+            for img, prop, val in con.execute("SELECT imageid, property, value FROM ImageTagProperties WHERE tagid = ?", (src,)).fetchall():
+                if con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (img, dst, prop, val)).fetchone():
+                    con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (img, src, prop, val))
+                else:
+                    con.execute("UPDATE ImageTagProperties SET tagid = ? WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (dst, img, src, prop, val))
+                merged_images.append(img)
+            # digiKam's unconfirmed suggestions name the person inside the value: "<tag id>,autodetectedFace,<rect>"
+            for img, tid, val in con.execute("SELECT imageid, tagid, value FROM ImageTagProperties WHERE property = 'autodetectedPerson' AND value LIKE ?", (f"{src},%",)).fetchall():
+                con.execute("UPDATE ImageTagProperties SET value = ? WHERE imageid = ? AND tagid = ? AND property = 'autodetectedPerson' AND value = ?",
+                            (f"{dst}," + val.split(",", 1)[1], img, tid, val))
+                merged_images.append(img)
+            src_icon = con.execute("SELECT icon FROM Tags WHERE id = ?", (src,)).fetchone()[0]
+            if src_icon and not con.execute("SELECT icon FROM Tags WHERE id = ?", (dst,)).fetchone()[0]:
+                con.execute("UPDATE Tags SET icon = ?, iconkde = ? WHERE id = ?", (src_icon, "", dst))
+            old, new = tree.full(src), tree.full(dst)
+            con.execute("DELETE FROM TagProperties WHERE tagid = ?", (src,))
+            con.execute("DELETE FROM Tags WHERE id = ?", (src,))
+            jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            merged_images = list(dict.fromkeys(merged_images + list(photos)))
+            from app.photos import history
+            history.record([{"photo_id": iid, "action": "tag", "summary": f"Merged: {old} → {new}", "path": path} for iid, path in photos.items()])
+            summary.update(id=src, into=dst, path=old, new_path=new, photos=len(photos))
         elif kind == "add":
             pid = int(op.get("parent") or 0)
             # a tag may be created under a family group, and a person directly under the People root
@@ -221,6 +263,8 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
                            tags=len(sub), photos=len(photos))
 
     summary.update(sidecars=len(jobs), backup=str(backup_file) if backup_file else None)
+    if kind == "merge":
+        _after_merge(summary["id"], summary["into"], merged_images, db_path)
     if queue and jobs:
         appstate._write(lambda c: c.executemany(
             "INSERT INTO tag_rewrite_queue (op, path, image_id) VALUES (?,?,?)", jobs))
@@ -228,6 +272,22 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
     elif not queue:
         summary["jobs"] = jobs
     return summary
+
+
+def _after_merge(src: int, dst: int, images: list, db_path):
+    """What the viewer keeps about the merged tag follows it: People groups and face references; the sidecars'
+    face regions are rewritten from the database (the tag lists through the queue, like any tag change)."""
+    def go(c):
+        for (gid,) in c.execute("SELECT group_id FROM people_group_members WHERE tag_id = ?", (src,)).fetchall():
+            if c.execute("SELECT 1 FROM people_group_members WHERE group_id = ? AND tag_id = ?", (gid, dst)).fetchone():
+                c.execute("DELETE FROM people_group_members WHERE group_id = ? AND tag_id = ?", (gid, src))
+            else:
+                c.execute("UPDATE people_group_members SET tag_id = ? WHERE group_id = ? AND tag_id = ?", (dst, gid, src))
+        c.execute("UPDATE ai_person_references SET tag_id = ? WHERE tag_id = ?", (dst, src))
+    appstate._write(go)
+    if images:
+        from app.faces import facemgr
+        facemgr.queue_sidecars(images, db_path)
 
 
 def _run_group(op: str, rows: list):
