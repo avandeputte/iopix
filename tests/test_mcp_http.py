@@ -111,3 +111,9 @@ def test_edit_photos_tool_sets_the_date_in_sidecar_and_database(client, lib):
     con.close()
     mcp_server.edit_photos(updates.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
     edits.forget([pid])
+
+
+def test_inspect_file_reads_a_video(client, lib):
+    from app import mcp_server, updates
+    r = mcp_server.inspect_file(updates.admin_token(), lib["videos"][0])
+    assert r["size"] > 0 and r["boxes"] and r["complete"] and "exiftool" in r, r

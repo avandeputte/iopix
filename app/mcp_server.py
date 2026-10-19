@@ -525,6 +525,66 @@ def job_queue(token: str) -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
+def inspect_file(token: str, photo_id: int) -> dict:
+    """What is inside one photo's or video's file, for "it does not show" questions: exiftool's reading of its
+    container and streams (warnings included), ffmpeg's decode check of the first seconds, and the file's first and
+    last bytes (a QuickTime file needs its moov box; a file cut short has none). Read-only. Needs the admin token."""
+    _need_token(token)
+    import shutil
+    import subprocess
+    con = db()
+    try:
+        r = con.execute("SELECT path FROM photos WHERE id = ?", (int(photo_id),)).fetchone()
+    finally:
+        con.close()
+    if not r:
+        raise ToolError("No such photo")
+    path = r[0]
+    out = {"path": path}
+    try:
+        res = subprocess.run([*edits.exiftool_cmd(), "-j", "-G1", "-q", "-m", "-api", "LargeFileSupport=1", "-FileType", "-MIMEType", "-Warning", "-Error",
+                              "-MajorBrand", "-CompatibleBrands", "-Duration", "-CompressorID", "-CompressorName", "-ImageWidth", "-ImageHeight",
+                              "-AvgBitrate", "-VideoFrameRate", "-AudioFormat", "-HandlerType", "-ContentIdentifier", "-MediaDataSize", "-MovieDataSize", path],
+                             capture_output=True, text=True, timeout=120)
+        out["exiftool"] = json.loads(res.stdout or "[{}]")[0]
+    except Exception as e:  # noqa: BLE001 - a diagnostic: report what failed
+        out["exiftool"] = {"error": str(e)[:300]}
+    ff = shutil.which("ffmpeg")
+    if ff:
+        res = subprocess.run([ff, "-v", "error", "-nostdin", "-t", "3", "-i", path, "-f", "null", "-"], capture_output=True, text=True, timeout=120)
+        out["ffmpeg_decode"] = {"ok": res.returncode == 0 and not res.stderr.strip(), "errors": res.stderr.strip()[:1500]}
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 64))
+            tail = f.read(64)
+        out["size"], out["head"], out["tail"] = size, head.hex(), tail.hex()
+        boxes, pos = [], 0
+        with open(path, "rb") as f:  # the top-level boxes of an MP4 / QuickTime file
+            while pos < size and len(boxes) < 30:
+                f.seek(pos)
+                hd = f.read(16)
+                if len(hd) < 8:
+                    break
+                n, kind = int.from_bytes(hd[:4], "big"), hd[4:8].decode("latin-1")
+                if n == 1 and len(hd) >= 16:
+                    n = int.from_bytes(hd[8:16], "big")
+                elif n == 0:
+                    n = size - pos
+                boxes.append({"box": kind, "at": pos, "size": n})
+                if n < 8:
+                    break
+                pos += n
+        out["boxes"] = boxes
+        out["complete"] = bool(boxes) and pos == size
+    except OSError as e:
+        out["read_error"] = str(e)
+    return out
+
+
+@server.tool(annotations=READ_ONLY)
 def photo_file(token: str, photo_id: int) -> dict:
     """Checks one photo's files on disk: the image (exists, size, readable), its XMP sidecar, the
     thumbnail cache entry, and any backups the viewer made. For 'this photo does not show' issues."""
