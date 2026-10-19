@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.53.5"
+version = "1.54.0"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"

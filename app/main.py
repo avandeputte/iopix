@@ -5,6 +5,7 @@ few endpoints that change it (sidecars, image files, digiKam's database on
 request) are listed in WRITE_PATHS and go through the modules that own those
 writes."""
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Request
@@ -99,6 +100,8 @@ async def _auth_guard(request: Request, call_next):
     of that only once a user exists. Read-only mode refuses library writes for everyone."""
     user = users.user_from_token(request.cookies.get(users.COOKIE, "")) if request.cookies.get(users.COOKIE) else None
     request.state.via_proxy = False
+    if "cf-access-jwt-assertion" in request.headers and time.time() - proxyauth.seen.get("at", 0) > 60:
+        proxyauth.note(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
     if proxyauth.mode() != "off":  # signed in at a reverse proxy (Cloudflare Access, Authelia...): that person, when vouched for
         pu = proxyauth.user(request)
         if pu:

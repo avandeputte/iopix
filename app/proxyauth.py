@@ -36,20 +36,65 @@ _jwks = {"client": None, "team": None}
 _lock = threading.Lock()
 
 
+KEYS = ("AUTH_PROXY", "AUTH_PROXY_HEADER", "AUTH_PROXY_TRUSTED", "AUTH_PROXY_CREATE", "CF_ACCESS_TEAM", "CF_ACCESS_AUD")
+_opts = {"at": 0.0, "values": {}}
+seen = {}  # the last Cloudflare Access token seen (unverified claims), to set this up from: {iss, aud, email, peer, at}
+
+
+def _opt(name: str):
+    """A setting: the environment (iopix.env) wins, else what an admin saved (Settings, or the MCP tool), re-read every
+    few seconds."""
+    if os.environ.get(name) not in (None, ""):
+        return os.environ.get(name)
+    now = time.time()
+    if now - _opts["at"] > 5:
+        try:
+            from app.data import state
+            _opts["values"] = {k: state.get_setting(k.lower(), "") for k in KEYS}
+        except Exception:
+            _opts["values"] = {}
+        _opts["at"] = now
+    return _opts["values"].get(name) or None
+
+
+def save(values: dict):
+    """Store proxy sign-in settings (keys of KEYS; empty removes one). Values in the environment still win."""
+    from app.data import state
+    for k, v in values.items():
+        if k in KEYS:
+            state.set_setting(k.lower(), str(v or "").strip())
+    _opts["at"] = 0.0
+    _cache.clear()
+
+
+def note(headers_in, peer: str):
+    """Remember the claims of a Cloudflare Access token (not verified: only to show which team and application the
+    requests come through, so they can be set up)."""
+    tok = headers_in.get(CF_JWT_HEADER)
+    if not tok:
+        return
+    try:
+        import jwt
+        c = jwt.decode(tok, options={"verify_signature": False})
+        seen.update(iss=c.get("iss"), aud=c.get("aud"), email=c.get("email"), peer=peer, at=int(time.time()))
+    except Exception:
+        pass
+
+
 def mode() -> str:
-    m = (os.environ.get("AUTH_PROXY") or "off").strip().lower()
+    m = (_opt("AUTH_PROXY") or "off").strip().lower()
     return m if m in PRESETS else "off"
 
 
 def headers() -> list:
-    raw = os.environ.get("AUTH_PROXY_HEADER", "").strip()
+    raw = (_opt("AUTH_PROXY_HEADER") or "").strip()
     if raw:
         return [h.strip() for h in raw.split(",") if h.strip()]
     return [CF_HEADER] if mode() == "cloudflare" else list(GENERIC_HEADERS)
 
 
 def trusted() -> list:
-    raw = os.environ.get("AUTH_PROXY_TRUSTED", "").strip() or "127.0.0.1,::1"
+    raw = (_opt("AUTH_PROXY_TRUSTED") or "").strip() or "127.0.0.1,::1"
     out = []
     for part in raw.replace(" ", ",").split(","):
         if part:
@@ -61,8 +106,8 @@ def trusted() -> list:
 
 
 def cf_settings():
-    team = (os.environ.get("CF_ACCESS_TEAM") or "").strip().removeprefix("https://").rstrip("/")
-    aud = (os.environ.get("CF_ACCESS_AUD") or "").strip()
+    team = (_opt("CF_ACCESS_TEAM") or "").strip().removeprefix("https://").rstrip("/")
+    aud = (_opt("CF_ACCESS_AUD") or "").strip()
     return (team, aud) if team and aud else (None, None)
 
 
@@ -127,7 +172,7 @@ def user_for(ident: str):
         con.close()
     if r:
         return users._row(r)
-    role = (os.environ.get("AUTH_PROXY_CREATE") or "").strip().lower()
+    role = (_opt("AUTH_PROXY_CREATE") or "").strip().lower()
     if role not in ("viewer", "editor"):
         return None
     name = ident.strip()[:64]
@@ -162,8 +207,9 @@ def user(request):
 def status() -> dict:
     """For Settings and diagnostics: how proxy sign-in is set up (no secrets)."""
     team, aud = cf_settings()
-    return {"mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()],
-            "cloudflareVerified": bool(team), "create": (os.environ.get("AUTH_PROXY_CREATE") or "").strip().lower() or None}
+    return {"mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
+            "team": team, "aud": aud,
+            "cloudflareVerified": bool(team), "create": (_opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}
 
 
 def remember_peer():

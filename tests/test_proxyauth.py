@@ -94,3 +94,21 @@ def test_the_real_peer_survives_uvicorns_forwarded_rewrite():
     scope = {"type": "http", "client": ("127.0.0.1", 5000), "headers": [(b"x-forwarded-for", b"203.0.113.9")], "scheme": "http"}
     asyncio.run(mw(scope, None, None))
     assert seen == {"client": "203.0.113.9", "peer": "127.0.0.1"}, seen
+
+
+def test_settings_from_the_app_and_the_token_seen(monkeypatch, account):
+    """Proxy sign-in can be set up in the app (the environment still wins), and the Cloudflare team and application
+    of the requests are noted (unverified) so they can be set up from them."""
+    import jwt
+    for k in proxyauth.KEYS:
+        monkeypatch.delenv(k, raising=False)
+    proxyauth.save({"AUTH_PROXY": "nginx", "AUTH_PROXY_TRUSTED": "10.0.0.0/8"})
+    try:
+        assert proxyauth.mode() == "nginx" and proxyauth.identity({"Remote-User": "proxy-probe"}, "10.1.2.3") == "proxy-probe"
+        monkeypatch.setenv("AUTH_PROXY", "off")
+        assert proxyauth.mode() == "off", "the environment wins"
+        tok = jwt.encode({"iss": "https://myteam.cloudflareaccess.com", "aud": ["aud-x"], "email": "probe@example.com"}, "k", algorithm="HS256")
+        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "127.0.0.1")
+        assert proxyauth.seen["iss"] == "https://myteam.cloudflareaccess.com" and proxyauth.seen["aud"] == ["aud-x"]
+    finally:
+        proxyauth.save({k: "" for k in proxyauth.KEYS})

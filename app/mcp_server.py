@@ -538,6 +538,24 @@ def repair_video(token: str, photo_id: int) -> dict:
         raise ToolError(str(e))
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optional[str] = None, cf_access_aud: Optional[str] = None,
+                 trusted: Optional[str] = None, create_role: Optional[str] = None) -> dict:
+    """Sign-in at a reverse proxy (Cloudflare Access, Authelia behind HAProxy/nginx/Caddy/Traefik): with no settings
+    given, how it is set up and the Cloudflare Access team and application last seen in requests; with settings, saves
+    them (mode: off|cloudflare|haproxy|nginx|caddy|traefik|header; an empty string clears one; iopix.env still wins).
+    Needs the admin token."""
+    _need_token(token)
+    from app import proxyauth
+    changes = {k: v for k, v in (("AUTH_PROXY", mode), ("CF_ACCESS_TEAM", cf_access_team), ("CF_ACCESS_AUD", cf_access_aud),
+                                 ("AUTH_PROXY_TRUSTED", trusted), ("AUTH_PROXY_CREATE", create_role)) if v is not None}
+    if "AUTH_PROXY" in changes and changes["AUTH_PROXY"] not in ("", "off", *proxyauth.PRESETS):
+        raise ToolError("mode: off, cloudflare, haproxy, nginx, caddy, traefik or header")
+    if changes:
+        proxyauth.save(changes)
+    return proxyauth.status()
+
+
 @server.tool(annotations=READ_ONLY)
 def inspect_file(token: str, photo_id: int) -> dict:
     """What is inside one photo's or video's file, for "it does not show" questions: exiftool's reading of its
