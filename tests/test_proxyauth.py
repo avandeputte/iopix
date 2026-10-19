@@ -169,3 +169,21 @@ def test_a_proxy_sign_in_carries_over_to_the_home_network(client, monkeypatch, a
     monkeypatch.setenv("AUTH_PROXY", "off")
     assert client.get("/api/auth/me").json()["signedInBy"] == "password"
     client.post("/api/auth/logout", json={})
+
+
+def test_someone_with_no_account_can_be_denied(client, monkeypatch, account):
+    monkeypatch.setenv("AUTH_PROXY", "nginx")
+    monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+    client.cookies.clear()
+    stranger = {"Remote-User": "stranger@example.com"}
+    assert client.get("/api/auth/me", headers=stranger).json()["user"] is None, "default: the sign-in screen"
+    monkeypatch.setenv("AUTH_PROXY_CREATE", "deny")
+    proxyauth._cache.clear()
+    r = client.get("/api/auth/accounts", headers=stranger)
+    assert r.status_code == 403 and r.json()["noAccess"]
+    assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}, headers=stranger).status_code == 403
+    page = client.get("/", headers=stranger)
+    assert page.status_code == 403 and "No access" in page.text and "stranger@example.com" in page.text
+    assert client.get("/api/auth/me", headers={"Remote-User": "proxy-probe"}).json()["user"]["name"] == "proxy-probe", "people with an account still get in"
+    client.cookies.clear()
+    assert client.get("/api/auth/accounts").status_code == 200, "no proxy sign-in (the home network): unaffected"

@@ -95,8 +95,8 @@ async def api_proxy_set(request: Request):
     m = changes.get("AUTH_PROXY")
     if m is not None and m.lower() not in ("", "off", *proxyauth.PRESETS):
         raise HTTPException(400, "Unknown proxy")
-    if changes.get("AUTH_PROXY_CREATE", "").lower() not in ("", "viewer", "editor"):
-        raise HTTPException(400, "New accounts can be viewers or editors only")
+    if changes.get("AUTH_PROXY_CREATE", "").lower() not in ("", "viewer", "editor", "deny"):
+        raise HTTPException(400, "Someone with no account: the sign-in screen, deny, or a viewer or editor account")
     if (m or proxyauth.mode()).lower() == "cloudflare" and ("CF_ACCESS_TEAM" in changes or "CF_ACCESS_AUD" in changes or m):
         team = changes.get("CF_ACCESS_TEAM", proxyauth._opt("CF_ACCESS_TEAM") or "")
         aud = changes.get("CF_ACCESS_AUD", proxyauth._opt("CF_ACCESS_AUD") or "")

@@ -16,7 +16,7 @@ Settings (environment, iopix.env):
                       X-Auth-Request-Email, X-Forwarded-Email (the names Authelia, Authentik and oauth2-proxy use)
   AUTH_PROXY_TRUSTED  addresses or networks the proxy connects from (default 127.0.0.1, ::1)
   AUTH_PROXY_CREATE   a role (viewer or editor) to create an account for someone the proxy lets in who has none
-                      yet; empty (default): such a person is treated as not signed in
+                      yet; deny: such a person gets no access at all; empty (default): the sign-in screen
   CF_ACCESS_TEAM      the Cloudflare Access team domain, e.g. myteam.cloudflareaccess.com
   CF_ACCESS_AUD       the Access application's audience (AUD) tag
 """
@@ -182,6 +182,12 @@ def identity(headers_in, peer: str):
     return None
 
 
+def deny_unknown() -> bool:
+    """AUTH_PROXY_CREATE=deny: someone the proxy lets in who has no account here gets no access at all (not even
+    the sign-in screen)."""
+    return (_opt("AUTH_PROXY_CREATE") or "").strip().lower() == "deny"
+
+
 def user_for(ident: str):
     """The account for this identity (email first, then name, case-insensitively), created with AUTH_PROXY_CREATE's
     role when there is none and that is allowed; None otherwise."""
@@ -217,6 +223,7 @@ _cache = {}  # identity -> (user, until): a page load makes dozens of requests
 def user(request):
     """The signed-in user the proxy vouches for, or None."""
     ident = identity(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
+    request.state.proxy_ident = ident
     if not ident:
         return None
     hit = _cache.get(ident)
@@ -230,6 +237,8 @@ def user(request):
         how = "Cloudflare Access" if mode() == "cloudflare" else f"the proxy ({mode()})"
         if u:
             authlog.info("signed in by %s: %s as %s (%s) from %s", how, ident, u["name"], u["role"], source(request))
+        elif deny_unknown():
+            authlog.warning("%s let in %s, who has no account here: access denied (from %s)", how, ident, source(request))
         else:
             authlog.warning("%s let in %s, who has no account here: shown the sign-in screen (from %s)", how, ident, source(request))
     return u

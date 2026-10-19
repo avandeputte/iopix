@@ -9,7 +9,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.ai import analysis
 from app import config
@@ -93,6 +93,19 @@ def _mcp_token_ok(request: Request) -> bool:
     return auth.lower().startswith("bearer ") and updates.token_ok(auth[7:].strip())
 
 
+def _no_access(request: Request, ident: str):
+    """Someone the proxy let in who has no account here, with Settings › Users › Sign-in at a proxy set to deny them."""
+    msg = f"{ident} has no account on this photo library. Ask its owner for access."
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": msg, "noAccess": True}, status_code=403)
+    from html import escape
+    out = "/cdn-cgi/access/logout" if proxyauth.external(request.headers) else None
+    return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>No access</title><style>body{{font:16px system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 16px;color:#222;background:#fff}}
+@media (prefers-color-scheme:dark){{body{{color:#eee;background:#111}}a{{color:#8ab4f8}}}}</style>
+<h1>No access</h1><p>{escape(msg)}</p>{f'<p><a href="{out}">Sign in with another account</a></p>' if out else ''}""", status_code=403)
+
+
 @app.middleware("http")
 async def _auth_guard(request: Request, call_next):
     """Who is asking (session cookie), and may they do this? Library writes need an editor
@@ -107,6 +120,9 @@ async def _auth_guard(request: Request, call_next):
         pu = proxyauth.user(request)
         if pu:
             user, request.state.via_proxy = pu, True
+        elif getattr(request.state, "proxy_ident", None) and proxyauth.deny_unknown() and not request.url.path.startswith("/mcp"):
+            # (MCP clients sign in with the admin token, whatever Cloudflare service token got them through)
+            return _no_access(request, request.state.proxy_ident)
     if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers):
         user = None  # a passwordless account's session (begun on the LAN) does not work from outside
         if time.time() - proxyauth._logged.get(("lan-session", request.cookies.get(users.COOKIE)), 0) > 3600:

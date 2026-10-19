@@ -721,7 +721,7 @@ function proxySection() {
     const team = inp('CF_ACCESS_TEAM', 'myteam.cloudflareaccess.com'), aud = inp('CF_ACCESS_AUD', 'Application Audience (AUD) tag', 520);
     const header = inp('AUTH_PROXY_HEADER', 'default: ' + (d.mode === 'cloudflare' ? 'Cf-Access-Authenticated-User-Email' : 'Remote-User, X-Forwarded-User, X-Auth-Request-Email…'));
     const trusted = inp('AUTH_PROXY_TRUSTED', 'default: 127.0.0.1, ::1');
-    const create = lock('AUTH_PROXY_CREATE', h('select', null, [['', 'Uses the sign-in here (default)'], ['viewer', 'Get a viewer account'], ['editor', 'Get an editor account']]
+    const create = lock('AUTH_PROXY_CREATE', h('select', null, [['', 'Gets the sign-in screen (default)'], ['deny', 'Is denied access'], ['viewer', 'Gets a viewer account'], ['editor', 'Gets an editor account']]
       .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY_CREATE || '') === k }, l))));
     const row = (label, detail, el) => h('div', { class: 'srow' }, h('div', null, h('b', null, label), h('div', { class: 'muted', style: 'font-size:13px' }, detail)), el);
     const cf = h('div', null,
@@ -733,7 +733,7 @@ function proxySection() {
     const seen = d.seen && d.seen.iss ? h('div', { class: 'muted', style: 'font-size:13px;margin:6px 0' }, `Last Cloudflare Access request: team ${String(d.seen.iss).replace(/^https:\/\//, '')}, AUD ${[].concat(d.seen.aud || []).join(', ')}${d.seen.email ? ', ' + d.seen.email : ''}${d.seen.account !== undefined ? (d.seen.account ? ' (account ' + d.seen.account + ')' : ' (no account)') : ''}. `,
       env.has('CF_ACCESS_TEAM') || env.has('CF_ACCESS_AUD') ? null : h('a', { class: 'lnk', onclick: () => { team.value = String(d.seen.iss).replace(/^https:\/\//, ''); aud.value = [].concat(d.seen.aud || [])[0] || ''; } }, 'Use these')) : null;
     const show = () => { cf.style.display = modeSel.value === 'cloudflare' ? '' : 'none'; other.style.display = modeSel.value === 'off' ? 'none' : ''; rest.style.display = modeSel.value === 'off' ? 'none' : ''; };
-    const rest = h('div', null, row('Someone with no account here', 'When the proxy lets in a person whose email or name matches no account.', create));
+    const rest = h('div', null, row('Someone with no account here', 'When the proxy lets in a person whose email or name matches no account. Denied: a “No access” page, with no way to sign in here.', create));
     modeSel.onchange = show;
     const state = d.mode === 'off' ? 'Off: only the sign-in here.' : d.mode === 'cloudflare' ? (d.cloudflareVerified ? 'On: Cloudflare Access tokens are verified.' : 'On, but without the team domain and AUD tag: the header is believed from the proxy addresses only.') : `On (${d.mode}): the user header is believed from ${d.trusted.join(', ')}.`;
     fill(box, h('h3', null, 'Sign-in at a proxy'),

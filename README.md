@@ -351,7 +351,7 @@ When the proxy already makes people sign in, the viewer can take that sign-in in
 | `AUTH_PROXY` | `cloudflare`, `haproxy`, `nginx`, `caddy`, `traefik` or `header` (any other proxy); `off` by default |
 | `AUTH_PROXY_HEADER` | the header(s) with the user, comma-separated. Default for `cloudflare`: `Cf-Access-Authenticated-User-Email`; for the others: `Remote-User`, `X-Forwarded-User`, `X-Auth-Request-User`, `X-Auth-Request-Email`, `X-Forwarded-Email` |
 | `AUTH_PROXY_TRUSTED` | addresses or networks the proxy connects from, e.g. `172.18.0.0/16` for a Docker network; default `127.0.0.1,::1` (a proxy on the same machine) |
-| `AUTH_PROXY_CREATE` | `viewer` or `editor`: create an account with that role for someone the proxy lets in who has none; empty (default): they are not signed in |
+| `AUTH_PROXY_CREATE` | `viewer` or `editor`: create an account with that role for someone the proxy lets in who has none; `deny`: they get a "No access" page and cannot sign in here; empty (default): they get the sign-in screen |
 | `CF_ACCESS_TEAM`, `CF_ACCESS_AUD` | Cloudflare Access team domain (`myteam.cloudflareaccess.com`) and the application's AUD tag |
 
 The header is only believed from the proxy. A request that reaches the viewer any other way is ignored, whatever headers it carries. The one exception is Cloudflare Access with `CF_ACCESS_TEAM` and `CF_ACCESS_AUD` set: there the signed token Cloudflare adds to every request (`Cf-Access-Jwt-Assertion`) is checked against your team's keys, and the email is taken from that token. This is the recommended setup for a Cloudflare Tunnel. Without those two settings, `cloudflared` must connect from an address in `AUTH_PROXY_TRUSTED`.
