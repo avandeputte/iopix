@@ -368,7 +368,7 @@ Someone signed in this way sees no Sign out or Change password in the viewer, be
 
 The built-in sign-in keeps working alongside: anyone the proxy does not vouch for (on your own network, where the hostname points straight at the server, or someone whose email has no account) gets the viewer's usual sign-in screen. Requests that come through Cloudflare (they carry `Cf-Ray`) never get one-click sign-in: passwordless accounts are left out of the picker and refused, and a passwordless session started at home does not work from outside.
 
-These settings can also be saved in the app instead of `iopix.env` (the MCP tool `proxy_signin`); `iopix.env` wins when both are set.
+These settings can also be set in the app instead of `iopix.env` (Settings › Users › Sign-in at a proxy, or the MCP tool `proxy_signin`); `iopix.env` wins when both are set.
 
 ## MCP server
 

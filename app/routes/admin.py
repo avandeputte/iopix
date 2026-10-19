@@ -75,6 +75,37 @@ def api_settings_get(request: Request):
     return out
 
 
+@router.get("/api/settings/proxy")
+def api_proxy_get(request: Request):
+    """Sign-in at a reverse proxy (Cloudflare Access...): its settings, which of them iopix.env fixes, and the
+    Cloudflare Access team and application last seen in requests. Admins only."""
+    if not users.is_admin(request.state.user):
+        raise HTTPException(403, "Admins only")
+    return proxyauth.status()
+
+
+@router.post("/api/settings/proxy")
+async def api_proxy_set(request: Request):
+    """Body: any of proxyauth.KEYS (an empty string clears one). Settings in iopix.env cannot be changed here."""
+    body = await request.json()
+    changes = {k: str(v or "").strip() for k, v in body.items() if k in proxyauth.KEYS}
+    fixed = [k for k in changes if os.environ.get(k) not in (None, "")]
+    if fixed:
+        raise HTTPException(400, f"Set in iopix.env, change it there: {', '.join(fixed)}")
+    m = changes.get("AUTH_PROXY")
+    if m is not None and m.lower() not in ("", "off", *proxyauth.PRESETS):
+        raise HTTPException(400, "Unknown proxy")
+    if changes.get("AUTH_PROXY_CREATE", "").lower() not in ("", "viewer", "editor"):
+        raise HTTPException(400, "New accounts can be viewers or editors only")
+    if (m or proxyauth.mode()).lower() == "cloudflare" and ("CF_ACCESS_TEAM" in changes or "CF_ACCESS_AUD" in changes or m):
+        team = changes.get("CF_ACCESS_TEAM", proxyauth._opt("CF_ACCESS_TEAM") or "")
+        aud = changes.get("CF_ACCESS_AUD", proxyauth._opt("CF_ACCESS_AUD") or "")
+        if bool(team) != bool(aud):
+            raise HTTPException(400, "Cloudflare needs both the team domain and the AUD tag (or neither)")
+    proxyauth.save(changes)
+    return proxyauth.status()
+
+
 @router.post("/api/settings")
 async def api_settings(request: Request):
     """Body: {write_files: bool} - also write metadata into image files (JPEG, PNG, TIFF, WebP), not just sidecars."""

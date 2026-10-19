@@ -217,7 +217,8 @@ def user(request):
 def status() -> dict:
     """For Settings and diagnostics: how proxy sign-in is set up (no secrets)."""
     team, aud = cf_settings()
-    return {"mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
+    return {"values": {k: (_opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if os.environ.get(k) not in (None, "")],
+            "mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
             "team": team, "aud": aud,
             "cloudflareVerified": bool(team), "create": (_opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}
 

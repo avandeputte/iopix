@@ -691,6 +691,51 @@ export function usersSection() {
       } }, icon('add'), 'Add user')));
   };
   draw();
+  wrap.append(proxySection());
   return wrap;
+}
+// sign-in at a reverse proxy (Cloudflare Access, Authelia behind nginx...): who signed in there is signed in here
+function proxySection() {
+  const box = h('div');
+  const draw = async () => {
+    let d; try { d = await api('/api/settings/proxy'); } catch (e) { fill(box, h('div', { class: 'muted' }, e.message)); return; }
+    const v = d.values, env = new Set(d.fromEnv || []);
+    const lock = (k, el) => { if (env.has(k)) { el.disabled = true; el.title = 'Set in iopix.env'; } el.onkeydown = (e) => e.stopPropagation(); return el; };
+    const inp = (k, ph, w = 320) => lock(k, h('input', { class: 'einput', value: v[k] || '', placeholder: ph, style: `margin:0;width:${w}px;max-width:100%` }));
+    const modeSel = lock('AUTH_PROXY', h('select', null, [['off', 'Off'], ['cloudflare', 'Cloudflare Access'], ['haproxy', 'HAProxy'], ['nginx', 'nginx'], ['caddy', 'Caddy'], ['traefik', 'Traefik'], ['header', 'Another proxy']]
+      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY || 'off').toLowerCase() === k }, l))));
+    const team = inp('CF_ACCESS_TEAM', 'myteam.cloudflareaccess.com'), aud = inp('CF_ACCESS_AUD', 'Application Audience (AUD) tag', 520);
+    const header = inp('AUTH_PROXY_HEADER', 'default: ' + (d.mode === 'cloudflare' ? 'Cf-Access-Authenticated-User-Email' : 'Remote-User, X-Forwarded-User, X-Auth-Request-Email…'));
+    const trusted = inp('AUTH_PROXY_TRUSTED', 'default: 127.0.0.1, ::1');
+    const create = lock('AUTH_PROXY_CREATE', h('select', null, [['', 'Uses the sign-in here (default)'], ['viewer', 'Get a viewer account'], ['editor', 'Get an editor account']]
+      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY_CREATE || '') === k }, l))));
+    const row = (label, detail, el) => h('div', { class: 'srow' }, h('div', null, h('b', null, label), h('div', { class: 'muted', style: 'font-size:13px' }, detail)), el);
+    const cf = h('div', null,
+      row('Cloudflare team domain', 'Zero Trust › Settings › Team name and domain (the address the Access sign-in page is on).', team),
+      row('Application Audience (AUD) tag', 'Zero Trust › Access › Applications › this app › Overview. With both set, the token Cloudflare signs is checked and the email comes from it; nothing else is believed.', aud));
+    const other = h('div', null,
+      row('User header', 'The request header the proxy puts the signed-in user (name or email) in. Comma-separate several.', header),
+      row('Proxy addresses', 'The header is believed only from these addresses or networks (where the proxy connects from).', trusted));
+    const seen = d.seen && d.seen.iss ? h('div', { class: 'muted', style: 'font-size:13px;margin:6px 0' }, `Last Cloudflare Access request: team ${String(d.seen.iss).replace(/^https:\/\//, '')}, AUD ${[].concat(d.seen.aud || []).join(', ')}${d.seen.email ? ', ' + d.seen.email : ''}${d.seen.account !== undefined ? (d.seen.account ? ' (account ' + d.seen.account + ')' : ' (no account)') : ''}. `,
+      env.has('CF_ACCESS_TEAM') || env.has('CF_ACCESS_AUD') ? null : h('a', { class: 'lnk', onclick: () => { team.value = String(d.seen.iss).replace(/^https:\/\//, ''); aud.value = [].concat(d.seen.aud || [])[0] || ''; } }, 'Use these')) : null;
+    const show = () => { cf.style.display = modeSel.value === 'cloudflare' ? '' : 'none'; other.style.display = modeSel.value === 'off' ? 'none' : ''; rest.style.display = modeSel.value === 'off' ? 'none' : ''; };
+    const rest = h('div', null, row('Someone with no account here', 'When the proxy lets in a person whose email or name matches no account.', create));
+    modeSel.onchange = show;
+    const state = d.mode === 'off' ? 'Off: only the sign-in here.' : d.mode === 'cloudflare' ? (d.cloudflareVerified ? 'On: Cloudflare Access tokens are verified.' : 'On, but without the team domain and AUD tag: the header is believed from the proxy addresses only.') : `On (${d.mode}): the user header is believed from ${d.trusted.join(', ')}.`;
+    fill(box, h('h3', null, 'Sign-in at a proxy'),
+      h('div', { class: 'muted', style: 'max-width:820px' }, 'Someone signed in at your reverse proxy (Cloudflare Access on a tunnel, or Authelia, Authentik or oauth2-proxy behind HAProxy, nginx, Caddy or Traefik) is signed in here too, matched to an account by email, then name. Everyone else still uses the sign-in here; requests from outside through Cloudflare can only use accounts with a password.'),
+      h('div', { style: 'margin:8px 0' }, h('b', null, state)),
+      env.size ? h('div', { class: 'muted', style: 'font-size:13px' }, `Set in iopix.env (change them there): ${[...env].join(', ')}`) : null,
+      row('Proxy', 'Which reverse proxy signs people in.', modeSel), cf, seen, other, rest,
+      h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn on', onclick: async () => {
+        const body = {};
+        [['AUTH_PROXY', modeSel], ['CF_ACCESS_TEAM', team], ['CF_ACCESS_AUD', aud], ['AUTH_PROXY_HEADER', header], ['AUTH_PROXY_TRUSTED', trusted], ['AUTH_PROXY_CREATE', create]]
+          .forEach(([k, el]) => { if (!env.has(k)) body[k] = el.value.trim(); });
+        try { await post('/api/settings/proxy', body); toast('Proxy sign-in saved.'); draw(); } catch (e) { toast(e.message); }
+      } }, 'Save')));
+    show();
+  };
+  draw();
+  return box;
 }
 export function showAnalysis() { go('maintenance', null, true); }  // the old #/analysis page now lives in Maintenance; keep bookmarks working

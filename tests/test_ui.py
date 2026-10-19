@@ -1725,3 +1725,29 @@ def test_set_location_dialog_fits_and_who_is_this_lists_nearby_people(page, serv
     pid = lib["with_faces"][0]
     r = _json.loads(urllib.request.urlopen(f"{server}/api/faces/nearby?photo={pid}").read())
     assert isinstance(r["people"], list) and all("tag" in x for x in r["people"])
+
+
+def test_proxy_sign_in_settings(page, server):
+    """Settings › Users has the proxy sign-in settings: picking Cloudflare shows the team and AUD fields, saving them
+    turns verification on, and Off puts it back."""
+    accounts = page.request.get(server + "/api/auth/accounts").json()["accounts"]
+    if any(a["name"] == "alex" for a in accounts):
+        assert page.request.post(server + "/api/auth/login", data={"name": "alex", "password": "correct horse"}).ok
+    else:
+        assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok
+    try:
+        page.goto(server + "/#/settings")
+        page.wait_for_selector("h3:has-text('Sign-in at a proxy')", timeout=10000)
+        box = page.locator("div:has(> h3:has-text('Sign-in at a proxy'))")
+        assert box.locator("input").first.is_hidden(), "Off: nothing else to fill in"
+        box.locator("select").first.select_option("cloudflare")
+        box.locator("input[placeholder='myteam.cloudflareaccess.com']").fill("myteam.cloudflareaccess.com")
+        box.locator("input[placeholder^='Application Audience']").fill("aud-tag")
+        box.locator("button", has_text="Save").click()
+        page.wait_for_selector("b:has-text('Cloudflare Access tokens are verified')", timeout=10000)
+        d = page.request.get(server + "/api/settings/proxy").json()
+        assert d["mode"] == "cloudflare" and d["team"] == "myteam.cloudflareaccess.com" and d["aud"] == "aud-tag"
+        assert page.request.post(server + "/api/settings/proxy", data={"CF_ACCESS_AUD": ""}).status == 400, "team without AUD refused"
+    finally:
+        page.request.post(server + "/api/settings/proxy", data={"AUTH_PROXY": "off", "CF_ACCESS_TEAM": "", "CF_ACCESS_AUD": ""})
+    assert page.request.get(server + "/api/settings/proxy").json()["mode"] == "off"
