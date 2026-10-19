@@ -553,7 +553,14 @@ def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optiona
         raise ToolError("mode: off, cloudflare, haproxy, nginx, caddy, traefik or header")
     if changes:
         proxyauth.save(changes)
-    return proxyauth.status()
+    from app import users
+    out = proxyauth.status()
+    # which account each person the proxy lets in maps to (matched on email, then name)
+    out["accounts"] = [{"name": u["name"], "role": u["role"], "email": u.get("email") or None} for u in users.list_users()]
+    if out["seen"].get("email"):
+        u = proxyauth.user_for(out["seen"]["email"]) if proxyauth.mode() != "off" else None
+        out["seen"]["account"] = u["name"] if u else None
+    return out
 
 
 @server.tool(annotations=READ_ONLY)
