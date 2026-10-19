@@ -193,7 +193,7 @@ export function onRoute() {
     else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= 1100) toggleFilters(true, false);
     VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp);
     if (!$('#filters').hidden) renderFilters();
-  }
+  } else if (S.route.params.get('tab')) $('.stabs')?.show?.(S.route.params.get('tab'));  // Settings: a link to another tab of the page open
   syncLightbox();
 }
 window.addEventListener('popstate', onRoute);

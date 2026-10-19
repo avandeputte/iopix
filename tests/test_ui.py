@@ -205,10 +205,16 @@ def test_read_only_hides_every_editing_control(page, server, lib):
 def test_settings_and_maintenance_pages(page, server):
     page.goto(server + "/#/settings")
     page.wait_for_selector("h1:has-text('Settings')", timeout=10000)
-    page.wait_for_selector("h2:has-text('Metadata templates')", timeout=10000)  # the sections arrive with /api/maintenance
-    heads = page.locator("h2").all_inner_texts()
+    page.wait_for_selector(".stabs", timeout=10000)  # the sections arrive with /api/maintenance
+    assert page.locator(".stabs button").all_inner_texts()[:4] == ["Display", "digiKam and server", "Editing", "AI and search"]
+    heads = page.locator("h2").evaluate_all("els => els.map((e) => e.textContent)")
     for h in ("Display", "Search and background work", "Editing", "Place tags", "Metadata templates"):
         assert h in heads, heads
+    page.locator(".stabs button", has_text="Editing").click()
+    assert page.locator("h2:has-text('Metadata templates')").is_visible() and page.locator("h2:has-text('Display')").is_hidden()
+    assert "tab=editing" in page.url
+    page.reload(); page.wait_for_selector(".stabs button.on:has-text('Editing')", timeout=10000)
+    page.locator(".stabs button", has_text="Display").click()
     assert "Storage" not in heads and "Library" not in heads, "maintenance sections must not be on the Settings page"
     assert page.locator(".ajob select").count() >= 1, "the core budget selector lives in Settings"
     page.goto(server + "/#/maintenance")
@@ -294,7 +300,7 @@ def test_users_flow_in_the_browser(page, server, browser):
     page.locator(".modal input[type=password]").fill("correct horse")
     page.locator(".modal button", has_text="Create").click()
     page.wait_for_selector("#usermenu .avatar", timeout=5000)
-    page.goto(server + "/#/settings"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
+    page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
     assert page.locator("#topbar a.tool[href='#/maintenance']").is_visible()
     # a visitor in a fresh context: read-only, no maintenance icon, sign-in dialog
     ctx = browser.new_context(viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
@@ -340,7 +346,7 @@ def test_account_picker_one_click_sign_in(page, server, browser):
     page.locator("#usermenu button").click(); page.wait_for_selector(".modal h3:has-text('Sign in')", timeout=5000)
     page.locator(".modal .account", has_text="alex").click(); page.locator(".modal input[type=password]").fill("correct horse"); page.locator(".modal button", has_text="Sign in").click()
     page.wait_for_selector("#usermenu .avatar", timeout=5000)
-    page.goto(server + "/#/settings"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
+    page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
     page.locator("input[placeholder='User name']").last.fill("kid")
     page.locator("label:has-text('no password') input").check()
     page.locator("button", has_text="Add user").click(); page.wait_for_timeout(600)
@@ -359,7 +365,7 @@ def test_account_picker_one_click_sign_in(page, server, browser):
 
 
 def test_database_row_tests_a_connection(page, server, lib):
-    page.goto(server + "/#/settings"); page.wait_for_selector("h1:has-text('Settings')", timeout=10000)
+    page.goto(server + "/#/settings?tab=server"); page.wait_for_selector("h1:has-text('Settings')", timeout=10000)
     row = page.locator(".srow", has=page.locator("b", has_text="digiKam database"))
     assert row.count() == 1
     assert row.locator("select").first.input_value() == "sqlite"
@@ -612,7 +618,7 @@ def test_require_sign_in_shows_only_the_login_dialog(page, server, browser):
         visitor.wait_for_selector(".tile img", timeout=15000)
         assert visitor.locator(".modal-back").count() == 0 and visitor.locator("#main").is_visible()
         # the setting is on the Settings page and sign-out goes back to the dialog
-        visitor.goto(server + "/#/settings"); visitor.wait_for_selector("#reqlogin", timeout=10000)
+        visitor.goto(server + "/#/settings?tab=users"); visitor.wait_for_selector("#reqlogin", timeout=10000)
         assert visitor.locator("#reqlogin").is_checked()
         ctx.close()
     finally:
@@ -900,7 +906,7 @@ def test_digikam_offline_banner_and_sync_setting(page, server):
     page.locator("#dkbanner button[title^='Hide']").click()
     assert page.locator("#dkbanner").count() == 0
     page.unroute("**/api/status")
-    page.goto(server + "/#/settings")
+    page.goto(server + "/#/settings?tab=server")
     page.wait_for_selector(".srow:has-text('Sync with digiKam')", timeout=10000)
     assert page.locator(".srow", has_text="Sync with digiKam").locator("button", has_text="Turn off").count() == 1
 
@@ -1736,7 +1742,7 @@ def test_proxy_sign_in_settings(page, server):
     else:
         assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok
     try:
-        page.goto(server + "/#/settings")
+        page.goto(server + "/#/settings?tab=users")
         page.wait_for_selector("h3:has-text('Sign-in at a proxy')", timeout=10000)
         box = page.locator("div:has(> h3:has-text('Sign-in at a proxy'))")
         assert box.locator("input").first.is_hidden(), "Off: nothing else to fill in"

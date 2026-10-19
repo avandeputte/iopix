@@ -126,6 +126,7 @@ body.filters-open #main { right: 340px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { width: 30px; height: 30px; color: var(--fg2); font-size: 12px; }
 .seg button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.stabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .ghead { position: absolute; left: 8px; right: 0; display: flex; align-items: flex-end; padding-bottom: 8px; font-size: 14px; font-weight: 500; }
 .ghead .n { color: var(--fg2); font-weight: 400; margin-left: 10px; font-size: 12px; }
 .grow { position: absolute; left: 0; right: 0; display: flex; gap: 4px; }
