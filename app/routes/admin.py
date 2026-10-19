@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.ai import analysis
 from app.ai import caption
+from app import proxyauth
 from app import config
 from app.digikam import dbsync
 from app.ai import detector
@@ -242,15 +243,21 @@ async def api_login(request: Request):
     u = users.authenticate(str(body.get("name", "")), str(body.get("password", "")))
     if not u:
         raise HTTPException(401, "Wrong user name or password")
+    if u.get("passwordless") and proxyauth.external(request.headers):
+        raise HTTPException(403, "From outside your network, sign in with an account that has a password")
     resp = JSONResponse({"user": u, "settings": users.get_settings(u["id"])})
     resp.set_cookie(users.COOKIE, users.make_token(u["id"]), max_age=users.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
     return resp
 
 
 @router.get("/api/auth/accounts")
-def api_accounts():
-    """The account picker (public): names, and whether a password is needed."""
-    return {"accounts": users.accounts() if users.any_users() else []}
+def api_accounts(request: Request):
+    """The account picker (public): names, and whether a password is needed. From outside (through Cloudflare) only
+    accounts with a password."""
+    out = users.accounts() if users.any_users() else []
+    if proxyauth.external(request.headers):
+        out = [a for a in out if not a["passwordless"]]
+    return {"accounts": out}
 
 
 @router.post("/api/auth/logout")

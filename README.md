@@ -133,7 +133,7 @@ Out of the box the viewer is open to anyone who can reach it. `setup.sh` asks fo
 
 **Viewer database on MySQL/MariaDB** (Settings › Viewer database, admin): by default the viewer keeps its own data in `data/viewer.db` (SQLite). It can use a MySQL/MariaDB database of its own instead (give it its own database, e.g. `iopix`, not digiKam's): test the connection, tick "copy all the data" (and "drop and recreate" for a clean slate), and Switch; every row is copied across and the viewer restarts on the new database. The connection settings live in `data/viewer-db.json` (or `VIEWER_DB_TYPE`, `VIEWER_DB_HOST`, `VIEWER_DB_PORT`, `VIEWER_DB_DATABASE`, `VIEWER_DB_USER`, `VIEWER_DB_PASSWORD`), outside the database itself. If that server is unreachable at start, the viewer falls back to the SQLite file and says so in Settings. The backup zip always contains a SQLite copy, whichever is in use, so switching back is the same procedure in reverse.
 
-Each account can be linked to a person from People by an admin (Settings › Users; an admin can also link their own account from the account dialog). Only admins link accounts, because a linked person's face is shown on the sign-in screen. That person's face badge becomes the account's avatar in the account picker and the menu. Each account can also carry an optional email address (Settings › Users). The viewer does not use it yet; it is there so a reverse proxy that authenticates users (Authelia, Authentik, Cloudflare Access…) can later be mapped onto these accounts by the identity it passes.
+Each account can be linked to a person from People by an admin (Settings › Users; an admin can also link their own account from the account dialog). Only admins link accounts, because a linked person's face is shown on the sign-in screen. That person's face badge becomes the account's avatar in the account picker and the menu. Each account can also carry an optional email address (Settings › Users). A reverse proxy that authenticates users (Authelia, Authentik, Cloudflare Access…) is mapped onto these accounts by the email it passes (see Sign-in at the proxy).
 
 Sign in from the person icon at the top right: the dialog shows a tile per account; a passwordless viewer signs in with one click, the others ask for their password. Sessions are signed HttpOnly cookies (secret in `data/secret`) valid for 30 days; passwords are scrypt-hashed and never stored in clear. The server enforces all of it: write endpoints answer 401/403 regardless of what the page shows. Read-only mode (an admin setting) still refuses library writes for everyone, editors included.
 
@@ -365,6 +365,10 @@ So the header can't be faked, the proxy must replace it on every request, and th
 - **Cloudflare Tunnel**: add an Access application with a policy for your hostname, then set `AUTH_PROXY=cloudflare`, `CF_ACCESS_TEAM` and `CF_ACCESS_AUD` (Zero Trust › Access › Applications › your app › Overview › Application Audience tag)
 
 Someone signed in this way sees no Sign out or Change password in the viewer, because signing out happens at the proxy. Turn on Require sign-in (Settings › Users) as well, so nobody gets in without the proxy's sign-in.
+
+The built-in sign-in keeps working alongside: anyone the proxy does not vouch for (on your own network, where the hostname points straight at the server, or someone whose email has no account) gets the viewer's usual sign-in screen. Requests that come through Cloudflare (they carry `Cf-Ray`) never get one-click sign-in: passwordless accounts are left out of the picker and refused, and a passwordless session started at home does not work from outside.
+
+These settings can also be saved in the app instead of `iopix.env` (the MCP tool `proxy_signin`); `iopix.env` wins when both are set.
 
 ## MCP server
 

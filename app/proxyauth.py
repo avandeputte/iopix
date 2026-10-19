@@ -81,6 +81,16 @@ def note(headers_in, peer: str):
         pass
 
 
+EXTERNAL_HEADERS = ("cf-ray", "cf-connecting-ip", "cf-access-jwt-assertion")
+
+
+def external(headers_in) -> bool:
+    """Did the request come in from outside, through Cloudflare? (Requests on the LAN reach the viewer directly.)
+    Outside, one-click sign-in to a passwordless account is not offered: a password is required. A forged header can
+    only take that option away from the one who forges it, never grant anything."""
+    return any(headers_in.get(h) for h in EXTERNAL_HEADERS)
+
+
 def mode() -> str:
     m = (_opt("AUTH_PROXY") or "off").strip().lower()
     return m if m in PRESETS else "off"

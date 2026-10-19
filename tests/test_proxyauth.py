@@ -112,3 +112,19 @@ def test_settings_from_the_app_and_the_token_seen(monkeypatch, account):
         assert proxyauth.seen["iss"] == "https://myteam.cloudflareaccess.com" and proxyauth.seen["aud"] == ["aud-x"]
     finally:
         proxyauth.save({k: "" for k in proxyauth.KEYS})
+
+
+def test_from_outside_a_password_is_required(client, monkeypatch, account):
+    monkeypatch.delenv("AUTH_PROXY", raising=False)
+    users.create("oneclick-probe", "", "viewer")
+    outside = {"Cf-Ray": "abc-EWR", "Cf-Connecting-Ip": "203.0.113.9"}
+    names = lambda hd: {a["name"] for a in client.get("/api/auth/accounts", headers=hd).json()["accounts"]}
+    assert {"oneclick-probe", "proxy-probe"} <= names({})
+    assert "oneclick-probe" not in names(outside) and "proxy-probe" in names(outside)
+    assert client.post("/api/auth/login", json={"name": "oneclick-probe"}, headers=outside).status_code == 403
+    r = client.post("/api/auth/login", json={"name": "oneclick-probe"})  # on the LAN: one click still works
+    assert r.status_code == 200
+    assert client.get("/api/auth/me").json().get("user", {}).get("name") == "oneclick-probe"
+    assert not (client.get("/api/auth/me", headers=outside).json().get("user") or {}).get("name"), "its session does not work from outside"
+    assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}, headers=outside).status_code == 200
+    client.post("/api/auth/logout", json={})
