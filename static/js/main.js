@@ -114,6 +114,7 @@ export async function pollStatus() {
     }
     if (s.app && !S.RELOAD_PENDING) S.APP_STAMP = s.app;
     S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
+    S.AUTO_DB = !!(s.dbWrite && s.digikam && s.digikam.sync && s.digikam.reachable);  // edits go into digiKam's database by themselves, a minute later
     S.IS_ADMIN = s.isAdmin; S.USERS_EXIST = s.usersExist; S.DIGIKAM_CHECK = s.digikamCheck || 'pgrep';
     if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}${S.APP_COMMIT ? ' (' + S.APP_COMMIT + ')' : ''}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
     updateBanner(s.updateAvailable);

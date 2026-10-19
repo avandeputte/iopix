@@ -103,7 +103,8 @@ export async function editPhotos(ids, changes) {
     flashEdit(changes);
   }
   if (r.failed.length) toast(`${r.failed.length} could not be changed: ${r.failed[0].error}`);
-  else if (ids.length > 1) toast(`Saved to ${nf.format(r.edited)} sidecar files. digiKam shows it after “Reread Metadata From File”, or apply them to its database from Explore.`);
+  else if (ids.length > 1) toast(S.AUTO_DB ? `Saved for ${plural(r.edited, 'photo')}; digiKam’s database gets it within a minute.`
+    : `Saved to ${nf.format(r.edited)} sidecar files. digiKam shows it after “Reread Metadata From File”, or apply them to its database from Explore.`);
   S.keepView = true;
   pollSoon();
   return true;
