@@ -644,6 +644,20 @@ export function accountDialog() {
   const cur = h('input', { class: 'einput', type: 'password', placeholder: 'Current password', autocomplete: 'current-password', style: 'margin:0;width:100%' });
   const pw = h('input', { class: 'einput', type: 'password', placeholder: 'New password (8 characters or more)', autocomplete: 'new-password', style: 'margin:0;width:100%' });
   [cur, pw].forEach((i) => { i.onkeydown = (e) => e.stopPropagation(); });
+  // how this browser is signed in, and so what Sign out does
+  const how = h('p', { class: 'muted', style: 'font-size:12.5px' });
+  const outBtn = h('button', { class: 'pillbtn', onclick: async () => {
+    back.remove(); const r = await post('/api/auth/logout', {});
+    if (r && r.cloudflareLogout) { location.href = r.cloudflareLogout; return; }  // Cloudflare's own sign-out page ends its session too
+    if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out');
+  api('/api/auth/me').then((me) => {
+    const by = me.signedInBy;
+    fill(how, h('b', null, 'Signed in: '), by === 'cloudflare' ? (me.throughCloudflare ? 'through Cloudflare Access, from outside your network.' : 'through Cloudflare Access; this browser stays signed in on your home network too.')
+      : by === 'proxy' ? 'at the sign-in page of your proxy; sign out there.' : by === 'oneclick' ? 'here, with one click (no password).' : 'here, with a password.');
+    outBtn.textContent = by === 'cloudflare' && me.throughCloudflare ? 'Sign out (of Cloudflare too)' : 'Sign out';
+    outBtn.title = by === 'cloudflare' ? 'Ends the session here and Cloudflare Access’s, so Cloudflare asks for sign-in again next time' : '';
+    if (by === 'proxy') outBtn.remove();
+  }).catch(() => {});
   const back = modal(`${S.USER.name} · ${S.USER.role}`,
     h('p', { class: 'muted' }, S.USER.role === 'admin' ? 'You can change the library, the settings and the users.' : S.USER.role === 'editor' ? 'You can change the library (edits, tags, faces, places).' : 'You can browse, and keep favorites, albums and display settings.'),
     h('h4', null, 'Who you are in People'),
@@ -651,10 +665,10 @@ export function accountDialog() {
       S.IS_ADMIN ? h('button', { class: 'pillbtn', onclick: () => personPicker(async (t) => { try { S.USER = await post('/api/auth/person', { person: t.id }); renderUserMenu(); back.remove(); accountDialog(); } catch (e) { toast(e.message); } }) }, S.USER.person ? 'Change' : 'Link to a person')
         : h('span', { class: 'muted', style: 'font-size:12.5px' }, S.USER.person ? '' : '(an admin can link your account in Settings › Users)'),
       S.USER.person ? h('a', { class: 'lnk', href: hashFor('photos', photosWith({ tag: S.USER.person })), onclick: () => back.remove() }, 'Photos of me') : null),
-    S.VIA_PROXY ? h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Signed in through the sign-in page in front of the viewer (your proxy); sign out there.') : null,
+    how,
     S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', { style: 'display:grid;gap:8px' }, cur, pw)],
     S.VIA_PROXY ? null : h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toast(e.message); } } }, 'Change password')),
-    h('div', { class: 'modal-btns' }, S.VIA_PROXY ? null : h('button', { class: 'pillbtn', onclick: async () => { back.remove(); await post('/api/auth/logout', {}); if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out'),
+    h('div', { class: 'modal-btns' }, outBtn,
       h('button', { class: 'pillbtn on', onclick: () => back.remove() }, 'Done')));
 }
 export function usersSection() {

@@ -99,6 +99,7 @@ async def _auth_guard(request: Request, call_next):
     or admin, settings and maintenance an admin, favorites and albums a signed-in user; all
     of that only once a user exists. Read-only mode refuses library writes for everyone."""
     user = users.user_from_token(request.cookies.get(users.COOKIE, "")) if request.cookies.get(users.COOKIE) else None
+    cookie_uid = user["id"] if user else None
     request.state.via_proxy = False
     if "cf-access-jwt-assertion" in request.headers and time.time() - proxyauth.seen.get("at", 0) > 60:
         proxyauth.note(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
@@ -135,7 +136,12 @@ async def _auth_guard(request: Request, call_next):
             return JSONResponse({"detail": "Only an admin can change settings or run maintenance."}, status_code=403 if user else 401)
         if _hits(path, SIGNED_IN_PATHS) and not users.is_signed_in(user):
             return JSONResponse({"detail": "Sign in to keep favorites and albums."}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    if request.state.via_proxy and user and cookie_uid != user["id"] and path != "/api/auth/logout":
+        # signed in at the proxy (Cloudflare Access): a session here too, so the same browser stays signed in on the
+        # home network, where requests reach the viewer directly without Cloudflare
+        users.set_session(response, user["id"], "cloudflare" if proxyauth.mode() == "cloudflare" else "proxy")
+    return response
 
 
 

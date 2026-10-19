@@ -281,7 +281,7 @@ async def api_login(request: Request):
         raise HTTPException(403, "From outside your network, sign in with an account that has a password")
     proxyauth.authlog.info("signed in: %s (%s, %s) from %s", u["name"], u["role"], "one click" if u.get("passwordless") else "password", src)
     resp = JSONResponse({"user": u, "settings": users.get_settings(u["id"])})
-    resp.set_cookie(users.COOKIE, users.make_token(u["id"]), max_age=users.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
+    users.set_session(resp, u["id"], "oneclick" if u.get("passwordless") else "password")
     return resp
 
 
@@ -300,8 +300,10 @@ def api_logout(request: Request):
     u = request.state.user
     if u:
         proxyauth.authlog.info("signed out: %s from %s", u["name"], proxyauth.source(request))
-    resp = JSONResponse({"ok": True})
-    resp.delete_cookie(users.COOKIE, path="/")
+    # through Cloudflare the page then goes to Cloudflare's own sign-out (/cdn-cgi/access/logout) to end that session too
+    outside = proxyauth.external(request.headers)
+    resp = JSONResponse({"ok": True, "cloudflareLogout": "/cdn-cgi/access/logout" if outside else None})
+    users.clear_session(resp, cloudflare_cookie=not outside)
     return resp
 
 
@@ -310,7 +312,18 @@ def api_me(request: Request):
     u = request.state.user
     return {"user": u, "settings": users.get_settings(u["id"]) if u else {}, "usersExist": users.any_users(),
             "isAdmin": users.is_admin(u), "canWrite": users.can_write(u), "signedIn": users.is_signed_in(u), "requireLogin": users.require_login(),
-            "viaProxy": bool(getattr(request.state, "via_proxy", False))}
+            "viaProxy": bool(getattr(request.state, "via_proxy", False)), "signedInBy": _signed_in_by(request, u),
+            "throughCloudflare": proxyauth.external(request.headers)}
+
+
+def _signed_in_by(request: Request, u):
+    """How this browser is signed in: cloudflare, proxy (another proxy's sign-in), password, oneclick; None if not."""
+    if not u:
+        return None
+    if getattr(request.state, "via_proxy", False):
+        return "cloudflare" if proxyauth.mode() == "cloudflare" else "proxy"
+    via = request.cookies.get(users.VIA_COOKIE)
+    return via if via in ("cloudflare", "proxy", "password", "oneclick") else ("oneclick" if u.get("passwordless") else "password")
 
 
 @router.post("/api/auth/settings")
@@ -351,7 +364,7 @@ async def api_setup(request: Request):
         raise HTTPException(400, str(e))
     proxyauth.authlog.info("first account created and signed in: %s (admin) from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"user": u})
-    resp.set_cookie(users.COOKIE, users.make_token(u["id"]), max_age=users.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
+    users.set_session(resp, u["id"], "password")
     return resp
 
 

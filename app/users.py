@@ -270,6 +270,23 @@ def make_token(user_id: int) -> str:
     return payload + "." + sig
 
 
+VIA_COOKIE = "iopix_via"  # how the session began (password, oneclick, cloudflare, proxy): shown in the account dialog only
+
+
+def set_session(response, user_id: int, via: str):
+    response.set_cookie(COOKIE, make_token(user_id), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
+    response.set_cookie(VIA_COOKIE, via, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
+
+
+def clear_session(response, cloudflare_cookie: bool = False):
+    """cloudflare_cookie: also drop Cloudflare Access's own session cookie for this site (on the home network, where
+    Cloudflare's sign-out page cannot be reached), so the next visit from outside asks Cloudflare's sign-in again."""
+    response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie(VIA_COOKIE, path="/")
+    if cloudflare_cookie:
+        response.delete_cookie("CF_Authorization", path="/")
+
+
 def user_from_token(token: str):
     try:
         uid, exp, sig = token.split(".")

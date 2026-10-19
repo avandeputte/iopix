@@ -77,6 +77,7 @@ def test_requests_through_the_proxy_are_signed_in(client, monkeypatch, account):
     monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
     me = client.get("/api/auth/me", headers={"Remote-User": "proxy-probe"}).json()
     assert me["user"]["name"] == "proxy-probe" and me["viaProxy"] and me["canWrite"]
+    client.cookies.clear()  # (the session the proxy sign-in started would keep this browser signed in)
     assert client.get("/api/auth/me").json()["user"] is None, "no header: not signed in"
 
 
@@ -148,3 +149,23 @@ def test_sign_ins_are_logged(client, monkeypatch, account, caplog):
     assert any(m.startswith("signed in: proxy-probe (editor, password)") for m in msgs)
     assert any(m.startswith("signed out: proxy-probe") for m in msgs)
     assert sum("signed in by the proxy (nginx): proxy-probe as proxy-probe" in m for m in msgs) == 1, "once, not per request"
+
+
+def test_a_proxy_sign_in_carries_over_to_the_home_network(client, monkeypatch, account):
+    monkeypatch.setenv("AUTH_PROXY", "nginx")
+    monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+    client.cookies.clear()
+    outside = {"Remote-User": "proxy-probe", "Cf-Ray": "abc-EWR"}
+    me = client.get("/api/auth/me", headers=outside).json()
+    assert me["viaProxy"] and me["signedInBy"] == "proxy" and me["throughCloudflare"]
+    assert client.cookies.get(users.COOKIE), "a session for this browser"
+    me = client.get("/api/auth/me").json()  # back home: no proxy header, the session does it
+    assert me["user"]["name"] == "proxy-probe" and not me["viaProxy"] and me["signedInBy"] == "proxy" and not me["throughCloudflare"]
+    r = client.post("/api/auth/logout", json={}, headers={"Cf-Ray": "x"})
+    assert r.json()["cloudflareLogout"] == "/cdn-cgi/access/logout"
+    assert client.post("/api/auth/logout", json={}).json()["cloudflareLogout"] is None
+    client.cookies.clear()
+    assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}).status_code == 200
+    monkeypatch.setenv("AUTH_PROXY", "off")
+    assert client.get("/api/auth/me").json()["signedInBy"] == "password"
+    client.post("/api/auth/logout", json={})
