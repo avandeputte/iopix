@@ -795,7 +795,7 @@ export const albumIdByPath = (path) => S.META.albums.find((a) => a.path === path
 export async function tagOp(op, t) {
   let r;
   try { r = await post('/api/tags/op', op); } catch (e) { toast(e.message, null, null, 9000); return; }
-  toast(op.op === 'icon' ? `“${r.path}” now uses this photo.` : op.op === 'notperson' ? `“${r.path}” is a keyword tag again, no longer listed under People.` : op.op === 'merge' ? `Merged “${r.path}” into “${r.new_path}” (${nf.format(r.photos)} photos).` : op.op === 'add' ? `Created “${r.path}”.` : `${{ rename: 'Renamed', move: 'Moved', delete: 'Deleted' }[op.op]} “${r.path}”${r.new_path ? ` → “${r.new_path}”` : ''}.` +
+  toast(op.op === 'icon' ? `“${r.path}” now uses this photo.` : op.op === 'notperson' ? `“${r.path}” is a keyword tag again, no longer listed under People.` : op.op === 'person' ? `“${r.path}” is a person now.` : op.op === 'merge' ? `Merged “${r.path}” into “${r.new_path}” (${nf.format(r.photos)} photos).` : op.op === 'add' ? `Created “${r.path}”.` : `${{ rename: 'Renamed', move: 'Moved', delete: 'Deleted' }[op.op]} “${r.path}”${r.new_path ? ` → “${r.new_path}”` : ''}.` +
     (r.sidecars ? ` Updating ${nf.format(r.photos)} photos’ sidecars in the background.` : ''), null, null, 8000);
   await awaitReindex();
   $('#taglist')?.remove();  // the tag datalist is rebuilt from the new tag list on next use
@@ -871,7 +871,8 @@ export function showTags() {
         t.person && !kids.length ? h('button', { class: 'pillbtn tmove', title: 'The same person entered twice: move everything on this one to another person, then remove this one', onclick: (e) => { e.stopPropagation();
           personPicker((into) => { if (into.id !== t.id && confirm(`Merge “${t.full.replaceAll('/', ' › ')}” into “${into.full.replaceAll('/', ' › ')}”?\n\nIts ${nf.format(t.nAll)} photos and face boxes move to ${into.name}, then “${t.name}” is removed. digiKam's database is backed up first.`)) tagOp({ op: 'merge', id: t.id, into: into.id }, t); });
         } }, 'Merge into…') : null,
-        t.person && !t.full.startsWith('People/') ? h('button', { class: 'pillbtn tmove', title: 'digiKam marked this tag as a person (a face was once named with it): make it a keyword tag again, off the People page', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'notperson', id: t.id }, t); } }, 'Not a person') : null,
+        t.person ? h('button', { class: 'pillbtn tmove', title: 'Make this a keyword tag again, off the People page (refused while face boxes carry the name)', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'notperson', id: t.id }, t); } }, 'Not a person')
+          : !kids.length ? h('button', { class: 'pillbtn tmove', title: 'Mark this tag as a person: it shows under People and faces can be named with it', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'person', id: t.id }, t); } }, icon('person'), 'Is a person') : null,
         isPerson ? null : act('trash', 'Delete', () => { const kidsN = S.META.tags.filter((x) => x.full.startsWith(t.full + '/')).length;
           if (confirm(`Delete the tag “${t.full}”${kidsN ? ` and its ${kidsN} sub-tags` : ''}?\n\nIt will be removed from ${nf.format(t.nAll)} photos (the photos themselves are not touched).`)) tagOp({ op: 'delete', id: t.id }, t); })) : null,
       h('span', { class: 'ct' }, nf.format(t.nAll)));

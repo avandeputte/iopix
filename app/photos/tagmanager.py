@@ -112,12 +112,12 @@ def _photos_with(con, tag_ids, roots):
 
 def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: bool = True, backup: bool = True) -> dict:
     """op: {op: add, parent, name} | {op: rename, id, name} | {op: move, id, parent} | {op: delete, id}
-       | {op: icon, id, photo} | {op: notperson, id} | {op: merge, id, into}. Returns a summary including how many sidecar files will be updated.
+       | {op: icon, id, photo} | {op: notperson, id} | {op: person, id} | {op: merge, id, into}. Returns a summary including how many sidecar files will be updated.
     `backup=False` is for callers that run several operations in a row and took one
     database backup themselves before the first."""
     db_path = Path(db_path or dkdb.sqlite_path())
     kind = op.get("op")
-    if kind not in ("add", "rename", "move", "delete", "icon", "notperson", "merge"):
+    if kind not in ("add", "rename", "move", "delete", "icon", "notperson", "person", "merge"):
         raise SyncError("Unknown tag operation.")
     dbsync.preflight(db_path, check_running, "tags")
     if queue and pending_jobs():
@@ -156,6 +156,20 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
             else:
                 con.execute("UPDATE Tags SET iconkde = ?, icon = NULL WHERE id = ?", ("", tid))
             summary.update(id=tid, path=tree.full(tid), photo=photo, photos=0, sidecars=0)
+        elif kind == "person":
+            # a keyword tag made a person (FaceTags::ensureIsPerson): it then shows under People, faces can be named
+            # with it, and digiKam lists it as a person too
+            tid = int(op.get("id") or 0)
+            if tid not in tree.rows or tid in tree.protected or tid in tree.internal:
+                raise SyncError("That tag cannot be changed here.")
+            if tree.subtree(tid) != [tid]:
+                raise SyncError(f"“{tree.full(tid)}” has tags inside it (a family or a group): only a single tag can be a person.")
+            if con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone():
+                raise SyncError(f"“{tree.full(tid)}” is already a person.")
+            con.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', ?)", (tid, tree.rows[tid]["name"]))
+            photos = _photos_with(con, [tid], roots)  # their sidecars list it as a person now (a name-only face region)
+            jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            summary.update(id=tid, path=tree.full(tid), photos=len(photos))
         elif kind == "notperson":
             # a keyword tag digiKam marked as a person (its "person" property, set when a face was once named with
             # it): the mark goes, the tag and its photos stay. Refused while face boxes still carry the name.

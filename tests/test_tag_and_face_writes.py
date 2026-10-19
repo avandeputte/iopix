@@ -284,3 +284,57 @@ def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
     out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
     tags = _json.loads(out)[0].get("TagsList") or []
     assert not any(w in (tags if isinstance(tags, list) else [tags]) for w in want), "removing the face takes the tag out of the sidecar too"
+
+
+def test_people_on_a_video_and_one_person_per_name(lib, client):
+    """A video can have people (no face boxes): the person goes on it in digiKam's database and its sidecar's tag list.
+    A new person typed with another letter case than an existing one under People is that existing one, marked as a
+    person, not a second tag."""
+    import json as _json
+    import sqlite3
+    import subprocess
+    from app.photos import edits
+    vid = lib["videos"][0]
+    dk = sqlite3.connect(lib["db"])
+    people = dk.execute("SELECT id FROM Tags WHERE name = 'People' AND pid = 0").fetchone()[0]
+    dk.close()
+    fam = tagmanager.apply({"op": "add", "parent": people, "name": "Zz Fam"}, check_running=False)["id"]
+    kid = tagmanager.apply({"op": "add", "parent": fam, "name": "Zz Kid Person"}, check_running=False)["id"]  # a keyword, not marked
+    try:
+        assert facemgr.create_person("zz kid person", 0) == kid, "the existing one, whatever the letter case"
+        dk = sqlite3.connect(lib["db"])
+        assert dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (kid,)).fetchone(), "now marked as a person"
+        assert dk.execute("SELECT count(*) FROM Tags WHERE lower(name) = 'zz kid person'").fetchone()[0] == 1
+        dk.close()
+        r = client.post("/api/faces/op", json={"op": "tagonly", "image": vid, "tag": kid})
+        assert r.status_code == 200, r.text
+        dk = sqlite3.connect(lib["db"])
+        assert dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (vid, kid)).fetchone()
+        dk.close()
+        path = dict(__import__("app.digikam.dbsync", fromlist=["x"])._photo_paths([vid]))[vid]
+        out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
+        tags = _json.loads(out)[0].get("TagsList") or []
+        assert "People/Zz Fam/Zz Kid Person" in (tags if isinstance(tags, list) else [tags]), tags
+        assert client.post("/api/faces/op", json={"op": "untag", "image": vid, "tag": kid}).status_code == 200
+    finally:
+        dk = sqlite3.connect(lib["db"])
+        for t in (kid, fam):
+            for tab, col in (("TagProperties", "tagid"), ("ImageTags", "tagid"), ("ImageTagProperties", "tagid"), ("Tags", "id")):
+                dk.execute(f"DELETE FROM {tab} WHERE {col} = ?", (t,))
+        dk.commit(); dk.close()
+
+
+def test_the_tag_manager_marks_a_tag_as_a_person_and_back(lib, client):
+    import sqlite3
+    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-person-switch"}, check_running=False)["id"]
+    try:
+        tagmanager.apply({"op": "person", "id": tid}, check_running=False, queue=False)
+        dk = sqlite3.connect(lib["db"])
+        assert dk.execute("SELECT value FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone()[0] == "zz-person-switch"
+        dk.close()
+        tagmanager.apply({"op": "notperson", "id": tid}, check_running=False, queue=False)
+        dk = sqlite3.connect(lib["db"])
+        assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone()
+        dk.close()
+    finally:
+        tagmanager.apply({"op": "delete", "id": tid}, check_running=False, queue=False)

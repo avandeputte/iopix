@@ -231,10 +231,9 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
                      "details": det, "undo": {"face_ops": inv} if inv else None})
     history.record(rows)
     # a person tagged without a box lives in the sidecar's tag list, not its regions: rewrite that list too
-    tag_only = [{"id": r["image"], "path": paths[r["image"]]} for r in done if r.get("op") in ("untag", "tagonly") and paths.get(r["image"])]
-    if tag_only:
-        from app.photos import edits
-        edits.rewrite_tags(tag_only)
+    tag_only = list(dict.fromkeys(r["image"] for r in done if r.get("op") in ("untag", "tagonly")))
+    if tag_only:  # now, not queued (a video or a photo without a sidecar gets one)
+        write_regions_many(tag_only, db_path)
     if background:
         queue_sidecars(list(dict.fromkeys(touched)), db_path)
         for r in results:
@@ -327,7 +326,11 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         return summary
     if kind_op in ("untag", "tagonly"):
         person = int(op.get("tag") or 0)
-        if person in sp.values() or not con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (person,)).fetchone():
+        if person in sp.values() or not con.execute("SELECT 1 FROM Tags WHERE id = ?", (person,)).fetchone():
+            raise SyncError("Choose a person.")
+        if kind_op == "tagonly":
+            _ensure_person(con, person)  # picked as a person: marked as one, as naming a face with it would
+        elif not _is_person(con, person):
             raise SyncError("That is not a person.")
         if con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property IN ('tagRegion', 'autodetectedFace')", (image, person)).fetchone():
             raise SyncError("A face box carries that person: remove or rename the face instead.")
@@ -388,10 +391,30 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
     return summary
 
 
+def _same_name_under_people(name: str):
+    """A tag under People (or a person anywhere) with this name, whatever its letter case: the person already exists
+    (typing "nathan Belcufine" must not make a second Nathan Belcufine)."""
+    con = dkdb.connect(write=False)
+    try:
+        tree = dkdb.tag_tree(con)
+        persons = {r[0] for r in con.execute("SELECT tagid FROM TagProperties WHERE property = 'person'")}
+        want = " ".join(name.split()).lower()
+        hits = [t for t in tree if dkdb.tag_path(tree, t).split("/")[-1].lower() == want
+                and (t in persons or dkdb.tag_path(tree, t).startswith("People/"))
+                and not any(r[0] == t for r in tree.values())]  # a family group (a tag with tags in it) is not a person
+        return min(hits, key=lambda t: (t not in persons, t)) if hits else None
+    finally:
+        con.close()
+
+
 def create_person(name: str, parent: int = 0) -> int:
-    """A new person tag (under People/<family> usually), marked as a person. Returns its id."""
-    r = tagmanager.apply({"op": "add", "parent": parent, "name": name})
-    tid = int(r["id"])
+    """A new person tag (under People/<family> usually), marked as a person. Returns its id. A person (or a tag under
+    People) of that name already there, in any letter case, is used instead of making a second one."""
+    existing = _same_name_under_people(name)
+    if existing:
+        tid = existing
+    else:
+        tid = int(tagmanager.apply({"op": "add", "parent": parent, "name": name})["id"])
     # tagmanager.apply just ran every check and took the backup; this follow-up row is tiny
     with dkdb.write_lock:
         con = dkdb.connect(write=True)

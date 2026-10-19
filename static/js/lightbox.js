@@ -246,9 +246,10 @@ export function photoActions(anchor, d) {
   const editing = S.EDITING, manage = S.CAN_MANAGE;
   const dateBox = () => { const box = LB.el.info.querySelector('.dateedit')?.parentElement; if (box) { box.hidden = false; box.scrollIntoView({ block: 'nearest' }); box.querySelector('input')?.focus(); } };
   popMenu(anchor, [
-    manage && !d.video ? 'Faces' : null,
+    manage ? (d.video ? 'People' : 'Faces') : null,
     manage && S.FACE_DETECT && !d.video ? ['Detect faces', () => detectFaces([d.id])] : null,
     manage && !d.video ? ['Add a face by hand…', () => startDrawFace()] : null,
+    manage ? [d.video ? 'Add a person to this video…' : 'Add a person without a face box…', () => personPicker((t) => faceOp({ op: 'tagonly', image: d.id, tag: t.id }, () => faceOp({ op: 'untag', image: d.id, tag: t.id })), d.id)] : null,
     d.lat != null ? 'Around this photo' : null,
     d.lat != null ? ['Day’s trail on the map', () => { closeLightbox(false); LB.pushed = false; go('map', photosWith({ from: d.day, to: d.day, trail: d.day })); }] : null,
     d.lat != null ? ['Photos nearby', () => filterFromLightbox({ bbox: [d.lat - 0.01, d.lon - 0.015, d.lat + 0.01, d.lon + 0.015].map((x) => x.toFixed(4)).join(',') })] : null,
@@ -720,7 +721,9 @@ export function faceOp(op, undo) {
 }
 export function personPicker(onPick, photoId) {
   // the "People" root carries digiKam's person property too, but it is not someone a face can be named after
-  const people = S.META.tags.filter((t) => t.person && t.full !== 'People' && t.full.split('/')[0] === 'People');
+  // people: person tags, and single tags filed under People that digiKam has not marked as persons yet (naming a face
+  // with one marks it), so an existing "People/Belcufine/Nathan Belcufine" is offered instead of a new person being made
+  const people = S.META.tags.filter((t) => t.full !== 'People' && t.full.split('/')[0] === 'People' && (t.person || (!t.hasKids && t.full.split('/').length > 2)));
   const inp = h('input', { class: 'pagefilter', style: 'margin:0;width:100%', placeholder: 'Type a name…' });
   const list = h('div', { class: 'alist', style: 'max-height:40vh;margin-top:8px' });
   const families = S.META.tags.filter((t) => !t.person && t.full.startsWith('People/') && t.full.split('/').length === 2);
