@@ -45,7 +45,8 @@ export function updateSelBar() {
   const ids = () => [...G.sel];
   const inAlbum = S.route.view === 'photos' && ualbumById(filterParams().get('ualbum'))?.canEdit ? filterParams().get('ualbum') : null;
   const allFav = ids().every((id) => ST.fav.has(id));
-  const btn = (ic, label, fn) => h('button', { class: 'pillbtn', title: label, onclick: fn }, icon(ic), h('span', null, label));
+  // the actions as icons, like the viewer's toolbar; the name shows on hover (and is what screen readers say)
+  const btn = (ic, label, fn) => h('button', { class: 'pillbtn selic', title: label, 'aria-label': label, onclick: fn }, icon(ic));
   fill(bar,
     h('button', { class: 'iconbtn', title: 'Clear selection (Esc)', onclick: () => clearSelection() }, icon('close')),
     h('span', { class: 'n' }, `${nf.format(G.sel.size)} selected`),
@@ -62,7 +63,7 @@ export function updateSelBar() {
       await loadState(); toast(`Removed ${nf.format(G.sel.size)} from the album.`); G.sel.clear(); S.viewKey = null; onRoute();
     }) : null,
     btn('download', 'Export', () => downloadDialog(photosWith({ ids: ids().join(',') }), G.sel.size)),
-    S.CAN_MANAGE ? btn('edit', 'Rename by date', () => renameByDate(ids())) : null,
+    S.CAN_MANAGE ? btn('text', 'Rename by date', () => renameByDate(ids())) : null,
     S.EDITING && G.sel.size > 1 ? btn('dup', 'Copy metadata', () => copyMetadata(ids())) : null,
     S.CAN_MANAGE ? btn('folder', 'Move to a folder', () => movePhotos(ids())) : null,
     S.CAN_MANAGE && S.LOSSLESS ? btn('rotate', 'Rotate or flip', (e) => editMenu(ids(), e.currentTarget, false)) : null,

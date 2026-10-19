@@ -870,3 +870,6 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .mapbar .mapfind input { border: 0; background: transparent; margin: 0; padding: 0; width: 230px; height: 34px; box-shadow: none; outline: none; }
 .mapbar .mapfind .mapsr { position: absolute; top: 42px; left: 0; width: 340px; max-height: 280px; overflow: auto; background: var(--bg); box-shadow: var(--shadow); border-radius: 12px; }
 @media (max-width: 800px) { .mapbar { flex-wrap: wrap; right: 12px; } .mapbar .mapfind input { width: 150px; } .mapbar .mapfind .mapsr { width: min(340px, 90vw); } }
+#selbar .pillbtn.selic { width: 40px; padding: 0; justify-content: center; border-radius: 50%; border: 0; background: transparent; color: var(--fg2); }
+#selbar .pillbtn.selic:hover { background: var(--bg3); color: var(--fg); }
+@media (max-width: 800px) { #selbar .pillbtn.selic { width: 34px; } }
