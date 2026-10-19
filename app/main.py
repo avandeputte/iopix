@@ -108,6 +108,9 @@ async def _auth_guard(request: Request, call_next):
             user, request.state.via_proxy = pu, True
     if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers):
         user = None  # a passwordless account's session (begun on the LAN) does not work from outside
+        if time.time() - proxyauth._logged.get(("lan-session", request.cookies.get(users.COOKIE)), 0) > 3600:
+            proxyauth._logged[("lan-session", request.cookies.get(users.COOKIE))] = time.time()
+            proxyauth.authlog.info("a one-click session is not used from outside: shown the sign-in screen (from %s)", proxyauth.source(request))
     request.state.user = user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner

@@ -91,6 +91,18 @@ def external(headers_in) -> bool:
     return any(headers_in.get(h) for h in EXTERNAL_HEADERS)
 
 
+authlog = logging.getLogger("app.auth")  # sign-ins, failed attempts and sign-outs, for Maintenance › Server log
+_logged = {}  # identity -> when its proxy sign-in was last logged (a page load makes dozens of requests)
+
+
+def source(request) -> str:
+    """Where a request came from, for the log: the visitor's address, and whether it came through Cloudflare."""
+    h = request.headers
+    if external(h):
+        return f"{h.get('cf-connecting-ip') or '?'} through Cloudflare"
+    return request.client.host if request.client else "?"
+
+
 def mode() -> str:
     m = (_opt("AUTH_PROXY") or "off").strip().lower()
     return m if m in PRESETS else "off"
@@ -142,7 +154,9 @@ def _cf_email(token: str, team: str, aud: str):
         key = client.get_signing_key_from_jwt(token).key
         claims = jwt.decode(token, key, algorithms=["RS256"], audience=aud, issuer=f"https://{team}", leeway=30)
     except Exception as e:  # a forged, expired or foreign token: nobody
-        log.warning("Cloudflare Access token refused: %s", str(e)[:200])
+        if time.time() - _logged.get("refused", 0) > 60:
+            _logged["refused"] = time.time()
+            authlog.warning("Cloudflare Access token refused (%s): treated as not signed in", str(e)[:200])
         return None
     return (claims.get("email") or claims.get("common_name") or "").strip() or None
 
@@ -190,7 +204,7 @@ def user_for(ident: str):
         import secrets
         # a random password nobody knows: this person signs in at the proxy (an admin can set a real one later)
         u = users.create(name, secrets.token_urlsafe(24), role, email=ident if "@" in ident else "")
-        log.info("account %s created for a sign-in through the proxy (%s)", name, role)
+        authlog.info("account %s created for a sign-in through the proxy (%s)", name, role)
         return u
     except ValueError as e:
         log.warning("could not create an account for %s: %s", name, e)
@@ -211,6 +225,13 @@ def user(request):
         return hit[0]
     u = user_for(ident)
     _cache[ident] = (u, now + 30)
+    if now - _logged.get(ident, 0) > 3600:  # once an hour per person, not per request
+        _logged[ident] = now
+        how = "Cloudflare Access" if mode() == "cloudflare" else f"the proxy ({mode()})"
+        if u:
+            authlog.info("signed in by %s: %s as %s (%s) from %s", how, ident, u["name"], u["role"], source(request))
+        else:
+            authlog.warning("%s let in %s, who has no account here: shown the sign-in screen (from %s)", how, ident, source(request))
     return u
 
 

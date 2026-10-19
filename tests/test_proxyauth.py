@@ -128,3 +128,23 @@ def test_from_outside_a_password_is_required(client, monkeypatch, account):
     assert not (client.get("/api/auth/me", headers=outside).json().get("user") or {}).get("name"), "its session does not work from outside"
     assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}, headers=outside).status_code == 200
     client.post("/api/auth/logout", json={})
+
+
+def test_sign_ins_are_logged(client, monkeypatch, account, caplog):
+    import logging
+    monkeypatch.delenv("AUTH_PROXY", raising=False)
+    with caplog.at_level(logging.INFO, logger="app.auth"):
+        assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "nope"}, headers={"Cf-Connecting-Ip": "203.0.113.9"}).status_code == 401
+        assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}).status_code == 200
+        client.post("/api/auth/logout", json={})
+        monkeypatch.setenv("AUTH_PROXY", "nginx")
+        monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+        proxyauth._logged.clear()
+        for _ in range(3):
+            client.get("/api/auth/me", headers={"Remote-User": "proxy-probe"})
+            proxyauth._cache.clear()
+    msgs = [r.getMessage() for r in caplog.records if r.name == "app.auth"]
+    assert any("failed sign-in as 'proxy-probe' from 203.0.113.9 through Cloudflare" in m for m in msgs), msgs
+    assert any(m.startswith("signed in: proxy-probe (editor, password)") for m in msgs)
+    assert any(m.startswith("signed out: proxy-probe") for m in msgs)
+    assert sum("signed in by the proxy (nginx): proxy-probe as proxy-probe" in m for m in msgs) == 1, "once, not per request"

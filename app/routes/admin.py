@@ -271,11 +271,15 @@ def api_analysis():
 @router.post("/api/auth/login")
 async def api_login(request: Request):
     body = await request.json()
-    u = users.authenticate(str(body.get("name", "")), str(body.get("password", "")))
+    name, src = str(body.get("name", ""))[:64], proxyauth.source(request)
+    u = users.authenticate(name, str(body.get("password", "")))
     if not u:
+        proxyauth.authlog.warning("failed sign-in as %r from %s (wrong user name or password)", name, src)
         raise HTTPException(401, "Wrong user name or password")
     if u.get("passwordless") and proxyauth.external(request.headers):
+        proxyauth.authlog.warning("one-click sign-in as %s refused from %s (outside: a password is required)", u["name"], src)
         raise HTTPException(403, "From outside your network, sign in with an account that has a password")
+    proxyauth.authlog.info("signed in: %s (%s, %s) from %s", u["name"], u["role"], "one click" if u.get("passwordless") else "password", src)
     resp = JSONResponse({"user": u, "settings": users.get_settings(u["id"])})
     resp.set_cookie(users.COOKIE, users.make_token(u["id"]), max_age=users.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
     return resp
@@ -292,7 +296,10 @@ def api_accounts(request: Request):
 
 
 @router.post("/api/auth/logout")
-def api_logout():
+def api_logout(request: Request):
+    u = request.state.user
+    if u:
+        proxyauth.authlog.info("signed out: %s from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(users.COOKIE, path="/")
     return resp
@@ -322,11 +329,13 @@ async def api_my_password(request: Request):
         raise HTTPException(401, "Sign in first")
     body = await request.json()
     if not u.get("passwordless") and not users.authenticate(u["name"], str(body.get("current", ""))):
+        proxyauth.authlog.warning("password change for %s refused from %s (wrong current password)", u["name"], proxyauth.source(request))
         raise HTTPException(403, "The current password is wrong")
     try:
         users.update(u["id"], password=str(body.get("password", "")))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    proxyauth.authlog.info("password changed: %s from %s", u["name"], proxyauth.source(request))
     return {"ok": True}
 
 
@@ -340,6 +349,7 @@ async def api_setup(request: Request):
         u = users.create(str(body.get("name", "")), str(body.get("password", "")), "admin")
     except ValueError as e:
         raise HTTPException(400, str(e))
+    proxyauth.authlog.info("first account created and signed in: %s (admin) from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"user": u})
     resp.set_cookie(users.COOKIE, users.make_token(u["id"]), max_age=users.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
     return resp
@@ -633,7 +643,7 @@ def api_restart():
 def api_log(lines: int = 300, level: str = "any", contains: str = "", requests: int = 0):
     """Maintenance › Server log: the end of data/viewer.log, filtered (admins)."""
     from app import logs
-    return logs.tail(lines, contains[:200], level if level in ("any", "warning", "error") else "any", bool(requests))
+    return logs.tail(lines, contains[:200], level if level in ("any", "warning", "error", "auth") else "any", bool(requests))
 
 
 @router.get("/api/log/download")

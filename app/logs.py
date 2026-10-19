@@ -7,7 +7,7 @@ PAGE_REQUEST = " uvicorn.access: "
 
 def tail(lines: int = 300, contains: str = "", level: str = "any", requests: bool = True) -> dict:
     """The last `lines` lines. `contains` keeps lines with that text; `level` "warning" or "error" keeps
-    only those (tracebacks count as errors); `requests` False drops the page-request lines."""
+    only those, "auth" only sign-ins, failed attempts and sign-outs (tracebacks count as errors); `requests` False drops the page-request lines."""
     lines = max(1, min(int(lines), 5000))
     path = config.LOG_FILE
     if not path.exists():
@@ -25,6 +25,8 @@ def tail(lines: int = 300, contains: str = "", level: str = "any", requests: boo
     if contains:
         c = contains.lower()
         out = [l for l in out if c in l.lower()]
+    if level == "auth":  # sign-ins, failed attempts, sign-outs
+        out = [l for l in out if " app.auth: " in l]
     if level == "warning":
         out = [l for l in out if " WARNING " in l or " ERROR " in l or " CRITICAL " in l or "Traceback" in l]
     elif level == "error":

@@ -489,7 +489,7 @@ def _public_settings() -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
-def server_log(token: str, lines: int = 200, contains: str = "", level: Literal["any", "warning", "error"] = "any") -> dict:
+def server_log(token: str, lines: int = 200, contains: str = "", level: Literal["any", "warning", "error", "auth"] = "any") -> dict:
     """The last lines of the viewer's own log (data/viewer.log, rotating). `contains` keeps only lines
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
     _need_token(token)
