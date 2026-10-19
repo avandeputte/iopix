@@ -524,6 +524,20 @@ def job_queue(token: str) -> dict:
     return out
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def repair_video(token: str, photo_id: int) -> dict:
+    """Repair a video that does not play because its wrapper is damaged (inspect_file shows it): the same streams
+    rewrapped without re-encoding, checked to play in full before it replaces the file. The original is kept
+    (the change log can put it back). Needs the admin token."""
+    _need_token(token)
+    from app.photos import repair
+    from app.digikam import dbsync
+    try:
+        return repair.video(int(photo_id))
+    except dbsync.SyncError as e:
+        raise ToolError(str(e))
+
+
 @server.tool(annotations=READ_ONLY)
 def inspect_file(token: str, photo_id: int) -> dict:
     """What is inside one photo's or video's file, for "it does not show" questions: exiftool's reading of its
