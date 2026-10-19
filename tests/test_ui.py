@@ -1209,6 +1209,20 @@ def test_only_the_town_is_known_saves_an_approximate_location(page, server, lib)
     urllib.request.urlopen(req).read()
 
 
+def test_long_file_names_stay_inside_their_cards(page, server):
+    """Metadata quality and the edit log in large view: a 60-character file name wraps inside its card."""
+    page.goto(server + "/#/quality")
+    page.wait_for_selector(".qsec", timeout=20000)
+    page.evaluate("""() => { const list = document.querySelector('.hlist.qitems') || document.querySelector('.hlist');
+        list.className = 'hlist qitems large';
+        const row = document.createElement('div'); row.className = 'hrow';
+        row.innerHTML = '<span class="ph"></span><div class="hmain"><b>1361232_10201731163668655_357083_n_1875465574185_10201731163668655.mp4</b> · taken</div>';
+        list.prepend(row); }""")
+    row = page.locator(".hlist.qitems.large .hrow").first
+    box, name = row.bounding_box(), row.locator("b").bounding_box()
+    assert name["x"] + name["width"] <= box["x"] + box["width"] + 1, (name, box)
+
+
 def test_info_panel_change_log_is_last_and_folded(page, server):
     """A photo changed here shows its change log at the very end of the info panel, folded until opened."""
     import json as _json

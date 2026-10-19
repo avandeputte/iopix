@@ -668,7 +668,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .hlist { display: flex; flex-direction: column; }
 .hrow { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .hrow img, .hrow .ph { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: var(--bg2); }
-.hrow .hmain { min-width: 0; flex: 1; }
+.hrow .hmain { min-width: 0; flex: 1; overflow-wrap: anywhere; }  /* a very long file name breaks instead of running out of its card */
 .hrow .muted { font-size: 12px; margin-top: 2px; }
 .hlist.small .hrow { padding: 5px 0; font-size: 12.5px; }
 .hact { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: var(--bg3); color: var(--fg2); margin-right: 2px; vertical-align: 1px; }
@@ -761,7 +761,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 /* Face quality lists: as a list, or as larger pictures with the details and actions under each */
 .qitems.large, .qitems.huge { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .qitems.huge { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); }
-.qitems.large .hrow, .qitems.huge .hrow { flex-direction: column; align-items: stretch; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.qitems.large .hrow, .qitems.huge .hrow { min-width: 0; flex-direction: column; align-items: stretch; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
 .qitems.large .hrow img { width: 100%; height: 200px; border-radius: 8px; }
 .qitems.huge .hrow img { width: 100%; height: 320px; border-radius: 8px; }
 @media (max-width: 800px) { .qitems.large, .qitems.huge { grid-template-columns: 1fr; } .qitems.huge .hrow img, .qitems.large .hrow img { height: 260px; } }
