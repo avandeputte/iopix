@@ -219,10 +219,13 @@ def test_settings_and_maintenance_pages(page, server):
     assert page.locator(".ajob select").count() >= 1, "the core budget selector lives in Settings"
     page.goto(server + "/#/maintenance")
     page.wait_for_selector("h1:has-text('Maintenance')", timeout=10000)  # a hash-only navigation re-renders in place
-    heads = page.locator("h2").all_inner_texts()
+    page.wait_for_selector(".stabs", timeout=10000)
+    assert page.locator(".stabs button").all_inner_texts() == ["Library", "AI analysis and models", "Storage and backups", "Viewer"]
+    heads = page.locator("h2").evaluate_all("els => els.map((e) => e.textContent)")
     for h in ("Library", "AI analysis and models", "Storage and backups", "Viewer"):
-        assert any(x == h or x.startswith(h + " ") or x.startswith(h + "\n") for x in heads), (h, heads)
+        assert any(x.startswith(h) for x in heads), (h, heads)
     assert "Display" not in heads and "Editing" not in heads
+    page.locator(".stabs button", has_text="AI analysis and models").click()
     page.wait_for_selector(".mtable tbody tr", timeout=10000)
     assert page.locator("b", has_text="Background work").count() == 1
     rows = page.locator(".mtable tbody tr")
@@ -233,6 +236,7 @@ def test_settings_and_maintenance_pages(page, server):
     assert page.locator(".mtable tr[data-model=geonames]").count() == 1, "models without a job have a row too"
     assert page.locator(".mtable thead th").all_inner_texts()[:3] == ["Feature", "Model", "Progress"]
     assert page.locator("b", has_text="Restart the viewer").count() == 1
+    page.locator(".stabs button", has_text="Library").click()
     assert page.locator(".srow b", has_text="Metadata consistency").count() == 1, "consistency sits under Library"
     assert page.locator(".stable.wide tr").count() >= 10 and page.locator(".stable.wide button", has_text="Rebuild").count() == 1
     assert page.locator("#nav a", has_text="Maintenance").count() == 0, "no longer in the main navigation"
@@ -928,7 +932,7 @@ def test_app_name_shows_in_the_top_bar_and_tab(page, server):
 
 
 def test_server_log_dialog_opens_from_maintenance(page, server):
-    page.goto(server + "/#/maintenance")
+    page.goto(server + "/#/maintenance?tab=viewer")
     page.wait_for_selector(".srow:has-text('Server log') button", timeout=10000)
     page.locator(".srow", has_text="Server log").locator("button").click()
     page.wait_for_selector(".modal pre.logview", timeout=5000)
@@ -1458,7 +1462,7 @@ def test_person_picker_shows_only_the_name(page, server, lib):
 
 
 def test_maintenance_explains_the_model_choices(page, server):
-    page.goto(server + "/#/maintenance")
+    page.goto(server + "/#/maintenance?tab=models")
     page.wait_for_selector(".mtable tr[data-job=facedetect] .mcompare", timeout=15000)
     row = page.locator(".mtable tr[data-job=facedetect]")
     assert "Face detection" in row.locator(".mwhat").inner_text()

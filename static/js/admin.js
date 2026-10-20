@@ -518,10 +518,13 @@ function scannerRow(m, row, btn, again) {
       btn('Scan now', async () => { try { await post('/api/scan', {}); toast('Scanning the album folders…'); setTimeout(again, 4000); } catch (e) { toast(e.message); } })));
 }
 export const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
-// Settings is split into tabs: each stab() marks where one begins; what comes before the first is always shown
-const STABS = [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['users', 'Users and sign-in']];
+// Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
+const STABS = {
+  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['users', 'Users and sign-in']],
+  maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['viewer', 'Viewer']],
+};
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
-function settingsTabs(page) {
+function settingsTabs(page, view) {
   if (!page) return;
   const kids = [...page.children], groups = new Map();
   let cur = null;
@@ -529,18 +532,18 @@ function settingsTabs(page) {
     if (el.classList.contains('stab-mark')) { cur = el.dataset.tab; groups.set(cur, []); continue; }
     if (cur) groups.get(cur).push(el);
   }
-  const tabs = STABS.filter(([k]) => groups.has(k));
+  const tabs = STABS[view].filter(([k]) => groups.has(k));
   if (tabs.length < 2) return;
   let pick = S.route.params.get('tab');  // #/settings?tab=users links straight to a tab; else the last one opened
-  if (!groups.has(pick)) { try { pick = localStorage.getItem('iopix.settingsTab'); } catch { pick = null; } }
+  if (!groups.has(pick)) { try { pick = localStorage.getItem(`iopix.${view}Tab`); } catch { pick = null; } }
   if (!groups.has(pick)) pick = tabs[0][0];
   const bar = h('div', { class: 'stabs', role: 'tablist' });
   const show = (k) => {
     if (!groups.has(k)) return;
     for (const [g, els] of groups) els.forEach((el) => { el.style.display = g === k ? '' : 'none'; });
     [...bar.children].forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); b.setAttribute('aria-selected', b.dataset.tab === k); });
-    try { localStorage.setItem('iopix.settingsTab', k); } catch { /* private window */ }
-    if (S.route.params.get('tab') !== k) { S.route.params.set('tab', k); history.replaceState(null, '', hashFor('settings', S.route.params)); }
+    try { localStorage.setItem(`iopix.${view}Tab`, k); } catch { /* private window */ }
+    if (S.route.params.get('tab') !== k) { S.route.params.set('tab', k); history.replaceState(null, '', hashFor(view, S.route.params)); }
   };
   tabs.forEach(([k, label]) => bar.append(h('button', { class: 'pillbtn', role: 'tab', 'data-tab': k, onclick: () => show(k) }, label)));
   bar.show = show;
@@ -694,6 +697,7 @@ export async function settingsPage(view) {
     ] : null,
     ] : [
     // 1. Library: everything about digiKam's data as the viewer sees it
+    stab('library'),
     h('h2', null, 'Library'),
     row('Import', 'Photos and videos from a phone, a card or a computer, into folders by date, duplicates left out, a sidecar for each. The installed app is a share target on Android.', h('a', { class: 'pillbtn', href: '#/import' }, 'Open Import')),
     scannerRow(m, row, btn, () => { if (S.route.view === view) settingsPage(view); }),
@@ -728,8 +732,10 @@ export async function settingsPage(view) {
       m.pendingEdits ? btn('Apply to digiKam database…', dbDialog, !m.digikamRunning) : null) : null,
     row('Tag cover photos', 'The photo shown for each tag is chosen by the content model. Pick them again after big tagging changes.', btn('Pick again', () => act('covers', 'Choosing tag covers in the background.'))),
     // 2. AI analysis and models
+    stab('models'),
     aiSection(view),
     // 3. Storage and backups: each item's size with what can be done about it on the same row
+    stab('storage'),
     h('h2', null, 'Storage and backups', h('span', { class: 'muted' }, `${fmtBytes(st.free)} free on the disk`)),
     (() => {
       const item = (label, size, detail, action) => h('tr', null, h('td', null, label, detail ? h('div', { class: 'muted', style: 'font-size:11.5px;white-space:normal' }, detail) : null),
@@ -753,6 +759,7 @@ export async function settingsPage(view) {
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('a', { class: 'pillbtn', href: '/api/backup/digikam', download: '' }, icon('download'), h('span', null, 'digiKam database')),
         h('a', { class: 'pillbtn', href: '/api/backup/app', download: '' }, icon('download'), h('span', null, 'Viewer data (zip)')))),
     // 4. The viewer itself
+    stab('viewer'),
     h('h2', null, 'Viewer'),
     row('Edit log', 'Every change made in the viewer, for every photo, kept for good: who, when, what it was before and after, with Undo and restore of the sidecar or the original file from the backups.', h('a', { class: 'pillbtn', href: '#/history' }, 'Open the edit log')),
     row('Server log', 'What the server has been doing: edits, database writes, updates, background jobs and any errors, from the viewer’s own log file in the data folder.', btn('Show the log', logDialog)),
@@ -777,7 +784,7 @@ export async function settingsPage(view) {
     row('Restart the viewer', 'Stops the server; launchd, Docker or systemd starts it again within seconds. Needed after an update of the RapidOCR package (offered in the models table above when “Check models for updates” finds a newer one), and handy when a background job looks stuck.',
       btn('Restart', async () => { if (!confirm('Restart the viewer now?')) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toast(e.message); } })),
     ])));
-  if (view === 'settings') settingsTabs(main.querySelector('.spage'));
+  settingsTabs(main.querySelector('.spage'), view);
 }
 
 export async function showDuplicates() {
