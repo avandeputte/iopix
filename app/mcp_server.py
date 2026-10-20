@@ -768,6 +768,18 @@ def face_quality(token: str) -> dict:
     return facequality.summary(limit=20)
 
 
+@server.tool(annotations=READ_ONLY)
+def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
+    """For the photos whose date does not match their folder (Maintenance > Metadata quality): every date stored in
+    each file and its sidecar (EXIF, XMP, IPTC, QuickTime, GPS, the file's own modification time), and which agree
+    with the folder. summary counts photos with some embedded date matching the folder, none, and whose embedded
+    dates disagree with each other; tags_matching_the_folder says which tags those are. detail: per photo. Read-only.
+    Needs the admin token."""
+    _need_token(token)
+    from app.photos import datecheck
+    return datecheck.wrongfolder(detail=detail, limit=limit)
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
 def face_cleanup(token: str, files: bool = False) -> dict:
     """Remove the near-duplicate face regions, exactly as Maintenance > Face quality > Remove duplicates: one region
