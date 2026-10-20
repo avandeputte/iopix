@@ -4,6 +4,7 @@ import { S, applyFilter, filterParams, go, toast, toastError } from './state.js'
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
 import { details, getDetail, openLightbox, syncLightbox } from './lightbox.js';
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();  // Leaflet wants real colours: the theme's tokens
 
 export const M = { data: null, map: null, token: 0 };
 
@@ -108,9 +109,9 @@ export async function showMap(fp) {
   if (trailDay) api(`/api/trail?day=${trailDay}`).then((t) => {
     if (token !== M.token || t.id.length < 2) return;
     const pts = t.id.map((_, i) => [t.lat[i], t.lon[i]]);
-    L.polyline(pts, { color: '#ea4335', weight: 3, opacity: .8, dashArray: '6 6' }).addTo(map);
-    L.circleMarker(pts[0], { radius: 7, color: '#34a853', fillOpacity: 1 }).bindTooltip('Start · ' + dfTime.format(date(t.ts[0]))).addTo(map);
-    L.circleMarker(pts[pts.length - 1], { radius: 7, color: '#ea4335', fillOpacity: 1 }).bindTooltip('End · ' + dfTime.format(date(t.ts[t.ts.length - 1]))).addTo(map);
+    L.polyline(pts, { color: cssVar('--danger'), weight: 3, opacity: .8, dashArray: '6 6' }).addTo(map);
+    L.circleMarker(pts[0], { radius: 7, color: cssVar('--ok'), fillOpacity: 1 }).bindTooltip('Start · ' + dfTime.format(date(t.ts[0]))).addTo(map);
+    L.circleMarker(pts[pts.length - 1], { radius: 7, color: cssVar('--danger'), fillOpacity: 1 }).bindTooltip('End · ' + dfTime.format(date(t.ts[t.ts.length - 1]))).addTo(map);
     const km = pts.reduce((a, p, i) => i ? a + Math.hypot(p[0] - pts[i - 1][0], (p[1] - pts[i - 1][1]) * Math.cos(p[0] * Math.PI / 180)) * 111.2 : 0, 0);
     bar.append(h('span', { class: 'pillbtn', style: 'cursor:default' }, `Trail: ${t.id.length} photos, ${km.toFixed(1)} km, ${dfTime.format(date(t.ts[0]))} to ${dfTime.format(date(t.ts[t.ts.length - 1]))}`));
     map.fitBounds(L.latLngBounds(pts).pad(0.15));
@@ -201,8 +202,8 @@ async function placeTray(map, fp, el) {
     if (!(await editPhotos(picked, { gps: at }))) return;
     for (const id of picked) { const k = ids.indexOf(id); if (k >= 0) ids.splice(k, 1); }
     sel.clear(); draw();
-    const pin = (at.accuracy ? L.circle([at.lat, at.lon], { radius: at.accuracy, color: '#c77d00', weight: 1, fillOpacity: 0.12 })
-      : L.circleMarker([at.lat, at.lon], { radius: 9, color: '#1a73e8', fillOpacity: .6 })).addTo(map).bindTooltip(`${picked.length} placed${at.accuracy ? ' (approximate)' : ''}`);
+    const pin = (at.accuracy ? L.circle([at.lat, at.lon], { radius: at.accuracy, color: cssVar('--warn'), weight: 1, fillOpacity: 0.12 })
+      : L.circleMarker([at.lat, at.lon], { radius: 9, color: cssVar('--accent'), fillOpacity: .6 })).addTo(map).bindTooltip(`${picked.length} placed${at.accuracy ? ' (approximate)' : ''}`);
     toast(`${plural(picked.length, 'photo')} placed.`, 'Undo', async () => { if (await editPhotos(picked, { gps: null })) { map.removeLayer(pin); ids.unshift(...picked); draw(); } }, 10000);
   };
   map.on('click', (e) => place(e.latlng));

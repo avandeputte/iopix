@@ -60,7 +60,7 @@ export function dkBanner(d) {
     ? ['Sync with digiKam is off', `The library lives in ${S.APP_NAME}’s own tables and everything works there; digiKam’s database is not opened.`]
     : ['digiKam’s database is unreachable', `Since ${fmtWhen(d.since)}. Showing the library as of ${asOf}; edits are saved to the sidecars and will be applied to digiKam when it is back.`];
   b = h('div', { id: 'dkbanner', class: 'sysbanner', 'data-key': key },
-    h('span', { class: 'ic-wrap', style: 'background:#c0873a' }, icon('wrench')),
+    h('span', { class: 'ic-wrap', style: 'background:var(--c-orange)' }, icon('wrench')),
     h('div', null, h('b', null, text[0]), h('div', { class: 'muted' }, text[1], ' ', h('a', { href: '#/settings', class: 'lnk' }, 'Settings'))),
     h('button', { class: 'iconbtn', title: 'Hide for now', onclick: () => { try { sessionStorage.setItem('iopix.digikamBannerDismissed', key); } catch { /* private mode */ } b.remove(); } }, icon('close')));
   document.body.append(b);
