@@ -768,6 +768,28 @@ def face_quality(token: str) -> dict:
     return facequality.summary(limit=20)
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+def rename_folder(token: str, folder: str, new_name: str) -> dict:
+    """Rename a folder (its last path segment) on disk and in digiKam's database, exactly as the Folders page does:
+    subfolders and sidecars follow, backups move with it. folder: its id or path (e.g. "2022/20221008 Soccer").
+    digiKam must be closed. Needs the admin token."""
+    _need_token(token)
+    from app.core import _rebuild_after_write
+    from app.digikam.dbsync import SyncError
+    from app.photos import organize
+    con = db()
+    try:
+        aid = _resolve_album(con, folder)
+    finally:
+        con.close()
+    try:
+        r = organize.rename_folder(aid, new_name)
+    except SyncError as e:
+        raise ToolError(str(e))
+    _rebuild_after_write()
+    return r
+
+
 @server.tool(annotations=READ_ONLY)
 def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
     """For the photos whose date does not match their folder (Maintenance > Metadata quality): every date stored in
