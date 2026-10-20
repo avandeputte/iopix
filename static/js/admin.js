@@ -2,7 +2,7 @@
 import { $, api, date, dfDay, dfMonth, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, faceUrl, filterParams, go, hashFor, infoPrefsEditor, onRoute, photosWith, pollSoon, toast } from './state.js';
 import { crumbs, suggestions } from './search.js';
-import { logDialog, modal } from './actions.js';
+import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
 import { card, pageTitle, people, setupDialog, usersSection } from './pages.js';
 import { details, openLightbox, personPicker, syncLightbox } from './lightbox.js';
@@ -51,7 +51,7 @@ export function aiSection(view) {
         if (!m) return;
         if (!m.installed) {
           e.target.value = c.chosen;
-          if (!confirm(`${m.label} is not installed. Download it (${m.size})? The viewer keeps working meanwhile; choose it here again once it has arrived.`)) return;
+          if (!await confirmDialog(`${m.label} is not installed. Download it (${m.size})? The viewer keeps working meanwhile; choose it here again once it has arrived.`)) return;
           try { await post('/api/models/download', { key }); toast(`Downloading ${m.label}…`); } catch (err) { toast(err.message); }
           draw(); return;
         }
@@ -59,8 +59,8 @@ export function aiSection(view) {
           : group === 'face_vectors' ? ' Every face is embedded again with it (the groups and suggestions rebuild in the background).'
           : group === 'face_detector' ? ' Used by the next face detection run.'
           : ' New photos use it from now on; “Run again” redoes the whole library with it.';
-        if (!confirm(`Switch ${c.label.toLowerCase()} to ${m.label}?${note}`)) { e.target.value = c.chosen; return; }
-        try { await post('/api/settings', { [group]: key }); toast(`${c.label}: now ${m.label}.`); } catch (err) { e.target.value = c.chosen; toast(err.message); }
+        
+        try { await post('/api/settings', { [group]: key }); toast(`${c.label}: now ${m.label}.${note}`, null, null, 9000); } catch (err) { e.target.value = c.chosen; toast(err.message); }
         draw();
       } }, c.options.map((k) => h('option', { value: k, selected: k === c.chosen }, models[k] ? models[k].label + (models[k].installed ? '' : ' (not installed)') : k)));
       return sel;
@@ -91,7 +91,7 @@ export function aiSection(view) {
       if (m.installed && !upd) return null;  // installed and current: nothing to offer
       return h('button', { class: 'pillbtn small' + (!m.installed || upd ? ' on' : ''), disabled: !!p.running, title: m.installed ? `Download ${m.label} again (${m.size})` : `Download ${m.label} (${m.size})`,
         onclick: async () => {
-          if (!confirm(`Download ${m.label} (${m.size})${m.installed ? ' again, replacing the installed files' : ''}? The viewer keeps working meanwhile.` + (m.kind === 'pip' ? '\n\nA package update takes effect after a restart of the viewer.' : ''))) return;
+          if (!await confirmDialog(`Download ${m.label} (${m.size})${m.installed ? ' again, replacing the installed files' : ''}? The viewer keeps working meanwhile.` + (m.kind === 'pip' ? '\n\nA package update takes effect after a restart of the viewer.' : ''))) return;
           try { await post('/api/models/download', { key: m.key }); toast(`Downloading ${m.label}…`); } catch (e) { toast(e.message); }
           draw();
         } }, m.installed ? 'Update' : 'Download');
@@ -108,13 +108,13 @@ export function aiSection(view) {
         extra);
     };
     // face detection writes to digiKam's database, so it never starts by itself: a Run link for the photos not looked at yet
-    const runNow = (j) => j && j.key === 'facedetect' && j.enabled && !j.running && j.done < j.total ? h('a', { class: 'lnk mrerun', style: 'margin-right:12px', title: 'Look for faces in every photo not looked at yet', onclick: async () => {
-      if (!confirm(`Look for faces in the ${nf.format(j.total - j.done)} photos not checked yet? New faces are added to digiKam’s database as unnamed faces; faces already marked are kept as they are.`)) return;
+    const runNow = (j) => j && j.key === 'facedetect' && j.enabled && !j.running && j.done < j.total ? h('button', { type: 'button', class: 'lnk mrerun', style: 'margin-right:12px', title: 'Look for faces in every photo not looked at yet', onclick: async () => {
+      if (!await confirmDialog(`Look for faces in the ${nf.format(j.total - j.done)} photos not checked yet? New faces are added to digiKam’s database as unnamed faces; faces already marked are kept as they are.`)) return;
       try { const r = await post('/api/analysis/run', { job: 'facedetect' }); toast(`Looking for faces in ${nf.format(r.queued)} photos.`); } catch (e) { toast(e.message); }
       draw();
     } }, 'Run') : null;
-    const rerun = (j) => j && j.rerun && j.enabled ? h('a', { class: 'lnk mrerun', title: `Discard the results of “${j.label}” and compute them again for every photo`, onclick: async () => {
-      if (!confirm(`Run “${j.label}” again from scratch for all ${nf.format(j.total)} photos? The current results for it are discarded first. This can take from several minutes to a few hours.`)) return;
+    const rerun = (j) => j && j.rerun && j.enabled ? h('button', { type: 'button', class: 'lnk mrerun', title: `Discard the results of “${j.label}” and compute them again for every photo`, onclick: async () => {
+      if (!await confirmDialog(`Run “${j.label}” again from scratch for all ${nf.format(j.total)} photos? The current results for it are discarded first. This can take from several minutes to a few hours.`)) return;
       try { await post('/api/analysis/run', { job: j.key, reset: true }); toast(`Re-running “${j.label}”.`); } catch (e) { toast(e.message); }
       draw();
     } }, 'Run again') : null;
@@ -179,8 +179,8 @@ export function analysisSection(view, part = 'jobs') {
           j.current && j.current.length ? ` · working on ${j.current.map((p) => p.split('/').pop()).join(', ')}` : '',
           stuck ? ' · no progress for over 5 minutes: probably stuck on that file; see the server log (journalctl -u iopix, docker logs, or data/server.log) and consider restarting the viewer from Maintenance' : ''); })() : null,
       h('div', { class: 'muted', style: 'font-size:13px;margin-top:6px' }, j.detail, ' ',
-        j.rerun && j.enabled ? h('a', { class: 'lnk', onclick: async () => {
-          if (!confirm(`Run “${j.label}” again from scratch for all ${nf.format(j.total)} photos? The current results for it are discarded first. This can take from several minutes to a few hours.`)) return;
+        j.rerun && j.enabled ? h('button', { type: 'button', class: 'lnk', onclick: async () => {
+          if (!await confirmDialog(`Run “${j.label}” again from scratch for all ${nf.format(j.total)} photos? The current results for it are discarded first. This can take from several minutes to a few hours.`)) return;
           try { await post('/api/analysis/run', { job: j.key, reset: true }); toast(`Re-running “${j.label}”.`); } catch (e) { toast(e.message); }
           draw();
         } }, 'Run again from scratch') : null))) : null);
@@ -194,8 +194,8 @@ export function analysisSection(view, part = 'jobs') {
             : other.key === 'jinaclip' ? 'Jina CLIP v1 is also installed: a larger CLIP that understands longer, more natural queries; it indexes about 3 times slower than CLIP. '
             : `${other.label} is also installed. `,
           'Switching re-indexes the whole library in the background when that model has no index yet; search stays on the current model until it finishes, and you can switch back at any time. ',
-          h('a', { class: 'lnk', onclick: async () => {
-            if (!confirm(`Switch content search to ${other.label}?`)) return;
+          h('button', { type: 'button', class: 'lnk', onclick: async () => {
+            if (!await confirmDialog(`Switch content search to ${other.label}?`)) return;
             try { await post('/api/settings', { search_model: other.key }); toast(`Switching to ${other.label}.`); } catch (e) { toast(e.message); }
             draw();
           } }, `Switch to ${other.label}`))))));
@@ -228,7 +228,7 @@ export async function showConsistency() {
   };
   // photos without a sidecar: write one from digiKam's database (rating, title, caption, tags), as digiKam would
   const makeSidecars = async (ids) => {
-    if (ids.length > 1 && !confirm(`Create an XMP sidecar for ${nf.format(ids.length)} photos, with the rating, title, caption and tags from digiKam’s database? Nothing else changes.`)) return;
+    if (ids.length > 1 && !await confirmDialog(`Create an XMP sidecar for ${nf.format(ids.length)} photos, with the rating, title, caption and tags from digiKam’s database? Nothing else changes.`)) return;
     toast(`Creating ${plural(ids.length, 'sidecar')}…`, null, null, 60000);
     let done = 0, skipped = [];
     for (let i = 0; i < ids.length; i += 200) {
@@ -241,7 +241,7 @@ export async function showConsistency() {
   // one photo: copy the chosen source's values to the other places that can hold them
   const fixOne = async (r, src) => {
     const targets = ['db', 'sidecar', 'file'].filter((t) => t !== src && (t !== 'file' || r.file_editable));
-    if (!confirm(`Copy ${r.mismatch.map((f) => (FIELD_LABEL[f] || f).toLowerCase()).join(', ')} from the ${SRC_LABEL[src].toLowerCase()} to the ${targets.map((t) => SRC_LABEL[t].toLowerCase()).join(' and ')} for ${r.name}?` + (targets.includes('db') ? '\n\nThis writes into digiKam’s database.' : ''))) return;
+    if (!await confirmDialog(`Copy ${r.mismatch.map((f) => (FIELD_LABEL[f] || f).toLowerCase()).join(', ')} from the ${SRC_LABEL[src].toLowerCase()} to the ${targets.map((t) => SRC_LABEL[t].toLowerCase()).join(' and ')} for ${r.name}?` + (targets.includes('db') ? '\n\nThis writes into digiKam’s database.' : ''))) return;
     try { const res = await post('/api/consistency/sync', { ids: [r.id], source: src, targets, fields: r.mismatch }); toast(res.synced ? `Fixed ${r.name}.` : `Not fixed: ${res.skipped[0]?.reason || 'nothing to copy'}`, null, null, 8000); } catch (e) { toast(e.message, null, null, 9000); return; }
     load();
   };
@@ -252,7 +252,7 @@ export async function showConsistency() {
   const runSync = async (src, targets, fields) => {
     const n = selected.size;
     if (!targets.length) { toast('Pick at least one place to copy to, other than the source.'); return; }
-    if (!confirm(`Copy ${fields.map((f) => (FIELD_LABEL[f] || f).toLowerCase()).join(', ')} from the ${SRC_LABEL[src].toLowerCase()} to the ${targets.map((t) => SRC_LABEL[t].toLowerCase()).join(' and ')} for ${nf.format(n)} ${n === 1 ? 'photo' : 'photos'}?` +
+    if (!await confirmDialog(`Copy ${fields.map((f) => (FIELD_LABEL[f] || f).toLowerCase()).join(', ')} from the ${SRC_LABEL[src].toLowerCase()} to the ${targets.map((t) => SRC_LABEL[t].toLowerCase()).join(' and ')} for ${nf.format(n)} ${n === 1 ? 'photo' : 'photos'}?` +
       (targets.includes('db') ? '\n\nThis writes into digiKam’s database.' : '') + (targets.includes('file') ? '\n\nImage files are rewritten in place (metadata only; pixels untouched); the original of each is kept in the viewer’s file-backups folder. Files that cannot hold metadata are skipped.' : '') + '\n\nSidecars are backed up before they change.')) return;
     fill(syncBar, h('span', { class: 'n' }, `Syncing ${nf.format(n)} photos…`));
     try {
@@ -281,7 +281,7 @@ export async function showConsistency() {
         h('span', { class: 'n' }, `${nf.format(selected.size)} selected`),
         h('span', { class: 'muted' }, 'Take the values from:'), ...quick,
         h('span', { class: 'sp' }),
-        h('a', { class: 'lnk', onclick: () => { advanced = !advanced; bar(); } }, advanced ? 'Fewer options' : 'Choose fields and places…')),
+        h('button', { type: 'button', class: 'lnk', onclick: () => { advanced = !advanced; bar(); } }, advanced ? 'Fewer options' : 'Choose fields and places…')),
       advanced ? h('div', { class: 'cbrow' },
         h('span', null, 'Copy from ', src, ' to '), h('span', { class: 'cbchecks' }, tg), h('span', { class: 'muted' }, 'fields:'), h('span', { class: 'cbchecks' }, fl),
         h('button', { class: 'pillbtn on', onclick: () => runSync(src.value, tg.map((l) => l.firstChild).filter((c) => c.checked && c.value !== src.value).map((c) => c.value),
@@ -309,7 +309,7 @@ export async function showConsistency() {
       s.scanned ? h('h2', { class: 'sec' }, field === 'nosidecar' ? 'Photos without a sidecar' : field ? `Photos whose ${(FIELD_LABEL[field] || field).toLowerCase()} differs` : 'Photos that disagree',
         h('span', { class: 'muted', style: 'font-size:13px;font-weight:400;margin-left:10px' }, nf.format(d.total)),
         h('span', { class: 'sp' }),
-        S.EDITING && d.total ? h('a', { class: 'lnk', style: 'font-size:13px;font-weight:400', onclick: async () => {  // every photo listed (on this filter), not only the ones shown
+        S.EDITING && d.total ? h('button', { type: 'button', class: 'lnk', style: 'font-size:13px;font-weight:400', onclick: async () => {  // every photo listed (on this filter), not only the ones shown
           try { const all = await api(`/api/consistency?field=${field}&offset=0&limit=5000`); all.items.forEach((r) => selected.add(r.id)); } catch (e) { toast(e.message); return; }
           bar(); load();
         } }, `Select all ${nf.format(d.total)}`) : null) : null,
@@ -340,10 +340,10 @@ export async function showConsistency() {
   };
   main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Metadata consistency', null]]),
     pageTitle('check', 'teal', 'Metadata consistency'),
-    h('p', { class: 'muted', style: 'margin:0' }, 'The rating, title, caption and tags of each photo are read from digiKam’s database, its XMP sidecar and the image file, and compared. Fix a photo with its buttons, or tick several and choose the right copy in the bar at the bottom; the other places are made to match. Files that cannot hold metadata (most videos, RAW) show n/a, which is not a disagreement.'),
+    h('p', { class: 'muted' }, 'The rating, title, caption and tags of each photo are read from digiKam’s database, its XMP sidecar and the image file, and compared. Fix a photo with its buttons, or tick several and choose the right copy in the bar at the bottom; the other places are made to match. Files that cannot hold metadata (most videos, RAW) show n/a, which is not a disagreement.'),
     h('div', { class: 'ctools' },
       h('button', { class: 'pillbtn on', onclick: () => scan(false, false) }, icon('spark'), 'Check new and changed photos'),
-      h('button', { class: 'pillbtn', onclick: () => { if (confirm('Re-check every photo in the library? This reads every sidecar and image file and takes a while.')) scan(false, true); } }, 'Re-check whole library'),
+      h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog('Re-check every photo in the library? This reads every sidecar and image file and takes a while.')) scan(false, true); } }, 'Re-check whole library'),
       [...filterParams().keys()].length ? h('button', { class: 'pillbtn', onclick: () => scan(true, true) }, 'Check the current search only') : null),
     head, list, more), syncBar);
   load();
@@ -362,7 +362,7 @@ export async function placeTagsDialog(ids) {
     p.progress.error ? h('p', { class: 'warn' }, p.progress.error) : null);
   draw();
   const back = modal(ids ? `Place tags for ${nf.format(ids.length)} photos` : 'Place tags for the whole library', body,
-    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Town names come from the offline place lookup and can be a neighbouring town. Tags are assigned through the normal edit path, so they reach digiKam’s database with “Apply edits to digiKam database”.'),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Town names come from the offline place lookup and can be a neighboring town. Tags are assigned through the normal edit path, so they reach digiKam’s database with “Apply edits to digiKam database”.'),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'),
       h('button', { class: 'pillbtn on', disabled: !p.to_tag || p.progress.running || !!(p.missing_tags.length && p.digikamRunning), onclick: async () => {
         try { const r = await post('/api/placetags', { ids: ids || [] }); toast(`Tagging ${nf.format(r.to_tag)} photos${r.creating ? `, creating ${r.creating} tags` : ''} in the background.`); } catch (e) { toast(e.message, null, null, 9000); return; }
@@ -399,7 +399,7 @@ export function onRouteFaces() { S.viewKey = null; onRoute(); }
 export async function showFaces(vp) {
   const tab = (vp && vp.get('tab')) || 'suggested';
   const page = h('div', { class: 'page' });
-  const tabs = h('div', { class: 'eseg', style: 'margin:10px 0' }, [['suggested', 'Suggestions'], ['unknown', 'Unnamed faces'], ['ignored', 'Ignored']].map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => go('faces', photosWith({ tab: k })) }, l)));
+  const tabs = h('div', { class: 'eseg', style: 'margin:10px 0' }, [['suggested', 'Suggestions'], ['unknown', 'Unnamed faces'], ['ignored', 'Ignored']].map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => go('faces', photosWith({ tab: k }), true) }, l)));
   const body = h('div');
   main.replaceChildren(page);
   page.append(crumbs([['People', '#/people'], ['Faces', null]]), h('h1', null, 'Faces'), tabs, body);
@@ -417,7 +417,7 @@ export async function showFaces(vp) {
   const refresh = () => showFaces(vp);
   if (!d.faces.length) { body.append(h('div', { class: 'empty' }, tab === 'suggested' ? 'No suggestions waiting. digiKam makes suggestions when you run face recognition there.' : tab === 'unknown' ? 'No unnamed faces.' : 'No ignored faces.')); return; }
   if (tab === 'suggested') {
-    body.append(h('div', { class: 'muted', style: 'max-width:820px' }, `${nf.format(d.total)} faces digiKam thinks it recognised, grouped by person, like digiKam’s People view. Confirm a whole group at once, or decide face by face. Everything is written to digiKam’s database (digiKam closed; backup first).`));
+    body.append(h('div', { class: 'muted', style: 'max-width:820px' }, `${nf.format(d.total)} faces digiKam thinks it recognized, grouped by person, like digiKam’s People view. Confirm a whole group at once, or decide face by face. Everything is written to digiKam’s database (digiKam closed; backup first).`));
     for (const [tag, name, count] of d.groups) {
       const faces = d.faces.filter((f) => f.tag === tag);
       const sel = new Set(faces.map((f, i) => i));
@@ -432,8 +432,8 @@ export async function showFaces(vp) {
       draw();
       body.append(h('div', { class: 'fgroup' },
         h('div', { class: 'fghead' }, h('img', { src: faceUrl(tag), alt: '' }), h('b', null, name), h('span', { class: 'muted' }, `${nf.format(count)} suggested`), h('span', { class: 'sp' }),
-          h('button', { class: 'pillbtn on', onclick: async () => { const chosen = faces.filter((f, i) => sel.has(i)); if (!chosen.length) { toast('Nothing selected in this group.'); return; } if (!confirm(`Confirm ${chosen.length} faces as ${name}?`)) return; if (await facesBatch(chosen.map((f) => op(f, 'confirm')), `Confirmed ${name}`)) refresh(); } }, icon('check'), 'Confirm selected'),
-          h('button', { class: 'pillbtn', onclick: async () => { const chosen = faces.filter((f, i) => sel.has(i)); if (!chosen.length) return; if (!confirm(`Reject ${chosen.length} suggestions of ${name}? The faces stay as unknown.`)) return; if (await facesBatch(chosen.map((f) => op(f, 'unknown')), 'Rejected')) refresh(); } }, 'Reject selected'),
+          h('button', { class: 'pillbtn on', onclick: async () => { const chosen = faces.filter((f, i) => sel.has(i)); if (!chosen.length) { toast('Nothing selected in this group.'); return; } if (await facesBatch(chosen.map((f) => op(f, 'confirm')), `Confirmed ${name}`)) refresh(); } }, icon('check'), 'Confirm selected'),
+          h('button', { class: 'pillbtn', onclick: async () => { const chosen = faces.filter((f, i) => sel.has(i)); if (!chosen.length) return; if (await facesBatch(chosen.map((f) => op(f, 'unknown')), 'Rejected')) refresh(); } }, 'Reject selected'),
           h('button', { class: 'pillbtn', onclick: () => { sel.size === faces.length ? sel.clear() : faces.forEach((f, i) => sel.add(i)); draw(); } }, 'Toggle all')),
         grid));
     }
@@ -451,11 +451,11 @@ export async function showFaces(vp) {
     if (S.route.view !== 'faces') return;
     if (g && (g.groups.length || g.missing.length || g.progress.running)) {
       const head = h('div', { class: 'muted', style: 'max-width:820px' }, `${nf.format(d.total)} faces digiKam found but could not name. Look-alikes are shown together so one decision covers the group, with the viewer’s own “looks like” guess when a named person matches; untick a face to leave it out. `,
-        h('a', { class: 'lnk', onclick: () => { store.set('facegroups', '0'); refresh(); } }, 'Show as a plain grid'));
+        h('button', { type: 'button', class: 'lnk', onclick: () => { store.set('facegroups', '0'); refresh(); } }, 'Show as a plain grid'));
       const status = g.progress.running ? h('div', { class: 'enote' }, `Grouping… ${nf.format(g.progress.done)} / ${nf.format(g.progress.total)} faces compared.`)
         : g.missing.length ? h('div', { class: 'enote' }, `${nf.format(g.missing.length)} faces have not been compared yet (the Face grouping job in Maintenance runs in the background).`) : null;
       body.append(head, status);
-      const nameAs = async (faces, s) => { if (!faces.length) return; if (!confirm(`Name ${faces.length} ${faces.length === 1 ? 'face' : 'faces'} as ${s.name}?`)) return; if (await facesBatch(faces.map((f) => op(f, 'name', { tag: s.tag })), `Named ${s.name}`)) refresh(); };
+      const nameAs = async (faces, s) => { if (!faces.length) return; if (await facesBatch(faces.map((f) => op(f, 'name', { tag: s.tag })), `Named ${s.name}`)) refresh(); };
       const looksLike = (s, faces) => s ? h('span', { class: 'lookslike' }, h('img', { src: faceUrl(s.tag), alt: '' }), `looks like ${s.name} · ${Math.round(s.score * 100)}%`,
         S.CAN_MANAGE ? h('button', { class: 'pillbtn on', style: 'height:26px;padding:0 10px', onclick: (e) => { e.stopPropagation(); nameAs(faces(), s); } }, `Name as ${s.name}`) : null) : null;
       const groupBlock = (faces, title, grouped, suggest) => {
@@ -468,8 +468,8 @@ export async function showFaces(vp) {
           !grouped && f.suggest ? h('div', { class: 'fsug', title: `looks like ${f.suggest.name} (${Math.round(f.suggest.score * 100)}%)`, onclick: () => nameAs([f], f.suggest) }, h('img', { src: faceUrl(f.suggest.tag), alt: '' }), f.suggest.name) : null)));
         draw();
         return h('div', { class: 'fgroup' }, h('div', { class: 'fghead' }, h('b', null, title), grouped ? looksLike(suggest, chosen) : null, h('span', { class: 'sp' }),
-          S.CAN_MANAGE ? [h('button', { class: 'pillbtn' + (suggest ? '' : ' on'), onclick: () => personPicker(async (t) => { const c = chosen(); if (!c.length) return; if (!confirm(`Name ${c.length} faces as ${t.name}?`)) return; if (await facesBatch(c.map((f) => op(f, 'name', { tag: t.id })), `Named ${t.name}`)) refresh(); }) }, icon('person'), grouped ? 'Name these…' : 'Name selected…'),
-            h('button', { class: 'pillbtn', onclick: async () => { const c = chosen(); if (!c.length) return; if (!confirm(`Ignore ${c.length} faces? They stay, marked as not a person to name.`)) return; if (await facesBatch(c.map((f) => op(f, 'ignore')), 'Ignored')) refresh(); } }, 'Ignore'),
+          S.CAN_MANAGE ? [h('button', { class: 'pillbtn' + (suggest ? '' : ' on'), onclick: () => personPicker(async (t) => { const c = chosen(); if (!c.length) return; if (await facesBatch(c.map((f) => op(f, 'name', { tag: t.id })), `Named ${t.name}`)) refresh(); }) }, icon('person'), grouped ? 'Name these…' : 'Name selected…'),
+            h('button', { class: 'pillbtn', onclick: async () => { const c = chosen(); if (!c.length) return; if (await facesBatch(c.map((f) => op(f, 'ignore')), 'Ignored')) refresh(); } }, 'Ignore'),
             h('button', { class: 'pillbtn', onclick: () => { sel.size === faces.length ? sel.clear() : faces.forEach((f, i) => sel.add(i)); draw(); } }, 'Toggle all')] : null), grid);
       };
       if (g.people === 0 && !g.progress.running) body.append(h('div', { class: 'muted', style: 'font-size:13px' }, 'Suggestions appear once the named people have been compared too (the Face grouping job does that first).'));
@@ -483,17 +483,17 @@ export async function showFaces(vp) {
   // unnamed or ignored faces: a selectable grid, name or ignore many at once
   const sel = new Set();
   const grid = h('div', { class: 'fgrid' });
-  if (tab === 'unknown' && store.get('facegroups', '1') === '0') body.append(h('div', { class: 'muted', style: 'font-size:13px' }, h('a', { class: 'lnk', onclick: () => { store.set('facegroups', '1'); refresh(); } }, 'Group look-alikes'), ' (needs the SFace model from Maintenance › AI analysis and models).'));
+  if (tab === 'unknown' && store.get('facegroups', '1') === '0') body.append(h('div', { class: 'muted', style: 'font-size:13px' }, h('button', { type: 'button', class: 'lnk', onclick: () => { store.set('facegroups', '1'); refresh(); } }, 'Group look-alikes'), ' (needs the SFace model from Maintenance › AI analysis and models).'));
   const bar = h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0' });
   const chosen = () => d.faces.filter((f, i) => sel.has(i));
   const drawBar = () => S.CAN_MANAGE && fill(bar,
     h('span', null, `${nf.format(sel.size)} selected of ${nf.format(d.faces.length)}`),
     h('button', { class: 'pillbtn', onclick: () => { sel.size === d.faces.length ? sel.clear() : d.faces.forEach((f, i) => sel.add(i)); draw(); } }, sel.size === d.faces.length ? 'Select none' : 'Select all'),
-    h('button', { class: 'pillbtn on', disabled: !sel.size, onclick: () => personPicker(async (t) => { const c = chosen(); if (!confirm(`Name ${c.length} faces as ${t.name}?`)) return; if (await facesBatch(c.map((f) => op(f, 'name', { tag: t.id })), `Named ${t.name}`)) refresh(); }) }, icon('person'), 'Name selected…'),
-    tab === 'unknown' ? h('button', { class: 'pillbtn', disabled: !sel.size, onclick: async () => { const c = chosen(); if (!confirm(`Ignore ${c.length} faces? They stay, marked as not a person to name.`)) return; if (await facesBatch(c.map((f) => op(f, 'ignore')), 'Ignored')) refresh(); } }, 'Ignore selected') : null,
+    h('button', { class: 'pillbtn on', disabled: !sel.size, onclick: () => personPicker(async (t) => { const c = chosen(); if (await facesBatch(c.map((f) => op(f, 'name', { tag: t.id })), `Named ${t.name}`)) refresh(); }) }, icon('person'), 'Name selected…'),
+    tab === 'unknown' ? h('button', { class: 'pillbtn', disabled: !sel.size, onclick: async () => { const c = chosen(); if (await facesBatch(c.map((f) => op(f, 'ignore')), 'Ignored')) refresh(); } }, 'Ignore selected') : null,
     tab === 'ignored' ? h('button', { class: 'pillbtn', disabled: !sel.size, onclick: async () => { const c = chosen(); if (await facesBatch(c.map((f) => op(f, 'unknown')), 'Back to unknown')) refresh(); } }, 'Back to unnamed') : null,
-    h('button', { class: 'pillbtn', disabled: !sel.size, onclick: async () => { const c = chosen(); if (await facesBatch(c.map((f) => op(f, 'remove')), 'Removed')) refresh(); } }, 'Remove selected'));
-  const draw = () => { fill(grid, d.faces.map((f, i) => h('div', { class: 'fcell' + (sel.has(i) ? ' sel' : ''), onclick: (e) => { if (e.target.tagName === 'IMG' && !e.shiftKey && !sel.size) return; if (!S.CAN_MANAGE) return; e.preventDefault(); sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } },
+    h('button', { class: 'pillbtn', disabled: !sel.size, onclick: async () => { const c = chosen(); if (!await confirmDialog(`Remove ${plural(c.length, 'face region')}? They are deleted from digiKam’s database and the sidecars; there is no undo.`, { ok: 'Remove', danger: true })) return; if (await facesBatch(c.map((f) => op(f, 'remove')), 'Removed')) refresh(); } }, 'Remove selected'));
+  const draw = () => { fill(grid, d.faces.map((f, i) => h('div', { class: 'fcell' + (sel.has(i) ? ' sel' : ''), tabindex: 0, role: 'button', onclick: (e) => { if (e.target.tagName === 'IMG' && !e.shiftKey && !sel.size) return; if (!S.CAN_MANAGE) return; e.preventDefault(); sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } },
     S.CAN_MANAGE ? h('label', { class: 'fchk' }, h('input', { type: 'checkbox', checked: sel.has(i), onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? sel.add(i) : sel.delete(i); draw(); } })) : null, crop(f),
     h('div', { class: 'muted', style: 'font-size:11px;text-align:center' }, dfMonth.format(date(f.ts)))))); drawBar(); };
   body.append(h('div', { class: 'muted', style: 'max-width:820px' }, tab === 'unknown' ? `${nf.format(d.total)} faces digiKam found but could not name. Tick the ones that are the same person and name them together; tick ones that are not faces to name and ignore them. Click a face to open its photo.` : `${nf.format(d.total)} faces marked as not to be named.`), bar, grid);
@@ -556,7 +556,7 @@ export async function settingsPage(view) {
   if (S.route.view !== view) return;
   const when = (t) => (t ? fmtWhen(t) : 'never');
   const act = async (action, msg, confirmText) => {
-    if (confirmText && !confirm(confirmText)) return;
+    if (confirmText && !await confirmDialog(confirmText)) return;
     try { await post('/api/maintenance', { action }); toast(msg); } catch (e) { toast(e.message); }
     setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 1500);
   };
@@ -571,11 +571,11 @@ export async function settingsPage(view) {
     stab('display'),
     h('h2', null, 'Display'),
     S.IS_ADMIN ? (() => {
-      const inp = h('input', { class: 'einput', placeholder: 'iopix', value: m.appNameSet || '', maxlength: 40, style: 'margin:0;width:220px', onkeydown: (e) => { if (e.key === 'Enter') e.target.nextSibling.click(); } });
+      const inp = h('input', { class: 'einput', placeholder: 'iopix', value: m.appNameSet || '', maxlength: 40, style: 'width:220px', onkeydown: (e) => { if (e.key === 'Enter') e.target.nextSibling.click(); } });
       return row('Name', 'What the viewer calls itself, for everyone: the top bar, the browser tab and the installed app. Leave it empty for iopix.',
         h('span', { style: 'display:flex;gap:6px;align-items:center' }, inp, btn('Save', async () => { try { await post('/api/settings', { app_name: inp.value }); toast('Name saved.'); pollSoon(300); } catch (e) { toast(e.message); } })));
     })() : null,
-    row('Appearance', `Light (the default) or dark colours, or follow the device’s setting. ${S.USER ? 'Saved with your account, so it follows you to other devices.' : 'Remembered in this browser; sign in to keep it with an account.'}`,
+    row('Appearance', `Light (the default) or dark colors, or follow the device’s setting. ${S.USER ? 'Saved with your account, so it follows you to other devices.' : 'Remembered in this browser; sign in to keep it with an account.'}`,
       h('div', { class: 'eseg', id: 'themeseg' }, THEMES.map(([k, label]) => h('button', { class: store.get('theme', 'light') === k ? 'on' : '', 'data-theme': k, onclick: (e) => {
         store.set('theme', k); applyTheme(); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); } }, label)))),
     row('Thumbnail badges', 'The small marks on thumbnails: face tags, GPS coordinates and favorites. This is remembered per browser.',
@@ -584,7 +584,7 @@ export async function settingsPage(view) {
     row('Info panel', `The sections the photo info panel shows; the gear at the top of the panel opens the same choices. ${S.USER ? 'Saved with your account, so it follows you to other devices.' : 'Remembered in this browser; sign in to keep it with an account.'}`, infoPrefsEditor()),
     S.IS_ADMIN ? (() => {
       const sel = h('select', null, h('option', { value: 'osm', selected: m.mapProvider !== 'google' }, 'OpenStreetMap (no account needed)'), h('option', { value: 'google', selected: m.mapProvider === 'google' }, 'Google Maps (your API key)'));
-      const keyIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleMapsKeySet ? 'key is set; paste a new one to replace it' : 'Google Maps API key', autocomplete: 'off', style: 'margin:0;width:260px' });
+      const keyIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleMapsKeySet ? 'key is set; paste a new one to replace it' : 'Google Maps API key', autocomplete: 'off', style: 'width:260px' });
       return row('Map provider', `Maps and place search use ${m.mapProvider === 'google' && m.googleMapsKeySet ? 'Google Maps' : 'OpenStreetMap'}. Google needs an API key from the Google Cloud console with the Map Tiles API and Geocoding API enabled and billing on; restrict the key to this viewer's address. The key is stored in the viewer's settings and never shown again.`,
         h('span', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' }, sel, keyIn, btn('Save', async () => {
           const body = { map_provider: sel.value }; if (keyIn.value.trim()) body.google_maps_key = keyIn.value.trim();
@@ -609,7 +609,7 @@ export async function settingsPage(view) {
         h('div', null, h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' }, type, backup), sq, my,
           h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
             btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/db/test', payload()); fill(result, `OK: ${nf.format(r.images)} photos, ${nf.format(r.tags)} tags, DBVersion ${r.dbVersion}, album root ${r.roots.join(', ')}`); } catch (e) { fill(result, e.message); } }),
-            btn('Save and switch', async () => { if (!confirm('Switch the viewer to this digiKam database now?')) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toast(e.message); return; } setTimeout(() => settingsPage(view), 2500); }, true)),
+            btn('Save and switch', async () => { if (!await confirmDialog('Switch the viewer to this digiKam database now?')) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toast(e.message); return; } setTimeout(() => settingsPage(view), 2500); }, true)),
           result));
     })() : null,
     S.IS_ADMIN ? (() => {
@@ -618,7 +618,7 @@ export async function settingsPage(view) {
         let d; try { d = await api('/api/roots'); } catch (e) { fill(body, e.message); return; }
         const inputs = new Map();
         fill(body, h('div', { style: 'display:grid;gap:8px' }, d.roots.map((r) => {
-          const inp = h('input', { class: 'einput', placeholder: r.localPath, value: r.overridden ? r.localPath : '', style: 'margin:0;width:340px', onkeydown: (e) => e.stopPropagation() });
+          const inp = h('input', { class: 'einput', placeholder: r.localPath, value: r.overridden ? r.localPath : '', style: 'width:340px', onkeydown: (e) => e.stopPropagation() });
           inputs.set(r.digikamPath, inp);
           return h('div', null, h('div', null, h('b', null, r.label || 'Album root'), ' ', h('span', { class: 'muted' }, `digiKam: ${r.digikamPath}`)),
             h('div', { style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px' }, inp,
@@ -652,7 +652,7 @@ export async function settingsPage(view) {
             btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/viewerdb/test', payload()); const t = Object.entries(r.tables); fill(result, `OK: ${r.version}. ${t.length ? 'Viewer tables already there: ' + t.map(([k, n]) => `${k} (${nf.format(n)})`).join(', ') : 'No viewer tables there yet.'}`); } catch (e) { fill(result, e.message); } }),
             btn('Switch', async () => {
               const p = payload();
-              if (!confirm(`Switch the viewer to ${p.type === 'mysql' ? `MySQL ${p.user}@${p.host}:${p.port}/${p.database}` : 'the SQLite file'}?` + (copy.checked ? '\n\nEvery row is copied there first' + (drop.checked ? ', after dropping and recreating the viewer’s tables at the target.' : ' (existing rows with the same ids are replaced).') : '\n\nThe data is NOT copied; the viewer starts empty there unless the tables already hold data.') + '\n\nThe viewer restarts when the copy is done; the page reloads by itself.')) return;
+              if (!await confirmDialog(`Switch the viewer to ${p.type === 'mysql' ? `MySQL ${p.user}@${p.host}:${p.port}/${p.database}` : 'the SQLite file'}?` + (copy.checked ? '\n\nEvery row is copied there first' + (drop.checked ? ', after dropping and recreating the viewer’s tables at the target.' : ' (existing rows with the same ids are replaced).') : '\n\nThe data is NOT copied; the viewer starts empty there unless the tables already hold data.') + '\n\nThe viewer restarts when the copy is done; the page reloads by itself.')) return;
               fill(result, 'Copying… this can take a minute on a large library.');
               try { const r = await post('/api/viewerdb/switch', { ...p, copy: copy.checked, drop: drop.checked }); fill(result, `Switched to ${r.database}: ` + Object.entries(r.copied).map(([k, n]) => `${k} ${nf.format(n)}`).join(', ') + '. Restarting…'); setTimeout(() => location.reload(), 6000); } catch (e) { fill(result, e.message); }
             }, true)), result);
@@ -673,8 +673,8 @@ export async function settingsPage(view) {
         api('/api/library/merge').then((p) => fill(planEl, p.total ? 'To merge: ' + p.summary.join(', ') + '.' : 'Nothing to merge.')).catch((e) => fill(planEl, e.message));
         const wrap = row('Sync with digiKam', `On, but ${plural(d.localChanges, 'change')} made while it was off ${d.localChanges === 1 ? 'is' : 'are'} not in digiKam’s database yet, so the viewer keeps using its own library. Merge writes those changes into digiKam (new tags, folders and uploads get digiKam ids; renames, assignments, faces, ratings, captions and locations are applied; deleted photos are removed), after a backup of digiKam’s database. Replace drops them and copies the library from digiKam again. Sidecar edits are kept either way.`,
           h('span', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
-            btn('Merge into digiKam', async () => { if (!confirm('Write the changes made while sync was off into digiKam’s database? digiKam must be closed; its database is backed up first.')) return; try { const r = await post('/api/library/merge', {}); toast(`Merged: ${Object.entries(r.applied).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing to do'}${r.conflicts ? `; ${r.conflicts} rows digiKam had also changed (the viewer’s values won)` : ''}.`, null, null, 12000); } catch (e) { toast(e.message, null, null, 10000); } setTimeout(() => settingsPage(view), 2500); }, true),
-            btn('Replace with digiKam’s', async () => { if (!confirm(`Drop the ${plural(d.localChanges, 'change')} made while sync was off and copy the library from digiKam again? Edits in sidecars are kept.`)) return; try { await post('/api/settings', { library_replace: true }); toast('Copying the library from digiKam…'); } catch (e) { toast(e.message); } setTimeout(() => settingsPage(view), 2500); }),
+            btn('Merge into digiKam', async () => { if (!await confirmDialog('Write the changes made while sync was off into digiKam’s database? digiKam must be closed; its database is backed up first.')) return; try { const r = await post('/api/library/merge', {}); toast(`Merged: ${Object.entries(r.applied).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing to do'}${r.conflicts ? `; ${r.conflicts} rows digiKam had also changed (the viewer’s values won)` : ''}.`, null, null, 12000); } catch (e) { toast(e.message, null, null, 10000); } setTimeout(() => settingsPage(view), 2500); }, true),
+            btn('Replace with digiKam’s', async () => { if (!await confirmDialog(`Drop the ${plural(d.localChanges, 'change')} made while sync was off and copy the library from digiKam again? Edits in sidecars are kept.`)) return; try { await post('/api/settings', { library_replace: true }); toast('Copying the library from digiKam…'); } catch (e) { toast(e.message); } setTimeout(() => settingsPage(view), 2500); }),
             btn('Turn sync off', async () => { try { await post('/api/settings', { digikam_sync: false }); } catch (e) { toast(e.message); } settingsPage(view); })));
         wrap.firstChild.append(planEl);
         return wrap;
@@ -708,7 +708,7 @@ export async function settingsPage(view) {
     row('Library copy', (() => { const d = m.digikam || {}; return d.mirror ? `The viewer’s own copy of the library’s metadata: ${nf.format(d.mirror.photos)} photos as of ${fmtWhen(d.mirror.taken)}, refreshed at every read of digiKam and included in the app backup. The index is built from it whenever digiKam’s database is unreachable or Sync with digiKam is off${d.source === 'mirror' ? ' (as it is now)' : ''}.` : 'Not taken yet; it is taken at the next read of digiKam’s database.'; })(), null),
     row('Rescan the library now', `The index is rebuilt from digiKam’s database whenever digiKam saves (last saved ${when(m.digikamSaved)}; index built ${when(m.indexBuilt)}). Force it here if something looks stale.`,
       btn('Rescan now', () => act('reindex', 'Rescanning the library…'), true)),
-    (() => {  // metadata consistency, summarised in one line
+    (() => {  // metadata consistency, summarized in one line
       const line = h('span', null, 'Loading…');
       api('/api/consistency?limit=1').then((c) => {
         const s = c.summary, p = c.progress;
@@ -719,7 +719,7 @@ export async function settingsPage(view) {
       return row('Metadata consistency', h('span', null, line, ' Rating, title, caption and tags are compared in the three places they live; disagreements can be synced in either direction.'),
         h('a', { class: 'pillbtn on', href: '#/consistency' }, 'Open'));
     })(),
-    (() => {  // face quality, summarised in one line; the page has the details and the fixes
+    (() => {  // face quality, summarized in one line; the page has the details and the fixes
       const line = h('span', null, 'Checking…');
       api('/api/quality').then((q) => fill(line, (q.near.extra ? `${plural(q.near.extra, 'face is', 'faces are')} stored twice. ` : 'No face is stored twice. ')
         + (q.separate.count ? `${plural(q.separate.count, 'photo has', 'photos have')} the same person in two places. ` : '')
@@ -773,16 +773,16 @@ export async function settingsPage(view) {
         fill(body, state, outcome, h('div', { style: 'display:flex;gap:6px;margin-top:6px' },
           btn('Check for updates', async () => { fill(body, 'Checking…'); try { await post('/api/update', { action: 'check' }); } catch (e) { toast(e.message); } draw(); }),
           btn('MCP update token…', async () => { try { const t = await post('/api/update', { action: 'token' }); const back = modal('MCP update token', h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
-            h('div', { class: 'modal-btns' }, t.fromEnv ? null : h('button', { class: 'pillbtn', onclick: async () => { if (!confirm('Generate a new token? The old one stops working.')) return; try { await post('/api/update', { action: 'regenerate_token' }); } catch (e) { toast(e.message); } back.remove(); } }, 'Regenerate'), h('button', { class: 'pillbtn on', onclick: () => back.remove() }, 'Close'))); } catch (e) { toast(e.message); } }),
+            h('div', { class: 'modal-btns' }, t.fromEnv ? null : h('button', { class: 'pillbtn', onclick: async () => { if (!await confirmDialog('Generate a new token? The old one stops working.')) return; try { await post('/api/update', { action: 'regenerate_token' }); } catch (e) { toast(e.message); } back.remove(); } }, 'Regenerate'), h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); } catch (e) { toast(e.message); } }),
           u.docker ? h('span', { class: 'muted' }, 'Docker: update by pulling the image (docker compose pull && docker compose up -d).')
-            : u.canRun ? btn('Update now', async () => { if (!confirm('Fetch the latest version, refresh the packages and restart the viewer?')) return; try { await post('/api/update', { action: 'run' }); toast('Updating; the viewer restarts when it is done.'); } catch (e) { toast(e.message); } setTimeout(draw, 3000); }, c && c.status === 'update') : null));
+            : u.canRun ? btn('Update now', async () => { if (!await confirmDialog('Fetch the latest version, refresh the packages and restart the viewer?')) return; try { await post('/api/update', { action: 'run' }); toast('Updating; the viewer restarts when it is done.'); } catch (e) { toast(e.message); } setTimeout(draw, 3000); }, c && c.status === 'update') : null));
         if (p.running) setTimeout(() => { if (S.route.view === view) draw(); }, 5000);
       };
       draw();
       return row('Viewer version', 'The code running here, and whether the GitHub main branch has something newer. "Update now" runs update.sh (git pull or a fresh tarball), keeps your settings and data, and restarts the service.', body);
     })(),
     row('Restart the viewer', 'Stops the server; launchd, Docker or systemd starts it again within seconds. Needed after an update of the RapidOCR package (offered in the models table above when “Check models for updates” finds a newer one), and handy when a background job looks stuck.',
-      btn('Restart', async () => { if (!confirm('Restart the viewer now?')) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toast(e.message); } })),
+      btn('Restart', async () => { if (!await confirmDialog('Restart the viewer now?')) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toast(e.message); } })),
     ])));
   settingsTabs(main.querySelector('.spage'), view);
 }
@@ -804,7 +804,7 @@ export async function showDuplicates() {
     nearDupsSection(src)));
   syncLightbox();
 }
-/** Near-duplicates: look-alike photos found with the content-search embeddings (resized, re-saved, burst neighbours). */
+/** Near-duplicates: look-alike photos found with the content-search embeddings (resized, re-saved, burst neighbors). */
 export function nearDupsSection(src) {
   const sec = h('div', { style: 'margin-top:36px' });
   const draw = async () => {
@@ -819,7 +819,7 @@ export function nearDupsSection(src) {
       : !d.gen ? 'Not computed yet. Every photo is compared with every other using the content-search embeddings; a minute or two for a large library.'
       : d.current ? `${nf.format(d.groups.length)} sets of similar photos at the “${d.level}” level. Sharpest copy first in each set.` : `Computed for an older search index (${d.level}); run it again for current results.`;
     fill(sec, h('h2', { style: '--hue:var(--c-purple)' }, h('span', { class: 'hic' }, icon('spark')), 'Similar photos'),
-      h('div', { class: 'muted', style: 'max-width:820px' }, 'Resized, re-saved or re-edited copies and burst neighbours, which the byte-identical check above cannot see. The viewer never deletes anything; it only shows the sets.'),
+      h('div', { class: 'muted', style: 'max-width:820px' }, 'Resized, re-saved or re-edited copies and burst neighbors, which the byte-identical check above cannot see. The viewer never deletes anything; it only shows the sets.'),
       h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0' }, S.IS_ADMIN ? h('span', null, 'Strictness: ', level) : null, run, h('span', { class: 'muted' }, note)),
       d.groups.map((g) => h('div', { class: 'dupgroup' }, h('div', { class: 'muted' }, `${g.n} similar · ${Math.round(g.score * 100)}% alike${g.identical ? ' · also byte-identical' : ''}`),
         h('div', { class: 'duprow' }, g.items.map((x) => { const i = src.id.push(x.id) - 1; return h('div', { class: 'dupitem' },
@@ -902,20 +902,20 @@ export function showTags() {
     const special = t.full === 'People' || isFaceBucket(t);
     const can = S.manageTags && !special;
     const isPerson = t.person || t.full.startsWith('People/');
-    const act = (ic, title, fn) => h('button', { class: 'iconbtn tact', title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(ic));
-    const trow = h('div', { class: 'trow', title: t.full, onclick: () => go('photos', photosWith({ tag: t.id })) }, tw, cover,
+    const act = (ic, title, fn) => h('button', { class: 'iconbtn tact', title, 'aria-label': title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(ic));
+    const trow = h('div', { class: 'trow', title: t.full, tabindex: 0, role: 'button', onclick: () => go('photos', photosWith({ tag: t.id })) }, tw, cover,
       h('span', { class: 'nm' }, flat ? t.full.replaceAll('/', ' › ') : t.name),
       can ? h('span', { class: 'tacts' },
-        act('add', 'Add a tag inside this one', () => { const n = prompt(`New tag inside “${t.name}”`); if (n) tagOp({ op: 'add', parent: t.id, name: n }); }),
-        act('edit', 'Rename', () => { const n = prompt('Rename tag', t.name); if (n && n !== t.name) tagOp({ op: 'rename', id: t.id, name: n }, t); }),
+        act('add', 'Add a tag inside this one', async () => { const n = await promptDialog(`New tag inside “${t.name}”`); if (n) tagOp({ op: 'add', parent: t.id, name: n }); }),
+        act('edit', 'Rename', async () => { const n = await promptDialog('Rename tag', t.name); if (n && n !== t.name) tagOp({ op: 'rename', id: t.id, name: n }, t); }),
         h('button', { class: 'pillbtn tmove', title: 'Move this tag (with its sub-tags) under another tag, or to the top level', onclick: (e) => { e.stopPropagation(); moveTagDialog(t); } }, icon('folder'), 'Move'),
         t.person && !kids.length ? h('button', { class: 'pillbtn tmove', title: 'The same person entered twice: move everything on this one to another person, then remove this one', onclick: (e) => { e.stopPropagation();
-          personPicker((into) => { if (into.id !== t.id && confirm(`Merge “${t.full.replaceAll('/', ' › ')}” into “${into.full.replaceAll('/', ' › ')}”?\n\nIts ${nf.format(t.nAll)} photos and face boxes move to ${into.name}, then “${t.name}” is removed. digiKam's database is backed up first.`)) tagOp({ op: 'merge', id: t.id, into: into.id }, t); });
+          personPicker(async (into) => { if (into.id !== t.id && await confirmDialog(`Merge “${t.full.replaceAll('/', ' › ')}” into “${into.full.replaceAll('/', ' › ')}”?\n\nIts ${nf.format(t.nAll)} photos and face boxes move to ${into.name}, then “${t.name}” is removed. digiKam's database is backed up first.`)) tagOp({ op: 'merge', id: t.id, into: into.id }, t); });
         } }, 'Merge into…') : null,
-        t.person ? h('button', { class: 'pillbtn tmove', title: 'Make this a keyword tag again, off the People page (refused while face boxes carry the name)', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'notperson', id: t.id }, t); } }, 'Not a person')
+        t.person ? h('button', { class: 'pillbtn tmove', title: 'Make this a keyword tag again, off the People page (refused while face boxes carry the name)', onclick: async (e) => { e.stopPropagation(); if (await confirmDialog(`Make “${t.name}” a keyword tag again? It leaves the People page; the photos keep the tag.`, { ok: 'Not a person' })) tagOp({ op: 'notperson', id: t.id }, t); } }, 'Not a person')
           : !kids.length ? h('button', { class: 'pillbtn tmove', title: 'Mark this tag as a person: it shows under People and faces can be named with it', onclick: (e) => { e.stopPropagation(); tagOp({ op: 'person', id: t.id }, t); } }, icon('person'), 'Is a person') : null,
-        isPerson ? null : act('trash', 'Delete', () => { const kidsN = S.META.tags.filter((x) => x.full.startsWith(t.full + '/')).length;
-          if (confirm(`Delete the tag “${t.full}”${kidsN ? ` and its ${kidsN} sub-tags` : ''}?\n\nIt will be removed from ${nf.format(t.nAll)} photos (the photos themselves are not touched).`)) tagOp({ op: 'delete', id: t.id }, t); })) : null,
+        isPerson ? null : act('trash', 'Delete', async () => { const kidsN = S.META.tags.filter((x) => x.full.startsWith(t.full + '/')).length;
+          if (await confirmDialog(`Delete the tag “${t.full}”${kidsN ? ` and its ${kidsN} sub-tags` : ''}?\n\nIt will be removed from ${nf.format(t.nAll)} photos (the photos themselves are not touched).`, { ok: 'Delete', danger: true })) tagOp({ op: 'delete', id: t.id }, t); })) : null,
       h('span', { class: 'ct' }, nf.format(t.nAll)));
     if (can && !flat) {  // drag a tag onto another tag to file it there
       trow.draggable = true;
@@ -943,7 +943,7 @@ export function showTags() {
     h('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
       h('input', { class: 'pagefilter', placeholder: 'Find a tag…', oninput: (e) => draw(norm(e.target.value)) }),
       S.CAN_MANAGE ? h('button', { class: 'pillbtn' + (S.manageTags ? ' on' : ''), style: 'margin-top:6px', onclick: () => { S.manageTags = !S.manageTags; document.body.classList.toggle('managing', S.manageTags); showTags(); } }, icon('edit'), S.manageTags ? 'Done managing' : 'Manage tags') : null,
-      S.manageTags ? h('button', { class: 'pillbtn', style: 'margin-top:6px', onclick: () => { const n = prompt('New top-level tag'); if (n) tagOp({ op: 'add', parent: 0, name: n }); } }, icon('add'), 'New top-level tag') : null),
+      S.manageTags ? h('button', { class: 'pillbtn', style: 'margin-top:6px', onclick: async () => { const n = await promptDialog('New top-level tag'); if (n) tagOp({ op: 'add', parent: 0, name: n }); } }, icon('add'), 'New top-level tag') : null),
     S.manageTags ? h('div', { class: 'enote', style: 'max-width:760px' }, 'To change the hierarchy, drag a tag onto the tag that should contain it, or use its Move button to pick a parent from the tree. Sub-tags and photos move with it. Changes go to digiKam’s database, so digiKam must be closed; a backup is saved first, and the sidecars of affected photos are updated in the background. People tags are managed in digiKam.') : null,
     h('div', { style: 'height:8px' }), topZone, tree));
   draw('');

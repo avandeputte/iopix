@@ -2,7 +2,7 @@
 import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
 import { S, ST, applyFilter, filterParams, loadState, savedSearchFor, toast } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
-import { clearSelection, selectRange, toggleSelect, updateSelBar } from './actions.js';
+import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
 import { LB, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
 import { start } from './main.js';
@@ -100,8 +100,8 @@ export function layoutGrid() {
     h('span', { class: 'count' }, plural(d.count, 'item')),
     byDate ? h('span', null, fmtRange(Math.min(d.ts[0], d.ts[d.count - 1]), Math.max(d.ts[0], d.ts[d.count - 1]))) : null,
     h('span', { class: 'sp' }),
-    h('span', { class: 'lnk selall', title: 'Select everything in this view', hidden: G.sel.size >= d.count, onclick: () => selectRange(0, d.count - 1, true) }, 'Select all'),
-    h('span', { class: 'lnk selnone', title: 'Deselect everything', hidden: !G.sel.size, onclick: () => clearSelection() }, 'Deselect all'),
+    h('button', { type: 'button', class: 'lnk selall', title: 'Select everything in this view', hidden: G.sel.size >= d.count, onclick: () => selectRange(0, d.count - 1, true) }, 'Select all'),
+    h('button', { type: 'button', class: 'lnk selnone', title: 'Deselect everything', hidden: !G.sel.size, onclick: () => clearSelection() }, 'Deselect all'),
     [...filterParams().keys()].some((k) => k !== 'sort') ? h('button', { class: 'pillbtn dlbtn', title: 'Download these as zip files', onclick: () => downloadDialog(filterParams()) }, icon('download'), h('span', null, 'Download')) : null,
     // the default sort (newest, or best match for ranked results) is left out of the URL
     h('select', { title: 'Sort', onchange: (e) => applyFilter((p) => { ['new', 'rel'].includes(e.target.value) && !(d.ranked && e.target.value === 'new') ? p.delete('sort') : p.set('sort', e.target.value); }) },
@@ -118,7 +118,7 @@ export function layoutGrid() {
       e.target.blur();
     } }) : null,
     [...filterParams().keys()].some((k) => k !== 'sort') && (S.USER || !S.USERS_EXIST) && !savedSearchFor(filterParams()) ? h('button', { class: 'pillbtn dlbtn', title: 'Save this search as a smart album (it updates itself)', onclick: async () => {
-      const n = prompt('Name for this smart album'); if (!n || !n.trim()) return;
+      const n = await promptDialog('Name for this smart album'); if (!n || !n.trim()) return;
       const q = filterParams(); q.delete('sort');
       try { await post('/api/searches', { name: n.trim(), query: q.toString() }); toast(`Saved “${n.trim()}” under Albums.`); await loadState(); layoutGrid(); renderGrid(true); } catch (e) { toast(e.message); }
     } }, icon('album'), h('span', null, 'Save search')) : null,
@@ -172,7 +172,7 @@ export function renderGrid(force) {
         const img = document.createElement('img');
         img.alt = ''; img.decoding = 'async'; img.draggable = false;
         if (fast) img.dataset.src = `/thumb/${d.id[i]}`; else img.src = `/thumb/${d.id[i]}`;
-        const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
+        const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, tabindex: 0, role: 'button', style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
           h('span', { class: 'tcheck', title: 'Select' }, icon('check')), ST.fav.has(d.id[i]) ? h('span', { class: 'fbadge' }, icon('heart')) : null);
         if (i in d.video) tile.append(h('span', { class: 'vbadge' }, d.video[i] ? fmtDur(d.video[i]) : null, icon('play')));
         const marks = [G.faces.has(i) ? h('span', { class: 'cbadge', title: 'Has face tags' }, icon('face')) : null, G.geo.has(i) ? h('span', { class: 'cbadge', title: 'Has GPS coordinates' }, icon('place')) : null].filter(Boolean);

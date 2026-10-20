@@ -49,7 +49,7 @@ export function setPhotoParam(id, push) {
 
 export function buildLightbox() {
   const lb = $('#lightbox');
-  const btn = (name, title, fn, cls = '') => h('button', { class: 'iconbtn ' + cls, title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(name));
+  const btn = (name, title, fn, cls = '') => h('button', { class: 'iconbtn ' + cls, title, 'aria-label': title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(name));
   LB.el = {
     frame: h('div', { class: 'lb-frame' }), ttl: h('div', { class: 'ttl' }),
     info: h('aside', { class: 'lb-info', hidden: !LB.info }),
@@ -164,7 +164,7 @@ export function unpeek() {
 }
 
 /** Rebuild the strip around the current photo when it drifts out of the rendered window, and
- *  keep the current one marked and centred. */
+ *  keep the current one marked and centered. */
 export function renderStrip() {
   const { src, i, el } = LB, reel = el.strip.querySelector('.reel');
   if (!src || src.id.length < 2) { el.strip.hidden = true; return; }
@@ -474,7 +474,7 @@ export function showItem() {
     renderFaces();
     if (LB.info) renderInfo();
   }).catch(() => {});
-  // warm the neighbours so stepping feels instant
+  // warm the neighbors so stepping feels instant
   for (const j of [i + 1, i - 1, i + 2]) {
     if (j < 0 || j >= src.id.length) continue;
     new Image().src = `/thumb/${src.id[j]}`;
@@ -724,7 +724,7 @@ export function personPicker(onPick, photoId) {
   // people: person tags, and single tags filed under People that digiKam has not marked as persons yet (naming a face
   // with one marks it), so an existing "People/Belcufine/Nathan Belcufine" is offered instead of a new person being made
   const people = S.META.tags.filter((t) => t.full !== 'People' && t.full.split('/')[0] === 'People' && (t.person || (!t.hasKids && t.full.split('/').length > 2)));
-  const inp = h('input', { class: 'pagefilter', style: 'margin:0;width:100%', placeholder: 'Type a name…' });
+  const inp = h('input', { class: 'pagefilter', style: 'width:100%', placeholder: 'Type a name…' });
   const list = h('div', { class: 'alist', style: 'max-height:40vh;margin-top:8px' });
   const families = S.META.tags.filter((t) => !t.person && t.full.startsWith('People/') && t.full.split('/').length === 2);
   // the people of the nearby photos in the same folder, nearest in time first: most likely the same people
@@ -830,7 +830,6 @@ export function adjustFace(f, d) {
   LB.el.stage.append(bar);
 }
 export async function setTagIcon(t, photoId) {
-  if (!t.person && !confirm(`Use this photo as the thumbnail for “${t.name}”? This is saved in digiKam’s database (digiKam must be closed; a backup is made first).`)) return;
   await tagOp({ op: 'icon', id: t.id, photo: photoId }, t);
   if (LB.open) { details.delete(LB.src.id[LB.i]); showItem(); }
 }
@@ -846,7 +845,7 @@ export function renderInfo() {
   if (!d) return;
   LB.mini?.remove(); LB.mini = null;
   const hid = infoHidden(), show = (k) => !hid.has(k);
-  const lnk = (text, obj) => h('a', { onclick: () => filterFromLightbox(obj) }, text);
+  const lnk = (text, obj) => h('button', { type: 'button', class: 'lnk', onclick: () => filterFromLightbox(obj) }, text);
   const saveOne = (ch) => editPhotos([d.id], ch);
   const irow = (ic, a, b) => h('div', { class: 'irow' }, icon(ic), h('div', null, h('div', { class: 'a' }, a), b ? h('div', { class: 'b' }, b) : null));
   const sub = (t) => h('div', { class: 'sub' }, t);
@@ -888,7 +887,7 @@ export function renderInfo() {
       h('div', { class: 'b' }, [d.faceq != null ? `Face quality ${Math.round(d.faceq * 100)} / 100` : null, d.bright != null && (d.bright < 0.2 || d.clip_lo > 0.5) ? 'Very dark' : null,
         d.bright != null && (d.bright > 0.8 || d.clip_hi > 0.3) ? 'Very bright' : null].filter(Boolean).join(' · ')))) : null,
     d.burst ? h('div', { class: 'irow' }, icon('dup'), h('div', null, h('div', { class: 'a' }, lnk(`Part of a burst of ${d.burst_size} frames`, { burst: d.burst, sort: 'old' })),
-      h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('a', { class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,
+      h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('button', { type: 'button', class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,
     d.similar && !d.video ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, lnk('More photos like this', { like: d.id })))) : null,
   ].flat().filter(Boolean) : [];
   fill(el,
@@ -903,7 +902,7 @@ export function renderInfo() {
     show('file') ? [irow(d.video ? 'video' : 'photo', d.name, [d.video ? null : `${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`, `${d.w} × ${d.h}`, fmtBytes(d.size), d.fmt].filter(Boolean).join(' · ')),
       d.album ? irow('folder', lnk(d.album.path.replace(/^\//, '') || d.album.name, { album: d.album.id, sort: 'old' }), 'Folder') : null,
       d.versions?.length ? irow('dup', h('span', null, d.versions.map((x, k) => [k ? ' · ' : '', x.id === d.id ? h('b', null, x.role === 'original' ? 'Original' : 'This version')
-        : h('a', { class: 'lnk', onclick: () => openLightbox({ id: d.versions.map((y) => y.id) }, k, true) }, x.role === 'original' ? 'Original' : `Version ${k}`)])), 'Versions') : null] : null,
+        : h('button', { type: 'button', class: 'lnk', onclick: () => openLightbox({ id: d.versions.map((y) => y.id) }, k, true) }, x.role === 'original' ? 'Original' : `Version ${k}`)])), 'Versions') : null] : null,
     S.EDITING ? [h('div', { style: 'height:10px' }),  // the rating, title and caption controls follow; they need no heading
       editControls({ rating: Math.max(d.rating, 0) }, saveOne),
       h('input', { class: 'einput', placeholder: 'Title', value: d.title || '', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.blur(); },
@@ -911,7 +910,7 @@ export function renderInfo() {
       h('textarea', { class: 'einput', placeholder: 'Caption', rows: 2, onkeydown: (e) => e.stopPropagation(), onchange: (e) => saveOne({ caption: e.target.value }) }, d.caption || ''),
       d.edited ? h('div', { class: 'enote' }, S.WRITE_FILES ? 'Changed here and saved to the sidecar and the image file. ' : 'Changed here and saved to the sidecar. ',
         S.AUTO_DB ? 'It goes into digiKam’s database by itself within a minute (once digiKam is closed). ' : 'digiKam shows it after “Reread Metadata From File”, or apply it to digiKam’s database from Explore. ',
-        h('a', { class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toast(e.message); return; } details.delete(d.id); toast('Viewer edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
+        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toast(e.message); return; } details.delete(d.id); toast('Viewer edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
     // one row per face (named, suggested, unknown); a person tag without a face region gets a row with the badge picture
     show('people') ? (() => {
       const faced = new Set(d.faces.map((f) => f.tag));
@@ -934,16 +933,16 @@ export function renderInfo() {
     show('tags') && (tags.length || S.EDITING) ? [h('h4', null, 'Tags'), h('div', { class: 'ichips' }, tags.map((t) => { const c = chip(t);
       if (S.EDITING) c.append(h('button', { class: 'tx', title: 'Remove this tag', onclick: (e) => { e.stopPropagation(); saveOne({ remove_tags: [t.id] }); } }, icon('close'))); return c; })),
       S.EDITING ? h('div', { style: 'margin-top:8px' }, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null,
-    show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('a', { class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
-    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('a', { class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'change') : null),
+    show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('button', { type: 'button', class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
+    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('button', { type: 'button', class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'change') : null),
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
         d.region ? [', ', lnk(d.region, { region: d.region })] : null, d.country ? [', ', lnk(d.country, { country: d.country })] : null) : null,
-      ex.gpsAccuracy ? h('div', { class: 'approx', title: 'Only the town is known: the pin marks its centre' }, icon('place'),
+      ex.gpsAccuracy ? h('div', { class: 'approx', title: 'Only the town is known: the pin marks its center' }, icon('place'),
         `Approximate location · within about ${ex.gpsAccuracy >= 1000 ? `${+(ex.gpsAccuracy / 1000).toFixed(1)} km` : `${Math.round(ex.gpsAccuracy)} m`}`) : null,
       mapEl,
       h('div', { class: 'irow' }, icon('place'), h('div', null, h('div', { class: 'a' }, `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`),
         h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${Math.round(d.alt)} m altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
-          h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel), ' · ', h('a', { class: 'lnk', onclick: () => streetView(d.lat, d.lon, d.name) }, 'Street View'))))] : null,
+          h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel), ' · ', h('button', { type: 'button', class: 'lnk', onclick: () => streetView(d.lat, d.lon, d.name) }, 'Street View'))))] : null,
     show('details') && kv.length ? [h('h4', null, 'Details'), h('div', { class: 'kv' }, kv)] : null,
     show('camera') && ckv.length ? [h('h4', null, 'Camera'), h('div', { class: 'kv' }, ckv)] : null,
     show('file') ? [h('h4', null, 'File'), h('div', { class: 'b muted', style: 'word-break:break-all;user-select:all;font-size:12.5px' }, d.path),
@@ -983,10 +982,14 @@ export function renderInfo() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {  // a dialog first; the sign-in dialog stays
+  if (e.key === 'Escape') {  // a menu or a dialog first; the sign-in dialog stays
+    const menu = document.querySelector('.facemenu');
+    if (menu) { menu.remove(); return; }
     const backs = [...document.querySelectorAll('.modal-back:not(.required)')];
     if (backs.length) { backs[backs.length - 1].remove(); return; }
   }
+  // Enter or Space on a card, tile, row or link-styled control that is not a real button (role=button) acts like a click
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]:not(button):not(a[href])') && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.target.click(); return; }
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   if (LB.open) {
     if (e.key === 'Escape') closeLightbox(true);

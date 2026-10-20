@@ -42,7 +42,7 @@ export function streetView(lat, lon, title) {
   const at = (u) => u.replaceAll('{lat}', lat).replaceAll('{lon}', lon);
   if (!sv.embed) { window.open(at(sv.link || 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}'), '_blank', 'noopener'); return; }
   const back = modal(title || 'Street View', h('iframe', { class: 'svframe', src: at(sv.embed), allowfullscreen: true, loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade' }),
-    h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' }, 'Where Google has no Street View imagery nearby, the frame stays grey. ',
+    h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' }, 'Where Google has no Street View imagery nearby, the frame stays gray. ',
       h('a', { class: 'lnk', href: at(sv.link), target: '_blank', rel: 'noopener' }, 'Open in Google Maps')),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
   back.querySelector('.modal').classList.add('svmodal');
@@ -197,7 +197,7 @@ async function placeTray(map, fp, el) {
   const place = async (latlng) => {
     if (!sel.size) { toast('Select photos in the tray first.'); return; }
     const picked = [...sel], at = { lat: +latlng.lat.toFixed(7), lon: +latlng.lng.toFixed(7), alt: null };
-    if (townOnly.checked) at.accuracy = +accSel.value;  // approximate: the town's centre, how far off it may be
+    if (townOnly.checked) at.accuracy = +accSel.value;  // approximate: the town's center, how far off it may be
     if (!(await editPhotos(picked, { gps: at }))) return;
     for (const id of picked) { const k = ids.indexOf(id); if (k >= 0) ids.splice(k, 1); }
     sel.clear(); draw();
@@ -210,14 +210,14 @@ async function placeTray(map, fp, el) {
   el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
   el.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.getData('text/plain') === 'iopix-place') place(map.mouseEventToLatLng(e)); });
   el.style.cursor = 'crosshair';
-  // only the town is known: the photos go to the town's centre, saved as approximate (no altitude, an accuracy radius)
+  // only the town is known: the photos go to the town's center, saved as approximate (no altitude, an accuracy radius)
   const townOnly = h('input', { type: 'checkbox', onchange: () => { accSel.disabled = !townOnly.checked; search.placeholder = townOnly.checked ? 'Find the town' : 'Find a place, landmark or address'; } });
   const accSel = h('select', { class: 'sharepick', disabled: true, title: 'How far from the spot the photos may have been taken' },
     [[1000, '~1 km'], [2000, '~2 km'], [5000, '~5 km'], [10000, '~10 km'], [25000, '~25 km']].map(([v, l]) => h('option', { value: v, selected: v === 2000 }, l)));
   // find a place: a name, landmark or address (the same search as Set location), then the map zooms there
   let st = 0;
   const results = h('div', { class: 'alist', hidden: true, style: 'max-height:180px' });
-  const search = h('input', { class: 'einput', placeholder: 'Find a place, landmark or address', style: 'margin:0;width:100%',
+  const search = h('input', { class: 'einput', placeholder: 'Find a place, landmark or address', style: 'width:100%',
     onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); clearTimeout(st); look(); } if (e.key === 'Escape') results.hidden = true; },
     oninput: () => { clearTimeout(st); st = setTimeout(look, 500); } });
   const look = async () => {

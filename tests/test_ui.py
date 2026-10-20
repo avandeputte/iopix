@@ -261,9 +261,9 @@ def test_pasting_a_coordinate_pair_fills_both_fields(page, server, lib):
         page.locator('[title^="Info"]').click()
     page.wait_for_selector(".lb-info h4", timeout=10000)
     # open the location dialog from the info pane ("Set location" link or the Location heading's "change")
-    link = page.locator(".lb-info a.lnk", has_text="Set location")
+    link = page.locator(".lb-info .lnk", has_text="Set location")
     if not link.count():
-        link = page.locator(".lb-info a.lnk", has_text="change").last
+        link = page.locator(".lb-info .lnk", has_text="change").last
     link.click()
     page.wait_for_selector(".modal input[placeholder='latitude']", timeout=5000)
     lat = page.locator(".modal input[placeholder='latitude']")
@@ -397,9 +397,11 @@ def test_container_mode_writes_without_a_confirmation(page, server):
     page.goto(server + "/#/tags"); page.wait_for_selector("h1", timeout=10000)
     page.locator("button", has_text="Manage tags").first.click(); page.wait_for_timeout(300)
     page.locator("button", has_text="New top-level tag").first.click()
+    page.wait_for_selector(".modal input", timeout=5000)  # the app's own prompt, not the browser's
+    page.locator(".modal input").fill("zz-ui-vouch"); page.locator(".modal-btns button.on").click()
     page.wait_for_timeout(2500)
-    assert any(t.startswith("prompt:") for t in dialogs), dialogs
-    assert not any("closed" in t or "cannot see" in t for t in dialogs), "no confirmation about digiKam: " + str(dialogs)
+    assert not dialogs, "no browser dialogs: " + str(dialogs)
+    assert page.locator(".modal").count() == 0, "no confirmation about digiKam"
     tags = json.load(urllib.request.urlopen(server + "/api/meta"))["tags"]
     assert any(t["name"] == "zz-ui-vouch" for t in tags), "after accepting, the tag is created"
 
@@ -708,6 +710,7 @@ def test_save_search_jump_to_date_and_hotkeys(page, server, lib):
     assert page.locator(".gbar .jumpdate").count() == 1, "the chronological view has a date box"
     page.on("dialog", lambda d: d.accept("Clips") if d.type == "prompt" else d.accept())
     page.locator(".gbar button[title^='Save this search']").click()
+    page.wait_for_selector(".modal input", timeout=5000); page.locator(".modal input").fill("Clips"); page.locator(".modal-btns button.on").click()
     page.wait_for_selector("#toast:has-text('Saved')", timeout=5000)
     page.wait_for_timeout(500)
     assert page.locator(".crumbs .cur", has_text="Clips").count() == 1, "the saved search shows in the breadcrumbs"
@@ -730,6 +733,7 @@ def test_save_search_jump_to_date_and_hotkeys(page, server, lib):
     page.wait_for_selector(".card.smart", timeout=10000)
     page.locator(".card.smart").first.hover()
     page.locator(".card.smart .carddl[title^='Delete']").first.click(force=True)
+    page.wait_for_selector(".modal-btns .danger", timeout=5000); page.locator(".modal-btns .danger").click()  # the app's own confirmation
     page.wait_for_selector(".card.smart", state="detached", timeout=5000)
 
 
@@ -757,10 +761,11 @@ def test_consistency_bulk_sync_bar(page, server, lib):
         bb = b.bounding_box()
         assert bb["x"] + bb["width"] <= vp["width"] and bb["y"] + bb["height"] <= vp["height"], "every button on screen"
     # Select all takes every disagreeing photo, then one click syncs them from the sidecar
-    page.locator("a.lnk", has_text="Select all").click()
+    page.locator(".lnk", has_text="Select all").click()
     page.wait_for_function("document.querySelector('#cbulk .n') && !document.querySelector('#cbulk .n').textContent.startsWith('1 ')", timeout=5000) if page.locator(".crec").count() > 1 else None
     page.on("dialog", lambda d: d.accept())
     page.locator("#cbulk button[data-src=sidecar]").click()
+    page.wait_for_selector(".modal-btns button.on", timeout=5000); page.locator(".modal-btns button.on").click()  # the app's own confirmation
     page.wait_for_selector("#toast:has-text('Synced')", timeout=20000)
     page.wait_for_selector("#cbulk", state="hidden", timeout=5000)
 
@@ -967,13 +972,13 @@ def test_grid_header_stays_while_scrolling_and_delete_asks_first(page, server):
     assert page.locator("#grid .selall").is_visible()
     page.locator("#grid .selall").click()
     page.wait_for_selector("#selbar", timeout=3000)
-    assert page.locator("#selbar a", has_text="Deselect all").count() == 1
+    assert page.locator("#selbar .lnk", has_text="Deselect all").count() == 1
     page.wait_for_timeout(1500)  # the editing flags arrive with the status poll
     if page.locator("#selbar button[title='Delete']").count():
         page.locator("#selbar button[title='Delete']").click()
         page.wait_for_selector(".modal .pillbtn.danger", timeout=3000)
         page.locator(".modal button", has_text="Cancel").click()
-    page.locator("#selbar a", has_text="Deselect all").click()
+    page.locator("#selbar .lnk", has_text="Deselect all").click()
     page.wait_for_selector("#selbar", state="detached", timeout=3000)
 
 
@@ -1357,7 +1362,7 @@ def test_removing_a_face_needs_no_question_and_can_be_undone(page, server):
     page.wait_for_timeout(300)
     assert not dialogs, dialogs
     assert page.locator(".facebox.face-unknown").count() == n - 1
-    page.locator("#toast a", has_text="Undo").click()
+    page.locator("#toast .lnk", has_text="Undo").click()
     page.wait_for_timeout(300)
     assert page.locator(".facebox.face-unknown").count() == n, "Undo puts it back"
     page.wait_for_timeout(2500)  # both changes reach the server before the page goes
@@ -1385,7 +1390,7 @@ def test_accept_as_it_is_removes_only_that_entry(page, server, lib):
         if before < 1:
             pytest.skip("the planted photos did not reach the list")
         page.evaluate("document.querySelector('.qsec').dataset.mark = 'kept'")
-        sec.locator(".hrow").first.locator("a", has_text="Accept as it is").click()
+        sec.locator(".hrow").first.locator(".lnk", has_text="Accept as it is").click()
         page.wait_for_timeout(800)
         assert sec.locator(".hrow").count() == before - 1
         assert page.evaluate("document.querySelector('.qsec').dataset.mark") == "kept", "the page was not redrawn"
@@ -1432,7 +1437,7 @@ def test_explore_rediscover_and_no_settings(page, server):
     sec = page.locator("h2:has-text('Rediscover') + .jrows")
     assert 1 <= sec.locator(".tile").count() <= 36
     first = sec.locator(".tile img").first.get_attribute("src")
-    page.locator("h2:has-text('Rediscover') a", has_text="Shuffle").click()
+    page.locator("h2:has-text('Rediscover') .lnk", has_text="Shuffle").click()
     page.wait_for_timeout(800)
     assert sec.locator(".tile").count() >= 1
     order = page.evaluate("[...document.querySelectorAll('#main h2')].map((e) => e.textContent)")
@@ -1510,7 +1515,7 @@ def test_delete_key_moves_to_the_trash_without_a_question_and_undo_restores(page
     assert not dialogs, dialogs
     assert "trash" in page.locator("#toast").inner_text().lower()
     assert any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"])
-    page.locator("#toast a", has_text="Undo").click()
+    page.locator("#toast .lnk", has_text="Undo").click()
     page.wait_for_timeout(2500)
     assert not any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"]), "back out of the trash"
 
@@ -1529,7 +1534,7 @@ def test_import_page_plans_then_imports_a_dropped_photo(page, server, lib, tmp_p
     rows = page.locator(".stable.wide tbody tr")
     assert rows.count() == 2
     assert page.locator(".stable.wide td", has_text="/1998/199807").count() == 1, "the folder follows the date taken"
-    assert page.locator(".stable.wide a", has_text="already in the library").count() == 1 and page.locator(".stable.wide .mst.ok", has_text="new").count() == 1
+    assert page.locator(".stable.wide .lnk", has_text="already in the library").count() == 1 and page.locator(".stable.wide .mst.ok", has_text="new").count() == 1
     btn = page.locator("button.pillbtn.on", has_text="Import 1")
     assert btn.count() == 1
     try:
@@ -1555,7 +1560,7 @@ def test_rotate_key_turns_the_photo_and_undo_from_the_toast(page, server, lib):
     page.wait_for_selector("#toast:has-text('Rotate right.')", timeout=30000)
     W, H = lossless.upright_size(w, h, o)
     assert _info(lib["db"], pid)[0] == (H, W, 1)
-    page.click("#toast a:has-text('Undo')")
+    page.click("#toast .lnk:has-text('Undo')")
     page.wait_for_selector("#toast:has-text('Put back as it was.')", timeout=30000)
     assert path.read_bytes() == original and _info(lib["db"], pid)[0] == (w, h, o)
     # the crop tool: drag over the picture, a size appears, Cancel leaves everything alone

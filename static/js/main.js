@@ -121,7 +121,7 @@ export async function pollStatus() {
     dkBanner(s.digikam);
     if (s.appName && s.appName !== S.APP_NAME) { S.APP_NAME = s.appName; applyAppName(); }
     document.body.classList.toggle('noadmin', !S.IS_ADMIN);
-    if (S.PENDING && s.dbWrite && !el.childNodes.length) el.replaceChildren(h('a', { class: 'lnk', style: 'cursor:pointer', title: 'Edits saved in sidecars that digiKam’s database does not have yet', onclick: dbDialog },
+    if (S.PENDING && s.dbWrite && !el.childNodes.length) el.replaceChildren(h('button', { type: 'button', class: 'lnk', style: 'cursor:pointer', title: 'Edits saved in sidecars that digiKam’s database does not have yet', onclick: dbDialog },
       `${nf.format(S.PENDING)} ${S.PENDING === 1 ? 'edit' : 'edits'} not in digiKam yet`));
     if (s.rev !== ST.rev && ST.rev >= 0) { const mine = ST.rev; await loadState(); if (mine !== ST.rev && S.route.view === 'albums') showAlbums(); }
     if (S.META && s.version && s.version !== S.META.version) {

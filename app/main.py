@@ -111,7 +111,8 @@ async def _auth_guard(request: Request, call_next):
     """Who is asking (session cookie), and may they do this? Library writes need an editor
     or admin, settings and maintenance an admin, favorites and albums a signed-in user; all
     of that only once a user exists. Read-only mode refuses library writes for everyone."""
-    user = users.user_from_token(request.cookies.get(users.COOKIE, "")) if request.cookies.get(users.COOKIE) else None
+    session = request.cookies.get(users.COOKIE) or request.cookies.get(users.OLD_COOKIE)
+    user = users.user_from_token(session) if session else None
     cookie_uid = user["id"] if user else None
     request.state.via_proxy = False
     if "cf-access-jwt-assertion" in request.headers and time.time() - proxyauth.seen.get("at", 0) > 60:

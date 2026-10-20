@@ -108,7 +108,7 @@ body.filters-open #main { right: 340px; }
 .page h1.ptitle .pic .ic { width: 22px; height: 22px; }
 .page h1.ptitle .muted { margin-left: -4px; }
 .page h2 { font-size: 16px; font-weight: 500; margin: 30px 0 12px; display: flex; align-items: baseline; gap: 12px; }
-.page h2 a, .page h2 .more { font-size: 13px; font-weight: 400; color: var(--accent); cursor: pointer; }
+.page h2 a, .page h2 .lnk, .page h2 .more { font-size: 13px; font-weight: 400; color: var(--accent); cursor: pointer; }
 .page h2 .muted { font-size: 13px; font-weight: 400; }
 .muted { color: var(--fg2); }
 .pagefilter { height: 38px; border-radius: 19px; border: 1px solid var(--line); background: var(--bg); padding: 0 16px; outline: 0; width: min(360px, 100%); margin: 10px 0 4px; }
@@ -323,8 +323,8 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .modal .alist .frow.on { opacity: .6; }  /* a zip part already downloaded */
 
-#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323232; color: #fff; padding: 12px 20px; border-radius: 8px; z-index: 200; box-shadow: var(--shadow); }
-#toast a { color: #8ab4f8; margin-left: 16px; cursor: pointer; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323232; color: #fff; padding: 12px 20px; border-radius: 8px; z-index: 2000; box-shadow: var(--shadow); }
+#toast a, #toast .lnk { color: #8ab4f8; margin-left: 16px; cursor: pointer; }
 
 /* ---- selection, favorites, app albums, duplicates */
 #selbar { position: fixed; inset: 0 0 auto 0; height: var(--topbar); z-index: 25; background: var(--bg); display: flex; align-items: center; gap: 8px; padding: 0 16px; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
@@ -367,7 +367,7 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 .eseg button + button { border-left: 1px solid var(--line); }
 .eseg button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 .eseg button:hover { background: var(--bg2); }
-.einput { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 8px 10px; outline: 0; resize: vertical; font: inherit; color: inherit; }
+.einput { width: 100%; margin: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 8px 10px; outline: 0; resize: vertical; font: inherit; color: inherit; }
 .einput:focus { border-color: var(--accent); }
 .enote { margin-top: 10px; font-size: 12.5px; color: var(--fg2); background: var(--bg2); border-radius: 8px; padding: 8px 10px; }
 .ichip .tx { width: 18px; height: 18px; border-radius: 50%; margin-right: -6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg2); }
@@ -621,6 +621,7 @@ body.nobadges .cbadges, body.nobadges .fbadge { display: none; }
 #filterbtn { height: 34px; padding: 0 12px 0 10px; border-radius: 10px; font-size: 13px; }
 #filterbtn .ic { width: 20px; height: 20px; }
 #topbar a.tool, #usermenu .tool { width: 30px; height: 30px; }
+@media (max-width: 800px) { #topbar a.tool, #usermenu .tool { width: 40px; height: 40px; } #topbar a.tool .ic, #usermenu .tool .ic { width: 22px; height: 22px; } }
 #topbar a.tool .ic, #usermenu .tool .ic { width: 18px; height: 18px; }
 #selbar .pillbtn { height: 34px; }
 @media (max-width: 800px) {
@@ -806,7 +807,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .tree .nm .fcap { display: block; font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fcovers { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; max-height: 260px; overflow: auto; padding: 2px; }
 .fcov { width: 100%; height: 76px; object-fit: cover; border-radius: 8px; cursor: pointer; outline: 2px solid transparent; outline-offset: 1px; }
-.fcov.auto { display: flex; align-items: center; justify-content: center; background: var(--chip); font-size: 13px; color: var(--fg2); }
+.fcov.auto { display: flex; align-items: center; justify-content: center; background: var(--bg3); font-size: 13px; color: var(--fg2); }
 .fcov.on { outline-color: var(--accent); }
 
 /* Map: placing photos without a location */
@@ -874,3 +875,11 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 #selbar .pillbtn.selic { width: 40px; padding: 0; justify-content: center; border-radius: 50%; border: 0; background: transparent; color: var(--fg2); }
 #selbar .pillbtn.selic:hover { background: var(--bg3); color: var(--fg); }
 @media (max-width: 800px) { #selbar .pillbtn.selic { width: 34px; } }
+
+/* ---- keyboard access: link-styled buttons, a visible focus ring, bigger touch targets */
+button.lnk { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: inherit; }
+button.lnk:hover { text-decoration: underline; }
+:is(button, a, [tabindex], input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile:focus-visible, .card:focus-visible, .trow:focus-visible, .frow:focus-visible, .fcell:focus-visible, .stat:focus-visible, .pill:focus-visible { outline-offset: -2px; }
+.tile:focus-visible .tcheck, .trow:focus-visible .tacts, .card:focus-visible .carddl, .card:focus-within .carddl { opacity: 1; display: inline-flex; }
+@media (hover: none) { .chip button, .ichip .tx { min-width: 32px; min-height: 32px; } .tact, .seg button, .eseg button { min-width: 36px; min-height: 36px; } .frow, .trow { min-height: 40px; } }

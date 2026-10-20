@@ -19,7 +19,7 @@ export async function downloadDialog(p, selected) {
   const nogps = h('input', { type: 'checkbox', checked: store.get('exp-nogps', '0') === '1', onchange: () => store.set('exp-nogps', nogps.checked ? '1' : '0') });
   const flat = h('input', { type: 'checkbox', checked: store.get('exp-flat', '0') === '1', onchange: () => store.set('exp-flat', flat.checked ? '1' : '0') });
   const body = h('div', null, h('p', null, 'Working out the download…'));
-  const back = modal('Export', body,
+  const back = modal('Download', body,
     h('div', { class: 'expopts' },
       h('label', null, h('span', { class: 'muted' }, 'Size'), sel['exp-size']), h('label', null, h('span', { class: 'muted' }, 'Format'), sel['exp-fmt']),
       h('label', null, h('span', { class: 'muted' }, 'File names'), sel['exp-name'])),

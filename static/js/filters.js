@@ -48,7 +48,7 @@ export async function renderFilters() {
   const scroll = el.scrollTop;
   fill(el,
     h('div', { class: 'fhead' }, h('span', null, 'Filters'), h('span', { class: 'muted', style: 'margin-left:10px;font-size:13px' }, `${nf.format(f.count)} items`), h('span', { class: 'sp' }),
-      [...p.keys()].length ? h('span', { class: 'lnk', style: 'font-size:13px;margin-right:6px', onclick: () => go(S.route.view === 'map' ? 'map' : 'photos', new URLSearchParams()) }, 'Clear all') : null,
+      [...p.keys()].length ? h('button', { type: 'button', class: 'lnk', style: 'font-size:13px;margin-right:6px', onclick: () => go(S.route.view === 'map' ? 'map' : 'photos', new URLSearchParams()) }, 'Clear all') : null,
       h('button', { class: 'iconbtn', title: 'Close', onclick: () => toggleFilters(false) }, icon('close'))),
     h('h3', null, 'Type'),
     frow('Photos', f.count - f.videos, p.get('type') === 'photo', () => applyFilter((q) => setOne(q, 'type', 'photo'))),

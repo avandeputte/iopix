@@ -61,7 +61,7 @@ export const faceUrl = (tagId) => `/face/${tagId}?v=${S.tagById.get(tagId)?.icon
 export const avatarOf = (u, big) => u.person ? h('img', { class: 'avatar' + (big ? ' big' : ''), src: faceUrl(u.person), alt: '' }) : h('span', { class: 'avatar' + (big ? ' big' : '') }, u.name[0].toUpperCase());
 export function toast(msg, action, fn, ms = 6000) {
   const t = $('#toast');
-  fill(t, msg, action ? h('a', { onclick: () => { t.hidden = true; fn(); } }, action) : null);
+  fill(t, msg, action ? h('button', { type: 'button', class: 'lnk', onclick: () => { t.hidden = true; fn(); } }, action) : null);
   t.hidden = false;
   clearTimeout(toast.t);
   toast.t = setTimeout(() => { t.hidden = true; }, ms);

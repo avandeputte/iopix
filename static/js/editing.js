@@ -2,7 +2,7 @@
 import { $, UTC, api, date, dfTimeLocal, fill, fmtWhen, h, icon, nf, norm, plural, post } from './core.js';
 import { S, go, hashFor, photosWith, pollSoon, toast } from './state.js';
 import { G } from './grid.js';
-import { modal } from './actions.js';
+import { confirmDialog, modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
 import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
 import { LB, details, getDetail, renderInfo, renderTitle, showItem } from './lightbox.js';
@@ -22,7 +22,7 @@ export function applyLocal(d, ch) {
  *  database is read again from the metadata. "Reread from file" is digiKam's Read Metadata From File. */
 export async function metadataEditor(d) {
   const body = h('div', { class: 'mdbody' }, h('div', { class: 'muted' }, 'Reading the metadata…'));
-  const filter = h('input', { class: 'einput', placeholder: 'Filter fields, e.g. Make, GPS, Keywords', style: 'margin:0;flex:1', oninput: () => draw() });
+  const filter = h('input', { class: 'einput', placeholder: 'Filter fields, e.g. Make, GPS, Keywords', style: 'flex:1', oninput: () => draw() });
   const which = h('select', { class: 'sharepick', onchange: () => draw() }, h('option', { value: 'file' }, 'Image file'), h('option', { value: 'sidecar' }, 'Sidecar (XMP)'));
   const changed = new Map();
   const saveBtn = h('button', { class: 'pillbtn on', disabled: true, onclick: () => save() }, 'Save changes');
@@ -55,8 +55,8 @@ export async function metadataEditor(d) {
     try { await post(`/api/metadata/${d.id}/reread`, {}); toast('Read again from the file and sidecar.'); details.delete(d.id); S.keepView = true; pollSoon(600); } catch (e) { toast(e.message, null, null, 9000); } } }, 'Reread from file');
   const add = S.CAN_MANAGE ? (() => {
     const g = h('select', { class: 'sharepick' }, ['XMP-dc', 'XMP-photoshop', 'XMP-iptcCore', 'XMP-xmp', 'XMP-xmpRights', 'IFD0', 'ExifIFD', 'GPS', 'IPTC'].map((x) => h('option', null, x)));
-    const t = h('input', { class: 'einput', placeholder: 'Field, e.g. Headline', style: 'margin:0;width:160px' });
-    const v = h('input', { class: 'einput', placeholder: 'Value', style: 'margin:0;flex:1;min-width:140px' });
+    const t = h('input', { class: 'einput', placeholder: 'Field, e.g. Headline', style: 'width:160px' });
+    const v = h('input', { class: 'einput', placeholder: 'Value', style: 'flex:1;min-width:140px' });
     return h('div', { class: 'mdadd' }, h('span', { class: 'muted' }, 'Add a field'), g, t, v, h('button', { class: 'pillbtn', onclick: () => {
       if (!t.value.trim()) return; changed.set(`${g.value}:${t.value.trim()}`, { group: g.value, tag: t.value.trim(), value: v.value }); saveBtn.disabled = false; fill(saveBtn, `Save ${plural(changed.size, 'change')}`); toast('Added; save to write it.'); } }, 'Add'));
   })() : null;
@@ -122,7 +122,7 @@ export async function createTagThenPick(full, onPick) {
   const name = parts.pop();
   let parent = 0;
   if (parts.length) { const p = S.META.tags.find((t) => !t.person && t.full.toLowerCase() === parts.join('/').toLowerCase()); if (!p) { toast(`Parent tag “${parts.join(' › ')}” does not exist.`); return; } parent = p.id; }
-  if (!confirm(`Create the tag “${full}” in digiKam’s database? digiKam must be closed; a backup is made first.`)) return;
+  if (!await confirmDialog(`Create the tag “${full}” in digiKam’s database? digiKam must be closed; a backup is made first.`)) return;
   let r;
   try { r = await post('/api/tags/op', { op: 'add', parent, name }); } catch (e) { toast(e.message, null, null, 9000); return; }
   await awaitReindex((m) => m.tags.some((t) => t.id === r.id));
@@ -140,7 +140,7 @@ export function tagPicker(onPick, placeholder = 'Add a tag…', { recent = true 
 export function tagPickerInput(onPick, placeholder) {
   const id = 'taglist';
   if (!$('#' + id)) document.body.append(h('datalist', { id }, S.META.tags.filter((t) => !t.person && !t.full.startsWith('People')).map((t) => h('option', { value: t.full }))));
-  const inp = h('input', { class: 'pagefilter', style: 'margin:0;width:100%', placeholder, list: id });
+  const inp = h('input', { class: 'pagefilter', style: 'width:100%', placeholder, list: id });
   const tryPick = () => { const t = S.META.tags.find((x) => !x.person && x.full.toLowerCase() === inp.value.trim().toLowerCase()); if (t) { inp.value = ''; onPick(t); } };
   inp.oninput = tryPick;
   inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { tryPick(); if (inp.value.trim() && S.CAN_MANAGE) { const v = inp.value.trim(); inp.value = ''; createTagThenPick(v, onPick); } else if (inp.value) toast('Pick an existing tag from the list.'); } };
@@ -159,8 +159,8 @@ export function tagDialog(ids) {
     h('p', { class: 'muted' }, 'Pick a recent tag, type to find one, or type “Parent/New tag” and press Enter to create it. Each tag is applied as soon as you pick it.'),
     tagPicker((t) => editPhotos(ids, { add_tags: [t.id] })),
     h('div', { class: 'erow', style: 'margin-top:14px' }, h('span', { class: 'el' }, 'Remove'), tagPicker((t) => editPhotos(ids, { remove_tags: [t.id] }), 'Remove a tag from all…', { recent: false })),
-    S.CAN_MANAGE ? h('div', { style: 'margin-top:14px' }, h('a', { class: 'lnk', onclick: () => { back.remove(); placeTagsDialog(ids); } }, 'Add place tags from GPS positions…')) : null,
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn on', onclick: () => back.remove() }, 'Done')));
+    S.CAN_MANAGE ? h('div', { style: 'margin-top:14px' }, h('button', { type: 'button', class: 'lnk', onclick: () => { back.remove(); placeTagsDialog(ids); } }, 'Add place tags from GPS positions…')) : null,
+    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
 }
 export function editDialog(ids) {
   const save = (ch) => editPhotos(ids, ch);
@@ -168,11 +168,10 @@ export function editDialog(ids) {
     h('p', null, 'Each change is saved straight away to the XMP sidecar files. digiKam’s database is not touched.'),
     editControls({}, save),
     ...(() => {  // title and caption for every selected photo, applied on demand (not on each keystroke)
-      const title = h('input', { class: 'einput', placeholder: 'Title for all', style: 'margin:0;flex:1', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.nextSibling.click(); } });
-      const caption = h('textarea', { class: 'einput', placeholder: 'Caption for all', rows: 2, style: 'margin:0;flex:1', onkeydown: (e) => e.stopPropagation() });
+      const title = h('input', { class: 'einput', placeholder: 'Title for all', style: 'flex:1', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.nextSibling.click(); } });
+      const caption = h('textarea', { class: 'einput', placeholder: 'Caption for all', rows: 2, style: 'flex:1', onkeydown: (e) => e.stopPropagation() });
       const apply = (field, el) => h('button', { class: 'pillbtn', style: 'height:32px', onclick: async () => {
         const v = el.value.trim();
-        if (!v && !confirm(`Clear the ${field} of ${plural(ids.length, 'photo')}?`)) return;
         if (await save({ [field]: v })) toast(`${field[0].toUpperCase() + field.slice(1)} ${v ? 'set' : 'cleared'} on ${plural(ids.length, 'photo')}.`);
       } }, 'Apply');
       return [h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Title'), title, apply('title', title)),
@@ -185,7 +184,7 @@ export function editDialog(ids) {
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'pillbtn', onclick: () => locationDialog(ids, null) }, icon('place'), 'Set location on map'),
       h('button', { class: 'pillbtn', onclick: () => templatePicker(ids) }, icon('copyright'), 'Apply template'),
       h('button', { class: 'pillbtn', onclick: () => gpxDialog(ids) }, icon('map'), 'Correlate with GPS track')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn on', onclick: () => back.remove() }, 'Done')));
+    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
 }
 
 export async function dbDialog() {
@@ -217,9 +216,9 @@ export const TEMPLATE_LABEL = { creator: 'Creator', copyrightNotice: 'Copyright 
 export async function loadTemplates() { if (!S.TEMPLATES) try { S.TEMPLATES = (await api('/api/maintenance')).templates || []; } catch { S.TEMPLATES = []; } return S.TEMPLATES; }
 export function dateEditor(ids, current, after) {
   // current: "YYYY-MM-DDTHH:MM:SS" for one photo, or null for a batch
-  const inp = h('input', { class: 'einput', type: 'datetime-local', step: 1, value: (current || '').slice(0, 16), style: 'margin:0;width:auto' });
+  const inp = h('input', { class: 'einput', type: 'datetime-local', step: 1, value: (current || '').slice(0, 16), style: 'width:auto' });
   const setBtn = h('button', { class: 'pillbtn', onclick: async () => { if (!inp.value) return; const t = inp.value.length === 16 ? inp.value + ':00' : inp.value; if (await editPhotos(ids, { taken: t })) after?.(); } }, 'Set date');
-  const amount = h('input', { class: 'einput', type: 'number', value: 1, style: 'margin:0;width:70px' });
+  const amount = h('input', { class: 'einput', type: 'number', value: 1, style: 'width:70px' });
   const unit = h('select', null, [['3600', 'hours'], ['60', 'minutes'], ['86400', 'days'], ['1', 'seconds']].map(([v, l]) => h('option', { value: v }, l)));
   const shift = (sign) => async () => { const s = sign * Math.round(+amount.value * +unit.value); if (!s) return; if (await editPhotos(ids, { shift: s })) after?.(); };
   return h('div', { class: 'dateedit' },
@@ -230,7 +229,7 @@ export function dateEditor(ids, current, after) {
 /** Face detection on request: a photo (answered at once) or a folder (in the background). Faces already
  *  marked, by digiKam or anything else, are kept; only faces nothing marked become new unnamed faces. */
 export async function detectFaces(ids, folder) {
-  if (folder && !confirm(`Look for faces in the ${nf.format(folder.nAll)} photos of “${folder.path.replace(/^\//, '')}” (with its subfolders)? New faces are added to digiKam’s database as unnamed faces; faces already marked stay as they are.`)) return;
+  if (folder && !await confirmDialog(`Look for faces in the ${nf.format(folder.nAll)} photos of “${folder.path.replace(/^\//, '')}” (with its subfolders)? New faces are added to digiKam’s database as unnamed faces; faces already marked stay as they are.`)) return;
   if (!folder) toast('Looking for faces…', null, null, 30000);
   let r;
   try { r = await post('/api/faces/detect', folder ? { album: folder.id } : { ids }); } catch (e) { toast(e.message, null, null, 9000); return; }
@@ -240,9 +239,9 @@ export async function detectFaces(ids, folder) {
 }
 export async function locationDialog(ids, current, after) {
   // current: {lat, lon, alt} or null. Drag the marker or click the map; coordinates can also be typed.
-  const lat = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'latitude', value: current?.lat ?? '', style: 'margin:0;width:140px' });
-  const lon = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'longitude', value: current?.lon ?? '', style: 'margin:0;width:140px' });
-  const alt = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'altitude m', value: current?.alt ?? '', style: 'margin:0;width:110px', oninput: () => { altAuto = false; fill(altNote); } });
+  const lat = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'latitude', value: current?.lat ?? '', style: 'width:140px' });
+  const lon = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'longitude', value: current?.lon ?? '', style: 'width:140px' });
+  const alt = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'altitude m', value: current?.alt ?? '', style: 'width:110px', oninput: () => { altAuto = false; fill(altNote); } });
   // the altitude follows the position (ground height from Google or Open-Meteo) until it is typed by hand
   let altAuto = current?.alt == null, altTimer = 0;
   const altNote = h('span', { class: 'muted', style: 'font-size:12px' });
@@ -259,7 +258,7 @@ export async function locationDialog(ids, current, after) {
     }, 400);
   };
   const mapEl = h('div', { class: 'imap', style: 'height:360px;margin:10px 0' });
-  // only the town is known: the pin goes to the town's centre (search for it), with no altitude and how far off it may
+  // only the town is known: the pin goes to the town's center (search for it), with no altitude and how far off it may
   // be, saved as the position's accuracy (EXIF GPSHPositioningError, digiKam's ImagePositions.accuracy)
   const accSel = h('select', { class: 'sharepick', title: 'How far from the pin the photo may have been taken', onchange: () => drawCircle() },
     [[1000, 'within about 1 km'], [2000, 'within about 2 km'], [5000, 'within about 5 km'], [10000, 'within about 10 km'], [25000, 'within about 25 km']]
@@ -283,7 +282,7 @@ export async function locationDialog(ids, current, after) {
   // address or landmark search (OpenStreetMap Nominatim through the server; GeoNames towns offline)
   let searchTimer = 0;
   const results = h('div', { class: 'alist', style: 'max-height:160px;margin-top:4px', hidden: true });
-  const search = h('input', { class: 'einput', placeholder: 'Search an address or place, e.g. “Mt Lebanon High School”', style: 'margin:0;flex:1;min-width:240px',
+  const search = h('input', { class: 'einput', placeholder: 'Search an address or place, e.g. “Mt Lebanon High School”', style: 'flex:1;min-width:240px',
     onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); run(); } if (e.key === 'Escape') { results.hidden = true; } },
     oninput: () => { clearTimeout(searchTimer); searchTimer = setTimeout(run, 500); } });
   const run = async () => {
@@ -300,7 +299,7 @@ export async function locationDialog(ids, current, after) {
     } }, icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, r.source === 'offline' ? 'No town by that name in the offline place list (no internet connection for the full search).' : 'Nothing found.'));
   };
-  // "Suggest location": the places of the photos taken nearest in time, and on request a landmark Google recognises
+  // "Suggest location": the places of the photos taken nearest in time, and on request a landmark Google recognizes
   const sugBox = h('div', { class: 'alist', style: 'max-height:200px;margin-top:4px', hidden: true });
   const useSpot = (x) => { lat.value = x.lat; lon.value = x.lon; if (x.alt != null) { alt.value = x.alt; altAuto = false; fill(altNote, 'altitude from that photo'); } sugBox.hidden = true; place(); if (map) map.setView([x.lat, x.lon], 16); };
   const ago = (m) => { const a = Math.abs(m); const t = a < 60 ? `${a} min` : a < 1440 ? `${Math.round(a / 6) / 10} h` : `${Math.round(a / 144) / 10} days`; return m === 0 ? 'same time' : m < 0 ? `${t} before` : `${t} after`; };
@@ -312,7 +311,7 @@ export async function locationDialog(ids, current, after) {
       let L2; try { L2 = await post('/api/location/landmark', { id: ids[0] }); } catch (err) { fill(row, icon('spark'), h('span', { class: 'nm muted', style: 'white-space:normal' }, err.message)); return; }
       row.replaceWith(...(L2.landmarks.length ? L2.landmarks.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => useSpot(x) }, icon('spark'),
         h('span', { class: 'nm', style: 'white-space:normal' }, x.name, h('span', { class: 'muted' }, ` · landmark, ${Math.round(x.score * 100)}% sure`))))
-        : [h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Google recognised no landmark in this photo.')]));
+        : [h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Google recognized no landmark in this photo.')]));
     } }, icon('spark'), h('span', { class: 'nm' }, 'Recognise a landmark in the photo', h('span', { class: 'muted' }, ' · Google Cloud Vision, about $0.0015 a photo after 1,000 free a month'))) : null;
     fill(sugBox, r.suggestions.length ? r.suggestions.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', title: `${x.lat}, ${x.lon}`, onclick: () => useSpot(x) },
       h('img', { src: `/thumb/${x.id}`, alt: '', style: 'width:34px;height:34px;object-fit:cover;border-radius:5px;flex:none' }),
@@ -322,15 +321,15 @@ export async function locationDialog(ids, current, after) {
   const back = modal(ids.length > 1 ? `Set location for ${nf.format(ids.length)} photos` : 'Set location',
     h('p', { class: 'muted' }, ids.length > 1 ? `The same position goes to all ${nf.format(ids.length)} selected photos, replacing any they already have. ` : '', 'Click the map or drag the pin, or type coordinates. Saved to the sidecar (and file, if on) and shown in digiKam after its database is updated.'),
     h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px' }, search,
-      h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognises', onclick: suggest }, icon('spark'), 'Suggest location')), results, sugBox,
+      h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognizes', onclick: suggest }, icon('spark'), 'Suggest location')), results, sugBox,
     h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;flex-wrap:wrap' }, townOnly, h('b', null, 'Only the town is known'),
-      accSel, h('span', { class: 'muted', style: 'font-size:12.5px' }, 'the pin marks the town’s centre; the photo is shown as approximate')),
+      accSel, h('span', { class: 'muted', style: 'font-size:12.5px' }, 'the pin marks the town’s center; the photo is shown as approximate')),
     mapEl,
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, lat, lon, alt, altNote,
       h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; alt.value = d.alt ?? ''; altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
       h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
-      current ? h('button', { class: 'pillbtn', onclick: async () => { if (confirm('Remove the location from ' + (ids.length > 1 ? 'these photos' : 'this photo') + '?')) { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); } } }, 'Remove location') : null,
+      current ? h('button', { class: 'pillbtn', onclick: async () => { { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); } } }, 'Remove location') : null,
       h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : +alt.value } })) after?.(); } }, icon('place'), 'Save location')));
   let map, marker;
   const place = () => { fetchAlt(); if (!map || !lat.value || !lon.value) return; const ll = [+lat.value, +lon.value]; marker ? marker.setLatLng(ll) : (marker = L.marker(ll, { draggable: true }).addTo(map).on('dragend', () => { const p = marker.getLatLng(); lat.value = p.lat.toFixed(6); lon.value = p.lng.toFixed(6); fetchAlt(); drawCircle(); })); map.setView(ll, townOnly.checked ? Math.min(Math.max(map.getZoom(), 10), 13) : Math.max(map.getZoom(), 12)); drawCircle(); };
@@ -361,7 +360,7 @@ export async function gpxDialog(ids) {
   const file = h('input', { type: 'file', accept: '.gpx,application/gpx+xml' });
   const tzNow = -new Date().getTimezoneOffset() * 60;  // this browser's offset, as a sensible default
   const offset = h('select', null, [...Array(27)].map((_, i) => i - 12).map((hh) => h('option', { value: hh * 3600, selected: hh * 3600 === tzNow }, `UTC${hh >= 0 ? '+' : ''}${hh}`)));
-  const shiftAmt = h('input', { class: 'einput', type: 'number', value: 0, style: 'margin:0;width:70px' });
+  const shiftAmt = h('input', { class: 'einput', type: 'number', value: 0, style: 'width:70px' });
   const shiftUnit = h('select', null, [['60', 'minutes'], ['1', 'seconds'], ['3600', 'hours']].map(([v, l]) => h('option', { value: v }, l)));
   const gap = h('select', null, [[120, '2 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, '1 hour'], [21600, '6 hours']].map(([v, l]) => h('option', { value: v, selected: v === 600 }, l)));
   const onlyMissing = h('input', { type: 'checkbox', checked: true });
@@ -405,7 +404,7 @@ export async function gpxDialog(ids) {
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
       h('button', { class: 'pillbtn on', onclick: async () => {
         if (!token || !preview?.matched) { toast('Match first.'); return; }
-        if (!confirm(`Write positions to ${nf.format(preview.matched)} photos? Sidecars are backed up first; digiKam gets them with “Apply edits to digiKam database”.`)) return;
+        if (!await confirmDialog(`Write positions to ${nf.format(preview.matched)} photos? Sidecars are backed up first; digiKam gets them with “Apply edits to digiKam database”.`)) return;
         try { const r = await post('/api/gpx/apply', { token, ids, ...params() }); back.remove(); toast(`Positions written to ${nf.format(r.edited)} photos.`); S.keepView = true; pollSoon(); }
         catch (e) { toast(e.message, null, null, 9000); }
       } }, icon('place'), 'Apply positions')));
@@ -434,7 +433,7 @@ export function templatesSection(m) {
         h('button', { class: 'pillbtn on', onclick: () => { if (!name.value.trim()) { name.focus(); return; } t.name = name.value.trim(); inputs.forEach(([k, inp]) => { t.fields[k] = inp.value.trim(); }); if (isNew) tpls.push(t); back.remove(); save(); } }, 'Save')));
   };
   const draw = () => fill(list, tpls.map((t) => h('div', { class: 'srow' }, h('div', null, h('b', null, t.name), h('div', { class: 'muted', style: 'font-size:13px' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ') || 'empty')),
-      h('span', { style: 'display:flex;gap:6px' }, h('button', { class: 'pillbtn', onclick: () => edit(t, false) }, 'Edit'), h('button', { class: 'pillbtn', onclick: () => { if (confirm(`Delete the template “${t.name}”? Photos it was applied to are not changed.`)) { tpls = tpls.filter((x) => x !== t); save(); } } }, 'Delete')))),
+      h('span', { style: 'display:flex;gap:6px' }, h('button', { class: 'pillbtn', onclick: () => edit(t, false) }, 'Edit'), h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the template “${t.name}”? Photos it was applied to are not changed.`, { ok: 'Delete', danger: true })) { tpls = tpls.filter((x) => x !== t); save(); } } }, 'Delete')))),
     h('div', { style: 'margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => edit({ name: '', fields: {} }, true) }, icon('add'), 'New template')));
   draw();
   return h('div', null, h('h2', null, 'Metadata templates'), h('div', { class: 'muted', style: 'max-width:820px' }, 'Like digiKam’s templates: creator, copyright, credit, source, instructions and contact details, applied to any selection in one go from the Edit dialog or the info panel.'), list);
