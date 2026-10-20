@@ -84,3 +84,24 @@ def test_photos_without_a_sidecar_are_listed_and_can_get_one(client, lib):
     assert s.status_code == 200 and s.json()["synced"] == 1, s.text
     assert Path(row["path"] + ".xmp").exists()
     client.post("/api/edit/revert", json={"ids": [pid]})  # put the library back: the created sidecar is removed
+
+
+def test_videos_are_checked_against_their_sidecar(client, lib):
+    """A video's sidecar is compared with digiKam too (its date was digiKam's import day for some old videos)."""
+    from app.data import index
+    con = index.open_index()
+    try:
+        v = con.execute("SELECT id, path, name, hash, size, modified, video FROM photos WHERE video = 1 LIMIT 1").fetchone()
+    finally:
+        con.close()
+    if not v:
+        pytest.skip("no video in the scratch library")
+    called = []
+    orig = consistency.compare
+    consistency.compare = lambda batch: called.extend(p["id"] for p in batch) or orig(batch)
+    try:
+        consistency.scan([dict(zip(("id", "path", "name", "hash", "size", "modified", "video"), v))])
+        assert _wait_done()
+    finally:
+        consistency.compare = orig
+    assert called == [v[0]], "the video is compared"

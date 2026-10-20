@@ -237,7 +237,7 @@ def scan(photos: list, rescan_all: bool = True):
     init()
     _run["gen"] += 1
     gen = _run["gen"]
-    todo = [p for p in photos if not p.get("video")]
+    todo = list(photos)  # videos too: their sidecar against digiKam (the file itself is not read)
     if not rescan_all:
         con = analysis.connect()
         try:
