@@ -100,8 +100,6 @@ export async function showExplore() {
     group('blue', S.META.years.map(([y, n]) => pill(y, n, { year: y }))),
     sec('purple', 'camera', 'Cameras'),
     group('purple', S.META.cameras.map(([c, n]) => pill(c, n, { camera: c }))),
-    sec('teal', 'camera', 'Lenses'),
-    group('teal', S.META.lenses.slice(0, 40).map(([c, n]) => pill(c, n, { lens: c }))),
     S.META.creators.length ? [sec('rose', 'copyright', 'Photographers'), group('rose', S.META.creators.slice(0, 30).map(([c, n]) => pill(c, n, { creator: c })))] : null,
     sec('slate', 'photo', 'File types'),
     group('slate', S.META.formats.map(([c, n]) => pill(c, n, { fmt: c }))));
