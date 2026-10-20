@@ -410,7 +410,8 @@ def source_version() -> str:
         # date, a position, a swapped tag, a tag's badge picture, face properties), whether digiKam or the
         # viewer made them: a count alone misses an edited caption, and the edit then never shows as applied
         for sql in ("SELECT count(*), max(id), SUM(CRC32(CONCAT(id,'|',COALESCE(album,''),'|',name,'|',status,'|',COALESCE(modificationDate,''),'|',COALESCE(uniqueHash,'')))) FROM Images",
-                    "SELECT count(*), max(modificationDate) FROM Albums",
+                    # the path catches a folder renamed or moved (its modificationDate does not change), the rest its properties
+                    "SELECT count(*), max(modificationDate), SUM(CRC32(CONCAT(id,'|',albumRoot,'|',relativePath,'|',COALESCE(caption,''),'|',COALESCE(collection,''),'|',COALESCE(icon,0)))) FROM Albums",
                     "SELECT count(*), SUM(CRC32(CONCAT(imageid,'|',tagid))) FROM ImageTags",
                     "SELECT count(*), max(id), SUM(CRC32(CONCAT(id,'|',COALESCE(pid,0),'|',name,'|',COALESCE(icon,0),'|',COALESCE(iconkde,'')))) FROM Tags",
                     "SELECT count(*), SUM(CRC32(CONCAT(tagid,'|',property,'|',COALESCE(value,'')))) FROM TagProperties",
