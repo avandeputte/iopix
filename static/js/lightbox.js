@@ -1,6 +1,6 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
 import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDur, h, icon, nf, norm, plural, post, store } from './core.js';
-import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, parseHash, photosWith, pollSoon, toast } from './state.js';
+import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, renderGrid, scrollToIndex } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
 import { dateEditor, detectFaces, editControls, editPhotos, locationDialog, metadataEditor, tagDialog, tagPicker, templatePicker } from './editing.js';
@@ -125,10 +125,10 @@ export function shareMenu(anchor) {
   const open = $('.sharemenu');
   if (open) { open.remove(); return; }
   const id = LB.src.id[LB.i], d = LB.detail, name = d?.name || `photo ${id}`, url = location.href;
-  const item = (label, attrs, sub) => h('a', { class: 'fmi', ...attrs }, label, sub ? h('div', { class: 'muted', style: 'font-size:12px' }, sub) : null);
+  const item = (label, attrs, sub) => h('a', { class: 'fmi', ...attrs }, label, sub ? h('div', { class: 'muted smaller' }, sub) : null);
   const done = (msg) => { menu.remove(); if (msg) toast(msg); };
   const menu = h('div', { class: 'facemenu sharemenu' }, h('div', { class: 'fmh' }, 'Share'),
-    item('Copy link', { onclick: async () => { try { await navigator.clipboard.writeText(url); done('Link copied.'); } catch { done('Could not copy; the address bar has the link.'); } } }, 'to this photo in the viewer'),
+    item('Copy link', { onclick: async () => { try { await navigator.clipboard.writeText(url); done('Link copied.'); } catch { done('Could not copy; the address bar has the link.'); } } }, `to this photo in ${S.APP_NAME}`),
     item('Download original', { href: `/orig/${id}?dl=1`, download: name, onclick: () => menu.remove() }, d?.bytes ? `${name} · ${fmtBytes(d.bytes)}` : name),
     !d?.video ? item('Download preview', { href: `/preview/${id}?dl=1`, onclick: () => menu.remove() }, 'a smaller JPEG for messages and email') : null,
     item('Open original in a new tab', { href: `/orig/${id}`, target: '_blank', rel: 'noopener', onclick: () => menu.remove() }),
@@ -262,7 +262,7 @@ export function photoActions(anchor, d) {
     manage ? ['Rename…', () => renamePhoto(d)] : null,
     manage ? ['Move to a folder…', () => movePhotos([d.id], () => { LB.detail = null; details.delete(d.id); setTimeout(showItem, 1500); })] : null,
     manage && S.LOSSLESS && !d.video ? ['Rotate, flip or crop…', () => editMenu([d.id], anchor, true)] : null,
-    manage && d.album && !d.video ? ['Use as folder cover', async () => { try { await post(`/api/folders/${d.album.id}/properties`, { icon: d.id }); toast(`Now the cover of “${d.album.name}” in Folders.`); S.keepView = true; pollSoon(600); } catch (e) { toast(e.message); } }] : null,
+    manage && d.album && !d.video ? ['Use as folder cover', async () => { try { await post(`/api/folders/${d.album.id}/properties`, { icon: d.id }); toast(`Now the cover of “${d.album.name}” in Folders.`); S.keepView = true; pollSoon(600); } catch (e) { toastError(e); } }] : null,
     'Share',
     ['Add to album…', () => albumDialog([d.id])],
     ['Download the original', () => LB.el.dl.click()],
@@ -289,11 +289,11 @@ export async function undoLast(id) {
     if (!e || e.action !== 'lossless') throw new Error('Nothing to undo');
     await post(`/api/history/${e.id}/restore`, { kind: 'undo' });
     await afterFileChange(id, null); toast('Put back as it was.');
-  } catch (err) { toast(err.message, null, null, 8000); }
+  } catch (err) { toastError(err, 8000); }
 }
 export async function transformPhotos(ids, op) {
   let r;
-  try { r = await post('/api/photos/transform', { ids, op }); } catch (e) { toast(e.message, null, null, 9000); return; }
+  try { r = await post('/api/photos/transform', { ids, op }); } catch (e) { toastError(e); return; }
   for (const d of r.done) await afterFileChange(d.id, d);
   const label = TRANSFORMS.find((t) => t[0] === op)[1].toLowerCase();
   if (r.failed.length) toast(`${r.done.length ? `${plural(r.done.length, 'photo')} ${label.replace('rotate', 'rotated').replace('flip', 'flipped').replace('turn', 'turned')}; ` : ''}${plural(r.failed.length, 'photo')} not: ${r.failed[0].error}`, null, null, 10000);
@@ -326,7 +326,7 @@ function startAdjust() {
   const save = async () => {
     fill(saveBtn, 'Saving…'); saveBtn.disabled = true;
     let r;
-    try { r = await post('/api/photos/adjust', { id: d.id, ...v }); } catch (e) { toast(e.message, null, null, 9000); saveBtn.disabled = false; fill(saveBtn, 'Save as new version'); return; }
+    try { r = await post('/api/photos/adjust', { id: d.id, ...v }); } catch (e) { toastError(e); saveBtn.disabled = false; fill(saveBtn, 'Save as new version'); return; }
     stop(); S.keepView = true; pollSoon(600); details.delete(d.id);
     toast(`Saved as ${r.name}, next to the original (which is unchanged).`, 'Show', () => openLightbox({ id: [r.id, d.id] }, 0, true), 10000);
   };
@@ -335,7 +335,7 @@ function startAdjust() {
     slider('exposure', 'Exposure', -2, 2, 0.1), slider('contrast', 'Contrast', -60, 60, 1), slider('saturation', 'Saturation', -100, 100, 1),
     slider('warmth', 'Warmth', -100, 100, 1), slider('angle', 'Straighten', -15, 15, 0.5),
     h('label', { class: 'adjrow' }, h('span', null, 'Auto levels'), auto),
-    h('div', { class: 'muted', style: 'font-size:12px' }, 'The preview is approximate; the saved version is rendered at full size.'),
+    h('div', { class: 'muted smaller' }, 'The preview is approximate; the saved version is rendered at full size.'),
     h('div', { style: 'display:flex;gap:8px;justify-content:flex-end' }, h('button', { class: 'pillbtn', onclick: (e) => { e.stopPropagation(); stop(); } }, 'Cancel'), saveBtn));
   stage.append(bar);
 }
@@ -385,7 +385,7 @@ export function startCrop() {
     const id = d.id, rect = [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)];
     stop();
     let res;
-    try { res = await post('/api/photos/crop', { id, rect }); } catch (e) { toast(e.message, null, null, 9000); return; }
+    try { res = await post('/api/photos/crop', { id, rect }); } catch (e) { toastError(e); return; }
     await afterFileChange(id, res);
     toast(`Cropped to ${res.w} × ${res.h}${res.how === 're-encoded' ? ' (re-encoded: this format cannot be cut without it)' : ''}${res.faces_dropped ? `; ${plural(res.faces_dropped, 'face')} outside it removed` : ''}.`, 'Undo', () => undoLast(id), 10000);
   };
@@ -743,10 +743,10 @@ export function personPicker(onPick, photoId) {
   const createPerson = (name) => {
     const fam = h('select', null, h('option', { value: 0 }, 'directly under People'), families.map((t) => h('option', { value: t.id }, t.name)));
     const sub = modal(`New person “${name}”`, h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Family'), fam),
-      h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Created in digiKam’s database as a person tag.'),
+      h('p', { class: 'muted small' }, 'Created in digiKam’s database as a person tag.'),
       h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => sub.remove() }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: async () => {
         let r;
-        try { r = await post('/api/faces/person', { name, parent: +fam.value || (S.META.tags.find((t) => t.full === 'People')?.id || 0) }); } catch (e) { toast(e.message, null, null, 9000); return; }
+        try { r = await post('/api/faces/person', { name, parent: +fam.value || (S.META.tags.find((t) => t.full === 'People')?.id || 0) }); } catch (e) { toastError(e); return; }
         sub.remove(); back.remove();
         await awaitReindex((m) => m.tags.some((t) => t.id === r.id), 50, 300);
         const t = S.tagById.get(r.id); if (t) onPick(t); else toast('Person created; it will appear shortly.');
@@ -788,7 +788,7 @@ export function startDrawFace() {
   stage.addEventListener('pointerdown', down, true); stage.addEventListener('pointermove', move, true); stage.addEventListener('pointerup', up, true);
 }
 /** Move or resize a face box: drag inside it to move, drag a corner to resize; it stays inside the photo.
- *  Saved as a move of the region (digiKam's database and the sidecar), with undo in the change log. */
+ *  Saved as a move of the region (digiKam's database and the sidecar), with undo in the edit log. */
 export function adjustFace(f, d) {
   const { frame } = LB.el;
   if (!d || d.video) return;
@@ -882,7 +882,7 @@ export function renderInfo() {
     d.concepts?.length ? [sub('Detected'), h('div', { class: 'ichips' }, d.concepts.map((c) => h('span', { class: 'ichip', title: `The model’s guess (${Math.round(c.p * 100)}% of its vote)`, onclick: () => filterFromLightbox({ concept: c.name }) }, icon('spark'), c.name)))] : null,
     d.boxes?.length ? [sub('Objects'), h('div', { class: 'ichips' }, [...new Set(d.boxes.map((b) => b.cls))].map((c) => h('span', { class: 'ichip', onclick: () => filterFromLightbox({ obj: c }) },
       c, h('b', { style: 'font-weight:400;color:var(--fg2)' }, d.boxes.filter((b) => b.cls === c).length > 1 ? ` ×${d.boxes.filter((b) => b.cls === c).length}` : ''))))] : null,
-    d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a', style: 'font-size:12.5px' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
+    d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a small' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
     d.sharpn != null ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, `Sharper than ${Math.round(d.sharpn * 100)}% of your photos`),
       h('div', { class: 'b' }, [d.faceq != null ? `Face quality ${Math.round(d.faceq * 100)} / 100` : null, d.bright != null && (d.bright < 0.2 || d.clip_lo > 0.5) ? 'Very dark' : null,
         d.bright != null && (d.bright > 0.8 || d.clip_hi > 0.3) ? 'Very bright' : null].filter(Boolean).join(' · ')))) : null,
@@ -910,7 +910,7 @@ export function renderInfo() {
       h('textarea', { class: 'einput', placeholder: 'Caption', rows: 2, onkeydown: (e) => e.stopPropagation(), onchange: (e) => saveOne({ caption: e.target.value }) }, d.caption || ''),
       d.edited ? h('div', { class: 'enote' }, S.WRITE_FILES ? 'Changed here and saved to the sidecar and the image file. ' : 'Changed here and saved to the sidecar. ',
         S.AUTO_DB ? 'It goes into digiKam’s database by itself within a minute (once digiKam is closed). ' : 'digiKam shows it after “Reread Metadata From File”, or apply it to digiKam’s database from Explore. ',
-        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toast(e.message); return; } details.delete(d.id); toast('Viewer edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
+        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toastError(e); return; } details.delete(d.id); toast('Viewer edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
     // one row per face (named, suggested, unknown); a person tag without a face region gets a row with the badge picture
     show('people') ? (() => {
       const faced = new Set(d.faces.map((f) => f.tag));
@@ -928,13 +928,13 @@ export function renderInfo() {
         } },
         h('img', { src: f.kind === 'tagonly' ? faceUrl(f.tag) : `/facecrop/${d.id}/${f.x}/${f.y}/${f.w}/${f.h}.jpg`, alt: '' }),
         h('span', { class: 'nm' }, f.kind === 'confirmed' || f.kind === 'tagonly' ? f.name : f.kind === 'suggested' ? [h('i', null, 'Suggestion: '), f.name] : h('i', null, 'Unknown face')),
-        S.CAN_MANAGE ? h('span', { class: 'muted', style: 'font-size:12px' }, f.kind === 'tagonly' ? 'no face box ▾' : 'options ▾') : null)))];
+        S.CAN_MANAGE ? h('span', { class: 'muted smaller' }, f.kind === 'tagonly' ? 'no face box ▾' : 'options ▾') : null)))];
     })() : null,
     show('tags') && (tags.length || S.EDITING) ? [h('h4', null, 'Tags'), h('div', { class: 'ichips' }, tags.map((t) => { const c = chip(t);
       if (S.EDITING) c.append(h('button', { class: 'tx', title: 'Remove this tag', onclick: (e) => { e.stopPropagation(); saveOne({ remove_tags: [t.id] }); } }, icon('close'))); return c; })),
-      S.EDITING ? h('div', { style: 'margin-top:8px' }, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null,
+      S.EDITING ? h('div', { class: 'mt8',}, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null,
     show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('button', { type: 'button', class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
-    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('button', { type: 'button', class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'change') : null),
+    show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('button', { type: 'button', class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'Change') : null),
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
         d.region ? [', ', lnk(d.region, { region: d.region })] : null, d.country ? [', ', lnk(d.country, { country: d.country })] : null) : null,
       ex.gpsAccuracy ? h('div', { class: 'approx', title: 'Only the town is known: the pin marks its center' }, icon('place'),
@@ -955,7 +955,7 @@ export function renderInfo() {
       api(`/api/history?photo=${d.id}&limit=6`).then((r) => {
         if (!r.entries.length || !box.isConnected) return;
         box.append(h('summary', null, `Edit log · ${plural(r.total, 'change')}`), list);
-        if (r.total > 6) box.append(h('a', { class: 'lnk', style: 'font-size:12.5px', href: `#/history?photo=${d.id}` }, `See all ${nf.format(r.total)}`));
+        if (r.total > 6) box.append(h('a', { class: 'lnk small', href: `#/history?photo=${d.id}` }, `See all ${nf.format(r.total)}`));
         list.append(...r.entries.map((e) => histEntry(e, () => { details.delete(d.id); showItem(); }, false)));
         box.hidden = false;
       }).catch(() => {});

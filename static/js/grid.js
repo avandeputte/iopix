@@ -1,6 +1,6 @@
 /** The timeline grid: layout, virtual rendering, selection by click and keyboard. */
 import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
-import { S, ST, applyFilter, filterParams, loadState, savedSearchFor, toast } from './state.js';
+import { S, ST, applyFilter, filterParams, loadState, savedSearchFor, toast, toastError } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
@@ -97,7 +97,7 @@ export function layoutGrid() {
   $('.gbar', grid)?.remove();
   crumbs(trail);
   grid.append(h('div', { class: 'gbar', style: `top:${top0}px` },
-    h('span', { class: 'count' }, plural(d.count, 'item')),
+    h('span', { class: 'count' }, plural(d.count, 'photo')),
     byDate ? h('span', null, fmtRange(Math.min(d.ts[0], d.ts[d.count - 1]), Math.max(d.ts[0], d.ts[d.count - 1]))) : null,
     h('span', { class: 'sp' }),
     h('button', { type: 'button', class: 'lnk selall', title: 'Select everything in this view', hidden: G.sel.size >= d.count, onclick: () => selectRange(0, d.count - 1, true) }, 'Select all'),
@@ -120,7 +120,7 @@ export function layoutGrid() {
     [...filterParams().keys()].some((k) => k !== 'sort') && (S.USER || !S.USERS_EXIST) && !savedSearchFor(filterParams()) ? h('button', { class: 'pillbtn dlbtn', title: 'Save this search as a smart album (it updates itself)', onclick: async () => {
       const n = await promptDialog('Name for this smart album'); if (!n || !n.trim()) return;
       const q = filterParams(); q.delete('sort');
-      try { await post('/api/searches', { name: n.trim(), query: q.toString() }); toast(`Saved “${n.trim()}” under Albums.`); await loadState(); layoutGrid(); renderGrid(true); } catch (e) { toast(e.message); }
+      try { await post('/api/searches', { name: n.trim(), query: q.toString() }); toast(`Saved “${n.trim()}” under Albums.`); await loadState(); layoutGrid(); renderGrid(true); } catch (e) { toastError(e); }
     } }, icon('album'), h('span', null, 'Save search')) : null,
     byDate ? h('select', { title: 'Group the photos by day or by month', class: 'groupsel', onchange: (e) => {
       const anchor = firstVisibleIndex();

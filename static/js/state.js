@@ -59,6 +59,7 @@ export const S = {
 export const faceUrl = (tagId) => `/face/${tagId}?v=${S.tagById.get(tagId)?.icon || 0}`;
 // an account's avatar: the linked person's face badge from People, else the first letter
 export const avatarOf = (u, big) => u.person ? h('img', { class: 'avatar' + (big ? ' big' : ''), src: faceUrl(u.person), alt: '' }) : h('span', { class: 'avatar' + (big ? ' big' : '') }, u.name[0].toUpperCase());
+export function toastError(e, ms = 9000) { toast((e && e.message) || String(e), null, null, ms); }
 export function toast(msg, action, fn, ms = 6000) {
   const t = $('#toast');
   fill(t, msg, action ? h('button', { type: 'button', class: 'lnk', onclick: () => { t.hidden = true; fn(); } }, action) : null);

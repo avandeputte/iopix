@@ -26,7 +26,6 @@ from app.data import state
 
 ROLES = ("viewer", "editor", "admin")
 COOKIE = "iopix_session"
-OLD_COOKIE = "dkv_session"  # the name before the app was renamed: still read, so nobody is signed out by the change
 SESSION_DAYS = 30
 _secret = None
 
@@ -283,7 +282,6 @@ def clear_session(response, cloudflare_cookie: bool = False):
     """cloudflare_cookie: also drop Cloudflare Access's own session cookie for this site (on the home network, where
     Cloudflare's sign-out page cannot be reached), so the next visit from outside asks Cloudflare's sign-in again."""
     response.delete_cookie(COOKIE, path="/")
-    response.delete_cookie(OLD_COOKIE, path="/")
     response.delete_cookie(VIA_COOKIE, path="/")
     if cloudflare_cookie:
         response.delete_cookie("CF_Authorization", path="/")

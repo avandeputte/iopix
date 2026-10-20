@@ -55,6 +55,9 @@ export function icon(name) {
   s.innerHTML = `<svg viewBox="0 0 24 24"><path d="${ICONS[name] || ''}"/></svg>`;
   return s;
 }
+/** Placeholders with one look: while something loads, when a request failed. */
+export const loadingBox = (text = 'Loading…') => h('div', { class: 'empty loading' }, text);
+export const errorBox = (e) => h('div', { class: 'empty error' }, (e && e.message) || String(e));
 export function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -155,11 +158,13 @@ export async function post(path, body) {
 
 /** The signed-in user's settings (synced to the server) behind `store`; kept here so core.js imports nothing. */
 export const SETTINGS = { user: null, pending: {}, flush: 0 };
+export const KEY = 'iopix.';  // every key this app keeps in the browser starts with it
 export const store = {
-  get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  // browser keys carry the app's prefix (iopix.theme, iopix.tile…); the server-side user settings keep the bare names
+  get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; try { return localStorage.getItem(KEY + k) ?? d; } catch { return d; } },
   set(k, v) {
     if (SETTINGS.user) { SETTINGS.user[k] = v; SETTINGS.pending[k] = v; clearTimeout(SETTINGS.flush); SETTINGS.flush = setTimeout(() => { const b = SETTINGS.pending; SETTINGS.pending = {}; post('/api/auth/settings', b).catch(() => {}); }, 400); return; }
-    try { localStorage.setItem(k, v); } catch { /* private mode */ }
+    try { localStorage.setItem(KEY + k, v); } catch { /* private mode */ }
   },
 };
 

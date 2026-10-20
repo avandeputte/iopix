@@ -2,7 +2,7 @@
    (data-theme on <html>: light | dark; absent = follow the system). The hues (--c-*) colour
    the navigation, search chips, Explore sections and quick filters; --mix is how strongly a
    hue tints a background in each theme. */
-:root {
+:root { --warn: #e37400; --danger: #d93025;
   --bg: #ffffff; --bg2: #f1f3f4; --bg3: #e8eaed; --fg: #202124; --fg2: #5f6368; --line: #dadce0;
   --brand: #4a5aa0; --brand-deep: #3b4a8c; --brand-ink: #3b4a8c;
   --accent: #1a73e8; --accent-bg: #e8f0fe; --tile: #e8eaed; --shadow: 0 2px 10px rgba(0,0,0,.18);
@@ -318,7 +318,7 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 .logview { height: min(60vh, 560px); overflow: auto; margin: 0 0 6px; padding: 10px 12px; background: var(--bg2); border-radius: 10px; font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
 .modal h3 { margin: 0 0 10px; font-size: 20px; font-weight: 400; }
 .modal p { margin: 0 0 12px; color: var(--fg2); }
-.modal .warn { color: #e37400; }
+.modal .warn { color: var(--warn); }
 .modal label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .modal .alist .frow.on { opacity: .6; }  /* a zip part already downloaded */
@@ -429,7 +429,7 @@ body.filters-open #crumbbar { right: 340px; }
 .mtable .mrerun { display: inline-block; margin-top: 4px; font-size: 11.5px; }
 .pillbtn.small { height: 28px; padding: 0 12px; font-size: 12.5px; }
 .mst { font-size: 12px; color: var(--fg2); margin-top: 2px; }
-.mst.ok { color: var(--c-green); } .mst.on { color: var(--accent); } .mst.warn { color: #e37400; }
+.mst.ok { color: var(--c-green); } .mst.on { color: var(--accent); } .mst.warn { color: var(--warn); }
 .ajob .ahead { display: flex; gap: 12px; align-items: baseline; }
 .ajob .ahead .sp { flex: 1; }
 .ajob .bar { height: 5px; border-radius: 3px; background: var(--bg3); margin-top: 8px; overflow: hidden; }
@@ -883,3 +883,14 @@ button.lnk:hover { text-decoration: underline; }
 .tile:focus-visible, .card:focus-visible, .trow:focus-visible, .frow:focus-visible, .fcell:focus-visible, .stat:focus-visible, .pill:focus-visible { outline-offset: -2px; }
 .tile:focus-visible .tcheck, .trow:focus-visible .tacts, .card:focus-visible .carddl, .card:focus-within .carddl { opacity: 1; display: inline-flex; }
 @media (hover: none) { .chip button, .ichip .tx { min-width: 32px; min-height: 32px; } .tact, .seg button, .eseg button { min-width: 36px; min-height: 36px; } .frow, .trow { min-height: 40px; } }
+
+/* ---- shared layout classes (instead of the same inline styles over and over) */
+.intro { max-width: 820px; }
+.small { font-size: 12.5px; } .smaller { font-size: 12px; } .note { font-size: 13px; }
+.stack { display: grid; gap: 8px; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .toolbar.tight { gap: 6px; } .toolbar.wide { gap: 10px; }
+.chk { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.pillbtn.wrapbtn { height: auto; padding: 6px 8px; white-space: normal; }
+.mt0 { margin-top: 0; } .mt6 { margin-top: 6px; } .mt8 { margin-top: 8px; } .mt10 { margin-top: 10px; } .my8 { margin: 8px 0; } .my10 { margin: 10px 0; } .my14 { margin: 14px 0; }
+.ptitle .muted { font-size: 13px; font-weight: 400; margin-left: 12px; }
+.empty.error { color: var(--danger); } .empty.loading { color: var(--fg2); }

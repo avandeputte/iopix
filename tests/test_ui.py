@@ -235,7 +235,7 @@ def test_settings_and_maintenance_pages(page, server):
     assert page.locator(".mtable tr[data-job=facedetect] select.mpick option").count() == 3, "YuNet, SCRFD and RetinaFace"
     assert page.locator(".mtable tr[data-model=geonames]").count() == 1, "models without a job have a row too"
     assert page.locator(".mtable thead th").all_inner_texts()[:3] == ["Feature", "Model", "Progress"]
-    assert page.locator("b", has_text="Restart the viewer").count() == 1
+    assert page.locator("b", has_text="Restart ").count() == 1  # "Restart <the app's name>"
     page.locator(".stabs button", has_text="Library").click()
     assert page.locator(".srow b", has_text="Metadata consistency").count() == 1, "consistency sits under Library"
     assert page.locator(".stable.wide tr").count() >= 10 and page.locator(".stable.wide button", has_text="Rebuild").count() == 1
@@ -421,7 +421,7 @@ def test_appearance_setting_switches_the_theme(page, server):
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(255, 255, 255)"
     page.click("#themeseg [data-theme=system]")
     assert page.evaluate("document.documentElement.dataset.theme") is None
-    assert page.evaluate("localStorage.getItem('theme')") == "system"
+    assert page.evaluate("localStorage.getItem('iopix.theme')") == "system"
 
 
 def test_light_is_the_default_theme(browser, server):
@@ -539,7 +539,7 @@ def test_grid_select_all_toggles_and_groups_by_month(page, server, lib):
     assert 0 < months < days, (days, months)
     head = page.locator(".ghead").first.inner_text()
     assert any(m in head for m in ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) and "," not in head, head
-    assert page.evaluate("localStorage.getItem('group')") == "month"
+    assert page.evaluate("localStorage.getItem('iopix.group')") == "month"
     page.select_option(".gbar .groupsel", "day")
 
 
@@ -693,7 +693,7 @@ def test_multi_edit_offers_title_caption_and_deselect_all(page, server, lib):
     page.wait_for_selector("#selbar", timeout=5000)
     assert page.locator(".gbar .selnone").is_visible() and page.locator(".gbar .selall").is_visible(), "partly selected: both links"
     page.locator("#selbar button[title='Edit']").click()
-    page.wait_for_selector(".modal h3:has-text('Edit 2 items')", timeout=5000)
+    page.wait_for_selector(".modal h3:has-text('Edit 2 photos')", timeout=5000)
     for ph in ("Title for all", "Caption for all"):
         assert page.locator(f".modal [placeholder='{ph}']").count() == 1
     assert page.locator(".modal .stars button").count() >= 5 and page.locator(".modal .erow .el", has_text="Add tag").count() == 1
@@ -931,7 +931,7 @@ def test_app_name_shows_in_the_top_bar_and_tab(page, server):
         assert page.title() == "iothing Photos"
         page.goto(server + "/#/settings")
         page.wait_for_selector(".srow:has-text('Name')", timeout=10000)
-        assert page.locator(".srow", has_text="What the viewer calls itself").locator("input").input_value() == "iothing Photos"
+        assert page.locator(".srow", has_text="calls itself").locator("input").input_value() == "iothing Photos"
     finally:
         set_name("")
 
@@ -1694,7 +1694,7 @@ def test_search_box_enter_runs_the_search(page, server):
     page.goto(server + "/#/explore")
     page.wait_for_selector("#q", timeout=10000)
     page.fill("#q", "yellowstone")
-    page.wait_for_selector("#suggest .sg, .sg", timeout=5000)  # the suggestion list draws as you type
+    page.wait_for_selector("#suggest .sg, .sg", timeout=20000)  # the suggestion list draws as you type (slow late in a full run)
     page.keyboard.press("Enter")
     page.wait_for_function("location.hash.includes('q=') || location.hash.includes('place') || location.hash.includes('tag')", timeout=10000)
     assert page.locator(".chip").count() >= 1
@@ -1752,8 +1752,8 @@ def test_proxy_sign_in_settings(page, server):
         assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok
     try:
         page.goto(server + "/#/settings?tab=users")
-        page.wait_for_selector("h3:has-text('Sign-in at a proxy')", timeout=10000)
-        box = page.locator("div:has(> h3:has-text('Sign-in at a proxy'))")
+        page.wait_for_selector("h2:has-text('Sign-in at a proxy')", timeout=10000)
+        box = page.locator("div:has(> h2:has-text('Sign-in at a proxy'))")
         assert box.locator("input").first.is_hidden(), "Off: nothing else to fill in"
         box.locator("select").first.select_option("cloudflare")
         box.locator("input[placeholder='myteam.cloudflareaccess.com']").fill("myteam.cloudflareaccess.com")

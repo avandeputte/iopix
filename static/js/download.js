@@ -23,10 +23,10 @@ export async function downloadDialog(p, selected) {
     h('div', { class: 'expopts' },
       h('label', null, h('span', { class: 'muted' }, 'Size'), sel['exp-size']), h('label', null, h('span', { class: 'muted' }, 'Format'), sel['exp-fmt']),
       h('label', null, h('span', { class: 'muted' }, 'File names'), sel['exp-name'])),
-    h('label', { style: 'margin-top:10px' }, nogps, ' Remove the location (GPS and place names) from the copies'),
-    h('label', { style: 'margin-top:6px' }, flat, ' All files in one folder (no album folders)'),
-    h('label', { style: 'margin-top:6px' }, side, ' Include digiKam XMP sidecar files'),
-    h('label', { style: 'margin-top:8px' }, 'Split into zip files of at most ', size),
+    h('label', { class: 'mt10',}, nogps, ' Remove the location (GPS and place names) from the copies'),
+    h('label', { class: 'mt6',}, flat, ' All files in one folder (no album folders)'),
+    h('label', { class: 'mt6',}, side, ' Include digiKam XMP sidecar files'),
+    h('label', { class: 'mt8',}, 'Split into zip files of at most ', size),
     h('p', { class: 'muted', style: 'font-size:12.5px;margin:8px 0 0' }, 'Copies are made for the download; the photos in the library are not changed. Resized and converted copies keep their dates, camera details, keywords and captions. Videos keep their size and format.'),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
   // the browser downloads each part through a hidden form, so even huge selections work

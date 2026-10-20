@@ -1,6 +1,6 @@
 /** Metadata editing dialogs: rating, titles, captions, tags, dates, locations and templates. */
 import { $, UTC, api, date, dfTimeLocal, fill, fmtWhen, h, icon, nf, norm, plural, post } from './core.js';
-import { S, go, hashFor, photosWith, pollSoon, toast } from './state.js';
+import { S, go, hashFor, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G } from './grid.js';
 import { confirmDialog, modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
@@ -47,12 +47,12 @@ export async function metadataEditor(d) {
   const load = async () => { try { m = await api(`/api/metadata/${d.id}`); } catch (e) { fill(body, h('div', { class: 'warn' }, e.message)); return; } draw(); };
   const save = async () => {
     saveBtn.disabled = true; fill(saveBtn, 'Saving…');
-    try { await post(`/api/metadata/${d.id}`, { changes: [...changed.values()] }); } catch (e) { toast(e.message, null, null, 10000); saveBtn.disabled = false; fill(saveBtn, `Save ${plural(changed.size, 'change')}`); return; }
+    try { await post(`/api/metadata/${d.id}`, { changes: [...changed.values()] }); } catch (e) { toastError(e, 10000); saveBtn.disabled = false; fill(saveBtn, `Save ${plural(changed.size, 'change')}`); return; }
     toast(`${plural(changed.size, 'field')} saved; the library now says the same.`); changed.clear(); fill(saveBtn, 'Save changes');
     details.delete(d.id); S.keepView = true; pollSoon(600); load();
   };
   const reread = h('button', { class: 'pillbtn', title: 'Fill the library’s fields for this photo again from its file and sidecar (digiKam: Read Metadata From File)', onclick: async () => {
-    try { await post(`/api/metadata/${d.id}/reread`, {}); toast('Read again from the file and sidecar.'); details.delete(d.id); S.keepView = true; pollSoon(600); } catch (e) { toast(e.message, null, null, 9000); } } }, 'Reread from file');
+    try { await post(`/api/metadata/${d.id}/reread`, {}); toast('Read again from the file and sidecar.'); details.delete(d.id); S.keepView = true; pollSoon(600); } catch (e) { toastError(e); } } }, 'Reread from file');
   const add = S.CAN_MANAGE ? (() => {
     const g = h('select', { class: 'sharepick' }, ['XMP-dc', 'XMP-photoshop', 'XMP-iptcCore', 'XMP-xmp', 'XMP-xmpRights', 'IFD0', 'ExifIFD', 'GPS', 'IPTC'].map((x) => h('option', null, x)));
     const t = h('input', { class: 'einput', placeholder: 'Field, e.g. Headline', style: 'width:160px' });
@@ -60,7 +60,7 @@ export async function metadataEditor(d) {
     return h('div', { class: 'mdadd' }, h('span', { class: 'muted' }, 'Add a field'), g, t, v, h('button', { class: 'pillbtn', onclick: () => {
       if (!t.value.trim()) return; changed.set(`${g.value}:${t.value.trim()}`, { group: g.value, tag: t.value.trim(), value: v.value }); saveBtn.disabled = false; fill(saveBtn, `Save ${plural(changed.size, 'change')}`); toast('Added; save to write it.'); } }, 'Add'));
   })() : null;
-  const back = modal(`All metadata · ${d.name}`, h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, filter, which), body, add,
+  const back = modal(`All metadata · ${d.name}`, h('div', { class: 'toolbar',}, filter, which), body, add,
     h('div', { class: 'modal-btns' }, S.CAN_MANAGE ? reread : null, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'), S.CAN_MANAGE ? saveBtn : null));
   back.querySelector('.modal').classList.add('mdmodal');
   load();
@@ -86,10 +86,10 @@ export async function copyMetadata(ids) {
     const targets = ids.filter((x) => x !== src);
     if (!Object.keys(ch).length || !targets.length) { toast('Nothing to copy.'); return; }
     back.remove();
-    if (await editPhotos(targets, ch)) toast(`Copied to ${plural(targets.length, 'photo')}. Each change is in the change log with undo.`);
+    if (await editPhotos(targets, ch)) toast(`Copied to ${plural(targets.length, 'photo')}. Each change is in the edit log with undo.`);
   } }, 'Copy to the others');
   const back = modal(`Copy metadata to ${plural(ids.length - 1, 'photo')}`, h('div', { class: 'muted', style: 'margin-bottom:6px' }, 'Copy from this photo (click to choose):'), thumbs,
-    h('div', { class: 'expopts' }, F.map(([k, l]) => h('label', { style: 'display:flex;gap:6px;align-items:center;cursor:pointer' }, boxes[k], l))),
+    h('div', { class: 'expopts' }, F.map(([k, l]) => h('label', { class: 'chk',}, boxes[k], l))),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), go_));
 }
 export async function editPhotos(ids, changes) {
@@ -124,7 +124,7 @@ export async function createTagThenPick(full, onPick) {
   if (parts.length) { const p = S.META.tags.find((t) => !t.person && t.full.toLowerCase() === parts.join('/').toLowerCase()); if (!p) { toast(`Parent tag “${parts.join(' › ')}” does not exist.`); return; } parent = p.id; }
   if (!await confirmDialog(`Create the tag “${full}” in digiKam’s database? digiKam must be closed; a backup is made first.`)) return;
   let r;
-  try { r = await post('/api/tags/op', { op: 'add', parent, name }); } catch (e) { toast(e.message, null, null, 9000); return; }
+  try { r = await post('/api/tags/op', { op: 'add', parent, name }); } catch (e) { toastError(e); return; }
   await awaitReindex((m) => m.tags.some((t) => t.id === r.id));
   $('#taglist')?.remove();
   const t = S.tagById.get(r.id);
@@ -164,7 +164,7 @@ export function tagDialog(ids) {
 }
 export function editDialog(ids) {
   const save = (ch) => editPhotos(ids, ch);
-  const back = modal(`Edit ${plural(ids.length, 'item')}`,
+  const back = modal(`Edit ${plural(ids.length, 'photo')}`,
     h('p', null, 'Each change is saved straight away to the XMP sidecar files. digiKam’s database is not touched.'),
     editControls({}, save),
     ...(() => {  // title and caption for every selected photo, applied on demand (not on each keystroke)
@@ -192,19 +192,19 @@ export async function dbDialog() {
   try { st = await api('/api/edits/db'); } catch { toast('Could not check the digiKam database status.'); return; }
   const msg = h('p', { class: st.digikamRunning ? 'warn' : '' }, st.digikamRunning
     ? 'digiKam is running. Quit digiKam first; its database must not be changed while it is open.'
-    : st.ask ? 'The viewer cannot see from here whether digiKam is open, so it does not check.' : 'digiKam is closed, so its database can be updated now.');
+    : st.ask ? `${S.APP_NAME} cannot see from here whether digiKam is open, so it does not check.` : 'digiKam is closed, so its database can be updated now.');
   const applyBtn = h('button', { class: 'pillbtn on', disabled: !!st.digikamRunning || !st.pending, onclick: async () => {
     applyBtn.textContent = 'Updating…';
     try {
       const r = await post('/api/edits/db', {});
       back.remove();
-      toast(`Updated ${plural(r.applied, 'item')} in digiKam’s database.` + (r.skipped.length ? ` ${r.skipped.length} skipped: ${r.skipped[0].reason}.` : ''), null, null, 9000);
+      toast(`Updated ${plural(r.applied, 'photo')} in digiKam’s database.` + (r.skipped.length ? ` ${r.skipped.length} skipped: ${r.skipped[0].reason}.` : ''), null, null, 9000);
       S.keepView = true; pollSoon();
     } catch (e) { applyBtn.textContent = 'Apply to digiKam database'; msg.className = 'warn'; msg.textContent = e.message; }
   } }, 'Apply to digiKam database');
   const back = modal('Apply edits to digiKam’s database',
     h('p', null, `${plural(st.pending, 'photo has', 'photos have')} edits that are saved in XMP sidecars but not yet in digiKam’s database.`),
-    h('p', null, 'This writes the same ratings, labels, titles, captions and tags into digikam4.db. A copy of the database is saved in the viewer’s data/db-backups folder first.'),
+    h('p', null, `This writes the same ratings, labels, titles, captions and tags into digikam4.db. A copy of the database is saved in ${S.APP_NAME}’s data/db-backups folder first.`),
     msg,
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
       h('a', { class: 'pillbtn', href: hashFor('photos', photosWith({ edited: 1 })), onclick: () => back.remove() }, 'Show them'), applyBtn));
@@ -224,7 +224,7 @@ export function dateEditor(ids, current, after) {
   return h('div', { class: 'dateedit' },
     h('div', { class: 'erow' }, h('span', { class: 'el' }, ids.length > 1 ? 'Set all to' : 'Taken'), inp, setBtn),
     h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Shift by'), amount, unit, h('button', { class: 'pillbtn', title: 'Move the date later', onclick: shift(1) }, '+ later'), h('button', { class: 'pillbtn', title: 'Move the date earlier', onclick: shift(-1) }, '− earlier')),
-    h('div', { class: 'muted', style: 'font-size:12px' }, 'Shifting keeps each photo’s own time and moves it by the same amount, for a camera clock that was wrong.'));
+    h('div', { class: 'muted smaller' }, 'Shifting keeps each photo’s own time and moves it by the same amount, for a camera clock that was wrong.'));
 }
 /** Face detection on request: a photo (answered at once) or a folder (in the background). Faces already
  *  marked, by digiKam or anything else, are kept; only faces nothing marked become new unnamed faces. */
@@ -232,7 +232,7 @@ export async function detectFaces(ids, folder) {
   if (folder && !await confirmDialog(`Look for faces in the ${nf.format(folder.nAll)} photos of “${folder.path.replace(/^\//, '')}” (with its subfolders)? New faces are added to digiKam’s database as unnamed faces; faces already marked stay as they are.`)) return;
   if (!folder) toast('Looking for faces…', null, null, 30000);
   let r;
-  try { r = await post('/api/faces/detect', folder ? { album: folder.id } : { ids }); } catch (e) { toast(e.message, null, null, 9000); return; }
+  try { r = await post('/api/faces/detect', folder ? { album: folder.id } : { ids }); } catch (e) { toastError(e); return; }
   if (!r.done) { toast(`Looking for faces in ${plural(r.queued, 'photo')} in the background; progress in Maintenance › AI analysis and models.`, null, null, 9000); return; }
   toast(r.added ? `Found ${plural(r.added, 'new face')}; ${r.found - r.added ? `${plural(r.found - r.added, 'face was', 'faces were')} already marked.` : ''} Name ${r.added === 1 ? 'it' : 'them'} under People or here.` : r.found ? `No new faces: the ${plural(r.found, 'face')} found ${r.found === 1 ? 'is' : 'are'} already marked.` : 'No faces found.', null, null, 9000);
   if (r.added && LB.open) { (ids || []).forEach((i) => details.delete(i)); S.keepView = true; setTimeout(() => { pollStatus().then(() => { if (LB.open) showItem(); }); }, 800); }
@@ -244,7 +244,7 @@ export async function locationDialog(ids, current, after) {
   const alt = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'altitude m', value: current?.alt ?? '', style: 'width:110px', oninput: () => { altAuto = false; fill(altNote); } });
   // the altitude follows the position (ground height from Google or Open-Meteo) until it is typed by hand
   let altAuto = current?.alt == null, altTimer = 0;
-  const altNote = h('span', { class: 'muted', style: 'font-size:12px' });
+  const altNote = h('span', { class: 'muted smaller' });
   const fetchAlt = () => {
     clearTimeout(altTimer);
     if (!altAuto || !lat.value || !lon.value) return;
@@ -289,14 +289,14 @@ export async function locationDialog(ids, current, after) {
     const q = search.value.trim();
     if (q.length < 2) { results.hidden = true; return; }
     let r;
-    try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toast(e.message); return; }
+    try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toastError(e); return; }
     if (search.value.trim() !== q) return;
     results.hidden = false;
     const note = r.note ? h('div', { class: 'muted', style: 'padding:4px 8px;font-size:12px' }, r.note) : null;
-    fill(results, note, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', title: `${x.lat}, ${x.lon}`, onclick: () => {
+    fill(results, note, r.results.length ? r.results.map((x) => h('div', { class: 'frow wrapbtn', title: `${x.lat}, ${x.lon}`, onclick: () => {
       lat.value = x.lat; lon.value = x.lon; results.hidden = true; search.value = x.name; place();
       if (map) map.setView([x.lat, x.lon], x.zoom || 14);
-    } }, icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
+    } }, icon('place'), h('span', { class: 'nm wrapbtn' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, r.source === 'offline' ? 'No town by that name in the offline place list (no internet connection for the full search).' : 'Nothing found.'));
   };
   // "Suggest location": the places of the photos taken nearest in time, and on request a landmark Google recognizes
@@ -306,16 +306,16 @@ export async function locationDialog(ids, current, after) {
   const suggest = async () => {
     sugBox.hidden = false; fill(sugBox, h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Looking at the photos taken around the same time…'));
     let r; try { r = await api(`/api/location/suggest?id=${ids[0]}`); } catch (e) { fill(sugBox, h('div', { class: 'muted', style: 'padding:6px 8px' }, e.message)); return; }
-    const landmark = r.landmarks ? h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: async (e) => {
+    const landmark = r.landmarks ? h('div', { class: 'frow wrapbtn wrapbtn wrapbtn wrapbtn', onclick: async (e) => {
       const row = e.currentTarget; fill(row, icon('spark'), h('span', { class: 'nm muted' }, 'Asking Google Cloud Vision…'));
-      let L2; try { L2 = await post('/api/location/landmark', { id: ids[0] }); } catch (err) { fill(row, icon('spark'), h('span', { class: 'nm muted', style: 'white-space:normal' }, err.message)); return; }
-      row.replaceWith(...(L2.landmarks.length ? L2.landmarks.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => useSpot(x) }, icon('spark'),
-        h('span', { class: 'nm', style: 'white-space:normal' }, x.name, h('span', { class: 'muted' }, ` · landmark, ${Math.round(x.score * 100)}% sure`))))
+      let L2; try { L2 = await post('/api/location/landmark', { id: ids[0] }); } catch (err) { fill(row, icon('spark'), h('span', { class: 'nm muted' }, err.message)); return; }
+      row.replaceWith(...(L2.landmarks.length ? L2.landmarks.map((x) => h('div', { class: 'frow', onclick: () => useSpot(x) }, icon('spark'),
+        h('span', { class: 'nm' }, x.name, h('span', { class: 'muted' }, ` · landmark, ${Math.round(x.score * 100)}% sure`))))
         : [h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Google recognized no landmark in this photo.')]));
     } }, icon('spark'), h('span', { class: 'nm' }, 'Recognise a landmark in the photo', h('span', { class: 'muted' }, ' · Google Cloud Vision, about $0.0015 a photo after 1,000 free a month'))) : null;
-    fill(sugBox, r.suggestions.length ? r.suggestions.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', title: `${x.lat}, ${x.lon}`, onclick: () => useSpot(x) },
+    fill(sugBox, r.suggestions.length ? r.suggestions.map((x) => h('div', { class: 'frow wrapbtn', title: `${x.lat}, ${x.lon}`, onclick: () => useSpot(x) },
       h('img', { src: `/thumb/${x.id}`, alt: '', style: 'width:34px;height:34px;object-fit:cover;border-radius:5px;flex:none' }),
-      h('span', { class: 'nm', style: 'white-space:normal' }, x.place || `${x.lat.toFixed(4)}, ${x.lon.toFixed(4)}`, h('span', { class: 'muted' }, ` · ${x.name}, taken ${ago(x.minutes)}${x.same_camera ? '' : ' (another camera)'}`))))
+      h('span', { class: 'nm wrapbtn' }, x.place || `${x.lat.toFixed(4)}, ${x.lon.toFixed(4)}`, h('span', { class: 'muted' }, ` · ${x.name}, taken ${ago(x.minutes)}${x.same_camera ? '' : ' (another camera)'}`))))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, 'No photo with a location was taken within 6 hours of this one.'), landmark);
   };
   const back = modal(ids.length > 1 ? `Set location for ${nf.format(ids.length)} photos` : 'Set location',
@@ -323,9 +323,9 @@ export async function locationDialog(ids, current, after) {
     h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px' }, search,
       h('button', { class: 'pillbtn', title: 'Places of the photos taken around the same time, or a landmark Google recognizes', onclick: suggest }, icon('spark'), 'Suggest location')), results, sugBox,
     h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;cursor:pointer;flex-wrap:wrap' }, townOnly, h('b', null, 'Only the town is known'),
-      accSel, h('span', { class: 'muted', style: 'font-size:12.5px' }, 'the pin marks the town’s center; the photo is shown as approximate')),
+      accSel, h('span', { class: 'muted small' }, 'the pin marks the town’s center; the photo is shown as approximate')),
     mapEl,
-    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, lat, lon, alt, altNote,
+    h('div', { class: 'toolbar',}, lat, lon, alt, altNote,
       h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; alt.value = d.alt ?? ''; altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
       h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
@@ -381,7 +381,7 @@ export async function gpxDialog(ids) {
     fill(result,
       h('p', null, `Track: ${nf.format(t.points)} points, ${t.km} km, ${fmtWhen(t.start)} to ${dfTimeLocal.format(date(t.end))} (in this browser’s time zone).`),
       h('p', null, h('b', null, `${nf.format(r.matched)} of ${nf.format(r.considered)} photos match`), r.unmatched ? ` (${nf.format(r.unmatched)} were taken too far from any track point)` : '', r.skipped_with_position ? `; ${nf.format(r.skipped_with_position)} already had a position and were left alone.` : '.'),
-      r.matched ? h('div', { class: 'muted', style: 'font-size:12.5px' }, 'Typical gap between photo time and nearest track point: ', `${Math.round(r.matches.reduce((a, m) => a + m.gap, 0) / r.matches.length)} s`, '. If photos land in the wrong place, the camera clock or the UTC offset is off; adjust and match again.') : null);
+      r.matched ? h('div', { class: 'muted small' }, 'Typical gap between photo time and nearest track point: ', `${Math.round(r.matches.reduce((a, m) => a + m.gap, 0) / r.matches.length)} s`, '. If photos land in the wrong place, the camera clock or the UTC offset is off; adjust and match again.') : null);
     mapEl.hidden = !r.matched;
     if (r.matched) try {
       await loadLeaflet(false);
@@ -396,33 +396,33 @@ export async function gpxDialog(ids) {
   const back = modal(`Correlate ${nf.format(ids.length)} photos with a GPS track`,
     h('p', { class: 'muted' }, 'Like digiKam’s Geolocation Editor: each photo gets the position the track recorded at the moment it was taken. Track times are UTC; tell it what time zone the camera clock was set to.'),
     h('div', { class: 'erow' }, h('span', { class: 'el' }, 'GPX file'), file),
-    h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Camera zone'), offset, h('span', { class: 'muted', style: 'font-size:12px' }, 'what the camera’s clock was set to')),
-    h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Clock error'), shiftAmt, shiftUnit, h('span', { class: 'muted', style: 'font-size:12px' }, 'negative if the camera ran fast')),
+    h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Camera zone'), offset, h('span', { class: 'muted smaller' }, 'what the camera’s clock was set to')),
+    h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Clock error'), shiftAmt, shiftUnit, h('span', { class: 'muted smaller' }, 'negative if the camera ran fast')),
     h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Max gap'), gap, h('label', { style: 'display:flex;gap:6px;align-items:center;margin-left:12px' }, onlyMissing, 'only photos without a position')),
-    h('div', { style: 'margin:8px 0' }, h('button', { class: 'pillbtn', onclick: run }, icon('spark'), 'Match')),
+    h('div', { class: 'my8',}, h('button', { class: 'pillbtn', onclick: run }, icon('spark'), 'Match')),
     result, mapEl,
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
       h('button', { class: 'pillbtn on', onclick: async () => {
         if (!token || !preview?.matched) { toast('Match first.'); return; }
         if (!await confirmDialog(`Write positions to ${nf.format(preview.matched)} photos? Sidecars are backed up first; digiKam gets them with “Apply edits to digiKam database”.`)) return;
         try { const r = await post('/api/gpx/apply', { token, ids, ...params() }); back.remove(); toast(`Positions written to ${nf.format(r.edited)} photos.`); S.keepView = true; pollSoon(); }
-        catch (e) { toast(e.message, null, null, 9000); }
+        catch (e) { toastError(e); }
       } }, icon('place'), 'Apply positions')));
   file.onchange = run;
 }
 export async function templatePicker(ids, after) {
   const tpls = await loadTemplates();
   const back = modal(`Apply a metadata template to ${plural(ids.length, 'photo')}`,
-    tpls.length ? h('div', { class: 'alist' }, tpls.map((t) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: async () => { back.remove(); if (await editPhotos(ids, { template: Object.fromEntries(Object.keys(TEMPLATE_LABEL).map((k) => [k, t.fields[k] || ''])) })) after?.(); } },
-      icon('copyright'), h('div', null, h('b', null, t.name), h('div', { class: 'muted', style: 'font-size:12px' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ')))))) 
+    tpls.length ? h('div', { class: 'alist' }, tpls.map((t) => h('div', { class: 'frow wrapbtn', onclick: async () => { back.remove(); if (await editPhotos(ids, { template: Object.fromEntries(Object.keys(TEMPLATE_LABEL).map((k) => [k, t.fields[k] || ''])) })) after?.(); } },
+      icon('copyright'), h('div', null, h('b', null, t.name), h('div', { class: 'muted smaller' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ')))))) 
       : h('p', { class: 'muted' }, 'No templates yet. Define them in Settings > Metadata templates.'),
-    h('p', { class: 'muted', style: 'font-size:12px' }, 'Applying a template sets every template field; fields left empty in the template are cleared on the photo, as in digiKam.'),
+    h('p', { class: 'muted smaller' }, 'Applying a template sets every template field; fields left empty in the template are cleared on the photo, as in digiKam.'),
     h('div', { class: 'modal-btns' }, h('a', { class: 'pillbtn', href: '#/settings', onclick: () => back.remove() }, 'Manage templates'), h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel')));
 }
 export function templatesSection(m) {
   const list = h('div');
   let tpls = (m.templates || []).map((t) => ({ ...t, fields: { ...t.fields } }));
-  const save = async () => { try { await post('/api/settings', { templates: tpls }); S.TEMPLATES = null; toast('Templates saved.'); } catch (e) { toast(e.message); } draw(); };
+  const save = async () => { try { await post('/api/settings', { templates: tpls }); S.TEMPLATES = null; toast('Templates saved.'); } catch (e) { toastError(e); } draw(); };
   const edit = (t, isNew) => {
     const name = h('input', { class: 'einput', style: 'margin:0', placeholder: 'Template name', value: t.name || '' });
     const inputs = Object.keys(TEMPLATE_LABEL).map((k) => [k, h('input', { class: 'einput', style: 'margin:0', placeholder: TEMPLATE_LABEL[k], value: t.fields[k] || '' })]);
@@ -432,9 +432,9 @@ export function templatesSection(m) {
       h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
         h('button', { class: 'pillbtn on', onclick: () => { if (!name.value.trim()) { name.focus(); return; } t.name = name.value.trim(); inputs.forEach(([k, inp]) => { t.fields[k] = inp.value.trim(); }); if (isNew) tpls.push(t); back.remove(); save(); } }, 'Save')));
   };
-  const draw = () => fill(list, tpls.map((t) => h('div', { class: 'srow' }, h('div', null, h('b', null, t.name), h('div', { class: 'muted', style: 'font-size:13px' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ') || 'empty')),
+  const draw = () => fill(list, tpls.map((t) => h('div', { class: 'srow' }, h('div', null, h('b', null, t.name), h('div', { class: 'muted note' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ') || 'empty')),
       h('span', { style: 'display:flex;gap:6px' }, h('button', { class: 'pillbtn', onclick: () => edit(t, false) }, 'Edit'), h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the template “${t.name}”? Photos it was applied to are not changed.`, { ok: 'Delete', danger: true })) { tpls = tpls.filter((x) => x !== t); save(); } } }, 'Delete')))),
-    h('div', { style: 'margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => edit({ name: '', fields: {} }, true) }, icon('add'), 'New template')));
+    h('div', { class: 'mt10',}, h('button', { class: 'pillbtn', onclick: () => edit({ name: '', fields: {} }, true) }, icon('add'), 'New template')));
   draw();
-  return h('div', null, h('h2', null, 'Metadata templates'), h('div', { class: 'muted', style: 'max-width:820px' }, 'Like digiKam’s templates: creator, copyright, credit, source, instructions and contact details, applied to any selection in one go from the Edit dialog or the info panel.'), list);
+  return h('div', null, h('h2', null, 'Metadata templates'), h('div', { class: 'muted intro' }, 'Like digiKam’s templates: creator, copyright, credit, source, instructions and contact details, applied to any selection in one go from the Edit dialog or the info panel.'), list);
 }

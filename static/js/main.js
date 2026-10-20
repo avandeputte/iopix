@@ -49,27 +49,27 @@ export function dkBanner(d) {
   let b = $('#dkbanner');
   const show = d && S.IS_ADMIN && (!d.sync || !d.reachable || d.conflict);
   const key = !show ? null : d.conflict ? 'conflict:' + d.localChanges : d.sync ? 'offline:' + d.since : 'off';
-  let dismissed = null; try { dismissed = sessionStorage.getItem('dk-dismissed'); } catch { /* private mode */ }
+  let dismissed = null; try { dismissed = sessionStorage.getItem('iopix.digikamBannerDismissed'); } catch { /* private mode */ }
   if (!show || dismissed === key) { b?.remove(); return; }
   if (b && b.dataset.key === key) return;
   b?.remove();
   const asOf = d.mirror?.taken ? fmtWhen(d.mirror.taken) : 'the last read';
   const text = d.conflict
-    ? ['Changes made while sync was off', `${plural(d.localChanges, 'change')} made with Sync with digiKam off ${d.localChanges === 1 ? 'is' : 'are'} not in digiKam yet, so the viewer keeps using its own library. Settings › Sync with digiKam merges them into digiKam, or replaces them with digiKam’s library.`]
+    ? ['Changes made while sync was off', `${plural(d.localChanges, 'change')} made with Sync with digiKam off ${d.localChanges === 1 ? 'is' : 'are'} not in digiKam yet, so ${S.APP_NAME} keeps using its own library. Settings › Sync with digiKam merges them into digiKam, or replaces them with digiKam’s library.`]
     : !d.sync
-    ? ['Sync with digiKam is off', 'The library lives in the viewer’s own tables and everything works there; digiKam’s database is not opened.']
+    ? ['Sync with digiKam is off', `The library lives in ${S.APP_NAME}’s own tables and everything works there; digiKam’s database is not opened.`]
     : ['digiKam’s database is unreachable', `Since ${fmtWhen(d.since)}. Showing the library as of ${asOf}; edits are saved to the sidecars and will be applied to digiKam when it is back.`];
   b = h('div', { id: 'dkbanner', class: 'sysbanner', 'data-key': key },
     h('span', { class: 'ic-wrap', style: 'background:#c0873a' }, icon('wrench')),
     h('div', null, h('b', null, text[0]), h('div', { class: 'muted' }, text[1], ' ', h('a', { href: '#/settings', class: 'lnk' }, 'Settings'))),
-    h('button', { class: 'iconbtn', title: 'Hide for now', onclick: () => { try { sessionStorage.setItem('dk-dismissed', key); } catch { /* private mode */ } b.remove(); } }, icon('close')));
+    h('button', { class: 'iconbtn', title: 'Hide for now', onclick: () => { try { sessionStorage.setItem('iopix.digikamBannerDismissed', key); } catch { /* private mode */ } b.remove(); } }, icon('close')));
   document.body.append(b);
 }
 /** The "a newer version is out" banner, for admins, when the daily check found one; dismissed per version in this browser. */
 export function updateBanner(u) {
   let b = $('#updbanner');
   let gone = '';
-  try { gone = localStorage.getItem('upd-dismissed') || ''; } catch { /* private mode */ }
+  try { gone = localStorage.getItem('iopix.updateDismissed') || ''; } catch { /* private mode */ }
   if (!u || gone === u.remote) { b?.remove(); return; }
   if (b && b.dataset.remote === u.remote) return;
   b?.remove();
@@ -78,14 +78,14 @@ export function updateBanner(u) {
     h('div', null, h('b', null, u.version ? `Version ${u.version} is available` : 'A newer build is available'),
       h('div', { class: 'muted' }, `You have v${S.APP_VERSION || '?'}${S.APP_COMMIT && S.APP_COMMIT !== 'unknown' ? ` (${S.APP_COMMIT})` : ''}. ${u.version ? '' : 'Latest change: '}${(u.message || '').replace(/^v\d+\.\d+\.\d+:\s*/, '').slice(0, 140)}`)),
     h('a', { class: 'pillbtn on', href: '#/maintenance', onclick: () => b.remove() }, 'Update…'),
-    h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('upd-dismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
+    h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('iopix.updateDismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
   document.body.append(b);
 }
 const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', 'duplicates', 'detected', 'bursts', 'events', 'favorites'];
 /** A new version of the viewer is on the server: a small note to load it now; it also loads at the next change of page. */
 function updateReadyNote() {
   if ($('#reloadnote')) return;
-  document.body.append(h('div', { id: 'reloadnote' }, h('span', null, 'A new version of the viewer is ready.'),
+  document.body.append(h('div', { id: 'reloadnote' }, h('span', null, `A new version of ${S.APP_NAME} is ready.`),
     h('button', { class: 'pillbtn on', onclick: () => location.reload() }, 'Load it now'),
     h('button', { class: 'iconbtn', title: 'Later: it loads when you next change page', onclick: (e) => e.currentTarget.parentElement.remove() }, icon('close'))));
 }

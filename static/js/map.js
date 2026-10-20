@@ -1,6 +1,6 @@
 /** The map page (Leaflet, loaded on demand). */
-import { $, api, date, dfDay, dfTime, fill, h, icon, main, nf, plural, store } from './core.js';
-import { S, applyFilter, filterParams, go, toast } from './state.js';
+import { $, api, date, dfDay, dfTime, errorBox, fill, h, icon, main, nf, plural, store } from './core.js';
+import { S, applyFilter, filterParams, go, toast, toastError } from './state.js';
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
 import { details, getDetail, openLightbox, syncLightbox } from './lightbox.js';
@@ -142,11 +142,11 @@ function mapSearch(map) {
   const look = async () => {
     const q = input.value.trim();
     if (q.length < 2) { results.hidden = true; return; }
-    let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toast(e.message); return; }
+    let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toastError(e); return; }
     if (input.value.trim() !== q) return;
     results.hidden = false;
-    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => go(x) },
-      icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
+    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow wrapbtn', onclick: () => go(x) },
+      icon('place'), h('span', { class: 'nm wrapbtn' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Nothing found.'));
   };
   // Enter goes straight to the best match
@@ -174,11 +174,11 @@ async function placeTray(map, fp, el) {
   const tray = h('aside', { class: 'maptray' }, h('div', { class: 'muted' }, 'Loading the photos without a location…'));
   el.parentElement.append(tray);
   let d;
-  try { d = await api('/api/photos?' + q.toString()); } catch (e) { fill(tray, h('div', { class: 'empty' }, e.message)); return; }
+  try { d = await api('/api/photos?' + q.toString()); } catch (e) { fill(tray, errorBox(e)); return; }
   const sel = new Set();
   let last = -1, shown = 240;
   const count = h('b');
-  const hint = h('div', { class: 'muted', style: 'font-size:12.5px' });
+  const hint = h('div', { class: 'muted small' });
   const grid = h('div', { class: 'tgrid' });
   const ids = d.id.slice();
   const refreshHead = () => { fill(count, sel.size ? `${nf.format(sel.size)} selected` : `${nf.format(ids.length)} without a location`); fill(hint, sel.size ? 'Click the map where they were taken, or drag them onto it.' : 'Click photos to select them (Shift for a range), or drag one straight onto the map.'); };
@@ -217,17 +217,17 @@ async function placeTray(map, fp, el) {
   // find a place: a name, landmark or address (the same search as Set location), then the map zooms there
   let st = 0;
   const results = h('div', { class: 'alist', hidden: true, style: 'max-height:180px' });
-  const search = h('input', { class: 'einput', placeholder: 'Find a place, landmark or address', style: 'width:100%',
+  const search = h('input', { class: 'einput', placeholder: 'Find a place, landmark or address',
     onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); clearTimeout(st); look(); } if (e.key === 'Escape') results.hidden = true; },
     oninput: () => { clearTimeout(st); st = setTimeout(look, 500); } });
   const look = async () => {
     const q = search.value.trim();
     if (q.length < 2) { results.hidden = true; return; }
-    let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toast(e.message); return; }
+    let r; try { r = await api('/api/geocode?q=' + encodeURIComponent(q)); } catch (e) { toastError(e); return; }
     if (search.value.trim() !== q) return;
     results.hidden = false;
-    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow', style: 'height:auto;padding:6px 8px', onclick: () => { results.hidden = true; search.value = x.name; found(x); } },
-      icon('place'), h('span', { class: 'nm', style: 'white-space:normal' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
+    fill(results, r.results.length ? r.results.map((x) => h('div', { class: 'frow wrapbtn', onclick: () => { results.hidden = true; search.value = x.name; found(x); } },
+      icon('place'), h('span', { class: 'nm wrapbtn' }, x.name, x.detail ? h('span', { class: 'muted' }, ' · ' + x.detail) : null)))
       : h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Nothing found.'));
   };
   // the place found: close in (street level for an address or landmark), with a pin that takes the photos
@@ -237,7 +237,7 @@ async function placeTray(map, fp, el) {
     const icon_ = L.divIcon({ className: '', html: '<div class="fpin"></div>', iconSize: [30, 42], iconAnchor: [15, 40] });
     pin = L.marker([x.lat, x.lon], { icon: icon_, zIndexOffset: 1000 }).addTo(map);
     const label = h('div', { class: 'fpinlabel' }, h('b', null, x.name), x.detail ? h('div', { class: 'muted' }, x.detail) : null,
-      h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px' },
+      h('div', { class: 'toolbar tight mt6',},
         h('button', { class: 'pillbtn on', onclick: (e) => { e.stopPropagation(); place(L.latLng(x.lat, x.lon)); } }, icon('place'), 'Put the selected photos here'),
         h('button', { class: 'pillbtn', onclick: (e) => { e.stopPropagation(); streetView(x.lat, x.lon, x.name); } }, 'Street View')),
       h('div', { class: 'muted', style: 'font-size:11.5px;margin-top:4px' }, 'Right-click (or long-press) elsewhere to move the pin.'));
