@@ -295,6 +295,50 @@ def columns(con: VConn, table: str) -> list:
     return [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
 
 
+def declared_columns(create_sql: str) -> dict:
+    """name -> definition of every column in a CREATE TABLE statement (table constraints left out), so a
+    column added to TABLES reaches databases created before it: ensure_schema adds what a table lacks."""
+    body = create_sql[create_sql.index("(") + 1:create_sql.rindex(")")]
+    defs, depth, cur = [], 0, []
+    for ch in body:  # split on the commas between definitions, not those inside VARCHAR(191) or DEFAULT ('{}')
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            defs.append("".join(cur)); cur = []
+        else:
+            cur.append(ch)
+    defs.append("".join(cur))
+    out = {}
+    for d in (d.strip() for d in defs):
+        # a table constraint (PRIMARY KEY (a, b), INDEX name (col), UNIQUE (col)...) rather than a column; a column may
+        # be named key, so the constraint forms are matched whole
+        if not d or _CONSTRAINT.match(d):
+            continue
+        out[d.split()[0].strip('`"')] = d
+    return out
+
+
+_CONSTRAINT = re.compile(r"^(PRIMARY\s+KEY|FOREIGN\s+KEY|CONSTRAINT\b|CHECK\s*\(|(UNIQUE|INDEX|KEY)(\s+KEY)?(\s+[`\"]?\w+[`\"]?)?\s*\()", re.I)
+
+
+def add_missing_columns(con: VConn) -> list:
+    """Every column TABLES declares that a table lacks, added with its declared definition; returns what was
+    added. Both engines: a column that only one branch of a migration knew about left the other failing at
+    its first query (v1.63.0, session_gen on MySQL)."""
+    added = []
+    for name, (cols, sq, my) in TABLES.items():
+        have = set(columns(con, name))
+        for col, definition in declared_columns(my if con.mysql else sq).items():
+            if col not in have:
+                con.execute(f"ALTER TABLE {name} ADD COLUMN {definition}")
+                added.append(f"{name}.{col}")
+    if added:
+        log.info("viewer database: columns added: %s", ", ".join(added))
+    return added
+
+
 # the table names before v1.18, renamed in place (rows kept) the first time a newer viewer opens the database
 OLD_NAMES = {
     "settings": "app_settings", "users": "user_accounts", "favorites": "favorite_photos",
@@ -450,7 +494,7 @@ def _migrate_ai_tables(con: VConn):
 
 
 def ensure_schema(con: VConn = None):
-    """Every table, idempotently; SQLite gets WAL and the two column additions older files lack."""
+    """Every table, idempotently; SQLite gets WAL; both engines get the columns older databases lack."""
     own = con is None
     con = con or connect()
     try:
@@ -474,8 +518,6 @@ def ensure_schema(con: VConn = None):
                 con.execute("ALTER TABLE user_accounts ADD COLUMN person INTEGER")
             if "email" not in have:
                 con.execute("ALTER TABLE user_accounts ADD COLUMN email TEXT")
-            if "session_gen" not in have:
-                con.execute("ALTER TABLE user_accounts ADD COLUMN session_gen " + ("INT DEFAULT 0" if con.mysql else "INTEGER DEFAULT 0"))
             if "undo" in columns(con, "photo_history"):  # v1.24 named the column after a reserved word
                 con.execute("ALTER TABLE photo_history RENAME COLUMN undo TO undo_values")
         if "file_copy" not in columns(con, "photo_history"):  # v1.32: the backed-up image file of each change
@@ -485,6 +527,7 @@ def ensure_schema(con: VConn = None):
             con.execute("ALTER TABLE viewer_albums ADD COLUMN owner_id " + ("BIGINT NULL" if con.mysql else "INTEGER"))
         if "is_shared" not in have:
             con.execute("ALTER TABLE viewer_albums ADD COLUMN is_shared " + ("INT NOT NULL DEFAULT 1" if con.mysql else "INTEGER NOT NULL DEFAULT 1"))
+        add_missing_columns(con)  # v1.63.1: every other column added since a database was created (session_gen, and whatever comes next), both engines
         # v1.43: the full comparison is kept only for photos whose copies disagree or that lack a sidecar; rows from
         # before carried it for every photo (tens of MB), and nothing reads it for the others
         con.execute("UPDATE metadata_check SET data = NULL WHERE data IS NOT NULL AND mismatch = 0 AND has_sidecar = 1")

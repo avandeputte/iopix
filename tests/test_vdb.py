@@ -161,3 +161,27 @@ def test_v124_undo_column_is_renamed_on_sqlite(tmp_path, monkeypatch):
     finally:
         c.close()
     assert "undo" not in vdb.TABLES["photo_history"][0] and " undo " not in vdb.TABLES["photo_history"][2]
+
+
+def test_every_declared_column_is_in_both_create_statements():
+    for name, (cols, sq, my) in vdb.TABLES.items():
+        assert list(vdb.declared_columns(sq)) == cols, name
+        assert list(vdb.declared_columns(my)) == cols, name
+
+
+def test_columns_added_since_a_database_was_created_are_added_on_open(tmp_path, monkeypatch):
+    """v1.63.0 added session_gen to user_accounts but only SQLite databases got it: the MySQL one failed at the
+    first signed-in request. Every column TABLES declares is now added to a table that lacks it, on both engines."""
+    db = tmp_path / "old.db"
+    raw = sqlite3.connect(db)
+    raw.execute("CREATE TABLE user_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE, hash TEXT NOT NULL, "
+                "role TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created INTEGER, last_login INTEGER, person INTEGER, email TEXT)")
+    raw.execute("INSERT INTO user_accounts (name, hash, role) VALUES ('old', 'h', 'admin')")
+    raw.execute("CREATE TABLE viewer_albums (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created INTEGER)")
+    raw.commit(); raw.close()
+    vc = vdb.VConn(vdb._sqlite_raw(db, 5), False, True)
+    vdb.ensure_schema(vc)
+    assert "session_gen" in vdb.columns(vc, "user_accounts") and "is_shared" in vdb.columns(vc, "viewer_albums")
+    assert tuple(vc.execute("SELECT name, session_gen FROM user_accounts").fetchone()) == ("old", 0)
+    assert vdb.add_missing_columns(vc) == []  # a second open adds nothing
+    vc.raw.close()

@@ -52,3 +52,19 @@ def test_without_a_clip_index_the_new_engine_answers_while_it_is_built(tmp_path,
     new = s.engines["siglip2"]
     assert s.active is new, "no CLIP index: search the growing SigLIP index rather than nothing"
     assert s.upgrade is new, "it is still being completed"
+
+
+def test_an_error_inside_the_active_engine_lookup_surfaces_instead_of_recursing(tmp_path, monkeypatch):
+    s = _fresh(tmp_path, monkeypatch, clip_index=True)
+    monkeypatch.setattr(semantic.Semantic, "_complete", lambda self, e: (_ for _ in ()).throw(AttributeError("inner")))
+    import pytest
+    with pytest.raises(RuntimeError, match="inner"):
+        s.active
+
+
+def test_revision_lookup_survives_a_missing_numpy(tmp_path, monkeypatch):
+    f = tmp_path / "embeddings-clip.npz"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(semantic, "np", None)
+    semantic._revisions.clear()
+    assert semantic._stored_revision(f) is None

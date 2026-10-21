@@ -33,11 +33,13 @@ ENGINES = {
 
 try:
     import numpy as np
-    importlib.import_module("fastembed")  # also proves onnxruntime and friends load on this machine
-    _HAVE = True
-except Exception:
+except ImportError:
     np = None
-    _HAVE = False
+try:
+    importlib.import_module("fastembed")  # also proves onnxruntime and friends load on this machine
+    _HAVE = np is not None
+except Exception:
+    _HAVE = False  # numpy, when present, still reads the embeddings files (revisions, file keys)
 
 
 def enabled() -> bool:
@@ -104,7 +106,7 @@ def _stored_revision(file):
     try:
         with np.load(file) as z:
             rev = str(z["revision"]) if "revision" in z.files else None
-    except (OSError, ValueError):
+    except Exception:  # not an embeddings file, or no numpy to read it with
         rev = None
     _revisions[file] = (stamp, rev)
     return rev
@@ -352,6 +354,12 @@ class Semantic:
         """Searches go to the chosen engine once its index is complete. Until then the newest complete
         index answers, when there is one: on an install that never had another index, the new one
         answers from the start, growing as it is built, rather than nothing at all."""
+        try:
+            return self._active()
+        except AttributeError as e:  # a property's AttributeError would re-enter __getattr__ and recurse without end
+            raise RuntimeError(f"semantic: {e}") from e
+
+    def _active(self) -> Engine:
         new = self.engines[self.chosen()]
         if self._complete(new):
             return new
@@ -371,7 +379,9 @@ class Semantic:
         new = self.engines[self.chosen()]
         return None if self._complete(new) else new
 
-    def __getattr__(self, name):  # ids, vecs, gen, load, search_text, similar, text_vector, _lock, ...
+    def __getattr__(self, name):  # ids, vecs, load, search_text, similar, text_vector, _lock, ...
+        if name in ("active", "engines"):  # an error inside the active property must surface, not recurse here
+            raise AttributeError(name)
         return getattr(self.active, name)
 
     @property
