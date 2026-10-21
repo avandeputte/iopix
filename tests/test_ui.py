@@ -1251,8 +1251,8 @@ def test_only_the_town_is_known_saves_an_approximate_location(page, server, lib)
 
 def test_long_file_names_stay_inside_their_cards(page, server):
     """Metadata quality and the edit log in large view: a 60-character file name wraps inside its card."""
-    page.goto(server + "/#/quality")
-    page.wait_for_selector(".qsec", timeout=20000)
+    page.goto(server + "/#/quality?check=nolocation")
+    page.wait_for_selector(".qsec[data-check=nolocation]", timeout=20000)
     page.evaluate("""() => { const list = document.querySelector('.hlist.qitems') || document.querySelector('.hlist');
         list.className = 'hlist qitems large';
         const row = document.createElement('div'); row.className = 'hrow';
@@ -1325,7 +1325,12 @@ def test_face_quality_page_and_adjusting_a_box(page, server):
     page.goto(server + "/#/quality")
     page.wait_for_selector("h1:has-text('Metadata quality')", timeout=10000)
     page.wait_for_selector("button:has-text('Check again')", timeout=20000)
-    assert page.locator("h2", has_text="Stored twice").count() == 1 and page.locator("h2", has_text="Outside the photo").count() == 1
+    # the overview: a row per check; each check is its own report, reached from the tab bar
+    assert page.locator(".qoverview .srow").count() == 8 and page.locator(".stabs [role=tab]").count() == 9
+    assert page.locator("h2", has_text="Stored twice").count() == 0, "a report shows only when opened"
+    page.locator(".stabs [role=tab]", has_text="Stored twice").click()
+    assert page.locator("h2", has_text="Stored twice").count() == 1 and page.locator("h2", has_text="Outside the photo").count() == 0
+    assert page.evaluate("location.hash") == "#/quality?check=near", "the report has its own link"
     page.locator(".eseg button", has_text="Larger").click()
     page.wait_for_selector(".qitems.huge, h2:has-text('Stored twice')", timeout=10000)
     if page.locator(".qitems.huge .hrow img").count():
@@ -1348,13 +1353,18 @@ def test_face_quality_page_and_adjusting_a_box(page, server):
     b = box.bounding_box()
     page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2); page.mouse.down()
     page.mouse.move(b["x"] + b["width"] / 2 + 15, b["y"] + b["height"] / 2 + 10, steps=4); page.mouse.up()
-    page.locator(".adjustbar button", has_text="Save").click()
+    with page.expect_response(lambda r: r.url.endswith("/api/faces/op"), timeout=10000) as moved:
+        page.locator(".adjustbar button", has_text="Save").click()
+    assert moved.value.ok, f"the move failed: {moved.value.status} {moved.value.text()[:300]}"
     page.wait_for_timeout(1500)
     assert posted and posted[0]["op"] == "move" and posted[0]["new_rect"] != posted[0]["rect"], posted
     page.unroute("**/api/faces/op")
     req = urllib.request.Request(server + "/api/faces/op", data=_json.dumps({"op": "move", "image": f["photo"], "rect": posted[0]["new_rect"], "new_rect": posted[0]["rect"]}).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
-    urllib.request.urlopen(req).read()  # put the scratch library back
+    try:
+        urllib.request.urlopen(req).read()  # put the scratch library back
+    except urllib.error.HTTPError as e:
+        raise AssertionError(f"putting the face back failed: {e.code} {e.read()[:300]}")
 
 
 def test_explore_is_home_and_menu_icons_are_coloured(page, server):
@@ -1409,7 +1419,7 @@ def test_accept_as_it_is_removes_only_that_entry(page, server, lib):
         dk.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (p, unknown, "autodetectedFace", '<rect x="20" y="20" width="60" height="60"/>'))
     dk.commit(); dk.close()
     try:
-        page.goto(server + "/#/quality")
+        page.goto(server + "/#/quality?check=unnamed")
         page.wait_for_selector("h2:has-text('Faces without a name')", timeout=20000)
         sec = page.locator(".qsec", has=page.locator("h2", has_text="Faces without a name"))
         before = sec.locator(".hrow").count()
@@ -1445,7 +1455,7 @@ def test_face_quality_loads_the_next_entries_in_place(page, server, lib):
         route.fulfill(status=200, content_type="application/json", body=_json.dumps({"total": 3, "items": [{"photo": i, "people": 1, "signature": "p1"} for i in ids[1:]]}))
     page.route("**/api/quality", first)
     page.route("**/api/quality/items*", nxt)
-    page.goto(server + "/#/quality")
+    page.goto(server + "/#/quality?check=untagged")
     sec = page.locator(".qsec", has=page.locator("h2", has_text="People, but nobody tagged"))
     sec.wait_for(timeout=20000)
     assert sec.locator(".hrow").count() == 1
@@ -1700,7 +1710,7 @@ def test_copy_metadata_dialog_from_a_selection(page, server):
 
 
 def test_metadata_quality_lists_photos_without_a_location(page, server):
-    page.goto(server + "/#/quality")
+    page.goto(server + "/#/quality?check=nolocation")
     page.wait_for_selector("h1:has-text('Metadata quality')", timeout=10000)
     page.wait_for_selector("h2:has-text('No location')", timeout=20000)
 
@@ -1934,3 +1944,42 @@ def test_remove_all_unnamed_face_regions_from_the_actions_menu(page, server):
         page.locator("#toast .lnk", has_text="Undo").click()
         page.wait_for_function("(n) => document.querySelectorAll('.facebox.face-unknown').length === n", arg=n, timeout=3000)
     assert _eventually(lambda: unknown_on_server() == rects), "all put back on the server"
+
+
+def test_several_unlocated_photos_get_one_location_together(page, server, lib):
+    """Metadata quality › No location: tick photos and set their location in one go; the rows fold away."""
+    import json as _json
+    unlocated = lambda: {x["photo"] for x in (_json.loads(urllib.request.urlopen(server + "/api/quality").read()).get("nolocation") or {}).get("items", [])}
+    ids = sorted(unlocated())[:2]
+    if len(ids) < 2:  # the fixture's photos all have a place: take it off two of them for the test (reverted at the end)
+        post_ = lambda path, body: urllib.request.urlopen(urllib.request.Request(server + path, data=_json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")).read()
+        for i in lib["ids"]:
+            if len(ids) >= 2:
+                break
+            d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{i}").read())
+            if i not in ids and d.get("lat") is not None and not d.get("video"):
+                post_("/api/edit", {"ids": [i], "changes": {"gps": None}}); ids.append(i)
+        assert len(ids) == 2
+        assert _eventually(lambda: set(ids) <= unlocated(), timeout=30), "the photos without a place reach the No location report"
+    page.goto(server + "/#/quality?check=nolocation")
+    page.wait_for_selector(".qsec[data-check=nolocation] .hrow .qpick input", timeout=20000)
+    btn = page.locator(".qsec[data-check=nolocation] button", has_text="Set location for")
+    assert btn.first.is_disabled(), "nothing ticked yet"
+    for i in ids:
+        page.locator(f".qsec[data-check=nolocation] .hrow[data-photo='{i}'] .qpick input").check()
+    assert page.locator(".qsec[data-check=nolocation] button", has_text="Set location for 2 ticked photos").count() == 1
+    page.locator(".qsec[data-check=nolocation] button", has_text="Set location for 2 ticked photos").click()
+    page.wait_for_selector(".modal h3:has-text('Set location')", timeout=5000)
+    assert "2 selected photos" in page.locator(".modal p.muted").first.inner_text()
+    page.locator(".modal input[placeholder='latitude']").fill("40.3834")
+    page.locator(".modal input[placeholder='longitude']").fill("-80.0459")
+    with page.expect_response(lambda r: "/api/edit" in r.url and r.request.method == "POST", timeout=15000):
+        page.locator(".modal button", has_text="Save location").click()
+    try:
+        for i in ids:
+            page.wait_for_function("(i) => !document.querySelector(`.qsec[data-check=nolocation] .hrow[data-photo='${i}']`)", arg=i, timeout=5000)
+        for i in ids:
+            assert _eventually(lambda: abs((_json.loads(urllib.request.urlopen(f"{server}/api/photo/{i}").read()).get("lat") or 0) - 40.3834) < 1e-4), "saved on the server"
+    finally:
+        req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": ids}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()

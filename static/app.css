@@ -656,6 +656,9 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .qitems.large .hrow, .qitems.huge .hrow { min-width: 0; flex-direction: column; align-items: stretch; gap: 8px; border: 1px solid var(--line); border-radius: var(--r-m); padding: 8px; }
 .qitems.large .hrow img { width: 100%; height: 200px; border-radius: var(--r-s); }
 .qitems.huge .hrow img { width: 100%; height: 320px; border-radius: var(--r-s); }
+.hrow .qpick { flex: none; margin: 0; }
+.qitems.large .hrow .qpick, .qitems.huge .hrow .qpick { align-self: flex-start; }
+.qoverview .srow { padding: 12px 0; }
 
 .qitems .hrow { transition: opacity .2s, transform .2s; }
 .qitems .hrow.qgone { opacity: 0; transform: scale(.96); }
