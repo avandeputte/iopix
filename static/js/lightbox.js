@@ -248,6 +248,7 @@ export function photoActions(anchor, d) {
     manage ? (d.video ? 'People' : 'Faces') : null,
     manage && S.FACE_DETECT && !d.video ? ['Detect faces', () => detectFaces([d.id])] : null,
     manage && !d.video ? ['Add a face by hand…', () => startDrawFace()] : null,
+    manage && !d.video && faceRegions(d).some((f) => f.kind === 'unknown') ? [`Remove all unnamed face regions (${faceRegions(d).filter((f) => f.kind === 'unknown').length})`, () => removeUnnamedFaces(d)] : null,
     manage ? [d.video ? 'Add a person to this video…' : 'Add a person without a face box…', () => personPicker((t) => faceOp({ op: 'tagonly', image: d.id, tag: t.id }, () => faceOp({ op: 'untag', image: d.id, tag: t.id })), d.id)] : null,
     d.lat != null ? 'Around this photo' : null,
     d.lat != null ? ['Day’s trail on the map', () => { closeLightbox(false); LB.pushed = false; go('map', photosWith({ from: d.day, to: d.day, trail: d.day })); }] : null,
@@ -705,21 +706,32 @@ export function removeFace(f, d) {
   const back = f.kind === 'confirmed' ? { op: 'add', tag: f.tag } : f.kind === 'suggested' ? { op: 'suggest', tag: f.tag } : f.kind === 'unknown' ? { op: 'detected' } : null;
   faceOp({ op: 'remove', image: d.id, rect }, back ? () => faceOp({ ...back, image: d.id, rect }) : null);
 }
-export function faceOp(op, undo) {
+/** Every unnamed (unknown) face region on the photo, removed in one go; Undo puts them all back. */
+export function removeUnnamedFaces(d) {
+  const rects = faceRegions(d).filter((f) => f.kind === 'unknown').map((f) => [f.x, f.y, f.w, f.h]);
+  if (!rects.length) { toast('No unnamed face regions on this photo.'); return; }
+  const ops = (op) => rects.map((rect) => ({ op, image: d.id, rect }));
+  faceOp(ops('remove'), () => faceOp(ops('detected'), null, `${plural(rects.length, 'unnamed face')} put back.`), `${plural(rects.length, 'unnamed face region')} removed.`);
+}
+/** One face change, or several on the same photo (an array, sent as one batch): shown at once, sent in order, undone from the message. */
+export function faceOp(op, undo, said) {
+  const ops = Array.isArray(op) ? op : [op];
+  op = ops[0];
   const id = op.image;
-  const rec = { op, at: Date.now() };
-  RECENT_FACE_OPS.set(id, [...(RECENT_FACE_OPS.get(id) || []), rec]);
+  const recs = ops.map((o) => ({ op: o, at: Date.now() }));
+  RECENT_FACE_OPS.set(id, [...(RECENT_FACE_OPS.get(id) || []), ...recs]);
   const shown = LB.open && LB.src.id[LB.i] === id ? LB.detail : null, cached = details.get(id);  // the cache holds promises
-  if (shown) applyFaceLocally(shown, op);
-  if (cached) cached.then((cd) => { if (cd && cd !== shown && cd.faces) applyFaceLocally(cd, op); }).catch(() => {});  // a copy the viewer is not showing (a still pending one gets the change from reapplyRecent)
+  if (shown) ops.forEach((o) => applyFaceLocally(shown, o));
+  if (cached) cached.then((cd) => { if (cd && cd !== shown && cd.faces) ops.forEach((o) => applyFaceLocally(cd, o)); }).catch(() => {});  // a copy the viewer is not showing (a still pending one gets the change from reapplyRecent)
   redrawPhoto(id);
   const name = op.tag ? S.tagById.get(op.tag)?.name : null;
-  const said = { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `${name} put back.` }[op.op];
+  said = said || { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `${name} put back.` }[op.op];
   if (said) undo ? toast(said, 'Undo', undo, 7000) : toast(said);
   const prev = FACE_Q.get(id) || Promise.resolve();
-  const mine = prev.then(() => post('/api/faces/op', op)).then(() => true, (e) => {
+  const send = () => ops.length === 1 ? post('/api/faces/op', op) : post('/api/faces/batch', { ops }).then((r) => { if (r.failed?.length) throw new Error(r.failed[0].error); });
+  const mine = prev.then(send).then(() => true, (e) => {
     toast(`That face change did not go through: ${e.message}`, null, null, 9000);
-    RECENT_FACE_OPS.set(id, (RECENT_FACE_OPS.get(id) || []).filter((x) => x !== rec));
+    RECENT_FACE_OPS.set(id, (RECENT_FACE_OPS.get(id) || []).filter((x) => !recs.includes(x)));
     details.delete(id);
     if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id) { LB.detail = fresh; redrawPhoto(id); } });
     return false;

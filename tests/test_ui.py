@@ -1873,3 +1873,64 @@ def test_update_banner_runs_the_update_and_reloads_on_the_new_version(page, serv
     with page.expect_event("load", timeout=15000):  # the version poll (every 5 s) sees the new one and reloads
         state["version"] = "9.9.9"
     page.wait_for_selector("#topbar", timeout=10000)
+
+
+def test_an_account_can_be_taken_off_the_sign_in_list(page, server, browser):
+    """Settings › Users › Sign-in list: unticked, the account is not a tile on the sign-in screen; "Other" with the
+    name and password still signs it in."""
+    import json, urllib.request
+    req = lambda path, body: urllib.request.urlopen(urllib.request.Request(server + path, data=json.dumps(body).encode(), headers={"content-type": "application/json"}, method="POST")).read()
+    req("/api/auth/setup", {"name": "alex", "password": "correct horse"})
+    page.goto(server + "/#/settings"); page.wait_for_selector("h1:has-text('Settings')", timeout=10000)
+    page.locator("#usermenu button").click(); page.wait_for_selector(".modal h3:has-text('Sign in')", timeout=5000)
+    page.locator(".modal .account", has_text="alex").click(); page.locator(".modal input[type=password]").fill("correct horse"); page.locator(".modal button", has_text="Sign in").click()
+    page.wait_for_selector("#usermenu .avatar", timeout=5000)
+    page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
+    page.locator("input[placeholder='User name']").last.fill("kid")
+    page.locator("label:has-text('no password') input").check()
+    page.locator("button", has_text="Add user").click(); page.wait_for_selector(".utable tr[data-user='kid']", timeout=5000)
+    box = page.locator(".utable tr[data-user='alex'] input[type=checkbox]")
+    assert box.is_checked(), "every account starts on the list"
+    with page.expect_response(lambda r: "/api/users/" in r.url and r.request.method == "POST", timeout=5000):
+        box.uncheck()
+    page.wait_for_timeout(600)
+    assert not page.locator(".utable tr[data-user='alex'] input[type=checkbox]").is_checked()
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900}); v = ctx.new_page()
+    v.goto(server + "/#/photos"); v.wait_for_selector(".tile img", timeout=15000)
+    v.locator("#usermenu button").click(); v.wait_for_selector(".modal .account", timeout=5000)
+    assert v.locator(".modal .account .nm").all_inner_texts() == ["kid", "Other"], "alex is not offered"
+    v.locator(".modal .account", has_text="Other").click()
+    v.locator(".modal input[placeholder='User name']").fill("alex"); v.locator(".modal input[type=password]").fill("correct horse"); v.locator(".modal button", has_text="Sign in").click()
+    v.wait_for_selector("#usermenu .avatar", timeout=5000)
+    assert v.evaluate("async () => (await (await fetch('/api/auth/me')).json()).user.name") == "alex"
+    ctx.close()
+
+
+def test_remove_all_unnamed_face_regions_from_the_actions_menu(page, server):
+    """Actions › Remove all unnamed face regions: every unknown face box goes in one go (one batch when there are
+    several), and Undo puts them all back."""
+    import json as _json
+    from collections import Counter
+    faces = _json.loads(urllib.request.urlopen(server + "/api/faces/queue?kind=unknown&limit=200").read())["faces"]
+    if not faces:
+        pytest.skip("no unknown face in the fixture")
+    pid = Counter(f["photo"] for f in faces).most_common(1)[0][0]
+    rects = {(f["x"], f["y"], f["w"], f["h"]) for f in faces if f["photo"] == pid}
+    _open_photo(page, server, pid)
+    page.keyboard.press("f"); page.wait_for_selector(".facebox.face-unknown", timeout=10000)
+    n = page.locator(".facebox.face-unknown").count()
+    page.keyboard.press("i"); page.wait_for_selector(".lb-info .iactions", timeout=10000)
+    page.locator(".lb-info .iactions").click()
+    item = page.locator(".facemenu .fmi", has_text="Remove all unnamed face regions")
+    assert f"({n})" in item.inner_text()
+    endpoint = "/api/faces/batch" if n > 1 else "/api/faces/op"
+    with page.expect_response(lambda r: r.url.endswith(endpoint), timeout=10000):
+        item.click()
+        page.wait_for_function("() => document.querySelectorAll('.facebox.face-unknown').length === 0", timeout=3000)
+    assert page.locator(".facebox.face-unknown").count() == 0
+    unknown_on_server = lambda: {(o["x"], o["y"], o["w"], o["h"]) for o in _json.loads(urllib.request.urlopen(f"{server}/api/photo/{pid}").read()).get("faces_other", []) if o["kind"] == "unknown"}
+    assert _eventually(lambda: not unknown_on_server()), "gone on the server"
+    with page.expect_response(lambda r: r.url.endswith(endpoint), timeout=10000):
+        page.locator("#toast .lnk", has_text="Undo").click()
+        page.wait_for_function("(n) => document.querySelectorAll('.facebox.face-unknown').length === n", arg=n, timeout=3000)
+    assert _eventually(lambda: unknown_on_server() == rects), "all put back on the server"

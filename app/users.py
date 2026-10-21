@@ -90,11 +90,11 @@ def needs_rehash(stored: str) -> bool:
 
 
 # ---- users
-COLS = "id, name, role, created, last_login, hash, person, email"
+COLS = "id, name, role, created, last_login, hash, person, email, listed"
 
 
 def _row(r) -> dict:
-    return {"id": r[0], "name": r[1], "role": r[2], "created": r[3], "last_login": r[4], "passwordless": not r[5], "person": r[6], "email": r[7] or ""}
+    return {"id": r[0], "name": r[1], "role": r[2], "created": r[3], "last_login": r[4], "passwordless": not r[5], "person": r[6], "email": r[7] or "", "listed": r[8] != 0}
 
 
 def clean_email(email) -> str:
@@ -112,11 +112,11 @@ def require_login() -> bool:
 
 
 def linked_persons() -> set:
-    """The person tags accounts are linked to: their face badges are the account picker's avatars,
+    """The person tags listed accounts are linked to: their face badges are the account picker's avatars,
     so they stay visible on the sign-in screen even when sign-in is required."""
     con = state.connect()
     try:
-        return {r[0] for r in con.execute("SELECT person FROM user_accounts WHERE person IS NOT NULL")}
+        return {r[0] for r in con.execute("SELECT person FROM user_accounts WHERE person IS NOT NULL AND listed = 1")}
     finally:
         con.close()
 
@@ -170,7 +170,7 @@ def create(name: str, password: str, role: str, email: str = "") -> dict:
         con.close()
 
 
-def update(user_id: int, role: str = None, password: str = None, name: str = None, email: str = None):
+def update(user_id: int, role: str = None, password: str = None, name: str = None, email: str = None, listed: bool = None):
     con = state.connect()
     try:
         if email is not None:
@@ -201,6 +201,8 @@ def update(user_id: int, role: str = None, password: str = None, name: str = Non
             if not name:
                 raise ValueError("A user name is needed")
             con.execute("UPDATE user_accounts SET name = ? WHERE id = ?", (name, user_id))
+        if listed is not None:  # off the sign-in screen's account list: the account signs in through "Other", by name
+            con.execute("UPDATE user_accounts SET listed = ? WHERE id = ?", (1 if listed else 0, user_id))
         con.commit()
     finally:
         con.close()
@@ -236,10 +238,11 @@ def authenticate(name: str, password: str):
 
 
 def accounts() -> list:
-    """What the sign-in picker shows to anyone: names and whether a password is asked for."""
+    """What the sign-in picker shows to anyone: names and whether a password is asked for. An account taken off
+    the list (Settings › Users › Sign-in list) signs in through "Other", by name."""
     con = state.connect()
     try:
-        return [{"id": r[0], "name": r[1], "passwordless": not r[2], "person": r[3]} for r in con.execute("SELECT id, name, hash, person FROM user_accounts ORDER BY lower(name)")]
+        return [{"id": r[0], "name": r[1], "passwordless": not r[2], "person": r[3]} for r in con.execute("SELECT id, name, hash, person FROM user_accounts WHERE listed = 1 ORDER BY lower(name)")]
     finally:
         con.close()
 

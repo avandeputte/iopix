@@ -700,7 +700,7 @@ export function usersSection() {
     const act = async (fn, after = draw) => { try { await fn(); } catch (err) { toastError(err); } after(); };
     const setPerson = (u, t) => act(async () => { await post(`/api/users/${u.id}`, { person: t ? t.id : null }); if (S.USER && S.USER.id === u.id) { S.USER.person = t ? t.id : null; renderUserMenu(); } });
     fill(body, h('table', { class: 'utable' },
-      h('thead', null, h('tr', null, ['Account', 'Email', 'Person in People', 'Role', 'Password', ''].map((c) => h('th', null, c)))),
+      h('thead', null, h('tr', null, ['Account', 'Email', 'Person in People', 'Role', 'Password', 'Sign-in list', ''].map((c) => h('th', null, c)))),
       h('tbody', null, d.users.map((u) => h('tr', { 'data-user': u.name },
         h('td', null, h('span', { class: 'ucell' }, avatarOf(u), h('span', null, u.name, u.id === S.USER?.id ? h('span', { class: 'muted' }, ' (you)') : null))),
         h('td', null, u.email || h('span', { class: 'muted' }, 'none'), ' ',
@@ -711,6 +711,8 @@ export function usersSection() {
         h('td', null, u.passwordless ? h('span', { class: 'muted' }, 'none (one-click)') : 'set', ' ',
           h('button', { type: 'button', class: 'lnk', onclick: async () => { const p = await promptDialog(`New password for ${u.name}`, { type: 'password', placeholder: '8 characters or more', ok: 'Set password' }); if (p) act(async () => { await post(`/api/users/${u.id}`, { password: p }); toast('Password set.'); }, () => {}); } }, 'Set'),
           u.role === 'viewer' && !u.passwordless ? [' · ', h('button', { type: 'button', class: 'lnk', title: 'One-click sign-in from the account picker', onclick: async () => { if (await confirmDialog(`Remove ${u.name}’s password? Anyone who can reach ${S.APP_NAME} can then sign in as ${u.name} with one click.`)) act(() => post(`/api/users/${u.id}`, { password: '' })); } }, 'Remove')] : null),
+        h('td', { style: 'text-align:center' }, h('input', { type: 'checkbox', checked: u.listed !== false, title: `Offered on the sign-in screen. Unticked, ${u.name} signs in through “Other”, by name${u.passwordless ? '' : ' and password'}.`,
+          onchange: (e) => act(async () => { await post(`/api/users/${u.id}`, { listed: e.target.checked }); toast(e.target.checked ? `${u.name} is offered on the sign-in screen again.` : `${u.name} is no longer offered on the sign-in screen; “Other” and the name still sign in.`); }) })),
         h('td', { style: 'text-align:right' }, u.id !== S.USER?.id ? h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the user ${u.name}?`, { ok: 'Delete', danger: true })) act(() => post(`/api/users/${u.id}`, { delete: true })); } }, 'Delete') : null))))),
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px' }, name, email, pw, role, nopw, h('button', { class: 'pillbtn on', onclick: async () => {
         try { await post('/api/users', { name: name.value.trim(), email: email.value.trim(), password: nopw.querySelector('input').checked ? '' : pw.value, role: nopw.querySelector('input').checked ? 'viewer' : role.value }); toast(`Added ${name.value.trim()}.`); } catch (err) { toastError(err); } draw();

@@ -229,3 +229,22 @@ def test_backup_downloads_are_for_admins(client, fresh, lib):
     r = client.get("/api/backup/digikam")
     assert r.status_code == 200 and r.content.startswith(b"SQLite format 3") and "digikam4-" in r.headers["content-disposition"]
     assert client.get("/api/backup/other").status_code == 404
+
+
+def test_an_account_can_be_left_off_the_sign_in_list(client, fresh):
+    """Settings › Users › Sign-in list: an unticked account is not offered on the sign-in screen; "Other" with
+    its name (and password) still signs it in."""
+    users.create("alex", "correct horse", "admin")
+    _login(client, "alex", "correct horse")
+    kid = client.post("/api/users", json={"name": "kid", "password": "", "role": "viewer"}).json()
+    alex = next(x for x in client.get("/api/users").json()["users"] if x["name"] == "alex")
+    assert alex["listed"] is True and kid["listed"] is True
+    assert client.post(f"/api/users/{alex['id']}", json={"listed": False}).status_code == 200
+    assert next(x for x in client.get("/api/users").json()["users"] if x["name"] == "alex")["listed"] is False
+    client.cookies.clear()
+    assert [a["name"] for a in client.get("/api/auth/accounts").json()["accounts"]] == ["kid"], "the picker leaves the account out"
+    _login(client, "alex", "correct horse")  # "Other": the name and password still sign in
+    assert client.get("/api/status").json()["user"]["name"] == "alex"
+    assert client.post(f"/api/users/{alex['id']}", json={"listed": True}).status_code == 200
+    client.cookies.clear()
+    assert [a["name"] for a in client.get("/api/auth/accounts").json()["accounts"]] == ["alex", "kid"]

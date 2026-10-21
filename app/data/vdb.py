@@ -47,11 +47,11 @@ TABLES = {
     "app_settings": (["key", "value"],
                  "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)",
                  "CREATE TABLE IF NOT EXISTS app_settings (`key` VARCHAR(191) PRIMARY KEY, value MEDIUMTEXT)"),
-    "user_accounts": (["id", "name", "hash", "role", "settings", "created", "last_login", "person", "email", "session_gen"],
+    "user_accounts": (["id", "name", "hash", "role", "settings", "created", "last_login", "person", "email", "session_gen", "listed"],
               "CREATE TABLE IF NOT EXISTS user_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE, hash TEXT NOT NULL, "
-              "role TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created INTEGER, last_login INTEGER, person INTEGER, email TEXT, session_gen INTEGER DEFAULT 0)",
+              "role TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '{}', created INTEGER, last_login INTEGER, person INTEGER, email TEXT, session_gen INTEGER DEFAULT 0, listed INTEGER NOT NULL DEFAULT 1)",
               "CREATE TABLE IF NOT EXISTS user_accounts (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(191) NOT NULL UNIQUE, hash TEXT NOT NULL, "
-              "role VARCHAR(32) NOT NULL, settings MEDIUMTEXT NOT NULL DEFAULT ('{}'), created BIGINT, last_login BIGINT, person INT, email VARCHAR(191), session_gen INT DEFAULT 0)"),
+              "role VARCHAR(32) NOT NULL, settings MEDIUMTEXT NOT NULL DEFAULT ('{}'), created BIGINT, last_login BIGINT, person INT, email VARCHAR(191), session_gen INT DEFAULT 0, listed INT NOT NULL DEFAULT 1)"),
     "favorite_photos": (["photo_id", "hash", "added"],
                   "CREATE TABLE IF NOT EXISTS favorite_photos (photo_id INTEGER PRIMARY KEY, hash TEXT, added INTEGER)",
                   "CREATE TABLE IF NOT EXISTS favorite_photos (photo_id BIGINT PRIMARY KEY, hash VARCHAR(64), added BIGINT)"),

@@ -442,7 +442,8 @@ async def api_users_create(request: Request):
 
 @router.post("/api/users/{user_id}")
 async def api_users_update(user_id: int, request: Request):
-    """{role} and/or {password} and/or {name} and/or {email} (optional; "" clears it); {delete: true} removes the user."""
+    """{role} and/or {password} and/or {name} and/or {email} (optional; "" clears it) and/or {listed} (on the sign-in
+    screen's account list); {delete: true} removes the user."""
     body = await request.json()
     if not users.get(user_id):
         raise HTTPException(404, "No such user")
@@ -452,7 +453,8 @@ async def api_users_update(user_id: int, request: Request):
                 raise ValueError("You cannot delete your own account while signed in")
             users.delete(user_id)
         else:
-            users.update(user_id, role=body.get("role"), password=body.get("password"), name=body.get("name"), email=body.get("email"))
+            users.update(user_id, role=body.get("role"), password=body.get("password"), name=body.get("name"), email=body.get("email"),
+                         listed=None if body.get("listed") is None else bool(body.get("listed")))
             if "person" in body:
                 if not _person_tag(body["person"]):
                     raise ValueError("That tag is not a person")
