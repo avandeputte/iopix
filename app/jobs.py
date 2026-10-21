@@ -11,7 +11,6 @@ check stops it at the next batch and the new submission runs afterwards.
 How many cores a running job may use is `threads()`: the `bg_threads`
 setting, else BG_THREADS from the environment, else half the cores.
 """
-import os
 import threading
 import time
 import traceback
@@ -33,7 +32,7 @@ GRACE = 3.0
 
 def threads() -> int:
     """Cores a background job may use right now."""
-    n = os.cpu_count() or 4
+    n = config.cpu_count()
     try:
         v = int(state.get_setting("bg_threads") or 0)
     except (TypeError, ValueError):
@@ -61,7 +60,7 @@ def submit(key: str, fn):
 def status() -> dict:
     with _lock:
         return {"running": _current, "queued": [k for k in ORDER if k in _queue], "threads": threads(),
-                "cores": os.cpu_count() or 4, "since": _started}
+                "cores": config.cpu_count(), "since": _started}
 
 
 def is_queued(key: str) -> bool:

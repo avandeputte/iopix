@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3b4a8c">
-<script>var t = 'light'; try { t = localStorage.getItem('theme') || 'light'; } catch (e) {} if (t !== 'system') document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';</script>
+<script>var t = 'light'; try { t = localStorage.getItem('iopix.theme') || 'light'; } catch (e) {} if (t !== 'system') document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -37,7 +37,7 @@
 <main id="main"></main>
 <aside id="filters" hidden></aside>
 <div id="lightbox" hidden></div>
-<div id="toast" hidden></div>
+<div id="toast" hidden role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
 </body>

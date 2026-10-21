@@ -6,6 +6,7 @@ request) are listed in WRITE_PATHS and go through the modules that own those
 writes."""
 import threading
 import time
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 
 from fastapi import Request
@@ -68,7 +69,7 @@ SIGNED_IN_PATHS = ("/api/favorites", "/api/ualbums", "/api/searches", "/api/tags
 # reads that are not for everyone, whatever the method: the server log and the merge plan (admins); the change log and
 # the elevation lookup, which spends Google credits (editors)
 ADMIN_READ_PATHS = ("/api/log", "/api/library/merge", "/api/quality")
-EDITOR_READ_PATHS = ("/api/history", "/api/elevation", "/api/import")
+EDITOR_READ_PATHS = ("/api/history", "/api/elevation", "/api/import", "/api/metadata")
 
 
 def _hits(path: str, paths) -> bool:
@@ -99,7 +100,7 @@ def _no_access(request: Request, ident: str):
     if request.url.path.startswith("/api/"):
         return JSONResponse({"detail": msg, "noAccess": True}, status_code=403)
     from html import escape
-    out = "/cdn-cgi/access/logout" if proxyauth.external(request.headers) else None
+    out = "/cdn-cgi/access/logout" if proxyauth.external(request.headers, proxyauth.peer_of(request)) else None
     return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>No access</title><style>body{{font:16px system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 16px;color:#222;background:#fff}}
 @media (prefers-color-scheme:dark){{body{{color:#eee;background:#111}}a{{color:#8ab4f8}}}}</style>
@@ -124,7 +125,7 @@ async def _auth_guard(request: Request, call_next):
         elif getattr(request.state, "proxy_ident", None) and proxyauth.deny_unknown() and not request.url.path.startswith("/mcp"):
             # (MCP clients sign in with the admin token, whatever Cloudflare service token got them through)
             return _no_access(request, request.state.proxy_ident)
-    if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers):
+    if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers, proxyauth.peer_of(request)):
         user = None  # a passwordless account's session (begun on the LAN) does not work from outside
         if time.time() - proxyauth._logged.get(("lan-session", request.cookies.get(users.COOKIE)), 0) > 3600:
             proxyauth._logged[("lan-session", request.cookies.get(users.COOKIE))] = time.time()
@@ -144,7 +145,12 @@ async def _auth_guard(request: Request, call_next):
         return JSONResponse({"detail": "Admins only"}, status_code=403 if user else 401)
     if _hits(path, EDITOR_READ_PATHS) and not users.can_write(user):
         return JSONResponse({"detail": "Editors only"}, status_code=403 if user else 401)
-    if request.method == "POST":
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        # a page on another site (or another port) cannot drive this one with the browser's cookies: the request's
+        # Origin, when the browser sends one, has to be this host
+        origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
+        if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
+            return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
         if _hits(path, WRITE_PATHS) and appstate.read_only():
             return JSONResponse({"detail": "The viewer is in read-only mode; nothing in the library can be changed."}, status_code=403)
         if _hits(path, WRITE_PATHS) and not users.can_write(user):

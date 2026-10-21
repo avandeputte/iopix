@@ -26,7 +26,7 @@ def test_metadata_lists_fields_and_writes_xmp_to_the_sidecar(client, lib):
     m = client.get(f"/api/metadata/{pid}").json()
     groups = {f["group"] for f in m["file"]}
     assert "IFD0" in groups or "ExifIFD" in groups
-    assert any(f["tag"] == "Make" and f["editable"] for f in m["file"]) or True
+    assert any(f["editable"] for f in m["file"]), "the file section has editable fields"
     r = client.post(f"/api/metadata/{pid}", json={"changes": [{"group": "XMP-dc", "tag": "Title", "value": "A title from the editor"},
                                                               {"group": "XMP-photoshop", "tag": "Headline", "value": "Editor headline"}]})
     assert r.status_code == 200, r.text
@@ -63,7 +63,7 @@ def test_adjust_saves_a_linked_version_and_leaves_the_original(client, lib):
         tags = lambda i: {n for (n,) in con.execute("SELECT t.name FROM ImageTags it JOIN Tags t ON t.id = it.tagid WHERE it.imageid = ?", (i,))}
         assert "Current Version" in tags(v["id"]) and "Original Version" in tags(pid)
         kw = lambda i: {n for n in tags(i) if "Version" not in n}
-        assert kw(v["id"]) >= {n for n in kw(pid)} - {"Unknown", "Unconfirmed"} or True
+        assert kw(v["id"]) >= {n for n in kw(pid)} - {"Unknown", "Unconfirmed"}
         assert con.execute("SELECT width, height, orientation FROM ImageInformation WHERE imageid = ?", (v["id"],)).fetchone() == (v["w"], v["h"], 1)
         con.close()
         d = client.get(f"/api/photo/{pid}").json()

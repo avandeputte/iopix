@@ -67,7 +67,16 @@ def test_module_paths_in_scripts_and_docs_exist():
     for f in files:
         if not f.exists():
             continue
-        for m in re.finditer(r"-m (app(?:\.[a-z_]+)+)", f.read_text()):
+        text = f.read_text()
+        for m in re.finditer(r"-m (app(?:\.[a-z_]+)+)", text):
             if importlib.util.find_spec(m.group(1)) is None:
                 missing.append(f"{f.relative_to(ROOT)}: {m.group(1)}")
+        if f.suffix == ".sh":  # python -c "from app.x import y" inside the shell scripts (setup.sh creates the admin and tests the database this way)
+            for m in re.finditer(r"from (app(?:\.[a-z_]+)*) import ([a-zA-Z_, ]+)", text):
+                mod = m.group(1)
+                if importlib.util.find_spec(mod) is None:
+                    missing.append(f"{f.relative_to(ROOT)}: {mod}"); continue
+                for name in (n.strip() for n in m.group(2).split(",") if n.strip()):
+                    if importlib.util.find_spec(f"{mod}.{name}") is None and not hasattr(importlib.import_module(mod), name):
+                        missing.append(f"{f.relative_to(ROOT)}: {mod}.{name}")
     assert not missing, missing

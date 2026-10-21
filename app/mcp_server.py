@@ -422,11 +422,14 @@ def view_photo(photo_id: int, size: Literal["small", "large"] = "small") -> Imag
 
 
 # ---- diagnostics: what an operator would check in a shell, read-only
-def _need_token(token: str):
+def _need_token(token: str, writes: bool = False):
     """The diagnostics tools reveal paths, log lines and settings; on an endpoint without sign-in
-    they take the same admin token as update_viewer (Maintenance > Viewer version)."""
+    they take the same admin token as update_viewer (Maintenance > Viewer version). writes: the tool changes the
+    library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
     if not updates.token_ok(token):
         raise ToolError("This tool needs the admin token (Maintenance > Viewer version > MCP update token)")
+    if writes and appstate.read_only():
+        raise ToolError("The viewer is in read-only mode; nothing in the library can be changed")
 
 
 @server.tool(annotations=READ_ONLY)
@@ -529,7 +532,7 @@ def repair_video(token: str, photo_id: int) -> dict:
     """Repair a video that does not play because its wrapper is damaged (inspect_file shows it): the same streams
     rewrapped without re-encoding, checked to play in full before it replaces the file. The original is kept
     (the change log can put it back). Needs the admin token."""
-    _need_token(token)
+    _need_token(token, writes=True)
     from app.photos import repair
     from app.digikam import dbsync
     try:
@@ -682,7 +685,7 @@ def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, c
     """Change the date taken ("YYYY-MM-DDTHH:MM:SS"), caption, title or rating of these photos exactly as the web app
     does: written to each sidecar (and the file when the viewer writes into files), in the edit log with undo, and with
     apply_to_database written into digiKam's database right away (digiKam closed). Needs the admin token."""
-    _need_token(token)
+    _need_token(token, writes=True)
     import re
     from app.digikam import dbsync
     ch = {}
@@ -733,7 +736,7 @@ def consistency_sync(token: str, photo_ids: list[int], source: str, targets: lis
     """Copy the given fields of the given photos from one source (db|sidecar|file) to the targets, exactly
     as the consistency page's Sync does: sidecars and files are backed up first; writing the database needs
     digiKam closed and is backed up too. Returns {synced, skipped}. Needs the admin token."""
-    _need_token(token)
+    _need_token(token, writes=True)
     from app.photos import consistency
     from app.digikam import dbsync
     try:
@@ -747,7 +750,7 @@ def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
     """Rewrite these photos' XMP sidecars (tag list and face regions) from digiKam's database, as the viewer does
     after a tag or face change: for when the database was changed outside the viewer. Each sidecar is backed up
     before its first change. Returns {photos, tags_failed, regions}. Needs the admin token."""
-    _need_token(token)
+    _need_token(token, writes=True)
     from app.digikam import dbsync
     from app.faces import facemgr
     from app.photos import edits
@@ -773,7 +776,7 @@ def rename_folder(token: str, folder: str, new_name: str) -> dict:
     """Rename a folder (its last path segment) on disk and in digiKam's database, exactly as the Folders page does:
     subfolders and sidecars follow, backups move with it. folder: its id or path (e.g. "2022/20221008 Soccer").
     digiKam must be closed. Needs the admin token."""
-    _need_token(token)
+    _need_token(token, writes=True)
     from app.core import _rebuild_after_write
     from app.digikam.dbsync import SyncError
     from app.photos import organize

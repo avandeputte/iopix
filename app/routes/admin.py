@@ -272,11 +272,19 @@ def api_analysis():
 async def api_login(request: Request):
     body = await request.json()
     name, src = str(body.get("name", ""))[:64], proxyauth.source(request)
+    key = f"{proxyauth.peer_of(request)}|{name.strip().lower()}"  # the real connection address, not a header anyone can set
+    nkey = f"name|{name.strip().lower()}"
+    wait = max(users.login_wait(key), users.login_wait(nkey))
+    if wait:
+        proxyauth.authlog.warning("sign-in as %r from %s refused: %d s to wait after repeated failures", name, src, wait)
+        raise HTTPException(429, f"Too many attempts; try again in {wait} seconds", headers={"Retry-After": str(wait)})
     u = users.authenticate(name, str(body.get("password", "")))
     if not u:
-        proxyauth.authlog.warning("failed sign-in as %r from %s (wrong user name or password)", name, src)
+        wait = max(users.login_failed(key), users.login_failed(nkey, users.LOCK_AFTER_NAME))
+        proxyauth.authlog.warning("failed sign-in as %r from %s (wrong user name or password%s)", name, src, f"; {wait} s wait" if wait else "")
         raise HTTPException(401, "Wrong user name or password")
-    if u.get("passwordless") and proxyauth.external(request.headers):
+    users.login_succeeded(key); users.login_succeeded(nkey)
+    if u.get("passwordless") and proxyauth.external(request.headers, proxyauth.peer_of(request)):
         proxyauth.authlog.warning("one-click sign-in as %s refused from %s (outside: a password is required)", u["name"], src)
         raise HTTPException(403, "From outside your network, sign in with an account that has a password")
     proxyauth.authlog.info("signed in: %s (%s, %s) from %s", u["name"], u["role"], "one click" if u.get("passwordless") else "password", src)
@@ -290,7 +298,7 @@ def api_accounts(request: Request):
     """The account picker (public): names, and whether a password is needed. From outside (through Cloudflare) only
     accounts with a password."""
     out = users.accounts() if users.any_users() else []
-    if proxyauth.external(request.headers):
+    if proxyauth.external(request.headers, proxyauth.peer_of(request)):
         out = [a for a in out if not a["passwordless"]]
     return {"accounts": out}
 
@@ -301,7 +309,7 @@ def api_logout(request: Request):
     if u:
         proxyauth.authlog.info("signed out: %s from %s", u["name"], proxyauth.source(request))
     # through Cloudflare the page then goes to Cloudflare's own sign-out (/cdn-cgi/access/logout) to end that session too
-    outside = proxyauth.external(request.headers)
+    outside = proxyauth.external(request.headers, proxyauth.peer_of(request))
     resp = JSONResponse({"ok": True, "cloudflareLogout": "/cdn-cgi/access/logout" if outside else None})
     users.clear_session(resp, cloudflare_cookie=not outside)
     return resp
@@ -313,7 +321,7 @@ def api_me(request: Request):
     return {"user": u, "settings": users.get_settings(u["id"]) if u else {}, "usersExist": users.any_users(),
             "isAdmin": users.is_admin(u), "canWrite": users.can_write(u), "signedIn": users.is_signed_in(u), "requireLogin": users.require_login(),
             "viaProxy": bool(getattr(request.state, "via_proxy", False)), "signedInBy": _signed_in_by(request, u),
-            "throughCloudflare": proxyauth.external(request.headers)}
+            "throughCloudflare": proxyauth.external(request.headers, proxyauth.peer_of(request))}
 
 
 def _signed_in_by(request: Request, u):
@@ -349,7 +357,9 @@ async def api_my_password(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     proxyauth.authlog.info("password changed: %s from %s", u["name"], proxyauth.source(request))
-    return {"ok": True}
+    resp = JSONResponse({"ok": True})
+    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password")  # the old sessions are dead now; this one goes on
+    return resp
 
 
 @router.post("/api/auth/setup")

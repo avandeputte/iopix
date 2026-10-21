@@ -163,7 +163,9 @@ def run(ref: str = ""):
         raise RuntimeError("In Docker, update by pulling the image: docker compose pull && docker compose up -d")
     if progress["running"]:
         raise RuntimeError("An update is already running")
-    ref = re.sub(r"[^A-Za-z0-9._/-]", "", ref or "")[:80]
+    ref = (ref or "").strip()[:80]
+    if ref and not re.fullmatch(r"[0-9a-f]{7,40}|[A-Za-z0-9][A-Za-z0-9._-]*", ref):  # a commit id or a plain branch name, nothing git could read as an option or a path
+        raise RuntimeError("ref must be a commit id or a branch name")
     progress.update(running=True, log="", error=None, finished=None)
     env = dict(os.environ, IOPIX_RESULT=str(config.DATA_DIR / RESULT_FILE), IOPIX_REPO=REPO, IOPIX_BRANCH=BRANCH)
     if ref:

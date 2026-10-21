@@ -136,7 +136,11 @@ export function initSearch() {
   q.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { S.sgSel = Math.min(S.sgSel + 1, S.sgItems.length - 1); renderSuggest(); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { S.sgSel = Math.max(S.sgSel - 1, 0); renderSuggest(); e.preventDefault(); }
-    else if (e.key === 'Enter') { if (q.value.trim()) pickSuggestion(S.sgSel); }
+    else if (e.key === 'Enter') {
+      if (!q.value.trim()) return;
+      if (S.sgItems.length) pickSuggestion(S.sgSel);
+      else { const text = q.value.trim(); q.value = ''; renderSuggest(); applyFilter((p) => p.append('q', text)); }  // no list yet: a text search
+    }
     else if (e.key === 'Escape') { q.value = ''; S.sgItems = []; renderSuggest(); q.blur(); }
     else if (e.key === 'Backspace' && !q.value) {
       const chips = chipList(filterParams());

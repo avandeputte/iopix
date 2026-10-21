@@ -114,9 +114,11 @@ def api_trash(request: Request):
 
 
 @router.get("/api/trash/thumb")
-def api_trash_thumb(info: str):
+def api_trash_thumb(request: Request, info: str):
     """A thumbnail of a trashed file, named by its .dtrashinfo record (which must sit in an album root's trash)."""
     from app.photos import organize
+    if not users.can_write(request.state.user):
+        raise HTTPException(403 if request.state.user else 401, "Editors only")
     item = next((t for t in organize.listing() if t["info"] == info), None)
     if not item or not item["exists"]:
         raise HTTPException(404)

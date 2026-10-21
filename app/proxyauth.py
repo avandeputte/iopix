@@ -71,7 +71,7 @@ def note(headers_in, peer: str):
     """Remember the claims of a Cloudflare Access token (not verified: only to show which team and application the
     requests come through, so they can be set up)."""
     tok = headers_in.get(CF_JWT_HEADER)
-    if not tok:
+    if not tok or not _from_trusted(peer):  # only what the tunnel itself delivers; anyone else's header is ignored
         return
     try:
         import jwt
@@ -84,11 +84,34 @@ def note(headers_in, peer: str):
 EXTERNAL_HEADERS = ("cf-ray", "cf-connecting-ip", "cf-access-jwt-assertion")
 
 
-def external(headers_in) -> bool:
-    """Did the request come in from outside, through Cloudflare? (Requests on the LAN reach the viewer directly.)
-    Outside, one-click sign-in to a passwordless account is not offered: a password is required. A forged header can
-    only take that option away from the one who forges it, never grant anything."""
-    return any(headers_in.get(h) for h in EXTERNAL_HEADERS)
+def _public(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address((ip or "").split("%")[0])
+    except ValueError:
+        return False
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return not (a.is_private or a.is_loopback or a.is_link_local or a.is_unspecified)
+
+
+def external(headers_in, peer: str = "") -> bool:
+    """Did the request come in from outside? Through Cloudflare (its headers), from a public address, or forwarded
+    by a trusted proxy (AUTH_PROXY_TRUSTED) on behalf of a public address. Requests on the LAN reach the viewer
+    directly from private addresses. Outside, one-click sign-in to a passwordless account is not offered: a password
+    is required. A forged header can only take that option away from the one who forges it, never grant anything."""
+    if any(headers_in.get(h) for h in EXTERNAL_HEADERS):
+        return True
+    if peer and _public(peer):
+        return True
+    if peer and _from_trusted(peer):
+        fwd = (headers_in.get("x-forwarded-for") or "").split(",")[0].strip()
+        return bool(fwd) and _public(fwd)
+    return False
+
+
+def peer_of(request) -> str:
+    """The address the connection really came from (before uvicorn's forwarded-header rewrite)."""
+    return request.scope.get("iopix.peer") or (request.client.host if request.client else "")
 
 
 authlog = logging.getLogger("app.auth")  # sign-ins, failed attempts and sign-outs, for Maintenance › Server log
@@ -98,9 +121,9 @@ _logged = {}  # identity -> when its proxy sign-in was last logged (a page load 
 def source(request) -> str:
     """Where a request came from, for the log: the visitor's address, and whether it came through Cloudflare."""
     h = request.headers
-    if external(h):
+    if any(h.get(x) for x in EXTERNAL_HEADERS):
         return f"{h.get('cf-connecting-ip') or '?'} through Cloudflare"
-    return request.client.host if request.client else "?"
+    return peer_of(request) or "?"
 
 
 def mode() -> str:
@@ -152,7 +175,7 @@ def _cf_email(token: str, team: str, aud: str):
         client = _jwks["client"]
     try:
         key = client.get_signing_key_from_jwt(token).key
-        claims = jwt.decode(token, key, algorithms=["RS256"], audience=aud, issuer=f"https://{team}", leeway=30)
+        claims = jwt.decode(token, key, algorithms=["RS256"], audience=aud, issuer=f"https://{team}", leeway=30, options={"require": ["exp"]})
     except Exception as e:  # a forged, expired or foreign token: nobody
         if time.time() - _logged.get("refused", 0) > 60:
             _logged["refused"] = time.time()
@@ -168,11 +191,15 @@ def identity(headers_in, peer: str):
         return None
     if m == "cloudflare":
         team, aud = cf_settings()
-        if team:
-            token = headers_in.get(CF_JWT_HEADER) or ""
-            if not token:
-                return None
-            return _cf_email(token, team, aud)
+        if not team:  # a bare email header is never believed for Cloudflare: the signed token is what makes it safe
+            if time.time() - _logged.get("cf-unset", 0) > 3600:
+                _logged["cf-unset"] = time.time()
+                log.warning("AUTH_PROXY=cloudflare without CF_ACCESS_TEAM and CF_ACCESS_AUD: nobody is signed in through the proxy")
+            return None
+        token = headers_in.get(CF_JWT_HEADER) or ""
+        if not token:
+            return None
+        return _cf_email(token, team, aud)
     if not _from_trusted(peer):
         return None
     for name in headers():

@@ -79,7 +79,7 @@ def _sess():
         if _session is None or _session_path != path:
             import onnxruntime as ort
             opts = ort.SessionOptions()
-            opts.intra_op_num_threads = max(1, jobs.threads())
+            opts.intra_op_num_threads = 2  # detect() runs threads()//2 photos at once: 2 x that = the budget, not its square
             _session = ort.InferenceSession(str(path), sess_options=opts, providers=["CPUExecutionProvider"])
             _session_path = path
         return kind, _session
@@ -213,6 +213,8 @@ def detect_image(img, landmarks: bool = False) -> list:
 def detect_photo(path: str, full_w: int, full_h: int) -> list:
     """Faces in a photo file, in upright full-resolution pixels (digiKam's region coordinates)."""
     img, _ = thumbs._open_oriented(path, 2400, 2400)
+    if not full_w or not full_h or full_w <= 8 or full_h <= 8:  # the index's placeholder size: the file says
+        full_w, full_h = thumbs.true_size(path) or (img.width, img.height)
     sx = full_w / img.width if full_w and full_w > 8 else 1.0
     sy = full_h / img.height if full_h and full_h > 8 else 1.0
     out = []
@@ -341,7 +343,7 @@ def detect(photos: list, gen: int = None, on_batch=None) -> dict:
     """Look for faces in these photos (rows from _photos), write the new ones, remember the photos."""
     from concurrent.futures import ThreadPoolExecutor
     total = {"checked": 0, "found": 0, "added": 0, "photos_with_new": 0, "errors": 0}
-    n = max(1, jobs.threads())
+    n = max(1, jobs.threads() // 2)
     for i in range(0, len(photos), 48):
         if gen is not None and gen != _run["gen"]:
             break

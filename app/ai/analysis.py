@@ -16,6 +16,7 @@ Each analysis is one job in the shared background queue (jobs.py). A job checks
 `_run["gen"]` between batches: start() and reset() bump it, which makes the
 running job stop so the new submission can take over.
 """
+from PIL import UnidentifiedImageError
 import logging
 import sqlite3
 import threading
@@ -177,45 +178,53 @@ def _pixel_job(photos: list, gen: int):
     if not todo:
         return
 
-    def work(p):
-        if gen != _run["gen"]:
-            return None
-        try:
-            return p, _analyse_one(p, p["id"] in q_todo, detector if p["id"] in o_todo else None)
-        except Exception as e:
-            log.warning("analysis: cannot read %s (%s)", p["path"], e)
-            # record the failure so the file is not decoded again on every pass
-            return p, {"quality": (None, None, None, None)} if p["id"] in q_todo else {}
-
-    last = time.time()
-    with ThreadPoolExecutor(workers, thread_name_prefix="analyse") as pool:
-        for i in range(0, len(todo), 64):
+    try:
+        def work(p):
             if gen != _run["gen"]:
-                return
-            qrows, orows, done = [], [], []
-            for res in pool.map(work, todo[i:i + 64]):
-                if not res:
-                    continue
-                p, out = res
-                st = _stamp(p)
-                if "quality" in out:
-                    qrows.append((p["id"], st, *out["quality"]))  # (photo, stamp, sharp, bright, clip_lo, clip_hi)
-                if p["id"] in o_todo:
-                    done.append((p["id"], st))
-                    orows += [(p["id"], *o) for o in out.get("objects", [])]
-            if qrows:
-                with _writer() as con:
-                    con.executemany("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'quality',?,NULL)", [(r[0], r[1]) for r in qrows])
-                progress["quality"]["done"] += len(qrows)
-            if done:
-                with _writer() as con:
-                    con.executemany("DELETE FROM ai_objects WHERE photo_id = ?", [(d[0],) for d in done])
-                    con.executemany("INSERT INTO ai_objects VALUES (?,?,?,?,?,?,?)", orows)
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'objects',?,NULL)", done)
-                progress["objects"]["done"] += len(done)
-            last = _notify(last, 60)
-    _finish("quality", "objects")
+                return None
+            try:
+                return p, _analyse_one(p, p["id"] in q_todo, detector if p["id"] in o_todo else None)
+            except UnidentifiedImageError as e:
+                log.warning("analysis: cannot decode %s (%s)", p["path"], e)
+                # record the failure so the file is not decoded again on every pass
+                return p, {"quality": (None, None, None, None)} if p["id"] in q_todo else {}
+            except OSError as e:  # unreadable right now (a dropped mount): nothing recorded, tried again on the next pass
+                log.warning("analysis: cannot read %s (%s)", p["path"], e)
+                return None
+            except Exception as e:
+                log.warning("analysis: cannot analyse %s (%s)", p["path"], e)
+                return p, {"quality": (None, None, None, None)} if p["id"] in q_todo else {}
+
+        last = time.time()
+        with ThreadPoolExecutor(workers, thread_name_prefix="analyse") as pool:
+            for i in range(0, len(todo), 64):
+                if gen != _run["gen"]:
+                    return
+                qrows, orows, done = [], [], []
+                for res in pool.map(work, todo[i:i + 64]):
+                    if not res:
+                        continue
+                    p, out = res
+                    st = _stamp(p)
+                    if "quality" in out:
+                        qrows.append((p["id"], st, *out["quality"]))  # (photo, stamp, sharp, bright, clip_lo, clip_hi)
+                    if p["id"] in o_todo:
+                        done.append((p["id"], st))
+                        orows += [(p["id"], *o) for o in out.get("objects", [])]
+                if qrows:
+                    with _writer() as con:
+                        con.executemany("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
+                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'quality',?,NULL)", [(r[0], r[1]) for r in qrows])
+                    progress["quality"]["done"] += len(qrows)
+                if done:
+                    with _writer() as con:
+                        con.executemany("DELETE FROM ai_objects WHERE photo_id = ?", [(d[0],) for d in done])
+                        con.executemany("INSERT INTO ai_objects VALUES (?,?,?,?,?,?,?)", orows)
+                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'objects',?,NULL)", done)
+                    progress["objects"]["done"] += len(done)
+                last = _notify(last, 60)
+    finally:
+        _finish("quality", "objects")
 
 
 # --------------------------------------------------------------------------
@@ -332,21 +341,23 @@ def _vision_job(photos: list, gen: int):
     if not todo:
         return
     batches = [todo[i:i + 24] for i in range(0, len(todo), 24)]
-    recognise = _portable_batch
-    last = time.time()
-    n = _vision_workers()
-    with ThreadPoolExecutor(n, thread_name_prefix="vision") as pool:
-        for i in range(0, len(batches), n):
-            if gen != _run["gen"]:
-                return
-            for rows in pool.map(recognise, batches[i:i + n]):  # (photo, stamp, text, nfaces, faceq)
-                with _writer() as con:
-                    con.executemany("INSERT OR REPLACE INTO ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
-                    con.executemany("INSERT OR REPLACE INTO ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'vision',?,NULL)", [(r[0], r[1]) for r in rows])
-                progress["vision"]["done"] += len(rows)
-            last = _notify(last, 60)
-    _finish("vision")
+    try:
+        recognise = _portable_batch
+        last = time.time()
+        n = _vision_workers()
+        with ThreadPoolExecutor(n, thread_name_prefix="vision") as pool:
+            for i in range(0, len(batches), n):
+                if gen != _run["gen"]:
+                    return
+                for rows in pool.map(recognise, batches[i:i + n]):  # (photo, stamp, text, nfaces, faceq)
+                    with _writer() as con:
+                        con.executemany("INSERT OR REPLACE INTO ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
+                        con.executemany("INSERT OR REPLACE INTO ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
+                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'vision',?,NULL)", [(r[0], r[1]) for r in rows])
+                    progress["vision"]["done"] += len(rows)
+                last = _notify(last, 60)
+    finally:
+        _finish("vision")
 
 
 def _caption_job(photos: list, gen: int):
@@ -357,24 +368,26 @@ def _caption_job(photos: list, gen: int):
     progress["captions"].update(running=bool(todo), done=0, total=len(todo))
     if not todo:
         return
-    last = time.time()
-    for i in range(0, len(todo), 8):  # one thread: the GPU serialises anyway, and the other jobs keep the CPU
-        if gen != _run["gen"]:
-            return
-        batch = todo[i:i + 8]
-        try:
-            texts = caption.describe([p["path"] for p in batch])
-        except Exception as e:  # the batch is not recorded, so these photos are tried again on the next run
-            log.warning("captions: batch starting at %s failed (%s)", batch[0]["path"], e)
+    try:
+        last = time.time()
+        for i in range(0, len(todo), 8):  # one thread: the GPU serialises anyway, and the other jobs keep the CPU
+            if gen != _run["gen"]:
+                return
+            batch = todo[i:i + 8]
+            try:
+                texts = caption.describe([p["path"] for p in batch])
+            except Exception as e:  # the batch is not recorded, so these photos are tried again on the next run
+                log.warning("captions: batch starting at %s failed (%s)", batch[0]["path"], e)
+                progress["captions"]["done"] += len(batch)
+                continue
+            rows = [(p["id"], _stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
+            with _writer() as con:
+                con.executemany("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
+                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])
             progress["captions"]["done"] += len(batch)
-            continue
-        rows = [(p["id"], _stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
-        with _writer() as con:
-            con.executemany("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
-            con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])
-        progress["captions"]["done"] += len(batch)
-        last = _notify(last, 120)
-    _finish("captions")
+            last = _notify(last, 120)
+    finally:
+        _finish("captions")
 
 
 def start(photos: list):

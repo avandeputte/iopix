@@ -34,12 +34,17 @@ jobs:
           for f in static/app.js static/js/*.js; do node --input-type=module --check < "$f" || exit 1; done; node --check static/sw.js  # ES modules parsed as modules (a plain --check can miss errors), then the service worker
           for f in *.sh installer/*.sh; do sh -n "$f"; done
           bash -n proxmox/ct/iopix.sh proxmox/install/iopix-install.sh
-      # the full test suite needs a digiKam library to cut its scratch copy from, so it runs
-      # on a developer machine: .venv/bin/python -m pytest tests
+      - name: Tests that need no photo library
+        # the full suite cuts a scratch copy from a digiKam library, so it runs on a developer machine
+        # (.venv/bin/python -m pytest tests); without one, conftest skips those and these still run
+        run: python -m pytest -q -p no:cacheprovider tests/test_imports.py tests/test_jobs.py tests/test_models_registry.py tests/test_query.py tests/test_settings_state.py tests/test_auto_models.py tests/test_semantic_switch.py tests/test_review_fixes.py
 
   image:
     needs: tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # the installer is attached to the release on a version tag
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3

@@ -50,8 +50,9 @@ def test_filters_narrow_results(client, lib):
 def test_text_search(client, lib):
     m = client.get("/api/meta").json()
     person = next(t for t in m["tags"] if t.get("person") and t["full"] != "People")
-    d = client.get("/api/photos", params={"q": person["name"]}).json()
-    assert d["count"] >= 0  # may be zero when the name is not on any kept photo, but must not error
+    r = client.get("/api/photos", params={"q": person["name"]})
+    d = r.json()
+    assert r.status_code == 200 and isinstance(d["count"], int)  # may be zero when the name is not on any kept photo, but must not error
 
 
 def test_facets_and_map(client):

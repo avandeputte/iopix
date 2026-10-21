@@ -91,6 +91,8 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
                         "(and this must be a JPEG, PNG, TIFF or WebP)")
     before = {f"{x['group']}:{x['tag']}": x["value"] for x in _dump(p["path"]) + _dump(p["path"] + ".xmp")}
     xmp = [c for c in changes if c["group"].startswith("XMP-")]
+    from app.digikam import dbsync
+    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
     side = edits._prepare(p["path"])
     snap = history.snapshot(p["id"], side)
     jobs = []
@@ -157,13 +159,15 @@ def reread(pid: int, check_running: bool = True) -> dict:
     if waiting != "none":
         facemgr.write_regions_many([p["id"]])
     meta = scanner.read([p["path"]])
+    if not meta.get(p["path"]):  # a rewrite from nothing would empty the photo's tags, faces, caption and position
+        raise SyncError("The file's metadata could not be read, so nothing was changed in digiKam's database")
     con = dkdb.connect()
     try:
         cat = con.execute("SELECT category FROM Images WHERE id = ?", (p["id"],)).fetchone()
         version = scanner.hash_version(con)
     finally:
         con.close()
-    rows = scanner.rows_for(p["path"], meta.get(p["path"]) or {}, cat[0] if cat else 1)
+    rows = scanner.rows_for(p["path"], meta[p["path"]], cat[0] if cat else 1)
     with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
         # what files and sidecars do not hold, and a reread must not lose: captions in other languages, and the faces
         # digiKam keeps in its database only (unknown, ignored and suggested ones)

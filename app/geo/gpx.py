@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 
 def parse(data: bytes) -> list:
     """[(utc timestamp, lat, lon, ele or None)] sorted by time."""
+    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        raise ValueError("GPX files with a DOCTYPE are not accepted")
     root = ET.fromstring(data)
     pts = []
     for el in root.iter():

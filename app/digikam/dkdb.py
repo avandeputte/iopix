@@ -186,6 +186,15 @@ def _norm_value(v):
     return v
 
 
+_ISO_DT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?")
+
+
+def looks_like_datetime(s: str) -> bool:
+    """Whether a string parameter is a bare ISO timestamp (what the viewer writes into DATETIME columns), and not
+    text that merely starts with one (a caption, a title, a tag name)."""
+    return bool(_ISO_DT.fullmatch(s))
+
+
 def db_datetime(s):
     """A value this backend accepts in a DATETIME/TEXT column, from an ISO string (local time)."""
     if s is None or not is_mysql():
@@ -239,7 +248,7 @@ class Conn:
         return sql.replace("%", "%%").replace("?", "%s")
 
     def _params(self, params):
-        return tuple(db_datetime(p) if isinstance(p, str) and len(p) >= 19 and p[4] == "-" and p[10] == "T" else p for p in params) if self.mysql else params
+        return tuple(db_datetime(p) if isinstance(p, str) and looks_like_datetime(p) else p for p in params) if self.mysql else params
 
     def execute(self, sql: str, params=()):
         if self.mysql:

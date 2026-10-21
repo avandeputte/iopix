@@ -214,11 +214,14 @@ def _watch():
 def _models_arrived(keys: list):
     """After a first-start download: pick the search model that just arrived if none is chosen, and kick the jobs."""
     if keys:
-        for k in ("siglip2", "jinaclip", "clip"):
-            if k in keys and not appstate.get_setting("search_model"):
-                appstate.set_setting("search_model", k)
-                break
-        _start_prewarm()
+        try:
+            for k in ("siglip2", "jinaclip", "clip"):
+                if k in keys and not appstate.get_setting("search_model"):
+                    appstate.set_setting("search_model", k)
+                    break
+            _start_prewarm()
+        except Exception as e:  # no index yet (digiKam unreachable on a first start): the watcher starts the jobs later
+            logging.getLogger("app.core").warning("models arrived but the jobs could not start yet: %s", e)
         _kick.set()
 
 
@@ -295,6 +298,8 @@ def _cached_image(kind: str, photo_id: int, dl: bool = False) -> FileResponse:
         path = thumbs.make(kind, row)
     except FileNotFoundError:
         raise HTTPException(404, "Original file is not available")
+    except OSError as e:
+        raise HTTPException(503, f"The file could not be read right now: {e}")
     if dl:  # a download of the resized JPEG, named after the photo (sharing a smaller file)
         return FileResponse(path, media_type="image/jpeg", filename=os.path.splitext(row["name"])[0] + "-preview.jpg",
                             content_disposition_type="attachment", headers=IMG_CACHE)

@@ -22,7 +22,11 @@ REPO="${IOPIX_REPO:-${DIGIKAM_VIEWER_REPO:-avandeputte/iopix}}"
 BRANCH="${IOPIX_BRANCH:-${DIGIKAM_VIEWER_BRANCH:-main}}"
 REF="${IOPIX_REF:-${DIGIKAM_VIEWER_REF:-$BRANCH}}"
 RESULT="${IOPIX_RESULT:-${DIGIKAM_VIEWER_RESULT:-}}"
+case "$REF" in -*|*..*|*/*/*) printf 'error: bad ref: %s\n' "$REF" >&2; exit 1;; esac  # a commit id or a branch, never an option or a path
 FORCE=0; [ "$1" = "--force" ] && FORCE=1
+TMP=""
+cleanup() { rc=$?; [ -n "$TMP" ] && rm -rf "$TMP"; [ $rc -ne 0 ] && [ -n "$RESULT" ] && printf 'error: update.sh failed (exit %s); see the log\n' "$rc" > "$RESULT" 2>/dev/null; true; }
+trap cleanup EXIT
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 note() { [ -n "$RESULT" ] && printf '%s\n' "$*" > "$RESULT" 2>/dev/null || true; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; note "error: $*"; exit 1; }
@@ -52,7 +56,7 @@ if [ -d .git ]; then
   fi
   git merge -q --ff-only FETCH_HEAD || die "git merge failed (local changes?)"
 else
-  TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+  TMP="$(mktemp -d)"
   # the archive is fetched by commit id, so the code and the recorded COMMIT always match
   R="$(remote_commit "$REF")"; [ -n "$R" ] || die "could not reach GitHub (or no such commit: $REF)"
   if [ "$FORCE" = 0 ] && [ "$R" = "$(local_commit)" ]; then

@@ -231,7 +231,7 @@ export function confirmDialog(message, opts = {}) {
     const cancel = h('button', { class: 'pillbtn', onclick: () => { finish(false); back.remove(); } }, opts.cancel || 'Cancel');
     const back = modal(opts.title || (paras.length > 1 ? paras.shift().textContent : 'Confirm'), ...paras, h('div', { class: 'modal-btns' }, cancel, ok));
     const remove = back.remove; back.remove = () => { remove(); finish(false); };  // closed any other way (Escape, the backdrop): no
-    back.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !opts.danger) { e.preventDefault(); ok.click(); } });
+    back.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !opts.danger && e.target !== cancel) { e.preventDefault(); ok.click(); } });  // Enter on Cancel cancels
     setTimeout(() => (opts.danger ? cancel : ok).focus(), 0);
   });
 }
@@ -252,6 +252,8 @@ export function promptDialog(message, opts = {}) {
 }
 /** Maintenance › Metadata quality: photos without a location, and faces stored twice, the same person in two places, boxes outside the photo or empty.
  *  The check runs every time the page is opened, and again with "Check again". */
+/** Redraw the quality page a moment later, unless the user has gone elsewhere meanwhile. */
+const refreshQuality = (ms) => setTimeout(() => { if (S.route.view === 'quality') showQuality(); }, ms);
 export async function showQuality() {
   const body = h('div', null, h('div', { class: 'muted' }, 'Checking every face in the library…'));
   main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Metadata quality', null]]),
@@ -308,11 +310,11 @@ export async function showQuality() {
   const busy = p.running ? h('div', { class: 'enote' }, p.files ? `Fixing the image files… ${nf.format(p.done)} / ${nf.format(p.total)}.` : `Removing duplicate faces… ${nf.format(p.done)} / ${nf.format(p.total)} photos.`) : null;
   if (p.running) setTimeout(() => { if (S.route.view === 'quality') showQuality(); }, 4000);
   const near = q.near;
-  const fitOne = async (x, ev) => { try { const r = await post('/api/quality/fit', { photos: [x.photo] }); toast(r.fitted ? 'Box trimmed to the photo.' : r.removed ? 'Empty box removed.' : 'Nothing to fix there.'); } catch (e) { toastError(e); return; } if (!gone(ev)) setTimeout(showQuality, 1200); };
+  const fitOne = async (x, ev) => { try { const r = await post('/api/quality/fit', { photos: [x.photo] }); toast(r.fitted ? 'Box trimmed to the photo.' : r.removed ? 'Empty box removed.' : 'Nothing to fix there.'); } catch (e) { toastError(e); return; } if (!gone(ev)) refreshQuality(1200); };
   const fitAll = q.invalid.count && S.CAN_MANAGE ? h('button', { class: 'pillbtn on', onclick: async () => {
     if (!await confirmDialog(`Trim ${plural(q.invalid.count, 'face box', 'face boxes')} to the edges of their photos (empty ones are removed)? Each change is in the edit log with undo.`)) return;
     try { const r = await post('/api/quality/fit', {}); toast(`${nf.format(r.fitted)} trimmed, ${nf.format(r.removed)} removed${r.failed ? `, ${nf.format(r.failed)} failed` : ''}.`, null, null, 7000); } catch (e) { toastError(e); return; }
-    setTimeout(showQuality, 1500);
+    refreshQuality(1500);
   } }, 'Fit them all inside their photos') : null;
   const sizes = h('div', { class: 'eseg', title: 'Thumbnail size' }, [['list', 'List'], ['large', 'Large'], ['huge', 'Larger']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: () => { store.set('qsize', k); showQuality(); } }, l)));
   fill(body, h('div', { style: 'display:flex;gap:10px;align-items:center;margin:4px 0 6px;flex-wrap:wrap' }, again, h('span', { class: 'muted' }, `${nf.format(q.checked)} face regions checked ${fmtWhen(q.at)}.`), h('span', { style: 'flex:1' }), sizes), busy,
@@ -320,12 +322,12 @@ export async function showQuality() {
       near.extra && S.CAN_MANAGE && !p.running ? [h('button', { class: 'pillbtn on', onclick: async () => {
         if (!await confirmDialog(`Remove ${nf.format(near.extra)} duplicate face regions on ${plural(near.photos, 'photo')}? One of each pair is kept; the sidecars are rewritten.`)) return;
         try { const r = await post('/api/quality/fix', {}); toast(`Cleaning up ${plural(r.photos, 'photo')} in the background.`); } catch (e) { toastError(e); }
-        setTimeout(showQuality, 1500);
+        refreshQuality(1500);
       } }, `Remove ${nf.format(near.extra)} duplicates`)]
         : p.finished && !p.files && !p.running && S.CAN_MANAGE ? [h('button', { class: 'pillbtn', onclick: async () => {
           if (!await confirmDialog('Rewrite the face regions inside the image files of the cleaned photos that still carry the duplicates? Each file is backed up first and its pixels are checked unchanged.')) return;
           try { const r = await post('/api/quality/fix', { files: true }); toast(`Looking at ${plural(r.photos, 'image file')} in the background.`); } catch (e) { toastError(e); }
-          setTimeout(showQuality, 1500);
+          refreshQuality(1500);
         } }, 'Fix the image files too')] : null,
       { list: near.examples, key: 'near', row: (x, all) => h('div', { class: 'hrow' }, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ` · ${x.apart} px apart`)) }),
     sec('Same person in two places', q.separate.count, 'Usually one of the two is someone else, named by mistake. Open the photo, show the faces (F), and rename, adjust or remove the wrong box.', null,
@@ -336,7 +338,7 @@ export async function showQuality() {
       const ignore = async (ids, ev) => {
         if (!ev && !await confirmDialog(`Mark the unnamed faces on ${plural(ids.length, 'photo')} as not faces to name? Each change is in the edit log with undo.`)) return;
         try { const r = await post('/api/quality/ignore', { photos: ids }); toast(`${plural(r.ignored, 'face')} ignored${r.failed ? `, ${nf.format(r.failed)} failed` : ''}.`); } catch (e) { toastError(e); return; }
-        if (!gone(ev)) setTimeout(showQuality, 1200);
+        if (!gone(ev)) refreshQuality(1200);
       };
       const nameThem = (x) => { openLightbox({ id: [x.photo] }, 0, true); setTimeout(() => { if (!LB.faces) toggleFaces(); }, 700); };
       return sec('Faces without a name', u.count,
@@ -356,7 +358,7 @@ export async function showQuality() {
       const find = async (ids, ev) => {
         let r;
         try { r = await post('/api/faces/detect', { ids }); toast(r.done ? `${plural(r.added || 0, 'face')} found${r.added ? '; name them from the photo, or under Faces without a name after Check again' : ''}.` : `Looking for faces in ${plural(r.queued, 'photo')} in the background.`, null, null, 7000); } catch (e) { toastError(e); return; }
-        if (ev && r.done && r.added) gone(ev); else if (!ev) setTimeout(showQuality, 2500);
+        if (ev && r.done && r.added) gone(ev); else if (!ev) refreshQuality(2500);
       };
       const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=untagged'); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
       return sec('People, but nobody tagged', u.count,
@@ -370,7 +372,7 @@ export async function showQuality() {
     (() => {  // no location: set one, or accept the photo as it is
       const u = q.nolocation || { count: 0, items: [], accepted: 0 }, items = u.items;
       const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'nolocation', on }); toast(on ? `${plural(ids.length, 'photo')} accepted without a location.` : 'Shown again.'); } catch (e) { toastError(e); return; } if (!gone(ev)) showQuality(); };
-      const place = (ids, ev) => locationDialog(ids, null, () => { if (!gone(ev)) setTimeout(showQuality, 1200); });
+      const place = (ids, ev) => locationDialog(ids, null, () => { if (!gone(ev)) refreshQuality(1200); });
       const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=nolocation'); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
       return sec('No location', u.count,
         `Photos and videos with no place recorded.${u.accepted ? ` ${plural(u.accepted, 'photo')} you accepted without one ${u.accepted === 1 ? 'is' : 'are'} not listed.` : ''} Set the location (the dialog suggests the places of photos taken around the same time), place them on the map (Map › Place photos), or accept the photo as it is: it leaves this list for good.`,
@@ -385,13 +387,13 @@ export async function showQuality() {
       const u = q.baddate || { count: 0, items: [], accepted: 0 }, items = u.items;
       const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'baddate', on }); toast(on ? `${plural(ids.length, 'date')} accepted as ${ids.length === 1 ? 'it is' : 'they are'}.` : 'Shown again.'); } catch (e) { toastError(e); return; } if (!gone(ev)) showQuality(); };
       const fixDate = (x, ev) => { const back = modal(`Date of ${x.name}`, h('p', { class: 'muted mt0' }, `Now ${x.taken.replace('T', ' ')}: ${x.reason}.`),
-        dateEditor([x.photo], x.taken.startsWith('1') && +x.taken.slice(0, 4) < 1901 ? null : x.taken, () => { back.remove(); if (!gone(ev)) setTimeout(showQuality, 1200); }),
+        dateEditor([x.photo], x.taken.startsWith('1') && +x.taken.slice(0, 4) < 1901 ? null : x.taken, () => { back.remove(); if (!gone(ev)) refreshQuality(1200); }),
         h('div', { style: 'text-align:right;margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); };
       const useFolder = async (list, ev) => {
         let n = 0;
         for (const x of list) { if (x.folder_date && await editPhotos([x.photo], { taken: x.folder_date })) n++; }
         if (list.length > 1) toast(`${plural(n, 'photo')} dated from ${n === 1 ? 'its' : 'their'} folder.`);
-        if (!gone(ev)) setTimeout(showQuality, 1200);
+        if (!gone(ev)) refreshQuality(1200);
       };
       const withFolder = items.filter((x) => x.folder_date);
       const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=baddate'); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
@@ -416,11 +418,11 @@ export async function showQuality() {
         ids_(list).forEach((i) => details.delete(i));
         toast(`${plural(n, 'photo')} moved to the folder for ${n === 1 ? 'its' : 'their'} date${failed ? `; ${nf.format(failed)} could not be` : ''}.`, null, null, 7000);
         S.keepView = true; pollSoon(600);
-        if (!gone(ev)) setTimeout(showQuality, 1500);
+        if (!gone(ev)) refreshQuality(1500);
       };
       const ids_ = (list) => list.map((x) => x.photo);
       const fixDate = (x, ev) => { const back = modal(`Date of ${x.name}`, h('p', { class: 'muted mt0' }, `In “${x.folder.replace(/^\//, '')}”, a folder for ${x.expect}.`),
-        dateEditor([x.photo], x.taken, () => { back.remove(); if (!gone(ev)) setTimeout(showQuality, 1200); }), h('div', { style: 'text-align:right;margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); };
+        dateEditor([x.photo], x.taken, () => { back.remove(); if (!gone(ev)) refreshQuality(1200); }), h('div', { style: 'text-align:right;margin-top:10px' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); };
       const pick = (x, ev) => movePhotos([x.photo], () => { gone(ev); });
       const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=wrongfolder'); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
       return sec('Date doesn’t match the folder', u.count,
@@ -499,7 +501,7 @@ export async function showImport(params) {
     let r;
     try { r = await post(`/api/import/${token}/run`, { layout: layoutSel.value, duplicates: dupSel.value, remember: !!remember?.firstChild.checked }); } catch (e) { toastError(e, 10000); run.disabled = false; draw(); return; }
     const folders = [...new Set(r.added.map((a) => a.folder))];
-    toast(`${plural(r.added.length, 'photo')} imported${folders.length ? ` into ${folders.slice(0, 3).join(', ')}${folders.length > 3 ? '…' : ''}` : ''}${r.skipped.length ? `; ${plural(r.skipped.length, 'file')} left out` : ''}.`, r.added.length ? 'Show' : null, () => go('photos', photosWith({ album: undefined, sort: 'new' })), 12000);
+    toast(`${plural(r.added.length, 'photo')} imported${folders.length ? ` into ${folders.slice(0, 3).join(', ')}${folders.length > 3 ? '…' : ''}` : ''}${r.skipped.length ? `; ${plural(r.skipped.length, 'file')} left out` : ''}.`, r.added.length ? 'Show' : null, () => go('photos', photosWith({ sort: 'new' })), 12000);
     token = null; plan = null; history.replaceState(null, '', '#/import'); onRoute(); S.keepView = true; pollSoon(600);
     fill(status, r.added.length ? h('span', null, `${plural(r.added.length, 'photo')} imported. `, h('a', { class: 'lnk', href: '#/folders' }, 'Open Folders')) : 'Nothing was imported.'); fill(table); run.hidden = true;
   };
@@ -570,11 +572,14 @@ export const pickedShared = (el) => (el.tagName === 'SELECT' ? el.value === '1' 
 export function albumDialog(ids) {
   const name = h('input', { class: 'pagefilter', style: 'flex:1;min-width:160px', placeholder: 'New album name' });
   const share = sharingPick();
+  let busy = false;  // Enter and the button together, or two quick Enters, must not make two albums
   const add = async (id, label) => {
+    if (busy) return;
+    busy = true;
     try {
-      if (id == null) { if (!name.value.trim()) { name.focus(); return; } await post('/api/ualbums', { name: name.value.trim(), ids, shared: pickedShared(share) }); label = name.value.trim(); }
+      if (id == null) { if (!name.value.trim()) { name.focus(); busy = false; return; } await post('/api/ualbums', { name: name.value.trim(), ids, shared: pickedShared(share) }); label = name.value.trim(); }
       else await post(`/api/ualbums/${id}`, { ids, on: true });
-    } catch (e) { toast(e.message || 'Could not update the album.'); return; }
+    } catch (e) { toast(e.message || 'Could not update the album.'); busy = false; return; }
     await loadState();
     back.remove();
     toast(`Added ${nf.format(ids.length)} to “${label}”.`, 'Open', () => { const a = ST.albums.find((x) => x.name === label); if (a) go('photos', photosWith({ ualbum: a.id })); });

@@ -91,7 +91,7 @@ def video(pid: int, check_running: bool = True) -> dict:
     if _decodes(ff, path):
         return {"id": pid, "fixed_by": None, "note": "it already plays: nothing to repair"}
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the video")
-    work = tempfile.mkdtemp(prefix="iopix-repair-", dir=os.path.dirname(path))
+    work = tempfile.mkdtemp(prefix=".iopix-repair-", dir=os.path.dirname(path))
     try:
         out, label = rewrap(path, work, ff)
         # keep the original's metadata (dates, place, Apple's Live Photo identifier) where ffmpeg did not carry it

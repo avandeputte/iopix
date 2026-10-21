@@ -120,7 +120,8 @@ SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DB
 if ! pct exec "$CTID" -- bash -c "$SETUP_CMD > /opt/iopix/setup.log 2>&1"; then
   msg_error "setup.sh failed inside the container; last lines of /opt/iopix/setup.log:"
   pct exec "$CTID" -- tail -n 40 /opt/iopix/setup.log || true
-  msg_error "Fix the cause, then run it again with: pct exec $CTID -- bash -c \"$SETUP_CMD\""
+  SHOWN="$(printf '%s' "$SETUP_CMD" | sed -E 's/(--admin [^ :]*:)[^ ]*/\1****/; s/(--mysql )[^ ]*/\1<host:port:user:password:db>/')"  # no secrets on the terminal
+  msg_error "Fix the cause, then run it again with: pct exec $CTID -- bash -c \"$SHOWN\""
   exit 1
 fi
 # the container cannot see digiKam's process on the host: ask before database writes instead of pgrep

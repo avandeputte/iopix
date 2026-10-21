@@ -137,10 +137,12 @@ def _exif(paths: list) -> dict:
                               *["-" + t for t in READ_TAGS], "-@", argfile], capture_output=True, text=True, timeout=3600)
         rows = json.loads(res.stdout or "[]")
     except (OSError, ValueError, subprocess.SubprocessError) as e:
-        log.warning("scanner: exiftool could not read %d files (%s)", len(paths), e)
-        rows = []
+        # never an empty answer: a caller writing rows from {} would wipe the photo's tags, faces, caption and position
+        raise SyncError(f"exiftool could not read {len(paths)} file(s): {e}") from e
     finally:
         os.unlink(argfile)
+    if paths and not rows:
+        raise SyncError(f"exiftool gave nothing back for {len(paths)} file(s)" + (f": {res.stderr.strip()[:200]}" if res.stderr else ""))
     return {r.get("SourceFile"): r for r in rows}
 
 
@@ -155,7 +157,9 @@ def read(paths: list) -> dict:
     sides = _exif([p + ".xmp" for p in paths if os.path.exists(p + ".xmp")])
     out = {}
     for p in paths:
-        d = dict(files.get(p) or {})
+        if files.get(p) is None:  # exiftool said nothing about this file: no record, so no caller writes rows from nothing
+            continue
+        d = dict(files[p])
         s = sides.get(p + ".xmp") or {}
         for k, v in s.items():
             if k in SIDECAR_WINS and v not in (None, "", []):
@@ -407,9 +411,13 @@ def _write_rows(con, iid: int, r: dict, tags: _Tags, special: dict, full: bool):
     for prop, value in r["copyright"].items():
         con.execute("INSERT INTO ImageCopyright (imageid, property, value, extraValue) VALUES (?,?,?,?)",
                     (iid, prop, value, "x-default" if prop in ("copyrightNotice", "rightsUsageTerms") else None))
+    relabel = {tags.by_path.get(INTERNAL + n) for n in (*PICK_TAGS, *COLOR_TAGS)} - {None}
+    internal = {tid for p, tid in tags.by_path.items() if p.startswith(INTERNAL)} - relabel
+    keep_tags = [t for (t,) in con.execute("SELECT tagid FROM ImageTags WHERE imageid = ?", (iid,)) if t in internal]
+    keep_props = con.execute("SELECT tagid, property, value FROM ImageTagProperties WHERE imageid = ? AND property != 'tagRegion'", (iid,)).fetchall()
     con.execute("DELETE FROM ImageTags WHERE imageid = ?", (iid,))
     con.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (iid,))
-    want = set()
+    want = set(keep_tags)
     for p in r["tags"]:
         if p.startswith(INTERNAL) or p == "_Digikam_Internal_Tags_":
             continue
@@ -437,6 +445,9 @@ def _write_rows(con, iid: int, r: dict, tags: _Tags, special: dict, full: bool):
             # an unnamed face, on digiKam's Unknown tag without assigning that tag (FaceTagsEditor::addManually)
             con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, special["unknownPerson"], "autodetectedFace", folders_rect(rect)))
     con.executemany("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?,?)", [(iid, t) for t in want])
+    for tid, prop, val in keep_props:
+        if not con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (iid, tid, prop, val)).fetchone():
+            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (iid, tid, prop, val))
 
 
 def folders_rect(rect) -> str:
@@ -505,8 +516,10 @@ def complete(ids: list, check_running: bool = True) -> dict:
                 if twin:
                     _copy_attributes(con, twin, iid)
                     copied += 1
+                elif not meta.get(path):
+                    raise SyncError("the file could not be read; tried again on the next pass")
                 else:
-                    _write_rows(con, iid, rows_for(path, meta.get(path) or {}, cat), tags, special, full=True)
+                    _write_rows(con, iid, rows_for(path, meta[path], cat), tags, special, full=True)
                 stamp = dkdb.file_stamp(path)
                 con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?", (uh, size, stamp[0] if stamp else None, iid))
                 done += 1
@@ -634,7 +647,10 @@ def scan(check_running: bool = True) -> dict:
             with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
                 cats = dict(con.execute(f"SELECT id, category FROM Images WHERE id IN ({','.join(str(i) for i, _p in modified)})").fetchall())
                 for iid, path in modified:
-                    r = rows_for(path, meta.get(path) or {}, cats.get(iid, 1))
+                    if not meta.get(path):  # unreadable right now: left as it is, tried again on the next pass
+                        log.warning("scanner: %s could not be read; its rows are left as they are", path)
+                        continue
+                    r = rows_for(path, meta[path], cats.get(iid, 1))
                     _write_rows(con, iid, r, None, {}, full=False)
                     st = dkdb.file_stamp(path)
                     con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",

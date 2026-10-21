@@ -807,7 +807,8 @@ def revert(photos: list) -> dict:
                     jobs.append((p["path"], write_args(ch, None, True)))
                 if jobs and run_exiftool(jobs):
                     raise OSError("exiftool could not write the earlier values back")
-                backup.unlink(missing_ok=True)
+                if jobs:  # the sidecar is as digiKam had it again; otherwise the pre-viewer copy is kept
+                    backup.unlink(missing_ok=True)
                 done.append(pid)
             except OSError as e_:  # the edit stays remembered, so it can be retried
                 failed.append({"id": pid, "error": str(e_)})

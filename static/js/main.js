@@ -93,6 +93,7 @@ export async function pollStatus() {
   let delay = 20000;
   try {
     const s = await api('/api/status');
+    if (s.requireLogin && !s.user && S.USER) { location.reload(); return; }  // the session ended: the sign-in screen, not a dead page
     const el = $('#status');
     const progress = (label, p, ms) => { el.replaceChildren(label, h('br'), `${nf.format(p.done)} / ${nf.format(p.total)}`, h('div', { class: 'bar' }, h('i', { style: `width:${(100 * p.done / p.total).toFixed(1)}%` }))); delay = ms; };
     el.replaceChildren();
@@ -149,7 +150,8 @@ export async function start() {
 /** Load the library and show the first view; once per page load, after sign-in when that is required. */
 export async function boot() {
   S.BOOTED = true; document.body.classList.remove('locked');
-  try { indexMeta(await api('/api/meta')); await loadState(); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); return; }
+  // (a search typed before the metadata arrived draws its list once it is here)
+  try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); return; }
   if (store.get('filters', '0') === '1' && innerWidth >= 1100 && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
   await pollStatus();
   onRoute();

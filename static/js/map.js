@@ -11,7 +11,7 @@ export const M = { data: null, map: null, token: 0 };
 export function loadLeaflet(cluster) {
   const css = (href) => document.head.append(h('link', { rel: 'stylesheet', href }));
   const js = (src) => new Promise((ok, fail) => document.head.append(h('script', { src, onload: ok, onerror: () => fail(new Error('offline')) })));
-  S.leafletP ||= (css('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'), js('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'));
+  S.leafletP ||= (css('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'), js('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')).catch((e) => { S.leafletP = null; throw e; });  // offline once is not offline for the session
   if (!cluster) return S.leafletP;
   S.clusterP ||= S.leafletP.then(() => {
     css('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css');

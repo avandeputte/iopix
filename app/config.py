@@ -41,7 +41,15 @@ PREVIEW_CACHE_MAX_MB = int(os.environ.get("PREVIEW_CACHE_MAX_MB", 8000))
 # Build all grid thumbnails in the background after startup.
 PREWARM = os.environ.get("PREWARM", "1") not in ("0", "false", "no")
 # cores the one running background job may use (Settings can change it); half the machine by default
-BG_THREADS = int(os.environ.get("BG_THREADS", max(1, (os.cpu_count() or 4) // 2)))
+def cpu_count() -> int:
+    """The cores this process may use: the container's share under Docker/LXC, not the host's count."""
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 4
+
+
+BG_THREADS = int(os.environ.get("BG_THREADS", max(1, cpu_count() // 2)))
 PREWARM_WORKERS = int(os.environ["PREWARM_WORKERS"]) if os.environ.get("PREWARM_WORKERS") else None  # None: BG_THREADS
 
 # How often to check whether digiKam changed its database (seconds).

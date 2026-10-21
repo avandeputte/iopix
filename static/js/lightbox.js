@@ -25,7 +25,7 @@ const reapplyRecent = (id, d) => {
 };
 export function getDetail(id) {
   if (!details.has(id)) {
-    details.set(id, api(`/api/photo/${id}`).then((d) => reapplyRecent(id, d)));
+    details.set(id, api(`/api/photo/${id}`).then((d) => reapplyRecent(id, d)).catch((e) => { details.delete(id); throw e; }));  // not cached: asked again next time
     if (details.size > 400) details.delete(details.keys().next().value);
   }
   return details.get(id);
@@ -393,11 +393,29 @@ export function startCrop() {
   frame.append(box); stage.append(bar);
   stage.addEventListener('pointerdown', down, true); stage.addEventListener('pointermove', move, true); stage.addEventListener('pointerup', up, true);
 }
+/** A source list without item k: the id list and every array alongside it (w, h, ts...), index lists (geo, faces)
+ *  and index-keyed maps (video) shifted, so what is shown stays the photo at that position. */
+export function dropIndex(src, k) {
+  const n = src.id.length, out = {};
+  for (const [key, v] of Object.entries(src)) {
+    if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+      if (v.length === n && key !== 'id') out[key] = Array.from(v).filter((_, i) => i !== k);
+      else if (key === 'id') out[key] = Array.from(v).filter((_, i) => i !== k);
+      else out[key] = Array.from(v).filter((i) => i !== k).map((i) => (i > k ? i - 1 : i));  // a list of indices
+    } else if (v instanceof Set) out[key] = new Set([...v].filter((i) => i !== k).map((i) => (i > k ? i - 1 : i)));
+    else if (v && typeof v === 'object' && Object.keys(v).every((x) => /^\d+$/.test(x))) {
+      out[key] = {};
+      for (const [i, x] of Object.entries(v)) { const j = +i; if (j < k) out[key][j] = x; else if (j > k) out[key][j - 1] = x; }
+    } else out[key] = v;
+  }
+  return out;
+}
 export function deleteCurrent() {
   if (!S.CAN_MANAGE || !LB.open) return;
   const id = LB.src.id[LB.i];
   trashPhotos([id], () => {  // drop it from the sequence and show the next one (or close when it was the last)
-    if (LB.src.id.indexOf(id) >= 0) LB.src = { ...LB.src, id: LB.src.id.filter((x) => x !== id) };
+    const k = LB.src.id.indexOf(id);
+    if (k >= 0) LB.src = dropIndex(LB.src, k);
     if (!LB.src.id.length) { closeLightbox(true); return; }
     LB.i = Math.min(LB.i, LB.src.id.length - 1); setPhotoParam(LB.src.id[LB.i], false); showItem();
   });
@@ -990,6 +1008,7 @@ document.addEventListener('keydown', (e) => {
   }
   // Enter or Space on a card, tile, row or link-styled control that is not a real button (role=button) acts like a click
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]:not(button):not(a[href])') && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.target.click(); return; }
+  if (document.querySelector('.modal-back')) return;  // a dialog is open: its keys are its own (Space on a button, Delete in a field)
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   if (LB.open) {
     if (e.key === 'Escape') closeLightbox(true);

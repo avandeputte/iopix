@@ -146,6 +146,14 @@ class Engine:
         self.running = True
 
         def work():
+            try:
+                _work()
+            finally:
+                if run == self._run and self.running and not self._finished_ok:
+                    self.running = False  # a job that died must not look alive (the next start would wait for it)
+
+        def _work():
+            self._finished_ok = False
             from fastembed import ImageEmbedding
             n = jobs.threads()
             if self._image is None or self._image_threads != n:  # the thread budget is a session option
@@ -193,6 +201,7 @@ class Engine:
             with self._lock:
                 self._save()
             if run == self._run:
+                self._finished_ok = True
                 self.running = False
                 if self.on_finish:
                     self.on_finish(self)

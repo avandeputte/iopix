@@ -46,13 +46,15 @@ def test_run_passes_the_ref_and_keeps_the_outcome(client, monkeypatch, tmp_path)
     monkeypatch.setattr(updates, "in_docker", lambda: False)
     (tmp_path / "update.sh").write_text('#!/bin/sh\necho "ref=$IOPIX_REF"\necho "ok: updated to v9 (abc1234)" > "$IOPIX_RESULT"\n')
     monkeypatch.setattr(updates.config, "APP_DIR", tmp_path)
-    assert client.post("/api/update", json={"action": "run", "ref": "abc1234; rm -rf /"}).status_code == 200
+    assert client.post("/api/update", json={"action": "run", "ref": "abc1234; rm -rf /"}).status_code >= 400, "a ref is a commit id or a branch name, nothing else"
+    assert client.post("/api/update", json={"action": "run", "ref": "../../repos/evil/fork/commits/main"}).status_code >= 400
+    assert client.post("/api/update", json={"action": "run", "ref": "abc1234"}).status_code == 200
     import time
     for _ in range(50):
         if not updates.progress["running"]:
             break
         time.sleep(0.1)
-    assert "ref=abc1234rm-rf/" in updates.progress["log"], "the ref is sanitised to a commit or branch name"
+    assert "ref=abc1234" in updates.progress["log"], "the ref reaches update.sh"
     updates.progress.update(running=False, finished=None, log="", error=None)  # as after the restart
     s = client.get("/api/update").json()
     assert s["lastUpdate"]["ok"] is True and s["lastUpdate"]["text"] == "updated to v9 (abc1234)"

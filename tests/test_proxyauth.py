@@ -66,9 +66,10 @@ def test_cloudflare_access_token_is_verified(monkeypatch, account):
     assert proxyauth.identity({hdr: token(aud=["another-app"])}, "127.0.0.1") is None
     assert proxyauth.identity({hdr: token(exp=int(time.time()) - 600)}, "127.0.0.1") is None
     assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None, "no token: nobody"
-    # without the team settings: the plain header, from the proxy (cloudflared) only
+    # without the team settings nobody is signed in: for Cloudflare the signed token is the only proof (a plain
+    # header from the tunnel's address could be set by anything on that machine)
     monkeypatch.delenv("CF_ACCESS_TEAM")
-    assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") == "probe@example.com"
+    assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None
     assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "203.0.113.9") is None
 
 
@@ -109,7 +110,9 @@ def test_settings_from_the_app_and_the_token_seen(monkeypatch, account):
         monkeypatch.setenv("AUTH_PROXY", "off")
         assert proxyauth.mode() == "off", "the environment wins"
         tok = jwt.encode({"iss": "https://myteam.cloudflareaccess.com", "aud": ["aud-x"], "email": "probe@example.com"}, "k", algorithm="HS256")
-        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "127.0.0.1")
+        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")  # from the proxy's own address: anyone else's header is ignored
+        proxyauth.seen.clear(); proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "203.0.113.9"); assert not proxyauth.seen, "not from the proxy: not noted"
+        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")
         assert proxyauth.seen["iss"] == "https://myteam.cloudflareaccess.com" and proxyauth.seen["aud"] == ["aud-x"]
     finally:
         proxyauth.save({k: "" for k in proxyauth.KEYS})

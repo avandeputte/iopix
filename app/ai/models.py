@@ -15,6 +15,7 @@ model objects are dropped so the next use loads the new files.
 """
 import importlib.util
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -321,8 +322,12 @@ def fetch_file(url: str, dst, member: str = None):
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(".part")
     if not member:
-        urllib.request.urlretrieve(url, tmp)
-        tmp.replace(dst)
+        try:
+            urllib.request.urlretrieve(url, tmp)
+            tmp.replace(dst)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         return
     with tempfile.TemporaryDirectory(dir=str(dst.parent)) as d:
         archive = os.path.join(d, "download.zip")
@@ -338,6 +343,8 @@ def fetch_file(url: str, dst, member: str = None):
 
 def _download_here(key: str):
     """Runs in the child process, with the hub reachable."""
+    import socket
+    socket.setdefaulttimeout(120)  # a stalled connection ends instead of holding the download for the parent's two hours
     m = REGISTRY[key]
     if m.get("choice") == "search_model":
         from app.ai import semantic
@@ -390,7 +397,10 @@ def auto_download(keys: list, on_done=None):
             if not progress["error"] and local(key)["installed"]:
                 got.append(key)
         if on_done:
-            on_done(got)
+            try:
+                on_done(got)
+            except Exception as e:
+                logging.getLogger(__name__).warning("after the model download: %s", e)
 
     threading.Thread(target=work, name="auto-models", daemon=True).start()
     return todo

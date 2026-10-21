@@ -184,7 +184,7 @@ while IFS= read -r line; do case "$line" in ''|'#'*|*[!A-Za-z0-9_]*=*) ;; *=*) e
 echo "wrote $ENVF"
 if [ -n "$MYSQL" ]; then
   echo "testing the database connection"
-  "$VPY" -c "from app import dkdb; r = dkdb.test_connection(); print(f\"  OK: {r['images']} photos, {r['tags']} tags, DBVersion {r['dbVersion']}, root {r['roots']}\")" || die "could not connect to the database with those settings"
+  "$VPY" -c "from app.digikam import dkdb; r = dkdb.test_connection(); print(f\"  OK: {r['images']} photos, {r['tags']} tags, DBVersion {r['dbVersion']}, root {r['roots']}\")" || die "could not connect to the database with those settings"
 fi
 
 say "Models"
@@ -192,12 +192,12 @@ for key in $(echo "$AUTO_MODELS" | tr ',' ' '); do
   echo "downloading $key"
   HF_HUB_OFFLINE=0 "$VPY" -m app.ai.models download "$key" || echo "  download of $key failed; retry later from Maintenance > Models and data"
 done
-[ -n "$SEARCH_MODEL" ] && "$VPY" -c "from app import state; state.init(); state.set_setting('search_model', '$SEARCH_MODEL')"
+[ -n "$SEARCH_MODEL" ] && "$VPY" -c "from app.data import state; state.init(); state.set_setting('search_model', '$SEARCH_MODEL')"
 
 if [ -n "$ADMIN" ]; then
   say "Admin account"
   "$VPY" -c "
-import sys; from app import state, users
+import sys; from app.data import state; from app import users
 state.init(); users.init()
 name, pw = sys.argv[1].split(':', 1)
 print('  created', users.create(name, pw, 'admin')['name']) if not users.any_users() else print('  users already exist; not touched')

@@ -34,7 +34,7 @@ def server(lib):
     port = _free_port()
     env = dict(os.environ, DATA_DIR=str(Path(os.environ["DATA_DIR"]).parent / "data-ui"))
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
-                            cwd=str(APP), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            cwd=str(APP), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # a pipe nobody reads would stall the server once full
     url = f"http://127.0.0.1:{port}"
     try:
         for _ in range(300):
@@ -813,7 +813,7 @@ def test_timeline_rail_ribbon_marker_and_preview(page, server, lib):
     page.mouse.down(); page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.95); page.mouse.up()
     page.wait_for_timeout(300)
     assert page.locator("#main").evaluate("m => m.scrollTop") > 0
-    assert page.locator("#scrub .pos").inner_text() != before or True
+    assert page.locator("#scrub .pos").count() == 1  # the position label is still there after the jump
 
 
 def test_update_banner_shows_and_can_be_dismissed(page, server):
@@ -1609,7 +1609,7 @@ def test_map_place_mode_shows_the_tray(page, server):
     if lay.count():  # the Map / Satellite switch stays clear of the tray
         a, b = lay.first.bounding_box(), page.locator(".maptray").bounding_box()
         assert a["x"] + a["width"] <= b["x"] or a["y"] >= b["y"] + b["height"] or a["x"] >= b["x"] + b["width"] or a["y"] + a["height"] <= b["y"], (a, b)
-    assert "without a location" in page.locator(".maptray .mthead b").inner_text() or page.locator(".maptray .tgrid img").count() >= 0
+    assert "without a location" in page.locator(".maptray .mthead b").inner_text() or page.locator(".maptray .tgrid img").count() >= 1
     # only the town is known: photos dropped on the map are saved as approximate
     tiles = page.locator(".maptray .tgrid img")
     page.wait_for_timeout(800)
@@ -1692,7 +1692,7 @@ def test_search_box_enter_runs_the_search(page, server):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(server + "/#/explore")
-    page.wait_for_selector("#q", timeout=10000)
+    page.wait_for_selector(".stats .stat", timeout=15000)  # drawn from /api/meta: the suggestions need it
     page.fill("#q", "yellowstone")
     page.wait_for_selector("#suggest .sg, .sg", timeout=20000)  # the suggestion list draws as you type (slow late in a full run)
     page.keyboard.press("Enter")

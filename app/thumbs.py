@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 try:
     import pillow_heif
@@ -24,7 +24,7 @@ except Exception:  # HEIC files will fall back to a placeholder
 
 from app import config
 
-Image.MAX_IMAGE_PIXELS = None
+Image.MAX_IMAGE_PIXELS = 400_000_000  # a 400 MP panorama decodes; twice that is refused rather than eating the server's memory
 FFMPEG = shutil.which("ffmpeg")
 log = logging.getLogger(__name__)
 
@@ -147,8 +147,10 @@ def make(kind: str, photo: dict) -> Path:
                     size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
                     im = im.resize(size, Image.Resampling.LANCZOS, reducing_gap=2.0)
                 _save(im, dst, quality, icc)
-        except Exception:  # unreadable file: a placeholder keeps the grid going and is not retried
+        except (UnidentifiedImageError, Image.DecompressionBombError, ValueError):  # not a picture we can decode: a placeholder keeps the grid going and is not retried
             _placeholder(dst, photo["w"], photo["h"])
+        except OSError:  # unreadable right now (a dropped mount, a truncated copy still syncing): nothing cached, tried again later
+            raise
     return dst
 
 
@@ -162,8 +164,11 @@ def make_face(tag_id: int, photo: dict, rect: tuple, size: int = 256) -> Path:
         if dst.exists():
             return dst
         factor = min(1.0, size * 1.6 / max(w, h, 1))
-        im, icc = _open_oriented(photo["path"], int(photo["w"] * factor) + 1, int(photo["h"] * factor) + 1)
-        sx, sy = im.width / max(photo["w"], 1), im.height / max(photo["h"], 1)
+        pw, ph = photo["w"], photo["h"]
+        if not pw or not ph or pw <= 8 or ph <= 8:  # the index's placeholder size: the file says
+            pw, ph = true_size(photo["path"]) or (pw, ph)
+        im, icc = _open_oriented(photo["path"], int(pw * factor) + 1, int(ph * factor) + 1)
+        sx, sy = im.width / max(pw, 1), im.height / max(ph, 1)
         cx, cy = (x + w / 2) * sx, (y + h / 2) * sy
         half = max(w * sx, h * sy) * 0.85
         box = (int(max(0, cx - half)), int(max(0, cy - half)), int(min(im.width, cx + half)), int(min(im.height, cy + half)))
@@ -226,7 +231,8 @@ class Prewarmer:
 
 
 def forget(photo_id: int):
-    """Drop the cached thumbnail and preview of a photo whose picture just changed."""
+    """Drop what was derived from a photo whose picture just changed: the cached thumbnail and preview, the face
+    crops, and its content-search embedding (computed again from the new picture)."""
     for kind in ("t", "p"):
         d = config.CACHE_DIR / kind / f"{photo_id % 256:02x}"
         try:
@@ -234,6 +240,31 @@ def forget(photo_id: int):
                 f.unlink(missing_ok=True)
         except OSError:
             pass
+    try:
+        for f in (config.CACHE_DIR / "f").glob(f"*-{photo_id}-*.jpg"):
+            f.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        from app.ai import semantic
+        semantic.remove_ids([int(photo_id)])
+    except Exception as e:  # the embedding job is optional; a stale vector is the worst case
+        log.debug("embedding not dropped for %s: %s", photo_id, e)
+
+
+def true_size(path: str):
+    """(width, height) of the picture as it is shown, from the file itself (the index has a placeholder 4x3 when
+    digiKam does not know the size); None when it cannot be read."""
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            try:
+                o = im.getexif().get(0x0112) or 1
+            except Exception:
+                o = 1
+        return (h, w) if o in (5, 6, 7, 8) else (w, h)
+    except Exception:
+        return None
 
 
 def prune_previews():

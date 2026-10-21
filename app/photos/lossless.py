@@ -315,7 +315,11 @@ def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
                     raise SyncError("The orientation could not be written into the file without changing its image data; nothing was changed")
         how = "orientation flag"
     size = os.stat(p["path"]).st_size
-    _write_db(p["id"], w, h, orientation, size, kept, dropped, check_running)
+    try:
+        _write_db(p["id"], w, h, orientation, size, kept, dropped, check_running)
+    except BaseException:  # the database refused: the file goes back as it was
+        shutil.copy2(copy, p["path"])
+        raise
     return _finish(p, orientation, f"{OPS[op]} ({how})", before, copy, w, h, {"lossless": op, "how": how})
 
 
@@ -400,7 +404,11 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
             raise SyncError("The metadata could not be copied into the cropped file; the photo is as it was")
     kept, dropped = _new_values(p["regions"], lambda r: crop_rect(r, box))
     size = os.stat(p["path"]).st_size
-    _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running)
+    try:
+        _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running)
+    except BaseException:  # the database refused: the file goes back as it was
+        shutil.copy2(copy, p["path"])
+        raise
     how = "lossless" if p["ext"] in JPEG_EXT or p["ext"] in (".png", ".tif", ".tiff") else "re-encoded"
     r = _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, {"lossless": "crop", "box": list(box), "faces_dropped": len(dropped), "how": how})
     r["box"] = list(box)

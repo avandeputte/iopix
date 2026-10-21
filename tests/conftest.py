@@ -27,12 +27,15 @@ _data = _tmp / "data"
 
 from fixture import build  # noqa: E402  (tests/ on sys.path through pytest's rootdir conftest import)
 
-if not SRC_DB.exists() or not SRC_ROOT.exists():
-    pytest.exit(f"Test library source not found: {SRC_DB} / {SRC_ROOT} (set DIGIKAM_TEST_DB / DIGIKAM_TEST_ROOT)", returncode=3)
-LIB = build(SRC_DB, SRC_ROOT, _lib)
+LIB = None
+if SRC_DB.exists() and SRC_ROOT.exists():
+    LIB = build(SRC_DB, SRC_ROOT, _lib)
+else:  # no digiKam library to cut a scratch copy from (CI): the tests that need one skip, the rest run
+    (_lib / "db").mkdir(parents=True, exist_ok=True); (_lib / "photos").mkdir(parents=True, exist_ok=True)
+    print(f"\nNo test library at {SRC_DB} / {SRC_ROOT} (DIGIKAM_TEST_DB / DIGIKAM_TEST_ROOT): library tests are skipped")
 
 os.environ.update({
-    "DATA_DIR": str(_data), "DIGIKAM_DB_DIR": str(_lib / "db"), "PHOTOS_ROOT": str(LIB["root"]),
+    "DATA_DIR": str(_data), "DIGIKAM_DB_DIR": str(_lib / "db"), "PHOTOS_ROOT": str(LIB["root"] if LIB else _lib / "photos"),
     "PREWARM": "0", "SEMANTIC": "0", "ANALYSIS": "0", "CAPTIONS": "0", "REINDEX_POLL": "3600",
     "DIGIKAM_CHECK": "ask", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0",
 })
@@ -40,17 +43,19 @@ _data.mkdir(parents=True, exist_ok=True)
 
 from app import config  # noqa: E402
 
-assert config.DATA_DIR.resolve() == _data.resolve() and config.DIGIKAM_DB.resolve() == LIB["db"].resolve(), "environment overrides were not picked up"
+assert config.DATA_DIR.resolve() == _data.resolve() and (LIB is None or config.DIGIKAM_DB.resolve() == LIB["db"].resolve()), "environment overrides were not picked up"
 
 
 @pytest.fixture(scope="session")
 def lib():
     """Facts about the scratch library: ids, which have faces/tags/gps, videos."""
+    if LIB is None:
+        pytest.skip("needs a digiKam library to cut a scratch copy from (DIGIKAM_TEST_DB / DIGIKAM_TEST_ROOT)")
     return LIB
 
 
 @pytest.fixture(scope="session")
-def client():
+def client(lib):
     """One test client for the session; the app's startup builds the index from the scratch DB."""
     from fastapi.testclient import TestClient
     from app.main import app

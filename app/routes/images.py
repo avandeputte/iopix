@@ -17,6 +17,7 @@ from app.core import THUMB_COLS
 from app.core import IMG_CACHE
 from app.core import db
 from app.core import resolve
+from app import users
 from app.core import _form_items
 from app.core import _photo_row
 from app.core import _cached_image
@@ -128,13 +129,21 @@ def _zip_stream(entries):
 @router.post("/api/zip")
 async def api_zip_post(request: Request):
     """Same as GET /api/zip, for selections too long for a URL (form-encoded body)."""
+    _downloads_allowed(request)
     items = await _form_items(request)
     d = dict(items)
     return _zip_response(items, 1 if d.get("sidecars") == "1" else 0, d.get("name") or "photos")
 
 
+def _downloads_allowed(request: Request):
+    """Zips re-encode and ship whole folders: once accounts exist they are for signed-in users (visitors have the viewer)."""
+    if users.any_users() and not users.is_signed_in(request.state.user):
+        raise HTTPException(401, "Sign in to download photos")
+
+
 @router.get("/api/zip")
 def api_zip(request: Request, sidecars: int = 0, name: str = "photos"):
+    _downloads_allowed(request)
     return _zip_response(request.query_params.multi_items(), sidecars, name)
 
 
@@ -173,6 +182,7 @@ def _zip_parts(items, part_mb: int):
 @router.post("/api/zip/plan")
 async def api_zip_plan(request: Request):
     """How a download would be split. Body: the filters, form-encoded, plus part_mb."""
+    _downloads_allowed(request)
     items = await _form_items(request)
     parts = _zip_parts(items, int(dict(items).get("part_mb") or 2000))
     return {"files": sum(len(p) for p in parts), "bytes": sum(r[3] or 0 for p in parts for r in p),

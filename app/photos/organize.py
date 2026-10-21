@@ -114,19 +114,24 @@ def trash(ids: list, check_running: bool = True) -> dict:
                 pass
             sides = sidecars_of(r["path"])
             shutil.move(r["path"], dst)
-            side_moves = []
+            side_moves, side_from = [], []
             for s in sides:  # sidecars ride along, beside the file, under the trash name
                 tail = s[len(r["path"]):] if s.startswith(r["path"]) else ".xmp"
                 sdst = files_dir / (dst.name + tail) if tail.startswith(".") and s.startswith(r["path"]) else files_dir / (base + ".xmp")
                 shutil.move(s, sdst)
-                side_moves.append(str(sdst))
-            moved.append({**r, "trash": str(dst), "info": str(rec), "sides": side_moves})
+                side_moves.append(str(sdst)); side_from.append(s)
+            moved.append({**r, "trash": str(dst), "info": str(rec), "sides": side_moves, "sides_from": side_from})
         except (OSError, SyncError) as e:
             failed.append({"id": r["id"], "error": str(e)})
     if moved:
-        with dbsync.write_transaction(db_path, check_running) as con:
+        try:
+            with dbsync.write_transaction(db_path, check_running) as con:
+                for r in moved:
+                    con.execute("UPDATE Images SET status = ?, album = NULL WHERE id = ?", (TRASHED, r["id"]))
+        except BaseException:  # the database refused: the files go back where they were
             for r in moved:
-                con.execute("UPDATE Images SET status = ?, album = NULL WHERE id = ?", (TRASHED, r["id"]))
+                _move_back([(r["trash"], r["path"]), *zip(r["sides"], r["sides_from"])], r["info"])
+            raise
         from app.photos import history
         history.record([{"photo_id": r["id"], "action": "trashed", "summary": "Moved to the trash", "path": r["path"],
                          "details": {"trash": r["trash"], "info": r["info"], "album": r["album"], "name": r["name"]}} for r in moved])
@@ -200,21 +205,62 @@ def restore(infos: list, check_running: bool = True) -> dict:
                 dest = dest.parent / _free(dest.parent, dest.name)
             shutil.move(t["trash"], dest)
             tf = Path(t["trash"])
+            moves = [(t["trash"], str(dest))]
             for s in list(tf.parent.glob(tf.name + ".xmp")) + list(tf.parent.glob(tf.stem + ".xmp")):
-                shutil.move(s, str(dest) + ".xmp" if s.name.startswith(tf.name) else dest.with_suffix(".xmp"))
-            os.remove(t["info"])
-            done.append({**t, "album": album, "dest": dest})
+                sdst = str(dest) + ".xmp" if s.name.startswith(tf.name) else str(dest.with_suffix(".xmp"))
+                shutil.move(s, sdst)
+                moves.append((str(s), sdst))
+            done.append({**t, "album": album, "dest": dest, "moves": moves})
         except (OSError, SyncError) as e:
             failed.append({"info": t["info"], "error": str(e)})
     ids = []
     if done:
-        with dbsync.write_transaction(db_path, check_running) as con:
+        try:
+            _restore_rows(done, ids, db_path, check_running)
+        except BaseException:  # the database refused: back into the trash, records kept
             for t in done:
-                if t["id"] and con.execute("SELECT 1 FROM Images WHERE id = ?", (t["id"],)).fetchone():
-                    con.execute("UPDATE Images SET status = ?, album = ?, name = ? WHERE id = ?", (VISIBLE, t["album"], t["dest"].name, t["id"]))
-                    ids.append(t["id"])
-                else:  # trashed by digiKam before this row was known here, or the row is gone: register the file anew
-                    t["new"] = True
+                _move_back([(dst, src) for src, dst in t["moves"]], None)
+            raise
+        _restore_new(done, ids, check_running)
+        for t in done:  # the trash records go only now that the rows are back
+            try:
+                os.remove(t["info"])
+            except OSError:
+                pass
+    return {"restored": ids, "failed": failed}
+
+
+def _move_back(pairs: list, record: str):
+    """Undo file moves after a refused database write: each (where it is now, where it was); record: a trash
+    record to drop. Best effort, logged."""
+    for now, was in pairs:
+        try:
+            if os.path.exists(now):
+                shutil.move(now, was)
+        except OSError as e:
+            log.warning("could not put %s back to %s: %s", now, was, e)
+    if record:
+        try:
+            os.remove(record)
+        except OSError:
+            pass
+
+
+def _restore_rows(done: list, ids: list, db_path, check_running: bool):
+    """The one database write of a restore: rows marked visible again (a refusal leaves nothing half done)."""
+    with dbsync.write_transaction(db_path, check_running) as con:
+        for t in done:
+            if t["id"] and con.execute("SELECT 1 FROM Images WHERE id = ?", (t["id"],)).fetchone():
+                con.execute("UPDATE Images SET status = ?, album = ?, name = ? WHERE id = ?", (VISIBLE, t["album"], t["dest"].name, t["id"]))
+                ids.append(t["id"])
+            else:  # trashed by digiKam before this row was known here, or the row is gone: register the file anew
+                t["new"] = True
+
+
+def _restore_new(done: list, ids: list, check_running: bool):
+    """After the rows are back: photos with no row any more are registered anew, and the edit log gets its lines."""
+    from app.photos import folders
+    if done:
         fresh = [t for t in done if t.get("new")]
         if fresh:
             from app.photos import scanner
@@ -224,7 +270,8 @@ def restore(infos: list, check_running: bool = True) -> dict:
                 scanner.complete([a["id"] for a in added], check_running)  # dates, position, tags, faces from file and sidecar
         from app.photos import history
         history.record([{"photo_id": t["id"], "action": "restore", "summary": "Restored from the trash", "path": str(t["dest"])} for t in done if t["id"] and not t.get("new")])
-    return {"restored": ids, "failed": failed}
+    return ids
+
 
 
 def empty(infos: list = None, check_running: bool = True) -> dict:
@@ -294,20 +341,31 @@ def move_photos(ids: list, album_id: int, check_running: bool = True, new_name: 
             dst = folder["dir"] / final
             sides = sidecars_of(r["path"])
             shutil.move(r["path"], dst)
+            moves = [(r["path"], str(dst))]
             for s in sides:
                 tail = s[len(r["path"]):] if s.startswith(r["path"]) else None
-                shutil.move(s, str(dst) + tail if tail else dst.with_suffix(".xmp"))
+                sdst = str(dst) + tail if tail else str(dst.with_suffix(".xmp"))
+                shutil.move(s, sdst)
+                moves.append((s, sdst))
             if str(dst) != r["path"]:
                 from app.photos import edits
                 edits.move_backups(r["path"], str(dst))
-            moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"]})
+            moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"], "moves": moves})
         except (OSError, SyncError) as e:
             failed.append({"id": r["id"], "error": str(e)})
     if moved:
-        with dbsync.write_transaction(db_path, check_running) as con:
+        try:
+            with dbsync.write_transaction(db_path, check_running) as con:
+                for r in moved:
+                    con.execute("DELETE FROM Images WHERE album = ? AND name = ? AND id != ?", (r["to_album"], r["final"], r["id"]))  # a stale row at the destination
+                    con.execute("UPDATE Images SET album = ?, name = ? WHERE id = ?", (r["to_album"], r["final"], r["id"]))
+        except BaseException:  # the database refused: the files go back
+            from app.photos import edits
             for r in moved:
-                con.execute("DELETE FROM Images WHERE album = ? AND name = ? AND id != ?", (r["to_album"], r["final"], r["id"]))  # a stale row at the destination
-                con.execute("UPDATE Images SET album = ?, name = ? WHERE id = ?", (r["to_album"], r["final"], r["id"]))
+                _move_back([(dst, src) for src, dst in r["moves"]], None)
+                if r["dst"] != r["path"]:
+                    edits.move_backups(r["dst"], r["path"])
+            raise
         from app.photos import history
         history.record([{"photo_id": r["id"], "action": "moved", "summary": (f"Renamed to {r['final']}" if r["to_album"] == r["album"] else f"Moved to {folder['rel']}") + (f" (was {r['name']})" if r["final"] != r["name"] and r["to_album"] != r["album"] else ""),
                          "path": r["dst"], "details": {"from": r["path"], "to": r["dst"]}, "undo": {"move": {"album": r["album"], "name": r["name"]}}} for r in moved])
@@ -398,6 +456,8 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
             raise SyncError("A folder with that name is already there.")
         children = con.execute("SELECT id, relativePath FROM Albums WHERE albumRoot = ? AND (relativePath = ? OR relativePath LIKE ?)",
                                (src["root"], src["rel"], src["rel"].rstrip("/") + "/%")).fetchall()
+        prefix = src["rel"].rstrip("/") + "/"
+        children = [(aid, rel) for aid, rel in children if rel == src["rel"] or rel.startswith(prefix)]  # LIKE treats _ and % in names as wildcards
     finally:
         con.close()
     if not src["dir"].is_dir():

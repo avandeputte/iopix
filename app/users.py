@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 
 from app import config
@@ -263,10 +264,62 @@ def set_settings(user_id: int, changes: dict) -> dict:
     return cur
 
 
+# ---- sign-in attempts: a wrong password costs a growing wait, per address and account, so a password cannot be
+# guessed by trying many (the counters live in memory: a restart clears them)
+_attempts = {}  # key -> [failures, locked_until]
+_attempts_lock = threading.Lock()
+LOCK_AFTER = 5         # free tries before the first wait (per address and account)
+LOCK_AFTER_NAME = 20   # free tries per account whatever the addresses: many addresses cannot share the guessing
+LOCK_BASE = 30         # seconds; doubles with every further failure, up to LOCK_MAX
+LOCK_MAX = 15 * 60
+
+
+def login_wait(key: str) -> int:
+    """Seconds this key still has to wait before another try (0: go ahead)."""
+    with _attempts_lock:
+        rec = _attempts.get(key)
+        if not rec:
+            return 0
+        return max(0, int(-(-(rec[1] - time.time()) // 1)))  # rounded up: never tell someone 0 s when a moment remains
+
+
+def login_failed(key: str, free: int = LOCK_AFTER) -> int:
+    """Count a wrong password; returns the wait now imposed (0 while under the free tries)."""
+    with _attempts_lock:
+        if len(_attempts) > 10000:  # never let strangers fill the memory: expired entries go, the live locks stay
+            now = time.time()
+            for k in [k for k, (n, until) in _attempts.items() if until < now - LOCK_MAX]:
+                del _attempts[k]
+            if len(_attempts) > 10000:
+                for k in list(_attempts)[:len(_attempts) // 2]:
+                    del _attempts[k]
+        rec = _attempts.setdefault(key, [0, 0.0])
+        rec[0] += 1
+        over = rec[0] - free
+        wait = min(LOCK_MAX, LOCK_BASE * 2 ** (over - 1)) if over > 0 else 0
+        rec[1] = time.time() + wait
+        return wait
+
+
+def login_succeeded(key: str):
+    with _attempts_lock:
+        _attempts.pop(key, None)
+
+
 # ---- sessions
+def _session_salt(user_id: int) -> str:
+    """Part of the password hash: a changed password ends every session that was signed with the old one."""
+    con = state.connect()
+    try:
+        r = con.execute("SELECT hash FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        con.close()
+    return (r[0] or "none")[-16:] if r else "none"
+
+
 def make_token(user_id: int) -> str:
     payload = f"{user_id}.{int(time.time()) + SESSION_DAYS * 86400}"
-    sig = hmac.new(_key(), payload.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(_key(), (payload + "|" + _session_salt(user_id)).encode(), hashlib.sha256).hexdigest()
     return payload + "." + sig
 
 
@@ -290,7 +343,7 @@ def clear_session(response, cloudflare_cookie: bool = False):
 def user_from_token(token: str):
     try:
         uid, exp, sig = token.split(".")
-        if not hmac.compare_digest(hmac.new(_key(), f"{uid}.{exp}".encode(), hashlib.sha256).hexdigest(), sig):
+        if not hmac.compare_digest(hmac.new(_key(), f"{uid}.{exp}|{_session_salt(int(uid))}".encode(), hashlib.sha256).hexdigest(), sig):
             return None
         if int(exp) < time.time():
             return None

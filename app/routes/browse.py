@@ -189,6 +189,10 @@ def api_meta(request: Request):
 @router.get("/api/status")
 def api_status(request: Request):
     user = request.state.user
+    if user is None and users.require_login():  # the sign-in screen: only what it needs, nothing about the library or the server
+        return {"version": _public_version(), "app": _app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
+                "usersExist": users.any_users(), "signedIn": False, "isAdmin": False, "user": None, "readOnly": appstate.read_only(),
+                "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK, "editing": False, "dbWrite": False, "pendingEdits": 0}
     return {"version": _public_version(), "error": state["error"], "rev": appstate.rev, "app": _app_stamp(),
             "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
                        "current": list(prewarmer.current.values())[:3] if users.is_signed_in(user) else []},  # file paths: not for anonymous clients

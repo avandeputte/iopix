@@ -288,8 +288,13 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
             # on every build (30,000 of them) made each rebuild seconds slower. last_seen is refreshed daily.
             for dk, (h, sz, path, name) in current.items():
                 known = by_key.get((h, sz))
-                if known:
-                    vid, old = next(((v, d) for v, d in known if d == dk), known[0])
+                match = next(((v, d) for v, d in known if d == dk), None) if known else None
+                if match is None and known:
+                    # the same bytes under another number: that photo's row follows it only when its old number is
+                    # gone (digiKam renumbered it); while both numbers exist they are two copies, each its own photo
+                    match = next(((v, d) for v, d in known if d is None or d not in current), None)
+                if match:
+                    vid, old = match
                     if old != dk and old is not None and old not in current:
                         remap[old] = dk  # the same file under a new number
                     was = stored.get(vid)

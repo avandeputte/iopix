@@ -384,8 +384,8 @@ def _backup_before_migration(tag: str):
             c = settings()
             dst = d / f"viewer-before-{tag}-{stamp}.sql"
             with open(dst, "wb") as f:
-                res = subprocess.run([tool, "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], f"-p{c['password']}", "--single-transaction", c["database"]],
-                                     stdout=f, stderr=subprocess.PIPE, timeout=1800)
+                res = subprocess.run([tool, "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", c["database"]],
+                                     stdout=f, stderr=subprocess.PIPE, timeout=1800, env={**os.environ, "MYSQL_PWD": c["password"] or ""})  # never on the command line
             if res.returncode != 0:
                 raise RuntimeError(res.stderr.decode(errors="replace")[-300:])
         log.info("viewer database: copied to %s before the %s migration", dst, tag)
