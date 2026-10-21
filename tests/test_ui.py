@@ -1964,6 +1964,7 @@ def test_several_unlocated_photos_get_one_location_together(page, server, lib):
     page.goto(server + "/#/quality?check=nolocation")
     page.wait_for_selector(".qsec[data-check=nolocation] .hrow .qpick input", timeout=20000)
     assert page.locator("#qbulk").is_hidden(), "no bar until something is ticked"
+    page.evaluate("document.querySelector('.qsec[data-check=nolocation]').dataset.mark = 'kept'")
     for i in ids:
         page.locator(f".qsec[data-check=nolocation] .hrow[data-photo='{i}'] .qpick input").check()
     # the actions float at the bottom of the page (the consistency page's bar), so no scrolling back up
@@ -1980,8 +1981,50 @@ def test_several_unlocated_photos_get_one_location_together(page, server, lib):
     try:
         for i in ids:
             page.wait_for_function("(i) => !document.querySelector(`.qsec[data-check=nolocation] .hrow[data-photo='${i}']`)", arg=i, timeout=5000)
+        page.wait_for_timeout(2500)  # longer than any delayed redraw the page used to schedule
+        assert page.evaluate("document.querySelector('.qsec[data-check=nolocation]')?.dataset.mark") == "kept", "the page was drawn again: the user loses their place"
+        assert page.locator("#qbulk").is_hidden(), "nothing ticked after the save"
         for i in ids:
             assert _eventually(lambda: abs((_json.loads(urllib.request.urlopen(f"{server}/api/photo/{i}").read()).get("lat") or 0) - 40.3834) < 1e-4), "saved on the server"
     finally:
         req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": ids}).encode(), headers={"Content-Type": "application/json"}, method="POST")
         urllib.request.urlopen(req).read()
+
+
+def test_quality_page_keeps_its_place_after_an_edit_in_the_viewer(page, server, lib):
+    """A photo opened from the No location report and given a place in the viewer: closing the viewer must not draw the
+    report again (the library changed under it, but it is a work page, not a list)."""
+    import json as _json
+    unlocated = lambda: {x["photo"] for x in (_json.loads(urllib.request.urlopen(server + "/api/quality").read()).get("nolocation") or {}).get("items", [])}
+    ids = sorted(unlocated())[:1]
+    post_ = lambda path, body: urllib.request.urlopen(urllib.request.Request(server + path, data=_json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")).read()
+    if not ids:
+        for i in lib["ids"]:
+            d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{i}").read())
+            if d.get("lat") is not None and not d.get("video"):
+                post_("/api/edit", {"ids": [i], "changes": {"gps": None}}); ids = [i]; break
+        assert ids and _eventually(lambda: set(ids) <= unlocated(), timeout=30)
+    pid = ids[0]
+    page.goto(server + "/#/quality?check=nolocation")
+    page.wait_for_selector(f".qsec[data-check=nolocation] .hrow[data-photo='{pid}'] img", timeout=20000)
+    page.evaluate("document.querySelector('.qsec[data-check=nolocation]').dataset.mark = 'kept'")
+    page.locator(f".qsec[data-check=nolocation] .hrow[data-photo='{pid}'] img").click()
+    page.wait_for_selector("#lightbox .lb-frame img, #lightbox .lb-frame video", timeout=15000)
+    page.wait_for_timeout(300); page.mouse.move(420, 40)
+    page.keyboard.press("i"); page.wait_for_selector(".lb-info .iactions", timeout=10000)
+    page.locator(".lb-info .iactions").click()
+    page.locator(".facemenu .fmi", has_text="location").first.click()
+    page.wait_for_selector(".modal h3:has-text('Set location')", timeout=5000)
+    page.locator(".modal input[placeholder='latitude']").fill("40.3834")
+    page.locator(".modal input[placeholder='longitude']").fill("-80.0459")
+    try:
+        with page.expect_response(lambda r: "/api/edit" in r.url and r.request.method == "POST", timeout=15000):
+            page.locator(".modal button", has_text="Save location").click()
+        assert _eventually(lambda: pid not in unlocated(), timeout=20), "the library changed under the report"
+        page.wait_for_timeout(2500)  # the page polls soon after an edit, with the viewer still open
+        page.keyboard.press("Escape")
+        page.wait_for_selector("#lightbox", state="hidden", timeout=5000)
+        page.wait_for_timeout(800)
+        assert page.evaluate("document.querySelector('.qsec[data-check=nolocation]')?.dataset.mark") == "kept", "closing the viewer drew the report again"
+    finally:
+        post_("/api/edit/revert", {"ids": [pid]})

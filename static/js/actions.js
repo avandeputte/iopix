@@ -385,7 +385,8 @@ export async function showQuality() {
   report('nolocation', () => {  // no location: set one, or accept the photo as it is
       const u = q.nolocation || { count: 0, items: [], accepted: 0 }, items = u.items;
       const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'nolocation', on }); toast(on ? `${plural(ids.length, 'photo')} accepted without a location.` : 'Shown again.'); } catch (e) { toastError(e); return; } if (!gone(ev)) showQuality(); };
-      const place = (ids, ev) => locationDialog(ids, null, () => { if (!gone(ev)) refreshQuality(1200); });
+      // the rows fold away where they are; the page is never drawn again under the user (they would lose their place)
+      const place = (ids, ev) => locationDialog(ids, null, () => { if (!(ev && gone(ev))) goneMany('nolocation', ids); });
       // tick the photos of one place (a trip, a party) and act on them together from a bar fixed at the bottom of the
       // page, as the consistency page does: no scrolling back up to the buttons
       const sel = new Set();
@@ -394,14 +395,14 @@ export async function showQuality() {
       const acceptTicked = async () => {
         const ids = [...sel];
         try { await post('/api/quality/accept', { photos: ids, check: 'nolocation', on: true }); toast(`${plural(ids.length, 'photo')} accepted without a location.`); } catch (e) { toastError(e); return; }
-        goneMany('nolocation', ids); tickAll(false); refreshQuality(1200);
+        goneMany('nolocation', ids); tickAll(false);
       };
       const relabel = () => {
         tickBtn.textContent = sel.size && sel.size >= items.length ? 'Untick all' : 'Tick all shown';
         bar.hidden = !sel.size;
         document.body.classList.toggle('cbulk-open', sel.size > 0);
         fill(bar, h('div', { class: 'cbrow' }, h('span', { class: 'n' }, `${plural(sel.size, 'photo')} ticked`),
-          h('button', { class: 'pillbtn on', onclick: () => { const ids = [...sel]; locationDialog(ids, null, () => { goneMany('nolocation', ids); tickAll(false); refreshQuality(1200); }); } }, icon('place'), 'Set their location…'),
+          h('button', { class: 'pillbtn on', onclick: () => { const ids = [...sel]; locationDialog(ids, null, () => { goneMany('nolocation', ids); tickAll(false); }); } }, icon('place'), 'Set their location…'),
           h('button', { class: 'pillbtn', onclick: acceptTicked }, 'Accept them as they are'),
           h('span', { style: 'flex:1' }),
           h('button', { class: 'pillbtn', onclick: () => tickAll(false) }, 'Untick all')));

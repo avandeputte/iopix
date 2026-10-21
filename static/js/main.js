@@ -171,7 +171,7 @@ export async function pollStatus() {
       details.clear();
       // pages that are only lists of the library are redrawn in place; pages holding work in progress (the map
       // while placing, forms, dialogs, the edit log's search) keep what is on screen and refresh their data quietly
-      if (LB.open) S.viewKey = null;
+      if (LB.open) { if (LIVE_VIEWS.includes(S.route.view)) S.viewKey = null; else S.STALE_VIEW = true; }  // a list is drawn again when the viewer closes; a work page (quality, consistency, the edit log) keeps its place
       else if (S.route.view === 'map' && M.update) M.update();
       else if (LIVE_VIEWS.includes(S.route.view)) S.liveRedraw = { key: S.viewKey, quiet: S.keepView || !!S.liveRedraw?.quiet };
       else S.STALE_VIEW = true;
