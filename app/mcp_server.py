@@ -424,10 +424,10 @@ def view_photo(photo_id: int, size: Literal["small", "large"] = "small") -> Imag
 # ---- diagnostics: what an operator would check in a shell, read-only
 def _need_token(token: str, writes: bool = False):
     """The diagnostics tools reveal paths, log lines and settings; on an endpoint without sign-in
-    they take the same admin token as update_viewer (Maintenance > Viewer version). writes: the tool changes the
+    they take the same admin token as update_viewer (Maintenance > iopix version). writes: the tool changes the
     library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
     if not updates.token_ok(token):
-        raise ToolError("This tool needs the admin token (Maintenance > Viewer version > MCP update token)")
+        raise ToolError("This tool needs the admin token (Maintenance > iopix version > MCP update token)")
     if writes and appstate.read_only():
         raise ToolError("The viewer is in read-only mode; nothing in the library can be changed")
 
@@ -828,14 +828,14 @@ def face_cleanup(token: str, files: bool = False) -> dict:
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True))
 def update_viewer(token: str, ref: str = "") -> dict:
     """Update the viewer to the latest commit on GitHub and restart it (update.sh: code, packages,
-    service; settings and data are kept). Needs the admin token from Maintenance > Viewer version,
+    service; settings and data are kept). Needs the admin token from Maintenance > iopix version,
     because this endpoint has no sign-in. ref: the commit sha (or branch) to install; pass the sha
     you just pushed, since GitHub can report the previous commit for a short while after a push.
     Nothing happens when that commit is already installed. The connection drops when the viewer
     restarts; call check_for_update afterwards: lastUpdate carries the outcome and installed the
     commit. Not available in Docker (pull the image)."""
     if not updates.token_ok(token):
-        raise ToolError("Wrong or missing admin token (Maintenance > Viewer version shows it to an admin)")
+        raise ToolError("Wrong or missing admin token (Maintenance > iopix version shows it to an admin)")
     try:
         updates.run(ref)
     except RuntimeError as e:

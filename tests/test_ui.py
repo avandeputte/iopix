@@ -247,9 +247,9 @@ def test_settings_and_maintenance_pages(page, server):
     page.goto(server + "/#/maintenance")
     page.wait_for_selector("h1:has-text('Maintenance')", timeout=10000)  # a hash-only navigation re-renders in place
     page.wait_for_selector(".stabs", timeout=10000)
-    assert page.locator(".stabs button").all_inner_texts() == ["Library", "AI analysis and models", "Storage and backups", "Viewer"]
+    assert page.locator(".stabs button").all_inner_texts() == ["Library", "AI analysis and models", "Storage and backups", "iopix"], "the app's name, not the retired Viewer"
     heads = page.locator("h2").evaluate_all("els => els.map((e) => e.textContent)")
-    for h in ("Library", "AI analysis and models", "Storage and backups", "Viewer"):
+    for h in ("Library", "AI analysis and models", "Storage and backups", "iopix"):
         assert any(x.startswith(h) for x in heads), (h, heads)
     assert "Display" not in heads and "Editing" not in heads
     page.locator(".stabs button", has_text="AI analysis and models").click()
@@ -1963,12 +1963,14 @@ def test_several_unlocated_photos_get_one_location_together(page, server, lib):
         assert _eventually(lambda: set(ids) <= unlocated(), timeout=30), "the photos without a place reach the No location report"
     page.goto(server + "/#/quality?check=nolocation")
     page.wait_for_selector(".qsec[data-check=nolocation] .hrow .qpick input", timeout=20000)
-    btn = page.locator(".qsec[data-check=nolocation] button", has_text="Set location for")
-    assert btn.first.is_disabled(), "nothing ticked yet"
+    assert page.locator("#qbulk").is_hidden(), "no bar until something is ticked"
     for i in ids:
         page.locator(f".qsec[data-check=nolocation] .hrow[data-photo='{i}'] .qpick input").check()
-    assert page.locator(".qsec[data-check=nolocation] button", has_text="Set location for 2 ticked photos").count() == 1
-    page.locator(".qsec[data-check=nolocation] button", has_text="Set location for 2 ticked photos").click()
+    # the actions float at the bottom of the page (the consistency page's bar), so no scrolling back up
+    assert page.locator("#qbulk").is_visible() and "2 photos ticked" in page.locator("#qbulk .n").inner_text()
+    assert page.evaluate("getComputedStyle(document.querySelector('#qbulk')).position") == "fixed"
+    assert page.evaluate("document.body.classList.contains('cbulk-open')"), "the page leaves room for the bar"
+    page.locator("#qbulk button", has_text="Set their location").click()
     page.wait_for_selector(".modal h3:has-text('Set location')", timeout=5000)
     assert "2 selected photos" in page.locator(".modal p.muted").first.inner_text()
     page.locator(".modal input[placeholder='latitude']").fill("40.3834")

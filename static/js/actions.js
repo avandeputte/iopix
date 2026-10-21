@@ -257,6 +257,7 @@ export function promptDialog(message, opts = {}) {
 let qualityTimer = 0;  // the one pending redraw of the quality page; a new one replaces it
 export async function showQuality() {
   clearTimeout(qualityTimer);
+  document.body.classList.remove('cbulk-open');  // the ticked photos' bar of a report drawn before
   const body = h('div', null, h('div', { class: 'muted' }, 'Checking every face in the library…'));
   // redraw the page a moment later, unless the user has gone elsewhere or the page was drawn again meanwhile
   const refreshQuality = (ms) => { clearTimeout(qualityTimer); qualityTimer = setTimeout(() => { if (S.route.view === 'quality' && body.isConnected) showQuality(); }, ms); };
@@ -385,23 +386,40 @@ export async function showQuality() {
       const u = q.nolocation || { count: 0, items: [], accepted: 0 }, items = u.items;
       const accept = async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check: 'nolocation', on }); toast(on ? `${plural(ids.length, 'photo')} accepted without a location.` : 'Shown again.'); } catch (e) { toastError(e); return; } if (!gone(ev)) showQuality(); };
       const place = (ids, ev) => locationDialog(ids, null, () => { if (!gone(ev)) refreshQuality(1200); });
-      // tick the photos of one place (a trip, a party) and set their location together
+      // tick the photos of one place (a trip, a party) and act on them together from a bar fixed at the bottom of the
+      // page, as the consistency page does: no scrolling back up to the buttons
       const sel = new Set();
-      const selBtn = h('button', { class: 'pillbtn on', disabled: true, onclick: () => { const ids = [...sel]; locationDialog(ids, null, () => { goneMany('nolocation', ids); sel.clear(); relabel(); refreshQuality(1200); }); } }, 'Set location for the ticked…');
+      const bar = h('div', { class: 'cbulk', id: 'qbulk', hidden: true });
       const tickBtn = h('button', { class: 'pillbtn', onclick: () => tickAll(sel.size < items.length) }, 'Tick all shown');
-      const relabel = () => { selBtn.disabled = !sel.size; selBtn.textContent = sel.size ? `Set location for ${plural(sel.size, 'ticked photo')}…` : 'Set location for the ticked…'; tickBtn.textContent = sel.size && sel.size >= items.length ? 'Untick all' : 'Tick all shown'; };
+      const acceptTicked = async () => {
+        const ids = [...sel];
+        try { await post('/api/quality/accept', { photos: ids, check: 'nolocation', on: true }); toast(`${plural(ids.length, 'photo')} accepted without a location.`); } catch (e) { toastError(e); return; }
+        goneMany('nolocation', ids); tickAll(false); refreshQuality(1200);
+      };
+      const relabel = () => {
+        tickBtn.textContent = sel.size && sel.size >= items.length ? 'Untick all' : 'Tick all shown';
+        bar.hidden = !sel.size;
+        document.body.classList.toggle('cbulk-open', sel.size > 0);
+        fill(bar, h('div', { class: 'cbrow' }, h('span', { class: 'n' }, `${plural(sel.size, 'photo')} ticked`),
+          h('button', { class: 'pillbtn on', onclick: () => { const ids = [...sel]; locationDialog(ids, null, () => { goneMany('nolocation', ids); tickAll(false); refreshQuality(1200); }); } }, icon('place'), 'Set their location…'),
+          h('button', { class: 'pillbtn', onclick: acceptTicked }, 'Accept them as they are'),
+          h('span', { style: 'flex:1' }),
+          h('button', { class: 'pillbtn', onclick: () => tickAll(false) }, 'Untick all')));
+      };
       const pick = (x) => h('label', { class: 'chk qpick', title: 'Tick several photos to set their location at once' }, h('input', { type: 'checkbox', 'aria-label': `Tick ${x.name}`, checked: sel.has(x.photo), onchange: (e) => { if (e.target.checked) sel.add(x.photo); else sel.delete(x.photo); relabel(); } }));
       const tickAll = (on) => { items.forEach((x) => (on ? sel.add(x.photo) : sel.delete(x.photo))); body.querySelectorAll('.qsec[data-check="nolocation"] .qpick input').forEach((i) => { i.checked = sel.has(+i.closest('.hrow').dataset.photo); }); relabel(); };
       const again = u.accepted ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api('/api/quality/accepted?check=nolocation'); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
-      return sec('No location', u.count,
+      const el = sec('No location', u.count,
         `Photos and videos with no place recorded.${u.accepted ? ` ${plural(u.accepted, 'photo')} you accepted without one ${u.accepted === 1 ? 'is' : 'are'} not listed.` : ''} Set the location (the dialog suggests the places of photos taken around the same time), place them on the map (Map › Place photos), or accept the photo as it is: it leaves this list for good.`,
-        [items.length && S.EDITING ? selBtn : null, items.length && S.EDITING ? tickBtn : null,
+        [items.length && S.EDITING ? tickBtn : null,
           items.length && S.EDITING ? h('button', { class: 'pillbtn', onclick: () => place(items.map((x) => x.photo)) }, 'Set location for all shown') : null,
           items.length ? h('button', { class: 'pillbtn', onclick: () => accept(items.map((x) => x.photo)) }, 'Accept all shown') : null,
           h('a', { class: 'pillbtn', href: '#/map' }, 'Open the map'), again].filter(Boolean),
         { list: items, key: 'nolocation', row: (x, all) => h('div', { class: 'hrow', 'data-photo': x.photo }, S.EDITING ? pick(x) : null, thumb(x, all), h('div', { class: 'hmain' }, h('b', null, x.name), ' · ', x.ts ? dfDay.format(date(x.ts)) : 'no date', ' · ',
           S.EDITING ? [h('button', { type: 'button', class: 'lnk', onclick: (ev) => place([x.photo], ev) }, 'Set location'), ' · '] : null,
           h('button', { type: 'button', class: 'lnk', onclick: (ev) => accept([x.photo], true, ev) }, 'Accept as it is'))) });
+      el.append(bar);
+      return el;
   });
   report('baddate', () => {  // a date that cannot be right (1900, the future, 1970-01-01 00:00:00): set the right one, or accept it
       const u = q.baddate || { count: 0, items: [], accepted: 0 }, items = u.items;
@@ -469,6 +487,7 @@ export async function showQuality() {
     if (k !== 'overview' && !reports.some(([key]) => key === k)) k = 'overview';
     if (!built.has(k)) built.set(k, k === 'overview' ? overview() : reports.find(([key]) => key === k)[1]());
     fill(view, built.get(k));
+    document.body.classList.toggle('cbulk-open', !!view.querySelector('.cbulk:not([hidden])'));
     [...bar.children].forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); b.setAttribute('aria-selected', b.dataset.tab === k); });
     store.set('qcheck', k);
     if ((S.route.params.get('check') || 'overview') !== k) { if (k === 'overview') S.route.params.delete('check'); else S.route.params.set('check', k); history.replaceState(null, '', hashFor('quality', S.route.params)); }

@@ -938,7 +938,7 @@ export function renderInfo() {
       h('textarea', { class: 'einput', placeholder: 'Caption', rows: 2, onkeydown: (e) => e.stopPropagation(), onchange: (e) => saveOne({ caption: e.target.value }) }, d.caption || ''),
       d.edited ? h('div', { class: 'enote' }, S.WRITE_FILES ? 'Changed here and saved to the sidecar and the image file. ' : 'Changed here and saved to the sidecar. ',
         S.AUTO_DB ? 'It goes into digiKam’s database by itself within a minute (once digiKam is closed). ' : 'digiKam shows it after “Reread Metadata From File”, or apply it to digiKam’s database from Explore. ',
-        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toastError(e); return; } details.delete(d.id); toast('Viewer edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
+        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toastError(e); return; } details.delete(d.id); toast('Edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
     // one row per face (named, suggested, unknown); a person tag without a face region gets a row with the badge picture
     show('people') ? (() => {
       const faced = new Set(d.faces.map((f) => f.tag));

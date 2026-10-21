@@ -528,7 +528,7 @@ export const OPEN_COMPARE = new Set();  // model groups whose "Compare the model
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
   settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['users', 'Users and sign-in']],
-  maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['viewer', 'Viewer']],
+  maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['viewer', () => S.APP_NAME]],
 };
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
 function settingsTabs(page, view) {
@@ -552,7 +552,7 @@ function settingsTabs(page, view) {
     try { localStorage.setItem(`iopix.${view}Tab`, k); } catch { /* private window */ }
     if (S.route.params.get('tab') !== k) { S.route.params.set('tab', k); history.replaceState(null, '', hashFor(view, S.route.params)); }
   };
-  tabs.forEach(([k, label]) => bar.append(h('button', { class: 'pillbtn', role: 'tab', 'data-tab': k, onclick: () => show(k) }, label)));
+  tabs.forEach(([k, label]) => bar.append(h('button', { class: 'pillbtn', role: 'tab', 'data-tab': k, onclick: () => show(k) }, typeof label === 'function' ? label() : label)));
   bar.show = show;
   page.querySelector('.stab-mark').before(bar);
   show(pick);
@@ -572,7 +572,7 @@ export async function settingsPage(view) {
   const btn = (label, fn, primary) => h('button', { class: 'pillbtn' + (primary ? ' on' : ''), onclick: fn }, label);
   const st = m.storage;
   main.replaceChildren(h('div', { class: 'page spage' },
-    pageTitle(view === 'settings' ? 'gear' : 'wrench', 'slate', view === 'settings' ? 'Settings' : 'Maintenance', h('span', { class: 'muted' }, `${S.APP_NAME} v${S.APP_VERSION || '?'}${S.APP_COMMIT && S.APP_COMMIT !== 'unknown' ? ' · ' + S.APP_COMMIT : ''}`)),
+    pageTitle(view === 'settings' ? 'gear' : 'wrench', 'slate', view === 'settings' ? 'Settings' : 'Maintenance', h('span', { class: 'muted' }, `${S.APP_NAME} v${S.APP_VERSION || '?'}`)),
     h('div', { class: 'muted intro' }, m.paths ? `Library: ${m.paths.library} (${nf.format(m.photos)} photos and videos). digiKam database: ${m.paths.digikamDb}. Everything ${S.APP_NAME} writes lives in ${m.paths.data}.` : `${nf.format(m.photos)} photos in the library.`),
     !S.USERS_EXIST ? row('No users yet', `${S.APP_NAME} is open to anyone who can reach it. Create the admin account to switch on sign-in: visitors then browse read-only, and only editors and admins can change the library.`, btn('Create the admin account', setupDialog, true)) : null,
     ...(view === 'settings' ? [
@@ -641,7 +641,7 @@ export async function settingsPage(view) {
     })() : null,
     S.IS_ADMIN ? (() => {  // the viewer's own database: SQLite file (default) or MySQL/MariaDB, with a one-time copy of the data
       const body = h('div', { class: 'muted note' }, 'Loading…');
-      const wrap = row('Viewer database', `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits and the AI results. SQLite in the data folder by default, or a MySQL/MariaDB database of its own (not digiKam’s). Switching copies every row across and restarts ${S.APP_NAME}; the configuration is kept in data/viewer-db.json, outside the database.`, body);
+      const wrap = row(`${S.APP_NAME} database`, `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits and the AI results. SQLite in the data folder by default, or a MySQL/MariaDB database of its own (not digiKam’s). Switching copies every row across and restarts ${S.APP_NAME}; the configuration is kept in data/viewer-db.json, outside the database.`, body);
       (async () => {
         let d; try { d = await api('/api/viewerdb'); } catch (e) { fill(body, e.message); return; }
         const inp = (k, ph, type = 'text', w = 160) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : (d[k] ?? ''), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
@@ -658,7 +658,7 @@ export async function settingsPage(view) {
         fill(body, h('div', null, `Currently: ${d.type === 'mysql' ? `MySQL ${d.user}@${d.host}:${d.port}/${d.database}` : `SQLite file ${d.sqlite_file}`}`, d.error ? h('span', { class: 'warn' }, ` · the configured MySQL database could not be used (${d.error}); the SQLite file is in use meanwhile`) : null),
           h('div', { class: 'mt8',}, type), my, opts,
           h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
-            btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/viewerdb/test', payload()); const t = Object.entries(r.tables); fill(result, `OK: ${r.version}. ${t.length ? 'Viewer tables already there: ' + t.map(([k, n]) => `${k} (${nf.format(n)})`).join(', ') : 'No viewer tables there yet.'}`); } catch (e) { fill(result, e.message); } }),
+            btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/viewerdb/test', payload()); const t = Object.entries(r.tables); fill(result, `OK: ${r.version}. ${t.length ? `${S.APP_NAME} tables already there: ` + t.map(([k, n]) => `${k} (${nf.format(n)})`).join(', ') : 'No viewer tables there yet.'}`); } catch (e) { fill(result, e.message); } }),
             btn('Switch', async () => {
               const p = payload();
               if (!await confirmDialog(`Switch ${S.APP_NAME} to ${p.type === 'mysql' ? `MySQL ${p.user}@${p.host}:${p.port}/${p.database}` : 'the SQLite file'}?` + (copy.checked ? '\n\nEvery row is copied there first' + (drop.checked ? `, after dropping and recreating ${S.APP_NAME}’s tables at the target.` : ' (existing rows with the same ids are replaced).') : `\n\nThe data is NOT copied; ${S.APP_NAME} starts empty there unless the tables already hold data.`) + `\n\n${S.APP_NAME} restarts when the copy is done; the page reloads by itself.`)) return;
@@ -669,7 +669,7 @@ export async function settingsPage(view) {
       return wrap;
     })() : null,
     S.IS_ADMIN ? row('Check for updates daily', m.updateCheckLocked ? `Switched off by UPDATE_CHECK=0 in the environment: ${S.APP_NAME} never contacts GitHub on its own.`
-      : `Once a day ${S.APP_NAME} asks GitHub whether a newer version of ${S.APP_NAME} exists and, if so, shows admins a banner. Only the public list of changes is fetched; nothing about this install or its photos is sent. Off: it never contacts GitHub on its own (Maintenance › Viewer can still check on request).`,
+      : `Once a day ${S.APP_NAME} asks GitHub whether a newer version of ${S.APP_NAME} exists and, if so, shows admins a banner. Only the public list of changes is fetched; nothing about this install or its photos is sent. Off: it never contacts GitHub on its own (Maintenance › ${S.APP_NAME} can still check on request).`,
       h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' }, h('input', { type: 'checkbox', checked: !!m.updateCheck, disabled: !!m.updateCheckLocked, onchange: async (e) => {
         try { await post('/api/settings', { update_check: e.target.checked }); toast(e.target.checked ? `${S.APP_NAME} will check for updates once a day.` : `${S.APP_NAME} will not contact GitHub on its own.`); pollSoon(2000); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), 'Check daily')) : null,
     S.IS_ADMIN ? row('Read-only mode', m.readOnlyLocked ? `Locked on by READ_ONLY=1 in the environment: nothing in the library can be changed from ${S.APP_NAME}.`
@@ -757,7 +757,7 @@ export async function settingsPage(view) {
         item('Previews', st.previews, `large images for ${S.APP_NAME}, remade on demand`, small('Clear', () => act('previews', 'Previews cleared; they are remade as you open photos.'))),
         item('Face crops', st.faces, 'remade on demand', small('Clear', () => act('faces', 'Face crops cleared; they are remade as needed.'))),
         item('Search index', st.index, 'rebuilt from digiKam’s database in seconds'),
-        item('Viewer database', st.viewerDb, st.viewerDbError ? h('span', { class: 'warn' }, `MySQL/MariaDB is configured but could not be used when ${S.APP_NAME} started (${st.viewerDbError}), so the SQLite file is in use since then: anything saved now is not in the MySQL database. Fix the cause (Settings › Viewer database) and restart ${S.APP_NAME}.`) : 'users, albums, favorites, settings, AI results'),
+        item(`${S.APP_NAME} database`, st.viewerDb, st.viewerDbError ? h('span', { class: 'warn' }, `MySQL/MariaDB is configured but could not be used when ${S.APP_NAME} started (${st.viewerDbError}), so the SQLite file is in use since then: anything saved now is not in the MySQL database. Fix the cause (Settings › ${S.APP_NAME} database) and restart ${S.APP_NAME}.`) : 'users, albums, favorites, settings, AI results'),
         item('Content embeddings', st.embeddings, 'the content-search index'),
         item('AI models', st.models),
         item('Sidecar backups', st.backups, `each sidecar as it was before ${S.APP_NAME} first changed it`),
@@ -768,10 +768,10 @@ export async function settingsPage(view) {
     h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:8px;max-width:820px' }, 'Backups are never deleted automatically (apart from keeping the last ten database copies); remove them by hand once you are happy with the corresponding changes.'),
     row('Download a backup', `digiKam’s database as it is right now (a consistent copy of digikam4.db, or a mysqldump for MariaDB), and ${S.APP_NAME}’s data as a zip (its database plus the content-search index). Keep them somewhere else.`,
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('a', { class: 'pillbtn', href: '/api/backup/digikam', download: '' }, icon('download'), h('span', null, 'digiKam database')),
-        h('a', { class: 'pillbtn', href: '/api/backup/app', download: '' }, icon('download'), h('span', null, 'Viewer data (zip)')))),
+        h('a', { class: 'pillbtn', href: '/api/backup/app', download: '' }, icon('download'), h('span', null, `${S.APP_NAME} data (zip)`)))),
     // 4. The viewer itself
     stab('viewer'),
-    h('h2', null, 'Viewer'),
+    h('h2', null, S.APP_NAME),
     row('Edit log', `Every change made in ${S.APP_NAME}, for every photo, kept for good: who, when, what it was before and after, with Undo and restore of the sidecar or the original file from the backups.`, h('a', { class: 'pillbtn', href: '#/history' }, 'Open the edit log')),
     row('Server log', `What the server has been doing: edits, database writes, updates, background jobs and any errors, from ${S.APP_NAME}’s own log file in the data folder.`, btn('Show the log', logDialog)),
     (() => {
@@ -782,7 +782,7 @@ export async function settingsPage(view) {
         if (!body.isConnected) return;
         const c = u.check, p = u.progress, last = u.lastUpdate;
         const outcome = !p.running && !p.error && last ? h('div', { class: last.ok ? 'muted' : 'warn', style: 'font-size:12px;margin-top:2px' }, `last update: ${last.text}`) : null;
-        const state = p.running ? `updating… ${S.APP_NAME} restarts when it is done` : p.error ? `last update failed: ${p.error}` : !c ? `v${u.version} · commit ${u.installed}` : c.status === 'current' ? `v${u.version} (${u.installed}) is the latest` : c.status === 'update' ? `newer version on GitHub: ${c.remote} from ${c.remoteDate} (${c.remoteMessage}); installed ${u.installed}` : `could not check: ${c.error}`;
+        const state = p.running ? `updating… ${S.APP_NAME} restarts when it is done` : p.error ? `last update failed: ${p.error}` : !c ? `v${u.version}` : c.status === 'current' ? `v${u.version} is the latest version` : c.status === 'update' ? `You have v${u.version}; ${c.remoteVersion ? `v${c.remoteVersion}` : 'a newer build'} is available${c.remoteDate ? ` (${c.remoteDate})` : ''}${c.remoteMessage ? `: ${c.remoteMessage.replace(/^v\d+\.\d+\.\d+:\s*/, '')}` : ''}` : `could not check: ${c.error}`;
         fill(body, state, outcome, h('div', { style: 'display:flex;gap:6px;margin-top:6px' },
           btn('Check for updates', async () => { fill(body, 'Checking…'); try { await post('/api/update', { action: 'check' }); } catch (e) { toastError(e); } draw(); }),
           btn('MCP update token…', async () => { try { const t = await post('/api/update', { action: 'token' }); const back = modal('MCP update token', h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
@@ -796,7 +796,7 @@ export async function settingsPage(view) {
         if (p.running) timer = setTimeout(() => { if (S.route.view === view && body.isConnected) draw(); }, 5000);
       };
       draw();
-      return row('Viewer version', 'The code running here, and whether the GitHub main branch has something newer. "Update now" runs update.sh (git pull or a fresh tarball), keeps your settings and data, and restarts the service.', body);
+      return row(`${S.APP_NAME} version`, `Which version of ${S.APP_NAME} is running here, and whether a newer one is out. “Update now” installs the newest version, keeps your settings and data, and restarts ${S.APP_NAME}; the page reloads when it is back.`, body);
     })(),
     row(`Restart ${S.APP_NAME}`, 'Stops the server; launchd, Docker or systemd starts it again within seconds. Needed after an update of the RapidOCR package (offered in the models table above when “Check models for updates” finds a newer one), and handy when a background job looks stuck.',
       btn('Restart', async () => { if (!await confirmDialog(`Restart ${S.APP_NAME} now?`)) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toastError(e); } })),

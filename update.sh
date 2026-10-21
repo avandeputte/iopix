@@ -150,7 +150,7 @@ pipi --no-deps -e . 2>/dev/null || echo "  note: the package metadata could not 
 NEWV="$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' app/__init__.py)"
 # the outcome goes to the result file now: the service restart below also ends this script
 # when the viewer started it
-note "ok: updated to v$NEWV ($(local_commit | cut -c1-7)) on $(date '+%Y-%m-%d %H:%M')"
+note "ok: updated to v$NEWV on $(date '+%Y-%m-%d %H:%M')"
 # jpegtran (libjpeg-turbo) turns and crops JPEGs without loss; newer than most installs, so it is added here when it can be
 if ! command -v jpegtran >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then
   say "Installing jpegtran (libjpeg-turbo-progs) for lossless JPEG rotate and crop"
@@ -164,7 +164,7 @@ SVC=""; for s in iopix digikam-viewer; do command -v systemctl >/dev/null 2>&1 &
 if [ -n "$SVC" ]; then
   if restart_unit "$SVC"; then echo "  systemd: restarted $SVC"; else
     echo "  could not restart $SVC from here; run: sudo systemctl restart $SVC"
-    note "ok: updated to v$NEWV ($(local_commit | cut -c1-7)); the service could not be restarted from here: sudo systemctl restart $SVC"
+    note "ok: updated to v$NEWV; the service could not be restarted from here: sudo systemctl restart $SVC"
   fi
 elif [ "$(uname -s)" = Darwin ]; then
   L="$(launchctl list 2>/dev/null | grep -o 'com\.[a-z.]*\(iopix\|digikam-viewer\)' | head -1)"

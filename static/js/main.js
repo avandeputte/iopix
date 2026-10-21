@@ -75,13 +75,13 @@ export function updateBanner(u) {
   if (b && b.dataset.remote === u.remote) return;
   b?.remove();
   const text = h('div', null, h('b', null, u.version ? `Version ${u.version} is available` : 'A newer build is available'),
-    h('div', { class: 'muted' }, `You have v${S.APP_VERSION || '?'}${S.APP_COMMIT && S.APP_COMMIT !== 'unknown' ? ` (${S.APP_COMMIT})` : ''}. ${u.version ? '' : 'Latest change: '}${(u.message || '').replace(/^v\d+\.\d+\.\d+:\s*/, '').slice(0, 140)}`));
+    h('div', { class: 'muted' }, `You have v${S.APP_VERSION || '?'}. ${u.version ? '' : 'Latest change: '}${(u.message || '').replace(/^v\d+\.\d+\.\d+:\s*/, '').slice(0, 140)}`));
   // the update runs from here; the banner then says so and the page reloads with the new version (details and Docker's way: Maintenance)
   const run = h('button', { class: 'pillbtn on', onclick: async () => {
     if (!await confirmDialog(`Fetch ${u.version ? 'version ' + u.version : 'the latest version'}, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;
     runUpdate((msg, failed) => {
       run.hidden = more.hidden = true;
-      fill(text, h('b', null, failed ? 'The update did not finish' : 'Updating…'), h('div', { class: 'muted' }, msg, failed ? [' ', h('a', { class: 'lnk', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Maintenance › Viewer version')] : null));
+      fill(text, h('b', null, failed ? 'The update did not finish' : 'Updating…'), h('div', { class: 'muted' }, msg, failed ? [' ', h('a', { class: 'lnk', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, `Maintenance › ${S.APP_NAME} version`)] : null));
     });
   } }, 'Update now');
   const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Details');
@@ -98,7 +98,7 @@ export async function runUpdate(onState) {
   const was = `${S.APP_VERSION}|${S.APP_COMMIT}`, until = Date.now() + 180000;
   const check = async () => {
     try { const s = await api('/api/status'); if (s.appVersion && `${s.appVersion}|${s.commit || ''}` !== was) { location.reload(); return; } } catch { /* restarting */ }
-    if (Date.now() < until) setTimeout(check, 5000); else onState('The update did not finish; see Maintenance › Viewer version.', true);
+    if (Date.now() < until) setTimeout(check, 5000); else onState(`The update did not finish; see Maintenance › ${S.APP_NAME} version.`, true);
   };
   setTimeout(check, 5000);
   return true;
@@ -158,7 +158,7 @@ export async function pollStatus() {
     S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
     S.AUTO_DB = !!(s.dbWrite && s.digikam && s.digikam.sync && s.digikam.reachable);  // edits go into digiKam's database by themselves, a minute later
     S.IS_ADMIN = s.isAdmin; S.USERS_EXIST = s.usersExist; S.DIGIKAM_CHECK = s.digikamCheck || 'pgrep';
-    if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}${S.APP_COMMIT ? ' (' + S.APP_COMMIT + ')' : ''}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
+    if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
     updateBanner(s.updateAvailable);
     dkBanner(s.digikam);
     if (s.appName && s.appName !== S.APP_NAME) { S.APP_NAME = s.appName; applyAppName(); }
