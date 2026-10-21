@@ -5,7 +5,7 @@ import { crumbs } from './search.js';
 import { G, renderGrid } from './grid.js';
 import { copyMetadata, dateEditor, editDialog, editPhotos, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
-import { pageTitle, people } from './pages.js';
+import { pageTitle } from './pages.js';
 import { LB, details, editMenu, openLightbox, showItem, toggleFaces, updateFavBtn } from './lightbox.js';
 import { pollStatus } from './main.js';
 
@@ -90,7 +90,7 @@ export async function showHistory(params) {
   const photo = params.get('photo'), more = h('button', { class: 'pillbtn my14', hidden: true }, 'Show more');
   let size = store.get('hsize', 'list');
   const list = h('div', { class: 'hlist qitems ' + size });
-  let action = params.get('action') || '', offset = 0, timer = 0;
+  let action = params.get('action') || '', offset = 0, timer = 0, token = 0;  // token: a slow earlier search must not land after a newer one
   const sel = h('select', { onchange: (e) => { action = e.target.value; reload(); } }, h('option', { value: '' }, 'Every change'), ...Object.entries(HIST_ACTION).map(([k, l]) => h('option', { value: k, selected: k === action }, l)));
   const q = h('input', { class: 'einput', placeholder: 'Search: file name, words in the change…', style: 'min-width:220px;flex:1', oninput: () => { clearTimeout(timer); timer = setTimeout(reload, 350); } });
   const people = (S.META?.tags || []).filter((t) => t.person && t.nAll).sort((a, b) => a.name.localeCompare(b.name));
@@ -115,7 +115,9 @@ export async function showHistory(params) {
     return u;
   };
   const load = async (append) => {
-    let r; try { r = await api('/api/history?' + query().toString()); } catch (e) { fill(list, errorBox(e)); return; }
+    const mine = ++token;
+    let r; try { r = await api('/api/history?' + query().toString()); } catch (e) { if (mine === token) fill(list, errorBox(e)); return; }
+    if (mine !== token) return;
     if (!append) list.replaceChildren();
     if (r.users && who.options.length === 1) who.append(...r.users.map((u) => h('option', { value: u }, u)));
     if (!r.entries.length && !offset) list.append(h('div', { class: 'empty' }, 'No change matches.'));
@@ -252,10 +254,12 @@ export function promptDialog(message, opts = {}) {
 }
 /** Maintenance › Metadata quality: photos without a location, and faces stored twice, the same person in two places, boxes outside the photo or empty.
  *  The check runs every time the page is opened, and again with "Check again". */
-/** Redraw the quality page a moment later, unless the user has gone elsewhere meanwhile. */
-const refreshQuality = (ms) => setTimeout(() => { if (S.route.view === 'quality') showQuality(); }, ms);
+let qualityTimer = 0;  // the one pending redraw of the quality page; a new one replaces it
 export async function showQuality() {
+  clearTimeout(qualityTimer);
   const body = h('div', null, h('div', { class: 'muted' }, 'Checking every face in the library…'));
+  // redraw the page a moment later, unless the user has gone elsewhere or the page was drawn again meanwhile
+  const refreshQuality = (ms) => { clearTimeout(qualityTimer); qualityTimer = setTimeout(() => { if (S.route.view === 'quality' && body.isConnected) showQuality(); }, ms); };
   main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Metadata quality', null]]),
     pageTitle('face', 'amber', 'Metadata quality'),
     h('p', { class: 'muted intro mt0' }, 'Every face region in digiKam’s database is checked: the same person stored twice a few pixels apart (shown twice in the people list), the same person in two separate places, and boxes that stick out of the photo or are empty. Fixes go through the normal face changes, so each one is in the edit log with undo.'),
@@ -308,7 +312,7 @@ export async function showQuality() {
   };
   const PAGE = 120;
   const busy = p.running ? h('div', { class: 'enote' }, p.files ? `Fixing the image files… ${nf.format(p.done)} / ${nf.format(p.total)}.` : `Removing duplicate faces… ${nf.format(p.done)} / ${nf.format(p.total)} photos.`) : null;
-  if (p.running) setTimeout(() => { if (S.route.view === 'quality') showQuality(); }, 4000);
+  if (p.running) refreshQuality(4000);
   const near = q.near;
   const fitOne = async (x, ev) => { try { const r = await post('/api/quality/fit', { photos: [x.photo] }); toast(r.fitted ? 'Box trimmed to the photo.' : r.removed ? 'Empty box removed.' : 'Nothing to fix there.'); } catch (e) { toastError(e); return; } if (!gone(ev)) refreshQuality(1200); };
   const fitAll = q.invalid.count && S.CAN_MANAGE ? h('button', { class: 'pillbtn on', onclick: async () => {

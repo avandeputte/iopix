@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Sl/rS+KC0nrtSAjt3RgE5IwLxyv1e0dVtjjbXx89p8I='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src https://www.google.com https://maps.google.com; worker-src 'self'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>iopix</title>
@@ -39,6 +40,5 @@
 <div id="lightbox" hidden></div>
 <div id="toast" hidden role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
-<script>if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});</script>
 </body>
 </html>

@@ -138,10 +138,10 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
         if os.path.exists(tmp):
             os.unlink(tmp)
     # the sidecar: the original's (what digiKam's database says), upright, regions dropped if straightened
-    if os.path.exists(src + ".xmp"):
-        shutil.copy2(src + ".xmp", dst + ".xmp")
+    if os.path.exists(edits.sidecar_path(src)):
+        shutil.copy2(edits.sidecar_path(src), edits.sidecar_path(dst))
         subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-XMP-tiff:Orientation#=1",
-                        *(["-XMP-mwg-rs:RegionInfo=", "-XMP-MP:RegionInfoMP="] if p["angle"] else []), dst + ".xmp"], capture_output=True, text=True, timeout=120)
+                        *(["-XMP-mwg-rs:RegionInfo=", "-XMP-MP:RegionInfoMP="] if p["angle"] else []), edits.sidecar_path(dst)], capture_output=True, text=True, timeout=120)
     regs = folders.register(album, [folders.staged_entry(__import__("pathlib").Path(dst))], check_running)
     vid = regs[0]["id"]
     w, h = im.size

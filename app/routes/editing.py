@@ -266,7 +266,7 @@ async def api_gpx_preview(request: Request):
     up = form.get("file")
     if up is None:
         raise HTTPException(400, "Upload a .gpx file")
-    data = await up.read()
+    data = await run_in_threadpool(up.file.read, 50 * 1024 * 1024 + 1)  # no more than the cap is ever read into memory
     if len(data) > 50 * 1024 * 1024:
         raise HTTPException(400, "GPX file is larger than 50 MB")
     try:

@@ -6,7 +6,7 @@ import { confirmDialog, modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
 import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
 import { LB, details, getDetail, renderInfo, renderTitle, showItem } from './lightbox.js';
-import { awaitReindex, pollStatus, start } from './main.js';
+import { awaitReindex, pollStatus } from './main.js';
 
 export function applyLocal(d, ch) {
   if ('rating' in ch) d.rating = ch.rating > 0 ? ch.rating : -1;
@@ -360,7 +360,11 @@ export async function locationDialog(ids, current, after) {
 export async function gpxDialog(ids) {
   const file = h('input', { type: 'file', accept: '.gpx,application/gpx+xml' });
   const tzNow = -new Date().getTimezoneOffset() * 60;  // this browser's offset, as a sensible default
-  const offset = h('select', null, [...Array(27)].map((_, i) => i - 12).map((hh) => h('option', { value: hh * 3600, selected: hh * 3600 === tzNow }, `UTC${hh >= 0 ? '+' : ''}${hh}`)));
+  // every whole hour, and the half- and three-quarter-hour zones (Newfoundland, Iran, India, Nepal, Myanmar, Adelaide…)
+  const zones = [...Array(27)].map((_, i) => (i - 12) * 3600).concat([-9.5, -3.5, 3.5, 4.5, 5.5, 5.75, 6.5, 8.75, 9.5, 10.5, 12.75].map((hh) => hh * 3600));
+  if (!zones.includes(tzNow)) zones.push(tzNow);
+  const zoneLabel = (s) => { const a = Math.abs(s), mm = Math.round(a % 3600 / 60); return `UTC${s < 0 ? '-' : '+'}${Math.floor(a / 3600)}${mm ? ':' + String(mm).padStart(2, '0') : ''}`; };
+  const offset = h('select', null, zones.sort((a, b) => a - b).map((s) => h('option', { value: s, selected: s === tzNow }, zoneLabel(s))));
   const shiftAmt = h('input', { class: 'einput', type: 'number', value: 0, style: 'width:70px' });
   const shiftUnit = h('select', null, [['60', 'minutes'], ['1', 'seconds'], ['3600', 'hours']].map(([v, l]) => h('option', { value: v }, l)));
   const gap = h('select', null, [[120, '2 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, '1 hour'], [21600, '6 hours']].map(([v, l]) => h('option', { value: v, selected: v === 600 }, l)));

@@ -7,8 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-import pytest
-
+from helpers import need_tool
 from app.digikam import dkdb
 from app.photos import edits
 from app.data import index, state
@@ -169,8 +168,7 @@ def test_viewer_data_follows_a_photo_digikam_renumbered(client, lib):
 
 def test_applying_an_edit_rebuilds_so_it_no_longer_shows_as_waiting(client, photo_id):
     from app.photos import edits
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     assert client.post("/api/edit", json={"ids": [photo_id], "changes": {"caption": "Applied caption probe"}}).status_code == 200
     assert photo_id in edits.pending()
     r = client.post("/api/edits/db")
@@ -183,8 +181,7 @@ def test_sync_off_folders_and_faces_go_to_the_library(client, lib):
     from app.photos import edits
     from app.faces import facemgr
     from app.digikam import library
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     index.ensure_fresh()
     dbf = Path(lib["db"])
     dk = sqlite3.connect(dbf)

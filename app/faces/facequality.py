@@ -355,7 +355,7 @@ def _file_regions(paths: list) -> dict:
     out = {}
     if not paths:
         return out
-    res = subprocess.run([edits.EXIFTOOL, "-j", "-struct", "-charset", "filename=UTF8", "-XMP-mwg-rs:RegionInfo", "-XMP-MP:RegionInfoMP", *paths],
+    res = subprocess.run([*edits.exiftool_cmd(), "-j", "-struct", "-charset", "filename=UTF8", "-XMP-mwg-rs:RegionInfo", "-XMP-MP:RegionInfoMP", *paths],
                          capture_output=True, text=True, timeout=600)
     try:
         items = json.loads(res.stdout or "[]")

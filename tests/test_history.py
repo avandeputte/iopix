@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from helpers import need_tool
 from app.photos import edits
 from app.data import index
 
 
 def test_an_edit_is_logged_and_can_be_undone(client, lib):
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     index.ensure_fresh()
     con = index.open_index()
     pid, title = con.execute("SELECT id, title FROM photos WHERE video = 0 AND id IN (%s) LIMIT 1" % ",".join(map(str, lib["ids"][3:]))).fetchone()

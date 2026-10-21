@@ -56,37 +56,42 @@ def _job(gen: int, level: str):
     eng = semantic.active
     eng.load()
     with eng._lock:
-        ids, vecs = eng.ids.copy(), eng.vecs.astype(np.float32, copy=True)
+        ids, vecs = eng.ids, eng.vecs  # no copy: the engine replaces these arrays, it never writes into them
     n = len(ids)
     progress.update(running=True, done=0, total=n, error=None)
-    pairs = []
+    total = 0
     try:
-        block = 1024
-        for s in range(0, n, block):
-            if gen != _run["gen"]:
-                return
-            sims = vecs[s:s + block] @ vecs.T  # [block, n]
-            for r in range(sims.shape[0]):
-                i = s + r
-                row = sims[r]
-                row[: i + 1] = -1  # each pair once (j > i), never a photo with itself
-                js = np.nonzero(row >= threshold)[0]
-                if len(js) > PER_PHOTO:
-                    js = js[np.argsort(-row[js])[:PER_PHOTO]]
-                for j in js.tolist():
-                    pairs.append((int(ids[i]), int(ids[j]), float(row[j])))
-            progress["done"] = min(n, s + block)
+        state.set_setting("near_dups_gen", "")  # not current until every block is in
         con = vdb.connect()
         try:
             con.execute("DELETE FROM ai_similar_photos")
-            for k in range(0, len(pairs), 2000):
-                con.executemany("INSERT INTO ai_similar_photos (a, b, score) VALUES (?,?,?)", pairs[k:k + 2000])
             con.commit()
+            block = 256
+            for s in range(0, n, block):
+                if gen != _run["gen"]:
+                    return
+                with np.errstate(all="ignore"):  # Accelerate emits spurious float warnings on matmul
+                    sims = vecs[s:s + block] @ vecs.T  # [block, n]
+                pairs = []
+                for r in range(sims.shape[0]):
+                    i = s + r
+                    row = sims[r]
+                    row[: i + 1] = -1  # each pair once (j > i), never a photo with itself
+                    js = np.nonzero(row >= threshold)[0]
+                    if len(js) > PER_PHOTO:
+                        js = js[np.argsort(-row[js])[:PER_PHOTO]]
+                    for j in js.tolist():
+                        pairs.append((int(ids[i]), int(ids[j]), float(row[j])))
+                if pairs:  # this block's pairs in one transaction; the whole list never exists at once
+                    con.executemany("INSERT INTO ai_similar_photos (a, b, score) VALUES (?,?,?)", pairs)
+                    con.commit()
+                total += len(pairs)
+                progress["done"] = min(n, s + block)
         finally:
             con.close()
         state.set_setting("near_dups_gen", expected_gen(level))
         state.set_setting("near_dups_level", level)
-        log.info("near-duplicates: %d pairs above %.2f among %d photos", len(pairs), threshold, n)
+        log.info("near-duplicates: %d pairs above %.2f among %d photos", total, threshold, n)
     except Exception as e:
         progress["error"] = str(e)[:200]
         log.warning("near-duplicates failed: %s", e)

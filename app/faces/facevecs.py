@@ -11,7 +11,8 @@ the face queue already shows) or InsightFace's ArcFace ResNet-50 (512-d, much be
 people apart; each crop is first aligned on its eyes, nose and mouth, found by the chosen face
 detector, the way ArcFace was trained). Vectors live in the viewer database (ai_face_embeddings
 for undecided faces, ai_person_references for the named prototypes), are pruned as faces are
-decided, and are all recomputed when the model changes, since vectors of different models do not compare.
+decided, and are all recomputed when the model (or the downloaded revision of it) changes, since vectors of
+different models do not compare.
 """
 import logging
 import threading
@@ -34,7 +35,6 @@ KINDS = ("unknown", "suggested")
 # 0.363, a little stricter here; ArcFace keeps different people near 0 (measured 0.05 against 0.71 for the same person)
 THRESHOLDS = {"sface": (0.45, 0.40), "arcface": (0.40, 0.35)}
 DIMS = {"sface": 128, "arcface": 512}
-GROUP_THRESHOLD = 0.45  # SFace's; group_threshold() gives the chosen model's
 PROTOS_PER_PERSON = 12  # the most recent confirmed faces of each person become their prototypes
 progress = {"running": False, "done": 0, "total": 0}
 _lock = threading.Lock()
@@ -57,10 +57,6 @@ def suggest_threshold() -> float:
 
 def model_path():
     return models.path_for("face_vectors")
-
-
-def download():
-    models.fetch_file(models.REGISTRY["sface"]["url"], models.path("sface"))
 
 
 def available() -> bool:
@@ -268,11 +264,22 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
     return True
 
 
+def _built_key(kind: str) -> str:
+    """What face_vectors_built records: model@revision (the file's sha256), so the same model downloaded again as
+    another file counts as a change too; the bare name when the file is not there to hash."""
+    rev = models.installed_revision(kind)
+    return f"{kind}@{rev}" if rev else kind
+
+
 def _same_model():
-    """Vectors from another model are useless now: forget them (once) when the choice changed."""
+    """Vectors from another model, or another revision of it, are useless now: forget them (once) when that changed."""
     from app.data import state
     kind = chosen()
-    if state.get_setting("face_vectors_built", "sface") != kind:
+    want = _built_key(kind)
+    have = state.get_setting("face_vectors_built", "sface")
+    if have == want:
+        return
+    if have != kind:  # the bare name is what versions before revisions wrote: those vectors came from the file installed then, adopted as is
         con = vdb.connect()
         try:
             con.execute("DELETE FROM ai_face_embeddings")
@@ -280,8 +287,8 @@ def _same_model():
             con.commit()
         finally:
             con.close()
-        state.set_setting("face_vectors_built", kind)
-        log.info("faces: embeddings recomputed with %s", kind)
+        log.info("faces: embeddings recomputed with %s", want)
+    state.set_setting("face_vectors_built", want)
 
 
 def _job(gen: int):
@@ -360,6 +367,35 @@ def _suggest(vec, pm, ptags, names):
     return {"tag": int(t), "name": names.get(int(t)), "score": round(float(sc), 3)} if sc >= suggest_threshold() else None
 
 
+def _components(m, threshold: float) -> dict:
+    """{root: [rows]} of the faces whose vectors (rows of m, unit length) are joined by pairs at or above the
+    threshold. Compared in row blocks against the whole matrix, so the memory is n x block rather than n x n:
+    this runs on a web request."""
+    n = len(m)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    block = 1024
+    for s in range(0, n, block):
+        with np.errstate(all="ignore"):  # Accelerate emits spurious float warnings on matmul
+            sims = m[s:s + block] @ m.T
+        rows, cols = np.nonzero(sims >= threshold)
+        keep = cols > rows + s  # each pair once (j > i), never a face with itself
+        for i, j in zip((rows[keep] + s).tolist(), cols[keep].tolist()):
+            a, b = find(i), find(j)
+            if a != b:
+                parent[b] = a
+    members = {}
+    for i in range(n):
+        members.setdefault(find(i), []).append(i)
+    return members
+
+
 def groups(kind: str = "unknown", threshold: float = None, tag: int = None) -> dict:
     """Undecided faces of one kind, look-alikes together: {groups: [{faces: [...], n, suggest}], ungrouped: [...],
     missing: faces without a vector yet}. Groups are connected components of pairs above the threshold; each group
@@ -394,25 +430,7 @@ def groups(kind: str = "unknown", threshold: float = None, tag: int = None) -> d
     pm, ptags, names = _prototypes()
     out["people"] = len(set(ptags.tolist())) if ptags is not None else 0
     m = np.stack([v for _, v in have])
-    sims = m @ m.T
-    n = len(have)
-    parent = list(range(n))
-
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    ii, jj = np.nonzero(np.triu(sims, 1) >= threshold)
-    for i, j in zip(ii.tolist(), jj.tolist()):
-        a, b = find(i), find(j)
-        if a != b:
-            parent[b] = a
-    members = {}
-    for i in range(n):
-        members.setdefault(find(i), []).append(i)
-    for root, idx in members.items():
+    for root, idx in _components(m, threshold).items():
         if len(idx) == 1:
             f = dict(have[idx[0]][0])
             f["suggest"] = _suggest(m[idx[0]], pm, ptags, names)

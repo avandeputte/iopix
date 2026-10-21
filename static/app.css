@@ -116,6 +116,7 @@ body.filters-open #main { right: 340px; }
   background: color-mix(in srgb, var(--hue) calc(var(--mix) + 8%), transparent); color: var(--hue); }
 .page h1.ptitle .pic .ic { width: 22px; height: 22px; }
 .page h1.ptitle .muted { margin-left: -4px; }
+.page h1.ptitle:focus { outline: none; }  /* the title takes focus after a change of page, for screen readers; nothing to see */
 .page h2 { font-size: var(--fs-l); font-weight: 500; margin: 30px 0 12px; display: flex; align-items: baseline; gap: 12px; }
 .page h2 a, .page h2 .lnk, .page h2 .more { font-size: var(--fs-m); font-weight: 400; color: var(--accent); cursor: pointer; }
 .page h2 .muted { font-size: var(--fs-m); font-weight: 400; }

@@ -4,10 +4,9 @@ import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, parseHash, ph
 import { G, renderGrid, scrollToIndex } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
 import { dateEditor, detectFaces, editControls, editPhotos, locationDialog, metadataEditor, tagDialog, tagPicker, templatePicker } from './editing.js';
-import { people } from './pages.js';
 import { tagOp } from './admin.js';
 import { M, loadLeaflet, loadMaps, mapLink, streetView, tiles } from './map.js';
-import { awaitReindex, pollStatus, start } from './main.js';
+import { awaitReindex, pollStatus } from './main.js';
 
 // src = the list being browsed ({id, w, h, ts, video}); faces/objects = overlay toggles; pushed = we added a history entry for ?p=
 export const LB = { open: false, src: null, i: 0, token: 0, info: store.get('info', '0') === '1', prefs: false, faces: false, objects: false, scale: 1, tx: 0, ty: 0, ar: 1.5, pushed: false, detail: null, play: 0, mini: null, hires: false };
@@ -44,7 +43,7 @@ export function setPhotoParam(id, push) {
   const p = new URLSearchParams(S.route.params);
   p.set('p', id);
   history[push ? 'pushState' : 'replaceState'](null, '', hashFor(S.route.view, p));
-  S.route = parseHash();
+  S.route = parseHash(); S.lastHash = location.hash;  // drawn already: Back from here is a change (state.js onNav)
 }
 
 export function buildLightbox() {
@@ -96,27 +95,27 @@ export function buildLightbox() {
 }
 
 /** Share: the device's own share sheet (AirDrop, Messages, Mail and the rest on a Mac or phone)
- *  with the picture attached, as PhotoStructure does. The screen-size JPEG is fetched as soon as
- *  the photo is shown, so the sheet opens inside the click, which browsers require. Where the
- *  browser has no share sheet (Firefox on the desktop, plain http) the menu below opens instead. */
-export function shareNow() {
+ *  with the picture attached, as PhotoStructure does. The screen-size JPEG is fetched on the click
+ *  (same origin, quick: the click still counts as the gesture the sheet requires), not for every
+ *  photo shown. Where the browser has no share sheet (Firefox on the desktop, plain http) the menu
+ *  below opens instead. */
+export async function shareNow() {
   const anchor = LB.el.shareBtn;
   if (!navigator.share) { shareMenu(anchor); return; }
   const id = LB.src.id[LB.i], d = LB.detail, name = d?.name || `photo-${id}.jpg`;
   const data = { title: name, url: location.href };
-  const file = LB.shareFile && LB.shareFile.id === id ? LB.shareFile.file : null;
+  const file = await shareFile(id, d);
+  if (!LB.open || LB.src.id[LB.i] !== id) return;  // moved on meanwhile
   if (file && (!navigator.canShare || navigator.canShare({ files: [file] }))) { data.files = [file]; delete data.url; }
   navigator.share(data).catch((e) => {
     if (e.name === 'AbortError') return;  // the sheet was dismissed
     shareMenu(anchor);
   });
 }
-/** Fetch the picture a share would attach (the screen-size JPEG, named after the photo). */
-export function prefetchShareFile(id, d) {
-  if (!navigator.share || d.video) { LB.shareFile = null; return; }
-  fetch(`/preview/${id}`).then((r) => r.blob()).then((blob) => {
-    if (LB.open && LB.src.id[LB.i] === id) LB.shareFile = { id, file: new File([blob], d.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) };
-  }).catch(() => {});
+/** The picture a share attaches (the screen-size JPEG, named after the photo); null for a video, or when it cannot be fetched (the link is shared then). */
+async function shareFile(id, d) {
+  if (!d || d.video) return null;
+  try { const blob = await (await fetch(`/preview/${id}`)).blob(); return new File([blob], d.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }); } catch { return null; }
 }
 
 /** The fallback menu: a link to the photo here, the original or a smaller JPEG as a download,
@@ -432,7 +431,7 @@ export function closeLightbox(fromUser) {
   const src = LB.src, i = LB.i;
   if (fromUser) {
     if (LB.pushed) { LB.pushed = false; history.back(); }
-    else { const p = new URLSearchParams(S.route.params); p.delete('p'); history.replaceState(null, '', hashFor(S.route.view, p)); S.route = parseHash(); }
+    else { const p = new URLSearchParams(S.route.params); p.delete('p'); history.replaceState(null, '', hashFor(S.route.view, p)); S.route = parseHash(); S.lastHash = location.hash; }
   }
   LB.pushed = false;
   if (src === G.data && S.route.view === 'photos') { scrollToIndex(i); renderGrid(true); }
@@ -488,7 +487,6 @@ export function showItem() {
     el.delBtn.style.display = S.CAN_MANAGE ? '' : 'none';
     el.editBtn.style.display = S.CAN_MANAGE && S.LOSSLESS && !d.video ? '' : 'none';
     el.objectsBtn.style.display = d.boxes?.length ? '' : 'none';
-    prefetchShareFile(id, d);
     renderFaces();
     if (LB.info) renderInfo();
   }).catch(() => {});
@@ -711,9 +709,9 @@ export function faceOp(op, undo) {
   const id = op.image;
   const rec = { op, at: Date.now() };
   RECENT_FACE_OPS.set(id, [...(RECENT_FACE_OPS.get(id) || []), rec]);
-  const shown = LB.open && LB.src.id[LB.i] === id ? LB.detail : null, cached = details.get(id);
+  const shown = LB.open && LB.src.id[LB.i] === id ? LB.detail : null, cached = details.get(id);  // the cache holds promises
   if (shown) applyFaceLocally(shown, op);
-  if (cached && cached !== shown && typeof cached === 'object' && cached.faces) applyFaceLocally(cached, op);
+  if (cached) cached.then((cd) => { if (cd && cd !== shown && cd.faces) applyFaceLocally(cd, op); }).catch(() => {});  // a copy the viewer is not showing (a still pending one gets the change from reapplyRecent)
   redrawPhoto(id);
   const name = op.tag ? S.tagById.get(op.tag)?.name : null;
   const said = { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `${name} put back.` }[op.op];

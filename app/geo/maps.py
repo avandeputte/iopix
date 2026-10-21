@@ -54,7 +54,14 @@ def provider() -> str:
 
 
 def key() -> str:
+    """The browser-facing key (tiles, Street View): restrict it by HTTP referrer in the Google Cloud console."""
     return state.get_setting("google_maps_key", "") or os.environ.get("GOOGLE_MAPS_API_KEY", "")
+
+
+def server_key() -> str:
+    """The key for the APIs this server calls (Geocoding, Places, Elevation, Vision): one restricted by API and by
+    this server's address, when the owner entered a second one; else the browser key."""
+    return state.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "") or key()
 
 
 def _create_session(k: str, map_type: str = "roadmap") -> dict:
@@ -116,7 +123,7 @@ def _config() -> dict:
 
 def geocode(q: str) -> list:
     """Google Geocoding API: addresses and landmarks, in the shape geocode.search returns."""
-    req = urllib.request.Request(GEOCODE_URL + "?" + urllib.parse.urlencode({"address": q, "key": key()}), headers=_headers())
+    req = urllib.request.Request(GEOCODE_URL + "?" + urllib.parse.urlencode({"address": q, "key": server_key()}), headers=_headers())
     with urllib.request.urlopen(req, timeout=8) as r:
         data = json.load(r)
     if data.get("status") not in ("OK", "ZERO_RESULTS"):
@@ -141,7 +148,7 @@ def places_search(q: str) -> list:
     (airports, stadiums, businesses). Needs "Places API (New)" enabled for the key."""
     body = json.dumps({"textQuery": q, "maxResultCount": 8}).encode()
     req = urllib.request.Request(PLACES_URL, data=body, method="POST", headers=_headers({
-        "Content-Type": "application/json", "X-Goog-Api-Key": key(),
+        "Content-Type": "application/json", "X-Goog-Api-Key": server_key(),
         "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.types"}))
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
@@ -169,7 +176,7 @@ def elevation(lat: float, lon: float) -> dict:
     errors = []
     if provider() == "google":
         try:
-            req = urllib.request.Request(ELEVATION_URL + "?" + urllib.parse.urlencode({"locations": f"{lat},{lon}", "key": key()}), headers=_headers())
+            req = urllib.request.Request(ELEVATION_URL + "?" + urllib.parse.urlencode({"locations": f"{lat},{lon}", "key": server_key()}), headers=_headers())
             with urllib.request.urlopen(req, timeout=8) as r:
                 data = json.load(r)
             if data.get("status") == "OK" and data.get("results"):
@@ -191,7 +198,7 @@ def landmarks(jpeg: bytes) -> list:
     Needs the Cloud Vision API enabled for the key, and a key Google accepts from a server."""
     import base64
     body = json.dumps({"requests": [{"image": {"content": base64.b64encode(jpeg).decode()}, "features": [{"type": "LANDMARK_DETECTION", "maxResults": 5}]}]}).encode()
-    req = urllib.request.Request(VISION_URL + "?key=" + urllib.parse.quote(key()), data=body, method="POST", headers=_headers({"Content-Type": "application/json"}))
+    req = urllib.request.Request(VISION_URL + "?key=" + urllib.parse.quote(server_key()), data=body, method="POST", headers=_headers({"Content-Type": "application/json"}))
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             data = json.load(r)

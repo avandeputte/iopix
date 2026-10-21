@@ -9,6 +9,9 @@
 #   --features search,places,objects,ocr,captions  --search-model clip|siglip2  --port N
 #   --admin NAME:PASSWORD | --no-admin   --service | --no-service   --data DIR   --python PATH
 #   --system-deps | --no-system-deps   install (or skip) python3, exiftool, ffmpeg and the MariaDB client with brew/apt/dnf/zypper/pacman
+# Secrets can stay off the command line (process lists show arguments): IOPIX_ADMIN=NAME:PASSWORD and
+#   IOPIX_MYSQL=HOST:PORT/DB:USER:PASS in the environment do what --admin and --mysql do; with --mysql or
+#   IOPIX_MYSQL given without the password part, IOPIX_MYSQL_PASSWORD supplies it. The flags win when both are given.
 # Run it again at any time: it keeps what is installed and only adds what you choose.
 set -e
 cd "$(dirname "$0")"
@@ -23,10 +26,16 @@ while [ $# -gt 0 ]; do
     --features) FEATURES="$2"; shift 2;; --search-model) SEARCH_MODEL="$2"; shift 2;; --port) PORT="$2"; shift 2;;
     --admin) ADMIN="$2"; shift 2;; --no-admin) NO_ADMIN=1; shift;; --service) SERVICE=1; shift;; --no-service) SERVICE=0; shift;;
     --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
+# the same answers from the environment, for installers that would rather not put passwords on a command line
+[ -n "$ADMIN" ] || ADMIN="${IOPIX_ADMIN:-}"
+[ -n "$MYSQL" ] || MYSQL="${IOPIX_MYSQL:-}"
+if [ -n "$MYSQL" ] && [ -n "${IOPIX_MYSQL_PASSWORD:-}" ]; then
+  case "${MYSQL#*/}" in *:*:*) ;; *) MYSQL="$MYSQL:$IOPIX_MYSQL_PASSWORD";; esac  # DB:USER given, the password comes from the environment
+fi
 # questions are read from standard input: the terminal, or piped answers (one per line); --yes takes every default
 if [ "$YES" = 1 ]; then TTY=""; else TTY=/dev/stdin; fi
 ask() {  # ask VAR "question" "default"

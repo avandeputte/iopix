@@ -13,11 +13,11 @@ search keeps working on the old index in the meantime.
 """
 import importlib
 import logging
-import os
 import threading
 import time
 
 from app import config, jobs, thumbs
+from app.ai import models
 
 log = logging.getLogger(__name__)
 MODEL_DIR = config.DATA_DIR / "models"
@@ -30,9 +30,6 @@ ENGINES = {
     "jinaclip": {"image": "jinaai/jina-clip-v1", "text": "jinaai/jina-clip-v1",
                  "file": "embeddings-jinaclip.npz", "dim": 768, "prompt": "a photo of {}"},
 }
-
-if MODEL_DIR.exists():  # models are already here: never contact the model hub at runtime
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 try:
     import numpy as np
@@ -75,6 +72,44 @@ def _unit(v):
     return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9)
 
 
+def _read(file):
+    """(ids, vecs, revision) of an embeddings file; the revision is None in a file from before it was recorded."""
+    with np.load(file) as z:
+        rev = str(z["revision"]) if "revision" in z.files else None
+        return z["ids"].astype(np.int32), z["vecs"].astype(np.float32), rev
+
+
+def _write(file, ids, vecs, revision):
+    """float16 on disk halves the file; vectors are unit length so nothing is lost. The revision of the
+    model they came from travels with them, so another revision's vectors are never mixed in or compared."""
+    tmp = file.with_suffix(".tmp.npz")
+    extra = {"revision": np.array(revision)} if revision else {}
+    np.savez(tmp, ids=ids, vecs=vecs.astype(np.float16), **extra)
+    tmp.replace(file)
+
+
+_revisions = {}  # embeddings file -> ((mtime, size), stored revision): asked on every search, read once per save
+
+
+def _stored_revision(file):
+    """The model revision recorded in an embeddings file, None for one from before revisions were recorded."""
+    try:
+        st = file.stat()
+    except OSError:
+        return None
+    stamp = (st.st_mtime_ns, st.st_size)
+    hit = _revisions.get(file)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    try:
+        with np.load(file) as z:
+            rev = str(z["revision"]) if "revision" in z.files else None
+    except (OSError, ValueError):
+        rev = None
+    _revisions[file] = (stamp, rev)
+    return rev
+
+
 class Engine:
     def __init__(self, name: str):
         self.name = name
@@ -83,7 +118,7 @@ class Engine:
         self.complete_marker = config.DATA_DIR / (self.cfg["file"] + ".complete")
         self.ids = None       # int32 [n]
         self.vecs = None      # float32 [n, dim], unit length
-        self.gen = 0          # bumped whenever the embeddings change
+        self.revision = None  # the model revision the vectors were computed with (models.installed_revision), once loaded
         self.done = self.total = 0
         self.running = False
         self.on_finish = None
@@ -100,21 +135,53 @@ class Engine:
         if self.ids is not None or not enabled():
             return
         if self.file.exists():
-            with np.load(self.file) as z:
-                self.ids, self.vecs = z["ids"].astype(np.int32), z["vecs"].astype(np.float32)
+            self.ids, self.vecs, self.revision = _read(self.file)
+            if self.revision is None:
+                # a file from before revisions were recorded: computed with the model installed then, which is the
+                # one installed now as far as anyone can tell; adopted, and stamped at the next save
+                self.revision = self.installed_revision()
+                if self.name == "clip" and not self.complete_marker.exists():
+                    self.complete_marker.write_text("ok\n")  # complete by the old rule (its file exists); the marker keeps saying so once the file carries a revision
+            self.check_revision()
         else:
             self.ids, self.vecs = np.zeros(0, np.int32), np.zeros((0, self.cfg["dim"]), np.float32)
+            self.revision = self.installed_revision()
+
+    def installed_revision(self):
+        return models.installed_revision(self.name)
+
+    def check_revision(self):
+        """Drop the vectors when the installed model is not the revision they were computed with (a re-download,
+        a hub update): vectors of different revisions do not compare. The next start() rebuilds the index, and
+        another complete index keeps answering meanwhile (Semantic.active), as on a model switch."""
+        if self.ids is None:
+            return
+        installed = self.installed_revision()
+        if installed is None or self.revision is None or installed == self.revision:
+            return
+        log.info("embeddings: the %s model changed (%s -> %s); its %d embeddings are computed again", self.name, self.revision[:12], installed[:12], len(self.ids))
+        self.reset()
+        self.revision = installed
 
     def _save(self):
-        """Caller holds self._lock. float16 on disk halves the file; vectors are unit length so nothing is lost."""
-        tmp = self.file.with_suffix(".tmp.npz")
-        np.savez(tmp, ids=self.ids, vecs=self.vecs.astype(np.float16))
-        tmp.replace(self.file)
+        """Caller holds self._lock."""
+        _write(self.file, self.ids, self.vecs, self.revision)
+
+    def file_key(self) -> str:
+        """Identifies the saved embeddings by the file's mtime and size (like index._embed_signature), so what
+        was computed from them (near-duplicates, the concept table) still reads as current after a restart."""
+        try:
+            st = self.file.stat()
+            return f"{self.name}:{st.st_mtime_ns}:{st.st_size}"
+        except OSError:
+            return f"{self.name}:0"
 
     def _text_model(self):
         if self._text is None:
             from fastembed import TextEmbedding
-            self._text = TextEmbedding(self.cfg["text"], cache_dir=str(MODEL_DIR))
+            # the model is on disk: never ask the hub (no revision check, no network); decided here, at the load,
+            # rather than by an environment variable set at import time
+            self._text = TextEmbedding(self.cfg["text"], cache_dir=str(MODEL_DIR), local_files_only=_ready(self.name))
         return self._text
 
     # ---- indexing
@@ -130,7 +197,6 @@ class Engine:
             if len(keep) != len(self.ids):
                 keep.sort()
                 self.ids, self.vecs = self.ids[keep], self.vecs[keep]
-                self.gen += 1
         have = set(self.ids.tolist())
         todo = [p for p in photos if p["id"] not in have]
         if self.running and {p["id"] for p in todo} <= self._todo_ids:
@@ -157,7 +223,7 @@ class Engine:
             from fastembed import ImageEmbedding
             n = jobs.threads()
             if self._image is None or self._image_threads != n:  # the thread budget is a session option
-                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n)
+                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
                 self._image_threads = n
             last_save = time.time()
             for i in range(0, len(todo), BATCH):
@@ -192,7 +258,6 @@ class Engine:
                                 return
                             self.ids = np.concatenate([self.ids, np.asarray(batch, np.int32)])
                             self.vecs = np.concatenate([self.vecs, vecs])
-                            self.gen += 1
                 self.done = min(len(todo), i + BATCH)
                 if time.time() - last_save > 60:
                     with self._lock:
@@ -244,7 +309,6 @@ class Engine:
         self._run += 1
         with self._lock:
             self.ids, self.vecs = np.zeros(0, np.int32), np.zeros((0, self.cfg["dim"]), np.float32)
-            self.gen += 1
             self.file.unlink(missing_ok=True)
             self.complete_marker.unlink(missing_ok=True)
 
@@ -277,8 +341,11 @@ class Semantic:
         return name if name in ENGINES and _ready(name) else "clip"
 
     def _complete(self, e: Engine) -> bool:
-        """An index that can answer searches: finished, or CLIP's (the first model, from before markers existed)."""
-        return e.complete_marker.exists() or (e.name == "clip" and e.file.exists())
+        """An index that can answer searches: finished (the marker), or a CLIP index from before markers and
+        revisions existed, complete by definition (load() gives it the marker). A CLIP file written since
+        carries a revision and needs the marker like every other, so a rebuild after a model change does
+        not pass for complete at its first save."""
+        return e.complete_marker.exists() or (e.name == "clip" and e.file.exists() and _stored_revision(e.file) is None)
 
     @property
     def active(self) -> Engine:
@@ -298,9 +365,6 @@ class Semantic:
                 return 0
         return max(others, key=age)
 
-    def _has_clip(self) -> bool:
-        return _ready("clip") and self.engines["clip"].file.exists()
-
     @property
     def upgrade(self):
         """The newly chosen engine while it is still indexing, else None."""
@@ -312,8 +376,9 @@ class Semantic:
 
     @property
     def key(self) -> str:
-        e = self.active
-        return f"{e.name}:{e.gen}"
+        """Identifies the index searches answer from: the engine and its saved file. Changes at each save
+        (once a minute while indexing), not with every batch embedded, and survives a restart."""
+        return self.active.file_key()
 
     @property
     def running(self) -> bool:
@@ -332,6 +397,7 @@ class Semantic:
     def start(self, photos: list):
         if not enabled():
             return
+        self.engines[self.chosen()].load()  # the revision check first: a model that changed makes its index incomplete
         up = self.upgrade
         if up is not None:
             def finished(engine):
@@ -342,7 +408,6 @@ class Semantic:
                 # (a missing or unreadable video, say) would otherwise block the switch forever.
                 if missing <= engine.failed:
                     engine.complete_marker.write_text("ok\n")
-                    engine.gen += 1
                     log.info("embeddings: %s index complete (%d photos, %d could not be embedded); search uses it now", engine.name, len(have), len(missing))
             up.on_finish = finished
             up.start(photos)
@@ -365,16 +430,16 @@ def remove_ids(ids: list):
         with eng._lock:
             if not eng.file.exists():
                 continue
-            if eng.ids is None:
-                with np.load(eng.file) as z:
-                    eids, vecs = z["ids"].astype(np.int32), z["vecs"].astype(np.float32)
-            else:
-                eids, vecs = eng.ids, eng.vecs
+            loaded = eng.ids is not None
+            eids, vecs, rev = (eng.ids, eng.vecs, eng.revision) if loaded else _read(eng.file)
             keep = ~np.isin(eids, gone)
             if keep.all():
                 continue
-            eng.ids, eng.vecs = eids[keep], vecs[keep]
-            eng._save()
+            if loaded:
+                eng.ids, eng.vecs = eids[keep], vecs[keep]
+                eng._save()
+            else:  # not loaded (search off, or not used yet): the file is pruned as it is, load() checks it later
+                _write(eng.file, eids[keep], vecs[keep], rev)
 
 
 def remap_ids(remap: dict):
@@ -386,15 +451,15 @@ def remap_ids(remap: dict):
         with eng._lock:
             if not eng.file.exists():
                 continue
-            if eng.ids is None:
-                with np.load(eng.file) as z:
-                    ids, vecs = z["ids"].astype(np.int32), z["vecs"].astype(np.float32)
-            else:
-                ids, vecs = eng.ids, eng.vecs
+            loaded = eng.ids is not None
+            ids, vecs, rev = (eng.ids, eng.vecs, eng.revision) if loaded else _read(eng.file)
             targets = np.array(sorted(set(remap.values()) - set(remap)), np.int32)
             keep = ~np.isin(ids, targets) if len(targets) else np.ones(len(ids), bool)
             ids, vecs = ids[keep], vecs[keep]
             lut = {int(k): int(v) for k, v in remap.items()}
             ids = np.array([lut.get(int(i), int(i)) for i in ids], np.int32)
-            eng.ids, eng.vecs = ids, vecs
-            eng._save()
+            if loaded:
+                eng.ids, eng.vecs = ids, vecs
+                eng._save()
+            else:
+                _write(eng.file, ids, vecs, rev)

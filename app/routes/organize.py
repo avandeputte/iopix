@@ -332,7 +332,7 @@ async def api_import_stage(request: Request):
         raise HTTPException(400, "No files")
     if any((f.size or 0) > 2 * 1024 ** 3 for f in ups):
         raise HTTPException(413, "Files over 2 GB cannot be uploaded this way")
-    files = [(f.filename, await f.read()) for f in ups[:500]]
+    files = [(f.filename, f.file) for f in ups[:500]]  # the open upload file (spooled to disk by Starlette), not its bytes
     token = str(form.get("token") or "") or None
     try:
         token = await run_in_threadpool(importer.stage, files, token)
@@ -389,7 +389,9 @@ async def share_target(request: Request):
     ups = [f for f in form.getlist("files") if hasattr(f, "filename")]
     if not ups:
         return RedirectResponse("/#/import", status_code=303)
-    files = [(f.filename, await f.read()) for f in ups[:200]]
+    if any((f.size or 0) > 2 * 1024 ** 3 for f in ups):
+        return RedirectResponse("/#/import?error=toolarge", status_code=303)
+    files = [(f.filename, f.file) for f in ups[:200]]
     token = await run_in_threadpool(importer.stage, files)
     return RedirectResponse(f"/#/import?staged={token}", status_code=303)
 
@@ -406,7 +408,7 @@ async def api_folder_upload(album_id: int, request: Request):
         raise HTTPException(400, "No files")
     if any((f.size or 0) > 2 * 1024 ** 3 for f in ups):
         raise HTTPException(413, "Files over 2 GB cannot be uploaded this way")
-    files = [(f.filename, await f.read()) for f in ups[:500]]
+    files = [(f.filename, f.file) for f in ups[:500]]
     try:
         result = await run_in_threadpool(folders.upload, album_id, files)
     except dbsync.SyncError as e:

@@ -11,38 +11,7 @@ from PIL import Image
 
 from app.data import index
 from app.photos import lossless
-
-
-def _face_jpeg(lib):
-    """(photo id, path, (tagid, rect), (w, h, orientation)) of a JPEG with a confirmed face region."""
-    con = sqlite3.connect(lib["db"])
-    try:
-        for pid in lib["with_faces"]:
-            row = con.execute("SELECT i.name, a.relativePath, ii.width, ii.height, ii.orientation FROM Images i JOIN Albums a ON a.id = i.album "
-                              "LEFT JOIN ImageInformation ii ON ii.imageid = i.id WHERE i.id = ? AND i.status = 1", (pid,)).fetchone()
-            if not row or not row[0].lower().endswith((".jpg", ".jpeg")) or not row[2]:
-                continue
-            reg = con.execute("SELECT tagid, value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion'", (pid,)).fetchone()
-            if not reg:
-                continue
-            path = Path(lib["root"]) / row[1].strip("/") / row[0]
-            if path.exists():
-                m = index.RECT_RE.search(reg[1])
-                return pid, path, (reg[0], tuple(map(int, m.groups()))), (row[2], row[3], row[4] or 1)
-    finally:
-        con.close()
-    pytest.skip("no JPEG with a face region in the fixture")
-
-
-def _info(db, pid):
-    con = sqlite3.connect(db)
-    try:
-        ii = con.execute("SELECT width, height, orientation FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()
-        im = con.execute("SELECT fileSize, modificationDate FROM Images WHERE id = ?", (pid,)).fetchone()
-        regs = con.execute("SELECT tagid, value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion'", (pid,)).fetchall()
-        return ii, im, {t: tuple(map(int, index.RECT_RE.search(v).groups())) for t, v in regs}
-    finally:
-        con.close()
+from helpers import _face_jpeg, _info, forget_identity, need_tool
 
 
 def _vid(pid):
@@ -68,8 +37,8 @@ def test_geometry():
     assert lossless.crop_rect(r, (38, 58, 50, 50)) is None, "nothing worth keeping"
 
 
-@pytest.mark.skipif(not lossless.jpegtran(), reason="jpegtran is not installed here")
 def test_rotate_jpeg_pixels_turn_faces_turn_and_undo_puts_everything_back(client, lib):
+    need_tool("jpegtran", lossless.jpegtran())
     pid, path, (tag, rect), (w, h, o) = _face_jpeg(lib)
     original = path.read_bytes()
     W, H = lossless.upright_size(w, h, o)
@@ -98,8 +67,8 @@ def test_rotate_jpeg_pixels_turn_faces_turn_and_undo_puts_everything_back(client
     assert ii == (w, h, o) and regs[tag] == rect and im_row[0] == len(original)
 
 
-@pytest.mark.skipif(not lossless.jpegtran(), reason="jpegtran is not installed here")
 def test_crop_jpeg_keeps_the_face_where_it_is_and_undo(client, lib):
+    need_tool("jpegtran", lossless.jpegtran())
     pid, path, (tag, rect), (w, h, o) = _face_jpeg(lib)
     original = path.read_bytes()
     W, H = lossless.upright_size(w, h, o)
@@ -159,7 +128,6 @@ def test_other_formats_turn_by_their_orientation_flag(client, lib):
     finally:
         con = sqlite3.connect(lib["db"])
         con.execute("DELETE FROM ImageInformation WHERE imageid = ?", (pid,)); con.execute("DELETE FROM Images WHERE id = ?", (pid,)); con.commit(); con.close()
-        from test_import import forget_identity
         forget_identity([pid])
         png.unlink(missing_ok=True); Path(str(png) + ".xmp").unlink(missing_ok=True)
         index.build()
@@ -199,7 +167,6 @@ def test_heic_crops_by_re_encoding(client, lib):
     finally:
         con = sqlite3.connect(lib["db"])
         con.execute("DELETE FROM ImageInformation WHERE imageid = ?", (pid,)); con.execute("DELETE FROM Images WHERE id = ?", (pid,)); con.commit(); con.close()
-        from test_import import forget_identity
         forget_identity([pid])
         heic.unlink(missing_ok=True); Path(str(heic) + ".xmp").unlink(missing_ok=True)
         index.build()

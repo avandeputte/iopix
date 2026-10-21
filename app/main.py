@@ -65,7 +65,9 @@ WRITE_PATHS = ("/api/edit", "/api/edits/db", "/api/faces/detect", "/api/photos/d
 
 
 ADMIN_PATHS = ("/api/settings", "/api/maintenance", "/api/scan", "/api/quality", "/api/log", "/api/library/merge", "/api/consistency/scan", "/api/analysis/run", "/api/models/check", "/api/models/download", "/api/restart", "/api/users", "/api/update", "/api/neardups")
-SIGNED_IN_PATHS = ("/api/favorites", "/api/ualbums", "/api/searches", "/api/tags/recent", "/api/auth/settings", "/api/auth/password")
+SIGNED_IN_PATHS = ("/api/favorites", "/api/ualbums", "/api/searches", "/api/tags/recent", "/api/auth/settings", "/api/auth/password", "/api/auth/logout_all")
+# reads that spend a shared resource (Nominatim's one request a second; the place-tag plan reads the whole index)
+SIGNED_IN_READ_PATHS = ("/api/geocode", "/api/placetags")
 # reads that are not for everyone, whatever the method: the server log and the merge plan (admins); the change log and
 # the elevation lookup, which spends Google credits (editors)
 ADMIN_READ_PATHS = ("/api/log", "/api/library/merge", "/api/quality")
@@ -78,7 +80,7 @@ def _hits(path: str, paths) -> bool:
 
 # what a visitor may still fetch when sign-in is required: the app shell and the sign-in endpoints
 OPEN_PATHS = ("/", "/index.html", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest", "/api/status", "/share")
-OPEN_PREFIXES = ("/icons/", "/js/", "/api/auth/")
+OPEN_PREFIXES = ("/icons/", "/js/", "/vendor/", "/api/auth/")  # /vendor/: the map library, part of the app shell
 
 
 def _open_to_visitors(path: str) -> bool:
@@ -145,6 +147,8 @@ async def _auth_guard(request: Request, call_next):
         return JSONResponse({"detail": "Admins only"}, status_code=403 if user else 401)
     if _hits(path, EDITOR_READ_PATHS) and not users.can_write(user):
         return JSONResponse({"detail": "Editors only"}, status_code=403 if user else 401)
+    if _hits(path, SIGNED_IN_READ_PATHS) and not users.is_signed_in(user):
+        return JSONResponse({"detail": "Sign in to use this"}, status_code=401)
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         # a page on another site (or another port) cannot drive this one with the browser's cookies: the request's
         # Origin, when the browser sends one, has to be this host

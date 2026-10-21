@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+from helpers import need_tool
 from app.digikam import dkdb
 from app.photos import edits
 from app.faces import facemgr, facequality
@@ -22,8 +23,7 @@ def _regions(db, pid, tag):
 
 
 def test_near_duplicates_are_found_and_removed(client, lib):
-    if not edits.available():
-        pytest.skip("exiftool is not available here")
+    need_tool("exiftool", edits.available())
     pid = lib["with_faces"][1]
     con = sqlite3.connect(lib["db"])
     tag, val = con.execute("SELECT tagid, value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion' LIMIT 1", (pid,)).fetchone()
@@ -70,8 +70,7 @@ def test_report_endpoint_is_for_admins_and_lists_counts(client, lib):
 
 
 def test_image_files_with_the_duplicates_are_rewritten_too(client, lib):
-    if not edits.available():
-        pytest.skip("exiftool is not available here")
+    need_tool("exiftool", edits.available())
     from app.data import vdb
     ic = index.open_index()
     jpegs = {r[0] for r in ic.execute("SELECT id FROM photos WHERE lower(path) LIKE '%.jpg' OR lower(path) LIKE '%.jpeg'")}

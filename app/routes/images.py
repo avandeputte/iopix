@@ -18,6 +18,7 @@ from app.core import IMG_CACHE
 from app.core import db
 from app.core import resolve
 from app import users
+from app.photos import edits
 from app.core import _form_items
 from app.core import _photo_row
 from app.core import _cached_image
@@ -219,8 +220,9 @@ def _zip_response(items, sidecars: int, name: str):
             except Exception:  # a file Pillow cannot read: the original goes in instead
                 data, arc = None, f"{folder}/{export.name_for(pattern, ts, fname, used[folder])}".lstrip("/")
             yield (data if data is not None else path), arc
-            if sidecars and os.path.isfile(path + ".xmp") and not opts["nogps"]:
-                yield path + ".xmp", arc + ".xmp"
+            side = edits.sidecar_path(path)
+            if sidecars and os.path.isfile(side) and not opts["nogps"]:
+                yield side, (arc + ".xmp" if side == path + ".xmp" else os.path.splitext(arc)[0] + ".xmp")
 
     safe = re.sub(r"[^\w .()+-]+", "_", name).strip(" ._")[:80] or "photos"
     if len(parts) > 1:

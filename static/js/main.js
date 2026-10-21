@@ -1,7 +1,8 @@
 /** Startup: metadata, state, the first route. */
-import { $, api, fmtWhen, h, healSoon, icon, main, nf, norm, plural, sleep, store } from './core.js';
-import { FILTER_VIEWS, NAV, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toast } from './state.js';
+import { $, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
+import { FILTER_VIEWS, NAV, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toast, toastError } from './state.js';
 import { initSearch } from './search.js';
+import { confirmDialog } from './actions.js';
 import { G } from './grid.js';
 import { dbDialog } from './editing.js';
 import { loadUser, loginDialog, moreSheet, renderUserMenu, showAlbums } from './pages.js';
@@ -73,15 +74,55 @@ export function updateBanner(u) {
   if (!u || gone === u.remote) { b?.remove(); return; }
   if (b && b.dataset.remote === u.remote) return;
   b?.remove();
-  b = h('div', { id: 'updbanner', 'data-remote': u.remote },
-    h('span', { class: 'ic-wrap' }, icon('spark')),
-    h('div', null, h('b', null, u.version ? `Version ${u.version} is available` : 'A newer build is available'),
-      h('div', { class: 'muted' }, `You have v${S.APP_VERSION || '?'}${S.APP_COMMIT && S.APP_COMMIT !== 'unknown' ? ` (${S.APP_COMMIT})` : ''}. ${u.version ? '' : 'Latest change: '}${(u.message || '').replace(/^v\d+\.\d+\.\d+:\s*/, '').slice(0, 140)}`)),
-    h('a', { class: 'pillbtn on', href: '#/maintenance', onclick: () => b.remove() }, 'Update…'),
+  const text = h('div', null, h('b', null, u.version ? `Version ${u.version} is available` : 'A newer build is available'),
+    h('div', { class: 'muted' }, `You have v${S.APP_VERSION || '?'}${S.APP_COMMIT && S.APP_COMMIT !== 'unknown' ? ` (${S.APP_COMMIT})` : ''}. ${u.version ? '' : 'Latest change: '}${(u.message || '').replace(/^v\d+\.\d+\.\d+:\s*/, '').slice(0, 140)}`));
+  // the update runs from here; the banner then says so and the page reloads with the new version (details and Docker's way: Maintenance)
+  const run = h('button', { class: 'pillbtn on', onclick: async () => {
+    if (!await confirmDialog(`Fetch ${u.version ? 'version ' + u.version : 'the latest version'}, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;
+    runUpdate((msg, failed) => {
+      run.hidden = more.hidden = true;
+      fill(text, h('b', null, failed ? 'The update did not finish' : 'Updating…'), h('div', { class: 'muted' }, msg, failed ? [' ', h('a', { class: 'lnk', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Maintenance › Viewer version')] : null));
+    });
+  } }, 'Update now');
+  const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Details');
+  b = h('div', { id: 'updbanner', 'data-remote': u.remote }, h('span', { class: 'ic-wrap' }, icon('spark')), text, run, more,
     h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('iopix.updateDismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
   document.body.append(b);
 }
+/** Run update.sh on the server (POST /api/update run), then watch for the new version: /api/status every 5 s until its
+ *  appVersion or commit differs from what runs here, and the page reloads. After 3 minutes without a change the update
+ *  is reported as not finished. onState(text, failed) gets the words for the screen. Returns whether the update started. */
+export async function runUpdate(onState) {
+  try { await post('/api/update', { action: 'run' }); } catch (e) { toastError(e, 10000); return false; }
+  onState('Updating… the page reloads when the new version is up.', false);
+  const was = `${S.APP_VERSION}|${S.APP_COMMIT}`, until = Date.now() + 180000;
+  const check = async () => {
+    try { const s = await api('/api/status'); if (s.appVersion && `${s.appVersion}|${s.commit || ''}` !== was) { location.reload(); return; } } catch { /* restarting */ }
+    if (Date.now() < until) setTimeout(check, 5000); else onState('The update did not finish; see Maintenance › Viewer version.', true);
+  };
+  setTimeout(check, 5000);
+  return true;
+}
 const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', 'duplicates', 'detected', 'bursts', 'events', 'favorites'];
+/** A list page the library changed under is drawn again in place, keeping what was typed in its filter box. Not while
+ *  the user is typing in the page or arranging People: then it waits for the next poll. */
+function redrawLive() {
+  const r = S.liveRedraw;
+  if (S.viewKey !== r.key) { S.liveRedraw = null; return; }  // drawn again since (a change of page): nothing stale left
+  const a = document.activeElement;
+  if (S.arrangePeople || (a && main.contains(a) && a.matches('input, textarea'))) return;
+  S.liveRedraw = null;
+  const pf = main.querySelector('.pagefilter'), kept = pf && pf.value ? { value: pf.value, start: pf.selectionStart, end: pf.selectionEnd } : null;
+  const quiet = r.quiet || S.keepView;
+  S.keepView = true; S.viewKey = null;
+  onRoute().then(() => {
+    const el = main.querySelector('.pagefilter');
+    if (!kept || !el || el.value) return;
+    el.value = kept.value; el.dispatchEvent(new Event('input'));
+    try { el.setSelectionRange(kept.start, kept.end); } catch { /* not a text field */ }
+  });
+  if (!quiet && S.route.view === 'photos') toast('Library updated from digiKam.');
+}
 /** A new version of the viewer is on the server: a small note to load it now; it also loads at the next change of page. */
 function updateReadyNote() {
   if ($('#reloadnote')) return;
@@ -132,16 +173,17 @@ export async function pollStatus() {
       // while placing, forms, dialogs, the edit log's search) keep what is on screen and refresh their data quietly
       if (LB.open) S.viewKey = null;
       else if (S.route.view === 'map' && M.update) M.update();
-      else if (LIVE_VIEWS.includes(S.route.view)) { const quiet = S.keepView; S.keepView = true; S.viewKey = null; onRoute(); if (!quiet && S.route.view === 'photos') toast('Library updated from digiKam.'); }
+      else if (LIVE_VIEWS.includes(S.route.view)) S.liveRedraw = { key: S.viewKey, quiet: S.keepView || !!S.liveRedraw?.quiet };
       else S.STALE_VIEW = true;
     }
+    if (S.liveRedraw) redrawLive();
   } catch { /* server restarting */ }
   pollSoon(delay);
 }
 export async function start() {
   await loadUser();
   $('#nav').replaceChildren(...NAV.map(([v, label, ic, href]) => h('a', { href: href || `#/${v}`, 'data-v': v }, icon(ic), label)),
-    h('button', { class: 'navmore', 'data-v': 'more', title: 'More', onclick: moreSheet }, icon('more'), 'More'), h('div', { id: 'status' }));
+    h('button', { class: 'navmore', 'data-v': 'more', title: 'More', onclick: moreSheet }, icon('more'), 'More'), h('div', { id: 'status', role: 'status', 'aria-live': 'polite' }));
   initSearch();
   applyBadgePref(); applyTheme();
   if (S.REQUIRE_LOGIN && !S.USER) { document.body.classList.add('locked'); loginDialog(true); return; }  // boot() runs after sign-in

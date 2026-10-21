@@ -12,6 +12,7 @@ near-synonyms apart, and a too-specific label absorbs everything nearby.
 """
 import hashlib
 import threading
+import time
 
 from app import config
 from app.ai.semantic import semantic, enabled, _unit
@@ -161,20 +162,28 @@ INDEX = {n: c for c, (_, n) in enumerate(NAMES)}
 MAX_LABELS = 3
 MIN_PROB = 0.15
 SECONDARY_RATIO = 0.6  # an extra label must be at least this likely relative to the best one
+CHUNK = 4096           # photos scored at a time: the N x vocabulary table never exists in full
+REBUILD_EVERY = 60     # seconds between rebuilds while the embedding job keeps growing the index
 
 _lock = threading.Lock()
 _cache = {"gen": None}
 
 
 def _text_matrix():
-    """Unit embeddings for the vocabulary, cached on disk per model and vocabulary."""
+    """Unit embeddings for the vocabulary, cached on disk per model, model revision and vocabulary."""
     engine = semantic.active
     key = hashlib.md5("|".join(n for _, n in NAMES).encode()).hexdigest()[:12]
-    path = config.DATA_DIR / f"concepts-{engine.name}-{key}.npy"
+    rev = hashlib.md5((engine.installed_revision() or "").encode()).hexdigest()[:12]  # another revision embeds text differently
+    path = config.DATA_DIR / f"concepts-{engine.name}-{key}-{rev}.npy"
     if path.exists():
         return np.load(path)
     mat = engine.text_matrix([engine.cfg["prompt"].format(n) for _, n in NAMES])
-    np.save(path, mat)
+    for old in config.DATA_DIR.glob(f"concepts-{engine.name}-*.npy"):  # another vocabulary or revision: never read again
+        if old != path:
+            old.unlink(missing_ok=True)
+    tmp = path.with_suffix(".tmp.npy")
+    np.save(tmp, mat)
+    tmp.replace(path)
     return mat
 
 
@@ -186,25 +195,35 @@ def _build():
         ids, vecs, gen = semantic.ids, semantic.vecs, semantic.key
     if ids is None or not len(ids):
         return None
-    T = _text_matrix()
-    with np.errstate(all="ignore"):  # Accelerate emits spurious float warnings on matmul
-        logits = 100.0 * (vecs @ T.T)
-    logits -= logits.max(axis=1, keepdims=True)
-    prob = np.exp(logits)
-    prob /= prob.sum(axis=1, keepdims=True)
-    top = np.argsort(-prob, axis=1)[:, :MAX_LABELS]
-    top_p = np.take_along_axis(prob, top, axis=1)
+    T = _text_matrix().T  # [dim, concepts]
+    n, k = len(ids), min(MAX_LABELS, T.shape[1])
+    top = np.zeros((n, MAX_LABELS), np.int64)
+    top_p = np.zeros((n, MAX_LABELS), np.float32)
+    for s in range(0, n, CHUNK):  # a chunk of rows at a time, softmax in place: one chunk x vocabulary array, not three N x vocabulary ones
+        with np.errstate(all="ignore"):  # Accelerate emits spurious float warnings on matmul
+            logits = 100.0 * (vecs[s:s + CHUNK] @ T)
+        logits -= logits.max(axis=1, keepdims=True)
+        np.exp(logits, out=logits)
+        logits /= logits.sum(axis=1, keepdims=True)
+        part = np.argpartition(-logits, k - 1, axis=1)[:, :k]  # the k best of each row, unordered: cheaper than sorting the whole row
+        pp = np.take_along_axis(logits, part, axis=1)
+        order = np.argsort(-pp, axis=1)
+        top[s:s + CHUNK, :k] = np.take_along_axis(part, order, axis=1)
+        top_p[s:s + CHUNK, :k] = np.take_along_axis(pp, order, axis=1)
     weak = top_p < SECONDARY_RATIO * top_p[:, :1]   # never applies to the best label itself
     top_p = np.where(weak, 0.0, top_p)
-    return {"gen": gen, "ids": ids, "top": top, "top_p": top_p, "pos": {int(i): k for k, i in enumerate(ids)}}
+    return {"gen": gen, "built": time.time(), "ids": ids, "top": top, "top_p": top_p, "pos": {int(i): k for k, i in enumerate(ids)}}
 
 
 def _data():
-    """The label table for the active engine, rebuilt when its embeddings change."""
+    """The label table for the active engine, rebuilt when its embeddings change. While the embedding job
+    is still adding to the index, at most once a minute: the previous table answers meanwhile."""
     if not enabled():
         return None
     with _lock:
         if _cache.get("gen") != semantic.key or "ids" not in _cache:
+            if "ids" in _cache and semantic.running and time.time() - _cache.get("built", 0) < REBUILD_EVERY:
+                return _cache
             built = _build()
             if built is None:
                 return None

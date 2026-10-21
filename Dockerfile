@@ -27,6 +27,11 @@ COPY static ./static
 # editable install: the app runs from /app (its static files sit next to the package)
 RUN pip install --no-cache-dir -e ".$([ "$AI" = "1" ] && echo [ai])" \
     && if [ "$CAPTIONS" = "1" ]; then pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -e ".[captions]"; fi
+# the viewer runs as its own user (uid 1000), not as root: /data and the app belong to it. A volume created before
+# this change is still root-owned; give it to the user once: chown -R 1000:1000 on the mounted folder (see the README)
+RUN useradd --uid 1000 --user-group --create-home --shell /usr/sbin/nologin iopix \
+    && mkdir -p /data && chown -R iopix:iopix /data /app
+VOLUME ["/data"]
 # DIGIKAM_CHECK=none: the container cannot see the host's processes, so the viewer does not check
 # whether digiKam is open before writing its database. HF_HUB_OFFLINE=1: the server never
 # contacts the model hub (downloads run in a child process that turns it back on).
@@ -34,5 +39,6 @@ ENV DIGIKAM_DB_DIR=/library/digikamDB PHOTOS_ROOT=/library/photos DATA_DIR=/data
     DIGIKAM_CHECK=none HF_HUB_OFFLINE=1 CAPTIONS=${CAPTIONS} PYTHONUNBUFFERED=1 \
     AUTO_MODELS=siglip2,yolox,geonames
 EXPOSE 8600
+USER iopix
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8600/api/status', timeout=4)" || exit 1
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8600"]

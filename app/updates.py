@@ -103,7 +103,7 @@ def available() -> dict:
     c = dict(_checked)
     if c.get("status") != "update":
         return None
-    return {"remote": c.get("remote"), "version": remote_version(c.get("remoteMessage")), "message": c.get("remoteMessage"), "date": c.get("remoteDate")}
+    return {"remote": c.get("remote"), "version": c.get("remoteVersion") or remote_version(c.get("remoteMessage")), "message": c.get("remoteMessage"), "date": c.get("remoteDate")}
 
 
 def start_daily():
@@ -121,14 +121,34 @@ def start_daily():
     threading.Thread(target=loop, name="update-check", daemon=True).start()
 
 
+def _remote_app_version(sha: str):
+    """The app version at that commit (app/__init__.py), so a commit that only touches the workflow or the docs is
+    not announced as a new build."""
+    req = urllib.request.Request(f"https://raw.githubusercontent.com/{REPO}/{sha}/app/__init__.py", headers={"User-Agent": "iopix"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        m = re.search(r'^__version__ = "([^"]+)"', r.read().decode("utf-8", "replace"), re.M)
+    return m.group(1) if m else None
+
+
 def check() -> dict:
-    """{installed, remote, remoteDate, remoteMessage, status: current|update|error}"""
+    """{installed, remote, remoteDate, remoteMessage, remoteVersion, status: current|update|error}"""
+    from app import __version__
     mine = local_commit()
     out = {"installed": mine[:7], "checked": int(time.time())}
     try:
         c = _fetch(f"https://api.github.com/repos/{REPO}/commits/{BRANCH}")
         out.update(remote=c["sha"][:7], remoteDate=c["commit"]["committer"]["date"][:10], remoteMessage=c["commit"]["message"].splitlines()[0][:100])
-        out["status"] = "current" if c["sha"].startswith(mine) and mine != "unknown" else "update"
+        if c["sha"].startswith(mine) and mine != "unknown":
+            out["status"] = "current"
+        else:
+            try:
+                rv = _remote_app_version(c["sha"])
+            except Exception:
+                rv = None
+            out["remoteVersion"] = rv
+            # a newer build is one with another app version; the same version under a new commit (a workflow or
+            # documentation change) is nothing to install
+            out["status"] = "current" if rv == __version__ else "update"
     except Exception as e:
         out.update(status="error", error=str(e)[:160])
     _checked.clear(); _checked.update(out)
@@ -148,9 +168,15 @@ def last_result() -> dict | None:
     return {"ok": text.startswith("ok:"), "text": text.split(":", 1)[-1].strip()[:300], "at": int(f.stat().st_mtime)}
 
 
+def _app_writable() -> bool:
+    """update.sh writes the app folder, the Python environment and (for a checkout) the git metadata."""
+    paths = [config.APP_DIR] + [p for p in (config.APP_DIR / ".venv", config.APP_DIR / ".git") if p.exists()]
+    return all(os.access(str(p), os.W_OK) for p in paths)
+
+
 def status() -> dict:
     from app import __version__
-    return {"version": __version__, "installed": local_commit()[:7], "docker": in_docker(), "canRun": (config.APP_DIR / "update.sh").exists() and not in_docker(),
+    return {"version": __version__, "installed": local_commit()[:7], "docker": in_docker(), "canRun": (config.APP_DIR / "update.sh").exists() and not in_docker() and _app_writable(),
             "check": dict(_checked) if _checked else None, "progress": dict(progress), "lastUpdate": last_result()}
 
 

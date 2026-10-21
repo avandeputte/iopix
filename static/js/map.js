@@ -11,12 +11,14 @@ export const M = { data: null, map: null, token: 0 };
 export function loadLeaflet(cluster) {
   const css = (href) => document.head.append(h('link', { rel: 'stylesheet', href }));
   const js = (src) => new Promise((ok, fail) => document.head.append(h('script', { src, onload: ok, onerror: () => fail(new Error('offline')) })));
-  S.leafletP ||= (css('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'), js('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')).catch((e) => { S.leafletP = null; throw e; });  // offline once is not offline for the session
+  // Leaflet and its cluster plugin ship with the app (static/vendor): no third party, and the page's Content Security
+  // Policy stays 'self'. Leaflet finds its marker and layer-switch images next to its stylesheet.
+  S.leafletP ||= (css('/vendor/leaflet/leaflet.css'), js('/vendor/leaflet/leaflet.js')).catch((e) => { S.leafletP = null; throw e; });  // failed once is not failed for the session
   if (!cluster) return S.leafletP;
   S.clusterP ||= S.leafletP.then(() => {
-    css('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css');
-    css('https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css');
-    return js('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js');
+    css('/vendor/leaflet.markercluster/MarkerCluster.css');
+    css('/vendor/leaflet.markercluster/MarkerCluster.Default.css');
+    return js('/vendor/leaflet.markercluster/leaflet.markercluster.js');
   });
   return S.clusterP;
 }

@@ -99,16 +99,22 @@ _kick = threading.Event()  # set after an edit so the index is rebuilt right awa
 
 
 _tag_covers: dict = {}  # tag id -> the most typical photo of that tag (filled in the background)
+_tag_covers_from = {"sig": None}  # what the covers were computed from: the tags' photo counts and the embeddings file
 
 
 def _compute_tag_covers(version: str):
     """Pick a cover for each keyword tag that actually looks like the tag: the photo
-    closest to the average of the tag's photos, nudged toward the tag's name."""
+    closest to the average of the tag's photos, nudged toward the tag's name. One
+    query and one text embedding per tag, so skipped when nothing it depends on
+    changed since the last run (the same tags with the same counts, the same index)."""
     if not semantic_enabled():
         return
     con = db()
     try:
-        tags = con.execute("SELECT id, name FROM tags WHERE person = 0 AND n_all > 0").fetchall()
+        tags = con.execute("SELECT id, name, n_all FROM tags WHERE person = 0 AND n_all > 0").fetchall()
+        sig = hash((tuple(sorted((t["id"], t["n_all"]) for t in tags)), semantic.key))
+        if sig == _tag_covers_from["sig"]:
+            return
         found = {}
         for t in tags:
             if state.get("source") != version:
@@ -126,6 +132,7 @@ def _compute_tag_covers(version: str):
         con.close()
     _tag_covers.clear()
     _tag_covers.update(found)
+    _tag_covers_from["sig"] = sig
     for c in CACHES:
         c.cache_clear()
 
@@ -236,11 +243,14 @@ def _setup_file_log():
     except OSError:
         return
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    h.setLevel(logging.INFO)  # the file's own level: INFO and up, whatever the loggers let through
     for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
         lg = logging.getLogger(name)
         if not any(isinstance(x, RotatingFileHandler) and getattr(x, "baseFilename", "") == str(config.LOG_FILE) for x in lg.handlers):
             lg.addHandler(h)
-        if lg.level == logging.NOTSET or lg.level > logging.INFO:
+        # a logger nobody configured (NOTSET: the root logger, WARNING by default) opens up to INFO so the app's own
+        # lines reach the file; a level somebody set, such as uvicorn's from --log-level, is left alone
+        if lg.level == logging.NOTSET:
             lg.setLevel(logging.INFO)
 
 

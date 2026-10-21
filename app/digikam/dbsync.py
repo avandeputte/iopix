@@ -41,10 +41,10 @@ def digikam_running() -> bool:
     if config.DIGIKAM_CHECK in ("none", "ask") or dkdb.standalone():
         return False
     try:
-        if subprocess.run(["pgrep", "-x", "digikam"], capture_output=True).returncode == 0:
+        if subprocess.run(["pgrep", "-x", "digikam"], capture_output=True, timeout=5).returncode == 0:
             return True
-        return subprocess.run(["pgrep", "-f", "digikam.app/Contents/MacOS/digikam"], capture_output=True).returncode == 0
-    except OSError:
+        return subprocess.run(["pgrep", "-f", "digikam.app/Contents/MacOS/digikam"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
         return True  # cannot tell, so assume it is
 
 

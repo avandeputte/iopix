@@ -3,6 +3,7 @@
 Source files are only ever opened for reading. Everything written goes to
 config.CACHE_DIR.
 """
+import io
 import os
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ from app import config
 
 Image.MAX_IMAGE_PIXELS = 400_000_000  # a 400 MP panorama decodes; twice that is refused rather than eating the server's memory
 FFMPEG = shutil.which("ffmpeg")
+# camera raw files (folders.IMAGE_EXT): Pillow cannot decode them, the JPEG preview they carry is shown instead
+RAW_EXT = {".dng", ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".raf", ".orf", ".rw2", ".pef", ".srw", ".x3f"}
 log = logging.getLogger(__name__)
 
 _locks: dict[str, threading.Lock] = {}
@@ -66,12 +69,46 @@ def _save(im: Image.Image, dst: Path, quality: int, icc=None):
     os.replace(tmp, dst)
 
 
+def _raw_preview(src: str):
+    """The JPEG a raw file carries (the full-size preview, else the smaller ones), opened with Pillow and
+    carrying the raw file's own orientation: the embedded picture is stored the way the sensor saw it, and
+    its own EXIF (when it has any) does not say so. None when exiftool is missing or no preview is found."""
+    from app.photos import edits
+    if not edits.EXIFTOOL:
+        return None
+    cmd = [*edits.exiftool_cmd(), "-charset", "filename=utf8"]
+    im = None
+    for tag in ("PreviewImage", "JpgFromRaw", "ThumbnailImage"):
+        try:
+            res = subprocess.run([*cmd, "-b", f"-{tag}", src], capture_output=True, timeout=120)
+        except (subprocess.SubprocessError, OSError):
+            return None
+        if res.returncode == 0 and res.stdout:
+            try:
+                im = Image.open(io.BytesIO(res.stdout))
+                break
+            except (UnidentifiedImageError, OSError):
+                continue
+    if im is None:
+        return None
+    try:
+        res = subprocess.run([*cmd, "-s3", "-n", "-Orientation", src], capture_output=True, text=True, timeout=60)
+        orientation = int(res.stdout.strip().splitlines()[0]) if res.returncode == 0 and res.stdout.strip() else 1
+    except (subprocess.SubprocessError, OSError, ValueError):
+        orientation = 1
+    im.getexif()[0x0112] = orientation  # what exif_transpose reads below
+    return im
+
+
 def _open_oriented(src: str, want_w: int, want_h: int):
     """Open an image upright (EXIF orientation applied) in RGB or L, no smaller than
     want_w x want_h when the decoder can shrink it for free, plus its ICC profile.
     Shared by the thumbnail, analysis and caption code so every job decodes a file
-    the same way."""
-    im = Image.open(src)
+    the same way. A raw file opens as its embedded preview; without one (or without
+    exiftool) Pillow is asked as before and refuses it the same way."""
+    im = _raw_preview(src) if os.path.splitext(src)[1].lower() in RAW_EXT else None
+    if im is None:
+        im = Image.open(src)
     if im.format in ("JPEG", "MPO"):
         # ask the decoder for the smallest size that still covers the target box,
         # whichever way up the picture turns out to be
@@ -268,7 +305,8 @@ def true_size(path: str):
 
 
 def prune_previews():
-    """Keep the preview cache under its size cap by deleting the oldest files."""
+    """Keep the preview cache under its size cap by deleting the oldest files (by the time they were
+    made: access times stand still on noatime mounts, which is what most NAS shares and containers are)."""
     root = config.CACHE_DIR / "p"
     if not root.exists():
         return
@@ -278,7 +316,7 @@ def prune_previews():
             st = f.stat()
         except OSError:  # pruned or still being written by another thread
             continue
-        files.append((st.st_atime, st.st_size, f))
+        files.append((st.st_mtime, st.st_size, f))
     total = sum(s for _, s, _ in files)
     cap = config.PREVIEW_CACHE_MAX_MB * 1024 * 1024
     for _, size, f in sorted(files):

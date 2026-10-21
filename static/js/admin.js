@@ -1,12 +1,12 @@
 /** Settings, maintenance, the model table, consistency, face quality, the history page and faces. */
-import { $, api, date, dfDay, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
+import { $, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, faceUrl, filterParams, go, hashFor, infoPrefsEditor, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
-import { crumbs, suggestions } from './search.js';
+import { crumbs } from './search.js';
 import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
-import { card, pageTitle, people, setupDialog, usersSection } from './pages.js';
+import { pageTitle, setupDialog, usersSection } from './pages.js';
 import { details, openLightbox, personPicker, syncLightbox } from './lightbox.js';
-import { awaitReindex, indexMeta, start } from './main.js';
+import { awaitReindex, indexMeta, runUpdate } from './main.js';
 
 /** Maintenance › AI analysis and models: one table, a row per feature, with the model it runs on (download,
  *  update check) and the background job that fills it (progress, run again). Models without a job (places)
@@ -20,7 +20,7 @@ export function aiSection(view) {
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin:14px 0' },
       h('button', { class: 'pillbtn on', onclick: async () => { try { await post('/api/analysis/run', { job: 'all' }); toast('Checking for new and changed photos…'); } catch (e) { toastError(e); } draw(); } }, icon('spark'), 'Check new and changed photos'), checkBtn),
     body);
-  const fmtDate = (t) => (t ? dfDay.format(new Date(t * 1000)) : '');
+  const fmtDate = (t) => (t ? dfDayLocal.format(new Date(t * 1000)) : '');  // when the model was installed: a real moment, in this browser's zone
   // a job's model: fixed (vision: RapidOCR) or the one chosen for the feature (Maintenance offers the alternatives in a menu)
   const JOB_MODEL = { vision: 'ocr' };
   const JOB_CHOICE = { embeddings: 'search_model', objects: 'object_model', faces: 'face_vectors', facedetect: 'face_detector', captions: 'caption_model' };
@@ -37,7 +37,7 @@ export function aiSection(view) {
   const draw = async () => {
     let a, md;
     try { [a, md] = await Promise.all([api('/api/analysis'), api('/api/models')]); } catch { return; }
-    if (S.route.view !== view) return;
+    if (S.route.view !== view || !body.isConnected) return;  // the page was drawn again meanwhile: this copy of the section is gone
     const q = a.queue || {}, p = md.progress || {};
     if (p.finished && !p.running && p.error) toast(`Download of ${p.finished} failed: ${p.error}`, null, null, 9000);
     const models = Object.fromEntries(md.models.map((m) => [m.key, m]));
@@ -140,7 +140,7 @@ export function aiSection(view) {
         h('thead', null, h('tr', null, ['Feature', 'Model', 'Progress', ''].map((c) => h('th', null, c)))), h('tbody', null, rows))));
     checkBtn.disabled = false; fill(checkBtn, icon('spark'), 'Check models for updates');
     clearTimeout(timer);
-    if (a.jobs.some((j) => j.running) || p.running) timer = setTimeout(() => { if (S.route.view === view) drawSafe(); }, 4000);
+    if (a.jobs.some((j) => j.running) || p.running) timer = setTimeout(() => { if (S.route.view === view && body.isConnected) drawSafe(); }, 4000);
   };
   const drawRaw = draw;
   const drawSafe = async () => {  // a menu the user has open is not replaced under their pointer; try again shortly
@@ -158,10 +158,11 @@ export function analysisSection(view, part = 'jobs') {
     h('div', { class: 'muted intro' }, `Everything here runs locally, wherever ${S.APP_NAME} is running, and is stored in its own data folder. New and changed photos are picked up automatically, about 20 seconds after digiKam saves them; “Check for new photos now” does the same on demand.`),
     h('div', { class: 'my14',}, h('button', { class: 'pillbtn on', onclick: async () => { try { await post('/api/analysis/run', { job: 'all' }); toast('Checking for new and changed photos…'); } catch (e) { toastError(e); } draw(); } }, icon('spark'), 'Check for new photos now')),] : [h('h2', null, 'Search and background work')]),
     body);
+  let timer = 0;  // one poll per section while a job runs; a section drawn again stops polling (body.isConnected)
   const draw = async () => {
     let d;
     try { d = await api('/api/analysis'); } catch { return; }
-    if (S.route.view !== view) return;
+    if (S.route.view !== view || !body.isConnected) return;
     const q = d.queue || {};
     const sel = h('select', { onchange: async (e) => { try { await post('/api/settings', { bg_threads: +e.target.value }); toast('Applies when the next job starts.'); } catch (err) { toastError(err); } } },
       Array.from({ length: Math.max(1, (q.cores || 4) - 1) }, (_, i) => h('option', { value: i + 1, selected: i + 1 === q.threads }, String(i + 1))));
@@ -199,7 +200,8 @@ export function analysisSection(view, part = 'jobs') {
             try { await post('/api/settings', { search_model: other.key }); toast(`Switching to ${other.label}.`); } catch (e) { toastError(e); }
             draw();
           } }, `Switch to ${other.label}`))))));
-    if (part === 'jobs' && d.jobs.some((j) => j.running)) setTimeout(() => { if (S.route.view === view) draw(); }, 4000);
+    clearTimeout(timer);
+    if (part === 'jobs' && d.jobs.some((j) => j.running)) timer = setTimeout(() => { if (S.route.view === view && body.isConnected) draw(); }, 4000);
   };
   draw();
   return wrap;
@@ -290,7 +292,7 @@ export async function showConsistency() {
   const load = async (append) => {
     if (!append) offset = 0;
     try { d = await api(`/api/consistency?field=${field}&offset=${offset}&limit=60`); } catch (e) { list.replaceChildren(errorBox(e)); return; }
-    if (S.route.view !== 'consistency') return;
+    if (S.route.view !== 'consistency' || !list.isConnected) return;
     const s = d.summary, p = d.progress;
     const tile = (hue, ic, n, label, f) => h(f == null ? 'div' : 'a', { class: 'stat' + (f != null && f === field ? ' on' : '') + (f != null ? ' click' : ''), style: `--hue:var(--c-${hue})`,
       onclick: f == null ? null : () => { field = f; selected.clear(); bar(); load(); } }, h('span', { class: 'sic' }, icon(ic)), h('div', null, h('b', null, nf.format(n)), h('span', null, label)));
@@ -324,7 +326,7 @@ export async function showConsistency() {
     offset += d.items.length;
     more.hidden = offset >= d.total;
     clearTimeout(pollT);
-    if (p.running) pollT = setTimeout(() => { if (S.route.view === 'consistency') load(); }, 3000);  // refresh the progress (and the list, from the top) until it is done
+    if (p.running) pollT = setTimeout(() => { if (S.route.view === 'consistency' && list.isConnected) load(); }, 3000);  // refresh the progress (and the list, from the top) until it is done
   };
   const scan = async (subset, rescanAll) => {
     const q = subset ? filterParams() : new URLSearchParams();
@@ -396,7 +398,9 @@ export async function facesBatch(ops, msg) {
   return true;
 }
 export function onRouteFaces() { S.viewKey = null; onRoute(); }
+let facesTimer = 0;  // the one timer that follows face grouping; every draw of the page replaces it
 export async function showFaces(vp) {
+  clearTimeout(facesTimer);
   const tab = (vp && vp.get('tab')) || 'suggested';
   const page = h('div', { class: 'page' });
   const tabs = h('div', { class: 'eseg my10' }, [['suggested', 'Suggestions'], ['unknown', 'Unnamed faces'], ['ignored', 'Ignored']].map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => go('faces', photosWith({ tab: k }), true) }, l)));
@@ -476,7 +480,10 @@ export async function showFaces(vp) {
       g.groups.forEach((grp, k) => body.append(groupBlock(grp.faces, `Look-alikes ${k + 1} · ${grp.n} faces`, true, grp.suggest)));
       if (g.ungrouped.length) body.append(groupBlock(g.ungrouped, `${nf.format(g.ungrouped.length)} faces without a look-alike`, false));
       if (g.missing.length) body.append(groupBlock(g.missing, `${nf.format(g.missing.length)} faces not compared yet`, false));
-      if (g.progress.running) setTimeout(() => { if (S.route.view === 'faces') refresh(); }, 5000);
+      if (g.progress.running) {  // grouping goes on in the background: the page follows it, but not under a selection being made (a face unticked)
+        const follow = () => { facesTimer = setTimeout(() => { if (S.route.view !== 'faces' || !page.isConnected) return; body.querySelector('.fcell:not(.sel)') ? follow() : refresh(); }, 5000); };
+        follow();
+      }
       return;
     }
   }
@@ -586,9 +593,10 @@ export async function settingsPage(view) {
     S.IS_ADMIN ? (() => {
       const sel = h('select', null, h('option', { value: 'osm', selected: m.mapProvider !== 'google' }, 'OpenStreetMap (no account needed)'), h('option', { value: 'google', selected: m.mapProvider === 'google' }, 'Google Maps (your API key)'));
       const keyIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleMapsKeySet ? 'key is set; paste a new one to replace it' : 'Google Maps API key', autocomplete: 'off', style: 'width:260px' });
-      return row('Map provider', `Maps and place search use ${m.mapProvider === 'google' && m.googleMapsKeySet ? 'Google Maps' : 'OpenStreetMap'}. Google needs an API key from the Google Cloud console with the Map Tiles API and Geocoding API enabled and billing on; restrict the key to ${S.APP_NAME}'s address. The key is stored in ${S.APP_NAME}'s settings and never shown again.`,
-        h('span', { class: 'toolbar tight',}, sel, keyIn, btn('Save', async () => {
-          const body = { map_provider: sel.value }; if (keyIn.value.trim()) body.google_maps_key = keyIn.value.trim();
+      const srvIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleServerKeySet ? 'server key is set; paste a new one to replace it' : 'Server key (optional)', title: 'A second key, restricted by API and by this server’s address, for geocoding, places, elevation and Vision; without one the first key is used', autocomplete: 'off', style: 'width:260px' });
+      return row('Map provider', `Maps and place search use ${m.mapProvider === 'google' && m.googleMapsKeySet ? 'Google Maps' : 'OpenStreetMap'}. Google needs an API key from the Google Cloud console with the Map Tiles API and Geocoding API enabled and billing on; restrict that key by HTTP referrer to ${S.APP_NAME}'s address, since browsers see it. An optional second key, restricted by API and by this server's address, is used for what the server calls (geocoding, places, elevation, Vision). Keys are stored in ${S.APP_NAME}'s settings and never shown again.`,
+        h('span', { class: 'toolbar tight' }, sel, keyIn, srvIn, btn('Save', async () => {
+          const body = { map_provider: sel.value }; if (keyIn.value.trim()) body.google_maps_key = keyIn.value.trim(); if (srvIn.value.trim()) body.google_server_key = srvIn.value.trim();
           if (sel.value === 'google' && !keyIn.value.trim() && !m.googleMapsKeySet) { toast('Enter the Google Maps API key first.'); return; }
           try { await post('/api/settings', body); S.mapsLoaded = false; toast('Map provider saved.'); } catch (e) { toastError(e); }
           settingsPage(view);
@@ -691,6 +699,8 @@ export async function settingsPage(view) {
     h('h2', null, 'Editing'),
     row('Write metadata into image files', `Off: edits go to XMP sidecars only. On: also into JPEG, PNG, TIFF and WebP files, like digiKam’s “sidecar and file” mode. Currently ${m.writeFiles ? 'on' : 'off'}.`,
       btn(m.writeFiles ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { write_files: !m.writeFiles }); } catch (e) { toastError(e); } settingsPage(view); })),
+    row('Sidecar file names', `New sidecars are written as ${m.sidecarCompat ? 'photo.xmp (digiKam’s “compatible file name” option)' : 'photo.jpg.xmp (digiKam’s default)'}. Existing sidecars are read either way; pick what your digiKam is set to.`,
+      btn(m.sidecarCompat ? 'Use photo.jpg.xmp' : 'Use photo.xmp', async () => { try { await post('/api/settings', { sidecar_compat: !m.sidecarCompat }); } catch (e) { toastError(e); } settingsPage(view); })),
     h('h2', null, 'Place tags'),
     row('Tags from GPS positions', 'Turns each geotagged photo’s town into real digiKam tags under “Places/Country/Region/Town”, so places are searchable in digiKam as well. Missing tags are created in digiKam’s database (digiKam closed); assignments go to sidecars like any edit.',
       h('button', { class: 'pillbtn', onclick: placeTagsDialog }, icon('place'), 'Review and run')),
@@ -766,8 +776,10 @@ export async function settingsPage(view) {
     row('Server log', `What the server has been doing: edits, database writes, updates, background jobs and any errors, from ${S.APP_NAME}’s own log file in the data folder.`, btn('Show the log', logDialog)),
     (() => {
       const body = h('div', { class: 'muted note' }, 'Loading…');
+      let timer = 0;
       const draw = async () => {
         let u; try { u = await api('/api/update'); } catch (e) { fill(body, e.message); return; }
+        if (!body.isConnected) return;
         const c = u.check, p = u.progress, last = u.lastUpdate;
         const outcome = !p.running && !p.error && last ? h('div', { class: last.ok ? 'muted' : 'warn', style: 'font-size:12px;margin-top:2px' }, `last update: ${last.text}`) : null;
         const state = p.running ? `updating… ${S.APP_NAME} restarts when it is done` : p.error ? `last update failed: ${p.error}` : !c ? `v${u.version} · commit ${u.installed}` : c.status === 'current' ? `v${u.version} (${u.installed}) is the latest` : c.status === 'update' ? `newer version on GitHub: ${c.remote} from ${c.remoteDate} (${c.remoteMessage}); installed ${u.installed}` : `could not check: ${c.error}`;
@@ -776,8 +788,12 @@ export async function settingsPage(view) {
           btn('MCP update token…', async () => { try { const t = await post('/api/update', { action: 'token' }); const back = modal('MCP update token', h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
             h('div', { class: 'modal-btns' }, t.fromEnv ? null : h('button', { class: 'pillbtn', onclick: async () => { if (!await confirmDialog('Generate a new token? The old one stops working.')) return; try { await post('/api/update', { action: 'regenerate_token' }); } catch (e) { toastError(e); } back.remove(); } }, 'Regenerate'), h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'))); } catch (e) { toastError(e); } }),
           u.docker ? h('span', { class: 'muted' }, 'Docker: update by pulling the image (docker compose pull && docker compose up -d).')
-            : u.canRun ? btn('Update now', async () => { if (!await confirmDialog(`Fetch the latest version, refresh the packages and restart ${S.APP_NAME}?`)) return; try { await post('/api/update', { action: 'run' }); toast(`Updating; ${S.APP_NAME} restarts when it is done.`); } catch (e) { toastError(e); } setTimeout(draw, 3000); }, c && c.status === 'update') : null));
-        if (p.running) setTimeout(() => { if (S.route.view === view) draw(); }, 5000);
+            : u.canRun ? btn('Update now', async () => {
+              if (!await confirmDialog(`Fetch the latest version, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;
+              if (await runUpdate((text, failed) => { if (failed) toast(text, null, null, 15000); })) { toast(`Updating; ${S.APP_NAME} restarts when it is done, and the page reloads.`); setTimeout(draw, 3000); }
+            }, c && c.status === 'update') : null));
+        clearTimeout(timer);
+        if (p.running) timer = setTimeout(() => { if (S.route.view === view && body.isConnected) draw(); }, 5000);
       };
       draw();
       return row('Viewer version', 'The code running here, and whether the GitHub main branch has something newer. "Update now" runs update.sh (git pull or a fresh tarball), keeps your settings and data, and restarts the service.', body);
@@ -808,12 +824,14 @@ export async function showDuplicates() {
 /** Near-duplicates: look-alike photos found with the content-search embeddings (resized, re-saved, burst neighbors). */
 export function nearDupsSection(src) {
   const sec = h('div', { style: 'margin-top:36px' });
+  let timer = 0;
+  const later = (ms) => { clearTimeout(timer); timer = setTimeout(() => { if (S.route.view === 'duplicates' && sec.isConnected) draw(); }, ms); };
   const draw = async () => {
     let d; try { d = await api('/api/neardups'); } catch (e) { fill(sec, errorBox(e)); return; }
-    if (S.route.view !== 'duplicates') return;
+    if (S.route.view !== 'duplicates' || !sec.isConnected) return;
     const p = d.progress;
     const level = h('select', null, Object.keys(d.levels).map((k) => h('option', { value: k, selected: k === d.level }, `${k} (${d.levels[k]})`)));
-    const run = S.IS_ADMIN ? h('button', { class: 'pillbtn on', disabled: p.running || !d.enabled, onclick: async () => { try { await post('/api/neardups', { level: level.value }); toast('Looking for similar photos in the background.'); } catch (e) { toastError(e, 8000); } setTimeout(draw, 1500); } }, icon('spark'), d.gen ? 'Find again' : 'Find similar photos') : null;
+    const run = S.IS_ADMIN ? h('button', { class: 'pillbtn on', disabled: p.running || !d.enabled, onclick: async () => { try { await post('/api/neardups', { level: level.value }); toast('Looking for similar photos in the background.'); } catch (e) { toastError(e, 8000); } later(1500); } }, icon('spark'), d.gen ? 'Find again' : 'Find similar photos') : null;
     const note = !d.enabled ? 'Needs content search (SigLIP 2 or CLIP) installed: the similarity comes from its embeddings.'
       : p.running ? `Comparing… ${nf.format(p.done)} / ${nf.format(p.total)} photos.`
       : p.error ? `Last run failed: ${p.error}`
@@ -827,7 +845,7 @@ export function nearDupsSection(src) {
           h('div', { class: 'tile', style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, i, true) }, h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
           h('div', { class: 'nm', title: x.name }, x.name), h('div', { class: 'sb' }, `${fmtBytes(x.size || 0)}${x.sharpn != null ? ' · sharpness ' + Math.round(x.sharpn * 100) + '%' : ''}`),
           h('a', { class: 'sb lnk', href: hashFor('photos', photosWith({ album: albumIdByPath(x.album), sort: 'old' })) }, x.album.replace(/^\//, ''))); })))));
-    if (p.running) setTimeout(() => { if (S.route.view === 'duplicates') draw(); }, 4000);
+    if (p.running) later(4000);
   };
   draw();
   return sec;
@@ -884,6 +902,7 @@ export function moveTagDialog(t) {
 }
 
 export function showTags() {
+  document.body.classList.toggle('managing', S.manageTags);  // onRoute drops the class with the page; the state itself stays for the next visit
   const kidsOf = tagKids();
   const row = (t, flat) => {
     const kids = flat ? [] : (kidsOf.get(t.id) || []);

@@ -9,7 +9,9 @@
 # (they are downloaded at install time) and nothing from data/ or .venv/.
 set -e
 cd "$(dirname "$0")/.."
-VERSION="${VERSION:-$(date +%Y.%m.%d)}"
+# the app's own version number (update.sh reads it the same way); the date only when it cannot be read
+VERSION="${VERSION:-$(sed -n 's/^__version__ = "\([^"]*\)".*/\1/p' app/__init__.py)}"
+[ -n "$VERSION" ] || VERSION="$(date +%Y.%m.%d)"
 mkdir -p dist
 OUT="dist/iopix-install.sh"
 TMP="$(mktemp -d)"

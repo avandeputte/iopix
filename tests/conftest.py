@@ -95,10 +95,8 @@ def _digikam_vouched_closed():
 @pytest.fixture(autouse=True)
 def _no_users_by_default():
     """Most tests run in the open (no users) mode the app has before the first admin is created."""
-    from app.data import state
-    from app import users
-    state.init(); users.init()
-    con = state.connect(); con.execute("DELETE FROM user_accounts"); con.commit(); con.close()
+    from helpers import clear_accounts
+    clear_accounts()
     yield
 
 
@@ -106,8 +104,8 @@ def _no_users_by_default():
 def fresh(client):
     """No accounts and no session cookie before and after: the open mode the app has before the
     first admin exists, for tests that create their own accounts."""
-    from app.data import state
+    from helpers import clear_accounts
     def clear():
-        con = state.connect(); con.execute("DELETE FROM user_accounts"); con.commit(); con.close()
+        clear_accounts()
         client.cookies.clear()
     clear(); yield; clear()

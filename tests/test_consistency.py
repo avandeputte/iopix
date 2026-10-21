@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from helpers import need_tool
 from app.photos import consistency
 
 
@@ -65,8 +66,7 @@ def test_results_naming_a_dropped_field_do_not_break_the_report(client):
 def test_photos_without_a_sidecar_are_listed_and_can_get_one(client, lib):
     import time
     from app.photos import consistency, edits
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     from pathlib import Path
     pid = next((i for i in lib["ids"] if not Path(client.get(f"/api/photo/{i}").json()["path"] + ".xmp").exists()), None)
     if pid is None:

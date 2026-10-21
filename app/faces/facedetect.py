@@ -55,10 +55,6 @@ def model_path():
     return models.path_for("face_detector")
 
 
-def download():
-    models.fetch_file(models.REGISTRY["yunet"]["url"], models.path("yunet"))
-
-
 def available() -> bool:
     if np is None or not model_path().exists():
         return False
@@ -413,7 +409,3 @@ def start(ids: list = None, album: int = None, redo: bool = False, after=None) -
                 after()
     jobs.submit("facedetect", job)
     return len(photos)
-
-
-def summary_json() -> str:
-    return json.dumps(progress)

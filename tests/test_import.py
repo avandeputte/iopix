@@ -1,65 +1,11 @@
 """Import: staged files go into folders by the date they were taken, duplicates are left out, every new
 file gets a sidecar, and the installed app's share target lands on the Import page with the files ready."""
-import shutil
 import sqlite3
-import subprocess
 from pathlib import Path
 
 from app.digikam import dkdb
-from app.photos import edits
 from app.data import index
-
-
-def _src(lib):
-    """A JPEG the library knows: (path, photo id), read from digiKam's database so the UI test (another process) can use it too."""
-    con = sqlite3.connect(lib["db"])
-    try:
-        for pid, rel, name in con.execute("SELECT i.id, a.relativePath, i.name FROM Images i JOIN Albums a ON a.id = i.album "
-                                          "WHERE i.status = 1 AND i.fileSize > 20000 AND (i.name LIKE '%.jpg' OR i.name LIKE '%.JPG') ORDER BY i.id"):
-            path = Path(lib["root"]) / rel.strip("/") / name
-            if path.exists() and "zz-" not in str(path):
-                return path, pid
-    finally:
-        con.close()
-    raise AssertionError("no JPEG in the fixture library")
-
-
-def _dated(lib, tmp_path, stamp="1999:12:31 10:00:00"):
-    """A copy of a library photo, taken on another day (a new file: a different size and contents)."""
-    p = tmp_path / "trip.jpg"
-    shutil.copy(_src(lib)[0], p)
-    subprocess.run([*edits.exiftool_cmd(), "-q", "-overwrite_original", f"-exif:DateTimeOriginal={stamp}", f"-exif:CreateDate={stamp}", f"-xmp:DateTimeOriginal={stamp}", f"-xmp:CreateDate={stamp}",
-                    "-xmp-dc:Description=import probe", str(p)], check=True)
-    return p
-
-
-def forget_identity(ids):
-    """Test photos removed behind the viewer's back lose their viewer ids too (the mirror test counts them)."""
-    from app.data import vdb
-    con = vdb.connect()
-    try:
-        for i in ids:
-            con.execute("DELETE FROM photo_identity WHERE dk_id = ?", (int(i),))
-        con.commit()
-    finally:
-        con.close()
-
-
-def _cleanup(client, lib, rels):
-    root = Path(lib["root"])
-    con = sqlite3.connect(lib["db"])
-    for rel in rels:
-        for (aid,) in con.execute("SELECT id FROM Albums WHERE relativePath = ? OR relativePath LIKE ?", (rel, rel + "/%")).fetchall():
-            forget_identity([r[0] for r in con.execute("SELECT id FROM Images WHERE album = ?", (aid,)).fetchall()])
-            con.execute("DELETE FROM ImageInformation WHERE imageid IN (SELECT id FROM Images WHERE album = ?)", (aid,))
-            con.execute("DELETE FROM Images WHERE album = ?", (aid,))
-            con.execute("DELETE FROM Albums WHERE id = ?", (aid,))
-        shutil.rmtree(root / rel.strip("/"), ignore_errors=True)
-    con.commit(); con.close()
-    try:
-        index.build()
-    except Exception:  # the UI tests' server rebuilds its own index when it notices
-        pass
+from helpers import forget_identity, _src, _dated, _cleanup
 
 
 def test_import_sorts_by_date_leaves_duplicates_out_and_writes_sidecars(client, lib, tmp_path):

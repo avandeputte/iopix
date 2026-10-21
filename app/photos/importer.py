@@ -69,7 +69,8 @@ def _dir(token: str) -> Path:
 
 
 def stage(files: list, token: str = None) -> str:
-    """files: [(name, bytes)]. Returns the token of the staging folder (new, or the given one to add to)."""
+    """files: [(name, bytes or an open binary file)]. Returns the token of the staging folder (new, or the given one
+    to add to). An open file is copied in chunks, so a multi-gigabyte upload never sits in memory."""
     token = token or secrets.token_urlsafe(16)
     d = _dir(token)
     d.mkdir(parents=True, exist_ok=True)
@@ -80,9 +81,19 @@ def stage(files: list, token: str = None) -> str:
         except SyncError:
             name = "photo-" + secrets.token_hex(3) + os.path.splitext(name)[1]
         dst = d / folders._free_name(d, name)
-        dst.write_bytes(data)
+        _store(dst, data)
     _sweep()
     return token
+
+
+def _store(dst, data):
+    """Write bytes, or copy an open file in chunks, to dst."""
+    if isinstance(data, (bytes, bytearray)):
+        dst.write_bytes(data)
+        return
+    data.seek(0)
+    with open(dst, "wb") as out:
+        shutil.copyfileobj(data, out, 1024 * 1024)
 
 
 def _sweep():
@@ -212,7 +223,7 @@ def _ensure_folder(rel: str, root: dict, check_running: bool) -> int:
 
 def make_sidecar(path: str) -> bool:
     """A sidecar beside a new file, holding the file's own metadata (what digiKam would write to it)."""
-    side = path + ".xmp"
+    side = edits.sidecar_path(path)
     if os.path.exists(side):
         return True
     try:
@@ -238,7 +249,7 @@ def sidecars_from_db(ids: list):
     from app.digikam import dbsync
     jobs = []
     for pid, path in dbsync._photo_paths(ids):
-        side, v = path + ".xmp", vals.get(pid) or {}
+        side, v = edits.sidecar_path(path), vals.get(pid) or {}
         if not os.path.exists(side):
             continue
         ch = {k: v[k] for k in ("rating", "title", "caption") if v.get(k)}

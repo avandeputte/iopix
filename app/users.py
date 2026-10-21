@@ -58,19 +58,35 @@ def _key() -> bytes:
 
 
 # ---- passwords
+SCRYPT = (2 ** 16, 8, 1)  # n, r, p: 64 MiB per hash (OWASP's floor is 2^17 x 8 x 1; 2^16 keeps a small container responsive)
+
+
 def hash_password(pw: str) -> str:
+    """scrypt2$n$r$p$salt$hash: the parameters travel with the hash, so they can be raised later."""
+    n, r, p = SCRYPT
     salt = secrets.token_bytes(16)
-    h = hashlib.scrypt(pw.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
-    return "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(h).decode()
+    h = hashlib.scrypt(pw.encode(), salt=salt, n=n, r=r, p=p, dklen=32, maxmem=256 * 1024 * 1024)
+    return f"scrypt2${n}${r}${p}$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(h).decode()
 
 
 def check_password(pw: str, stored: str) -> bool:
     try:
-        _, s, h = stored.split("$")
-        got = hashlib.scrypt(pw.encode(), salt=base64.b64decode(s), n=2 ** 14, r=8, p=1, dklen=32)
+        parts = stored.split("$")
+        if parts[0] == "scrypt2":
+            n, r, p, s, h = int(parts[1]), int(parts[2]), int(parts[3]), parts[4], parts[5]
+        else:  # the first format: scrypt$salt$hash with n=2^14, r=8, p=1
+            _, s, h = parts
+            n, r, p = 2 ** 14, 8, 1
+        got = hashlib.scrypt(pw.encode(), salt=base64.b64decode(s), n=n, r=r, p=p, dklen=32, maxmem=256 * 1024 * 1024)
         return hmac.compare_digest(got, base64.b64decode(h))
     except Exception:
         return False
+
+
+def needs_rehash(stored: str) -> bool:
+    """An older or weaker hash: replaced with the current one once the password is seen again."""
+    parts = (stored or "").split("$")
+    return bool(stored) and (parts[0] != "scrypt2" or tuple(int(x) for x in parts[1:4]) != SCRYPT)
 
 
 # ---- users
@@ -210,6 +226,8 @@ def authenticate(name: str, password: str):
             return None
         if r[1] and not check_password(password, r[1]):  # an empty hash is a passwordless viewer: one click signs in
             return None
+        if r[1] and needs_rehash(r[1]):  # the password is known now: stored with the current parameters
+            con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (hash_password(password), r[0]))
         con.execute("UPDATE user_accounts SET last_login = ? WHERE id = ?", (int(time.time()), r[0]))
         con.commit()
         return get(r[0])
@@ -308,13 +326,24 @@ def login_succeeded(key: str):
 
 # ---- sessions
 def _session_salt(user_id: int) -> str:
-    """Part of the password hash: a changed password ends every session that was signed with the old one."""
+    """Part of the password hash plus the account's session generation: a changed password, or "sign out
+    everywhere", ends every session that was signed before."""
     con = state.connect()
     try:
-        r = con.execute("SELECT hash FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
+        r = con.execute("SELECT hash, session_gen FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
     finally:
         con.close()
-    return (r[0] or "none")[-16:] if r else "none"
+    return f"{(r[0] or 'none')[-16:]}:{r[1] or 0}" if r else "none"
+
+
+def end_all_sessions(user_id: int):
+    """Every session of this account stops working (the caller sets a fresh cookie for the current one if wanted)."""
+    con = state.connect()
+    try:
+        con.execute("UPDATE user_accounts SET session_gen = coalesce(session_gen, 0) + 1 WHERE id = ?", (user_id,))
+        con.commit()
+    finally:
+        con.close()
 
 
 def make_token(user_id: int) -> str:

@@ -104,24 +104,29 @@ description
 msg_info "Mounting the library into CT ${CTID}"
 RO=",ro=1"; [[ "${IOPIX_WRITE:-0}" = 1 ]] && RO=""
 pct set "$CTID" -mp0 "$IOPIX_PHOTOS,mp=/library/photos$RO"
+SECRETS=""  # setup.sh reads IOPIX_MYSQL and IOPIX_ADMIN from its environment: the passwords stay off every command line
 if [[ "$IOPIX_DB" == sqlite:* ]]; then
   pct set "$CTID" -mp1 "${IOPIX_DB#sqlite:},mp=/library/digikamDB$RO"
   DBARG="--sqlite /library/digikamDB"
 else
-  DBARG="--mysql $(printf '%q' "${IOPIX_DB#mysql:}")"
+  DBARG=""; SECRETS+="IOPIX_MYSQL=$(printf '%q' "${IOPIX_DB#mysql:}")"$'\n'
 fi
 pct reboot "$CTID"; sleep 8
 msg_ok "Mounted the library"
 
 msg_info "Running the app's setup inside the container (packages, models, settings, admin, service)"
-ADMINARG=""; [[ -n "${IOPIX_ADMIN:-}" ]] && ADMINARG="--admin $(printf '%q' "$IOPIX_ADMIN")"
-SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DBARG --data /opt/iopix/data --features '${IOPIX_FEATURES:-none}' $ADMINARG --service --no-system-deps --port 8600"
+[[ -n "${IOPIX_ADMIN:-}" ]] && SECRETS+="IOPIX_ADMIN=$(printf '%q' "$IOPIX_ADMIN")"$'\n'
+# the answers with passwords go in as a root-only file (pushed, read into setup.sh's environment, removed), never as arguments
+SECF="$(mktemp)"; chmod 600 "$SECF"; printf '%s' "$SECRETS" > "$SECF"
+pct push "$CTID" "$SECF" /opt/iopix/setup.env --perms 0600 --user 0 --group 0
+rm -f "$SECF"
+SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DBARG --data /opt/iopix/data --features '${IOPIX_FEATURES:-none}' --service --no-system-deps --port 8600"
+WRAPPED="set -a; . /opt/iopix/setup.env; set +a; rm -f /opt/iopix/setup.env; $SETUP_CMD > /opt/iopix/setup.log 2>&1"
 # the setup's output is kept in the container; on failure the last lines are shown here
-if ! pct exec "$CTID" -- bash -c "$SETUP_CMD > /opt/iopix/setup.log 2>&1"; then
+if ! pct exec "$CTID" -- bash -c "$WRAPPED"; then
   msg_error "setup.sh failed inside the container; last lines of /opt/iopix/setup.log:"
   pct exec "$CTID" -- tail -n 40 /opt/iopix/setup.log || true
-  SHOWN="$(printf '%s' "$SETUP_CMD" | sed -E 's/(--admin [^ :]*:)[^ ]*/\1****/; s/(--mysql )[^ ]*/\1<host:port:user:password:db>/')"  # no secrets on the terminal
-  msg_error "Fix the cause, then run it again with: pct exec $CTID -- bash -c \"$SHOWN\""
+  msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_MYSQL=host:port/db:user:password for MariaDB) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
   exit 1
 fi
 # the container cannot see digiKam's process on the host: ask before database writes instead of pgrep

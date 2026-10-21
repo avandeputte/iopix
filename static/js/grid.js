@@ -5,7 +5,6 @@ import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
 import { LB, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
-import { start } from './main.js';
 
 export const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM

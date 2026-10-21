@@ -341,6 +341,7 @@ def api_photo(photo_id: int, request: Request):
     con = db()
     try:
         row = con.execute("SELECT * FROM photos WHERE id = ?", (photo_id,)).fetchone()
+        hide_path = users.any_users() and not users.is_signed_in(request.state.user)  # the server's folder layout is not for visitors
         if not row:
             raise HTTPException(404)
         d = dict(row)
@@ -357,6 +358,8 @@ def api_photo(photo_id: int, request: Request):
             "SELECT f.tag_id AS tag, f.kind, f.x, f.y, f.w, f.h, (SELECT name FROM tags t WHERE t.id = f.tag_id) AS name "
             "FROM faces f WHERE f.photo_id = ? AND f.kind != 'confirmed' ORDER BY f.x", (photo_id,))]
         d.pop("hash", None)
+        if hide_path:
+            d.pop("path", None)
         d["ualbums"] = appstate.albums_of(photo_id)
         d["similar"] = semantic_enabled()
         d["concepts"] = concepts.for_photo(photo_id) if semantic_enabled() else []

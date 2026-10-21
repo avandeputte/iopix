@@ -92,7 +92,8 @@ def test_pwa_files_are_served(client):
     for p in ("/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-512-maskable.png", "/icons/apple-touch-icon.png", "/icons/mark.svg"):
         assert client.get(p).status_code == 200, p
     html = client.get("/").text
-    assert 'rel="manifest"' in html and "serviceWorker" in html and "theme-color" in html
+    assert 'rel="manifest"' in html and "theme-color" in html
+    assert "serviceWorker" in client.get("/app.js").text  # the registration lives in app.js: the only inline script is the theme one (content security policy)
 
 
 def test_job_rows_expose_progress_visibility(client):

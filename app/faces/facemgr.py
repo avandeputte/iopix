@@ -112,6 +112,7 @@ def apply(op: dict, db_path=None, check_running: bool = True, background: bool =
 
 
 _side_queue = {}            # image -> db_path, waiting for its sidecar rewrite (latest database state is written)
+_side_writing = set()       # images whose sidecar is being written right now (a reread waits for them)
 _side_cond = threading.Condition()
 _side_worker = {"thread": None}
 
@@ -124,22 +125,28 @@ def _sidecar_worker():
             batch = list(_side_queue.items())[:50]
             for image, _p in batch:
                 _side_queue.pop(image, None)
+            _side_writing.update(image for image, _p in batch)
         by_db = {}
         for image, path in batch:
             by_db.setdefault(path, []).append(image)
-        for db_path, images in by_db.items():
-            try:
-                res = write_regions_many(images, db_path)
-                bad = [i for i, v in res.items() if v != "written"]
-                for i in res:
-                    if i not in bad:
-                        _tries.pop(i, None)
-                if bad:
-                    log.warning("face regions not written to the sidecars of %s: %s", bad[:10], {i: res[i] for i in bad[:3]})
-                    _retry(bad, db_path)
-            except Exception as e:
-                log.warning("face regions not written to the sidecars of %s: %s", images[:10], e)
-                _retry(images, db_path)
+        try:
+            for db_path, images in by_db.items():
+                try:
+                    res = write_regions_many(images, db_path)
+                    bad = [i for i, v in res.items() if v != "written"]
+                    for i in res:
+                        if i not in bad:
+                            _tries.pop(i, None)
+                    if bad:
+                        log.warning("face regions not written to the sidecars of %s: %s", bad[:10], {i: res[i] for i in bad[:3]})
+                        _retry(bad, db_path)
+                except Exception as e:
+                    log.warning("face regions not written to the sidecars of %s: %s", images[:10], e)
+                    _retry(images, db_path)
+        finally:
+            with _side_cond:
+                _side_writing.difference_update(image for image, _p in batch)
+                _side_cond.notify_all()
 
 
 _tries = {}
@@ -230,6 +237,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
                      "summary": labels.get(r.get("op"), "Face changed").format(name=(r.get("name") or "").split("/")[-1] or "a person"),
                      "details": det, "undo": {"face_ops": inv} if inv else None})
     history.record(rows)
+    edits._recheck(list(dict.fromkeys(r["image"] for r in done)))  # the consistency report's entries for these photos are stale now
     # a person tagged without a box lives in the sidecar's tag list, not its regions: rewrite that list too
     tag_only = list(dict.fromkeys(r["image"] for r in done if r.get("op") in ("untag", "tagonly")))
     if tag_only:  # now, not queued (a video or a photo without a sidecar gets one)

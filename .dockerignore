@@ -9,5 +9,9 @@ __pycache__
 .git
 .github
 dist
+docs
+tools
+tests
+*.egg-info
 *.log
 .DS_Store

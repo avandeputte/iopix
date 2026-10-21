@@ -53,6 +53,8 @@ export const S = {
   mapsLoaded: false,
   facetToken: 0,
   placeRows: [],
+  lastHash: null,  // the hash onRoute last drew (a link click fires popstate and hashchange for the same hash)
+  liveRedraw: null,  // a list page the library changed under, waiting to be redrawn (main.js)
 };
 
 /** A person's badge picture; the version key busts the cache when digiKam's tag icon changes. */
@@ -126,7 +128,8 @@ export const ualbumById = (id) => ST.albums.find((a) => a.id === +id);
 
 export function parseHash() {
   const raw = location.hash.replace(/^#\/?/, '');
-  const [path, qs = ''] = raw.split('?');
+  const i = raw.indexOf('?');  // only the first ? starts the query: #/photos?q=why? keeps its question mark
+  const path = i < 0 ? raw : raw.slice(0, i), qs = i < 0 ? '' : raw.slice(i + 1);
   return { view: VIEWS.includes(path) ? path : 'explore', params: new URLSearchParams(qs) };  // Explore is the home page
 }
 export function hashFor(view, params) {
@@ -171,9 +174,12 @@ export const photosWith = (obj) => {
   return p;
 };
 
+/** Draw the view the hash names. Returns a promise for the page being drawn (list pages fetch their data first). */
 export function onRoute() {
-  if (S.RELOAD_PENDING && !LB.open && !G.sel.size) { location.reload(); return; }  // a new version waits: a change of page is a good moment
+  if (S.RELOAD_PENDING && !LB.open && !G.sel.size) { location.reload(); return Promise.resolve(); }  // a new version waits: a change of page is a good moment
   S.route = parseHash();
+  S.lastHash = location.hash;
+  let done = Promise.resolve();
   const fp = filterParams();
   const vp = new URLSearchParams(S.route.params); vp.delete('p');
   const key = S.route.view + '?' + (PARAM_VIEWS.includes(S.route.view) ? vp : fp).toString();
@@ -182,6 +188,7 @@ export function onRoute() {
   $('#nav .navmore')?.classList.toggle('on', MORE_VIEWS.includes(cur));
   renderChips();
   if (key !== S.viewKey) {
+    const quiet = S.keepView;  // drawn again in place (after an edit, a library update): focus stays where it is
     S.viewKey = key;
     if (S.keepView) G.restore = main.scrollTop; else clearSelection(true);
     S.keepView = false;
@@ -189,13 +196,29 @@ export function onRoute() {
     removeScrubber();
     if (M.map && S.route.view !== 'map') { M.map.remove(); M.map = null; }  // Leaflet keeps window listeners until the map is removed
     crumbs(null);  // each view sets its own trail
+    document.body.classList.remove('cbulk-open', 'managing');  // page-wide states of the consistency and tags pages; they set them again when drawn
     // the filter pane belongs to the photo and map views: it steps aside elsewhere and comes back with them
     if (!FILTER_VIEWS.includes(S.route.view)) { if (!$('#filters').hidden) toggleFilters(false, false); }
     else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= 1100) toggleFilters(true, false);
-    VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp);
+    done = Promise.resolve(VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp));
     if (!$('#filters').hidden) renderFilters();
+    if (!quiet) done.then(() => focusTitle(key));
   } else if (S.route.params.get('tab')) $('.stabs')?.show?.(S.route.params.get('tab'));  // Settings: a link to another tab of the page open
   syncLightbox();
+  return done;
 }
-window.addEventListener('popstate', onRoute);
-window.addEventListener('hashchange', onRoute);
+/** Screen readers hear the new page: its title takes focus once it is drawn, unless something else holds it on
+ *  purpose (a field being typed in, a dialog, the viewer). */
+function focusTitle(key) {
+  if (S.viewKey !== key || LB.open) return;
+  const a = document.activeElement;
+  if (a && a !== document.body && (a.matches('input, textarea, select, [contenteditable]') || a.closest('#lightbox, .modal-back'))) return;
+  const t = main.querySelector('h1');
+  if (!t) return;
+  t.tabIndex = -1;
+  t.focus({ preventScroll: true });
+}
+// a plain <a href="#/…"> click fires popstate and then hashchange: the same hash is drawn once
+const onNav = () => { if (location.hash === S.lastHash && S.viewKey !== null) return; onRoute(); };
+window.addEventListener('popstate', onNav);
+window.addEventListener('hashchange', onNav);

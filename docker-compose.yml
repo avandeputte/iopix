@@ -18,7 +18,7 @@ services:
       - "8600:8600"
     volumes:
       - /path/to/photos:/library/photos:ro          # CHANGE ME: the folder digiKam manages
-      - dkv-data:/data
+      - dkv-data:/data                            # the container runs as uid 1000: a volume from before that needs chown -R 1000:1000 once (README)
       # SQLite instead of MariaDB: also mount the folder with digikam4.db and drop the DIGIKAM_DB_* lines below
       # - /path/to/digikamDB:/library/digikamDB:ro
     environment:

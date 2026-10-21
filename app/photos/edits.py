@@ -281,10 +281,50 @@ def ensure_backup(target: str):
         backup_original(target)
 
 
+def sidecar_candidates(photo_path: str) -> tuple:
+    """(photo.jpg.xmp, photo.xmp): digiKam's default sidecar name, and its "compatible file name" option."""
+    return photo_path + ".xmp", os.path.splitext(photo_path)[0] + ".xmp"
+
+
+def compat_naming() -> bool:
+    """Write new sidecars as photo.xmp (digiKam's "compatible file name" setting): SIDECAR_COMPAT=1 or the setting."""
+    if os.environ.get("SIDECAR_COMPAT", "").strip() in ("1", "true", "yes"):
+        return True
+    try:
+        from app.data import state
+        return state.get_setting("sidecar_compat", "0") == "1"
+    except Exception:
+        return False
+
+
+def _compat_owner(photo_path: str) -> bool:
+    """Whether photo.xmp belongs to this photo alone: not when photo.jpg and photo.cr2 would share it."""
+    base, _ext = os.path.splitext(photo_path)
+    stem, folder = os.path.basename(base), os.path.dirname(photo_path) or "."
+    try:
+        for f in os.listdir(folder):
+            if f != os.path.basename(photo_path) and os.path.splitext(f)[0] == stem and not f.lower().endswith(".xmp"):
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def sidecar_path(photo_path: str) -> str:
+    """The sidecar this photo uses: the one that exists (photo.jpg.xmp first, then photo.xmp when it is this
+    photo's alone), else the name a new one gets (compatible naming when that setting is on)."""
+    a, b = sidecar_candidates(photo_path)
+    if os.path.isfile(a):
+        return a
+    if os.path.isfile(b) and _compat_owner(photo_path):
+        return b
+    return b if compat_naming() else a
+
+
 def _prepare(photo_path: str) -> str:
     """Back the sidecar up before the viewer's first change, creating an empty
     sidecar if the photo has none. Returns the sidecar path."""
-    side = photo_path + ".xmp"
+    side = sidecar_path(photo_path)
     backup = _backup_path(photo_path)
     created = Path(str(backup) + ".created")
     if not os.path.exists(side) and not backup.exists() and not created.exists():
@@ -524,14 +564,26 @@ def _run_exiftool(jobs: list) -> list:
     from app.photos import pixelguard
     # image files (not sidecars) get their image data hashed before and after: a write that changed
     # the picture itself is undone (pixelguard)
+    errfile = argfile + ".errors"
     with pixelguard.Guard([t for t, _ in jobs]) as guard:
         try:
             res = subprocess.run([*exiftool_cmd(), "-@", argfile, "-common_args", "-overwrite_original", "-m", "-q",
-                                  "-charset", "utf8", "-charset", "iptc=utf8"],
+                                  "-charset", "utf8", "-charset", "iptc=utf8", "-efile", errfile],  # -efile: the files that gave errors
                                  capture_output=True, text=True, timeout=3600)
         finally:
             os.unlink(argfile)
         damaged = guard.verify()
+    named = set()
+    try:
+        with open(errfile, encoding="utf-8", errors="replace") as f:
+            named = {line.strip() for line in f if line.strip()}
+    except OSError:
+        pass
+    finally:
+        try:
+            os.unlink(errfile)
+        except OSError:
+            pass
     if damaged:
         skipped += damaged
         jobs = [j for j in jobs if j[0] not in damaged]
@@ -541,7 +593,7 @@ def _run_exiftool(jobs: list) -> list:
     if res.returncode == 0:
         return skipped
     err = res.stderr or ""
-    failed = [t for t, _ in jobs if t in err]
+    failed = [t for t, _ in jobs if t in named or os.path.abspath(t) in named] or [t for t, _ in jobs if t in err]
     return skipped + (failed or [t for t, _ in jobs])
 
 
@@ -725,7 +777,7 @@ def rewrite_tags(photos: list) -> list:
         db_tags = digikam_tag_paths([p["id"] for p in photos])
         jobs, owner = [], {}
         for p in photos:
-            side = p["path"] + ".xmp"
+            side = sidecar_path(p["path"])
             paths = effective_tags(db_tags.get(p["id"], []), old.get(p["id"], {}))
             if os.path.isfile(side):
                 jobs.append((side, write_args({}, paths, False)))
@@ -781,7 +833,7 @@ def revert(photos: list) -> dict:
         db = db_state([p["id"] for p in photos])
         in_files = writes_files()
         for p in photos:
-            pid, side = p["id"], p["path"] + ".xmp"
+            pid, side = p["id"], sidecar_path(p["path"])
             backup = _backup_path(p["path"])
             created = Path(str(backup) + ".created")
             e = edits.get(pid)
@@ -814,7 +866,7 @@ def revert(photos: list) -> dict:
                 failed.append({"id": pid, "error": str(e_)})
         forget(done)
     # tags and faces: the database's, now that the edits are forgotten (one exiftool run for all)
-    keep = [pid for pid in done if os.path.exists(next(p["path"] for p in photos if p["id"] == pid) + ".xmp")]
+    keep = [pid for pid in done if os.path.exists(sidecar_path(next(p["path"] for p in photos if p["id"] == pid)))]
     if keep:
         facemgr.write_regions_many(keep)
     from app.photos import history

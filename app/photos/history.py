@@ -268,7 +268,7 @@ def restore(entry_id: int, kind: str) -> dict:
     if kind == "sidecar":
         if not e["sidecar"] or not os.path.isfile(e["sidecar"]):
             raise FileNotFoundError("The copy of the sidecar from before this change is gone")
-        side = photo["path"] + ".xmp"
+        side = edits.sidecar_path(photo["path"])
         mine = snapshot(pid, side)
         edits.ensure_backup(side)
         shutil.copy2(e["sidecar"], side)
@@ -304,7 +304,7 @@ def _pending_from_sidecar(photo: dict):
     from app.photos import consistency, edits
     from app.faces import facemgr
     from app.data import index
-    side = photo["path"] + ".xmp"
+    side = edits.sidecar_path(photo["path"])
     vals = consistency._exif_read([side]).get(side) or {}
     con = index.open_index()
     try:
@@ -342,7 +342,7 @@ def _restore_deleted(e: dict) -> dict:
     files = d.get("files") or []
     if not backup.is_dir() or not files:
         raise FileNotFoundError("The copy of this photo is no longer in deleted-photos")
-    root = Path(str(config.PHOTOS_ROOT))
+    root = Path(d.get("root") or str(config.PHOTOS_ROOT))  # the album root it was deleted from (older entries: the first root)
     main_file = root / files[0]
     if main_file.exists():
         raise FileExistsError(f"A file is already at {main_file}; move it away first")

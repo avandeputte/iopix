@@ -66,8 +66,8 @@ def _dump(path: str) -> list:
 
 def read(pid: int) -> dict:
     p = _photo(pid)
-    return {"id": p["id"], "path": p["path"], "file": _dump(p["path"]), "sidecar": _dump(p["path"] + ".xmp"),
-            "writesFiles": edits.writes_files() and edits.can_write_file(p["path"]), "hasSidecar": os.path.isfile(p["path"] + ".xmp")}
+    return {"id": p["id"], "path": p["path"], "file": _dump(p["path"]), "sidecar": _dump(edits.sidecar_path(p["path"])),
+            "writesFiles": edits.writes_files() and edits.can_write_file(p["path"]), "hasSidecar": os.path.isfile(edits.sidecar_path(p["path"]))}
 
 
 def _args(changes: list) -> list:
@@ -89,7 +89,7 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
     if file_only and not in_file:
         raise SyncError("EXIF, GPS and IPTC fields live in the image file: turn on Settings › Write metadata into image files "
                         "(and this must be a JPEG, PNG, TIFF or WebP)")
-    before = {f"{x['group']}:{x['tag']}": x["value"] for x in _dump(p["path"]) + _dump(p["path"] + ".xmp")}
+    before = {f"{x['group']}:{x['tag']}": x["value"] for x in _dump(p["path"]) + _dump(edits.sidecar_path(p["path"]))}
     xmp = [c for c in changes if c["group"].startswith("XMP-")]
     from app.digikam import dbsync
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
@@ -124,7 +124,7 @@ def _mirror_gps_and_date(path: str, changes: list, in_file: bool):
     if not (gps or date):
         return
     edited_in_file = any(not c["group"].startswith("XMP-") for c in changes)
-    src = path if edited_in_file else path + ".xmp"
+    src = path if edited_in_file else edits.sidecar_path(path)
     try:
         out = subprocess.run([*edits.exiftool_cmd(), "-j", "-n", "-q", "-GPSLatitude", "-GPSLongitude", "-GPSAltitude", "-DateTimeOriginal", src],
                              capture_output=True, text=True, timeout=60).stdout
@@ -140,8 +140,8 @@ def _mirror_gps_and_date(path: str, changes: list, in_file: bool):
         t = str(v["DateTimeOriginal"])[:19]
         ch["taken"] = t[:10].replace(":", "-") + "T" + t[11:19]
     jobs = []
-    if edited_in_file and os.path.exists(path + ".xmp"):
-        jobs.append((path + ".xmp", edits.write_args(ch, None, False)))
+    if edited_in_file and os.path.exists(edits.sidecar_path(path)):
+        jobs.append((edits.sidecar_path(path), edits.write_args(ch, None, False)))
     elif not edited_in_file and in_file:
         jobs.append((path, edits.write_args(ch, None, True)))
     if jobs and ch:
@@ -155,6 +155,10 @@ def reread(pid: int, check_running: bool = True) -> dict:
     p = _photo(pid)
     from app.faces import facemgr
     with facemgr._side_cond:  # a face change still waiting for its sidecar: written first, or the reread would undo it
+        for _ in range(60):  # one being written right now: wait for it
+            if int(p["id"]) not in facemgr._side_writing:
+                break
+            facemgr._side_cond.wait(timeout=1)
         waiting = facemgr._side_queue.pop(int(p["id"]), "none")
     if waiting != "none":
         facemgr.write_regions_many([p["id"]])

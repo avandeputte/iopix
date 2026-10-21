@@ -163,7 +163,15 @@ export const store = {
   // browser keys carry the app's prefix (iopix.theme, iopix.tile…); the server-side user settings keep the bare names
   get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; try { return localStorage.getItem(KEY + k) ?? d; } catch { return d; } },
   set(k, v) {
-    if (SETTINGS.user) { SETTINGS.user[k] = v; SETTINGS.pending[k] = v; clearTimeout(SETTINGS.flush); SETTINGS.flush = setTimeout(() => { const b = SETTINGS.pending; SETTINGS.pending = {}; post('/api/auth/settings', b).catch(() => {}); }, 400); return; }
+    if (SETTINGS.user) {
+      SETTINGS.user[k] = v; SETTINGS.pending[k] = v; clearTimeout(SETTINGS.flush);
+      SETTINGS.flush = setTimeout(() => {
+        const b = SETTINGS.pending; SETTINGS.pending = {};
+        // not saved: the keys go back in the queue (a value set since wins) and leave with the next change
+        post('/api/auth/settings', b).catch(() => { for (const [kk, vv] of Object.entries(b)) if (!(kk in SETTINGS.pending)) SETTINGS.pending[kk] = vv; });
+      }, 400);
+      return;
+    }
     try { localStorage.setItem(KEY + k, v); } catch { /* private mode */ }
   },
 };

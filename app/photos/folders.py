@@ -14,6 +14,7 @@ the id. Nothing else is guessed on digiKam's behalf.
 """
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -193,8 +194,8 @@ def album_for_dir(directory: Path):
 
 
 def upload(album_id: int, files: list, check_running: bool = True) -> dict:
-    """files: [(name, bytes)]. Each goes into the folder (a taken name gets ' (2)'), then one
-    transaction adds their rows. Returns {added: [{id, name}], skipped: [{name, reason}]}."""
+    """files: [(name, bytes or an open binary file)]. Each goes into the folder (a taken name gets ' (2)'), then one
+    transaction adds their rows; an open file is copied in chunks. Returns {added: [{id, name}], skipped: [{name, reason}]}."""
     con = dkdb.connect()
     try:
         folder = _album(con, album_id)
@@ -210,11 +211,19 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
             name = _clean_name(os.path.basename(name or ""), "file")
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
             cat = _category(ext)
-            if len(data) > MAX_UPLOAD or not data:
+            if isinstance(data, (bytes, bytearray)):
+                size = len(data)
+            else:
+                data.seek(0, os.SEEK_END); size = data.tell(); data.seek(0)
+            if size > MAX_UPLOAD or not size:
                 raise SyncError("Empty file, or larger than 2 GB.")
             final = _free_name(folder["dir"], name)
             tmp = folder["dir"] / (".upload-" + final)
-            tmp.write_bytes(data)
+            if isinstance(data, (bytes, bytearray)):
+                tmp.write_bytes(data)
+            else:
+                with open(tmp, "wb") as out:
+                    shutil.copyfileobj(data, out, 1024 * 1024)
             tmp.replace(folder["dir"] / final)
             path = folder["dir"] / final
             from app.photos import importer

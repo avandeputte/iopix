@@ -35,7 +35,7 @@ def _photo_with(lib, where: str):
 
 
 def _forget(lib, ids, files=()):
-    from test_import import forget_identity
+    from helpers import forget_identity
     con = _db(lib)
     for t in ("ImageInformation", "ImageMetadata", "ImagePositions", "ImageComments", "ImageCopyright", "ImageTags", "ImageTagProperties", "VideoMetadata", "ImageProperties"):
         con.executemany(f"DELETE FROM {t} WHERE imageid = ?", [(i,) for i in ids])

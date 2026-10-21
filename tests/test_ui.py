@@ -4,7 +4,8 @@ the People rows and their menu, the person picker, read-only mode hiding
 every editing control, and the Settings page.
 
 A real uvicorn serves the scratch library on a free port, started once per
-session from the same environment the API tests use.
+session from the same environment the API tests use, but with its own copy of the
+library and its own data folder, so the two processes never reindex each other's edits.
 """
 import os
 import socket
@@ -16,8 +17,10 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("playwright")
-from playwright.sync_api import sync_playwright  # noqa: E402
+from helpers import clear_accounts, make_admin, need_tool
+
+need_tool("playwright", module_level=True)
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout  # noqa: E402
 
 APP = Path(__file__).resolve().parent.parent
 
@@ -29,10 +32,25 @@ def _free_port() -> int:
 
 
 @pytest.fixture(scope="session")
+def lib(lib):
+    """The browser tests' server gets its own copy of the scratch library (digiKam database and photos), so
+    the two processes stop reindexing each other's edits. Same photo ids, so every fact in the session
+    `lib` still holds; the paths are the copy's, and every test in this module sees this one."""
+    import shutil
+    src = Path(lib["db"]).parent.parent
+    dst = src.parent / "lib-ui"
+    if not dst.exists():
+        shutil.copytree(src, dst)
+    return dict(lib, db=dst / "db" / "digikam4.db", root=dst / "photos")
+
+
+@pytest.fixture(scope="session")
 def server(lib):
-    """uvicorn on a free port, same env overrides as the API tests (set by conftest)."""
+    """uvicorn on a free port with the API tests' env overrides (set by conftest), its own data folder and
+    its own copy of the library (the `lib` above)."""
     port = _free_port()
-    env = dict(os.environ, DATA_DIR=str(Path(os.environ["DATA_DIR"]).parent / "data-ui"))
+    env = dict(os.environ, DATA_DIR=str(Path(os.environ["DATA_DIR"]).parent / "data-ui"),
+               DIGIKAM_DB_DIR=str(Path(lib["db"]).parent), PHOTOS_ROOT=str(lib["root"]))
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
                             cwd=str(APP), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # a pipe nobody reads would stall the server once full
     url = f"http://127.0.0.1:{port}"
@@ -68,16 +86,15 @@ def browser():
 @pytest.fixture(autouse=True)
 def _ui_no_users(server):
     """The browser tests' own server keeps its users in its own viewer.db: start each test in open mode."""
-    import sqlite3
-    db = Path(os.environ["DATA_DIR"]).parent / "data-ui" / "viewer.db"
-    if db.exists():
-        con = sqlite3.connect(db); con.execute("DELETE FROM user_accounts"); con.commit(); con.close()
+    clear_accounts(Path(os.environ["DATA_DIR"]).parent / "data-ui" / "viewer.db")
     yield
 
 
 @pytest.fixture
 def page(browser, server):
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    # bypass_csp: Playwright polls wait_for_function by eval() inside the page, which the app's Content Security Policy
+    # refuses; the policy itself is checked by test_csp_lets_the_app_and_the_vendored_map_run in a strict context
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900}, bypass_csp=True)
     pg = ctx.new_page()
     errors = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -93,6 +110,16 @@ def _open_photo(page, server, pid):
     page.wait_for_selector("#lightbox .lb-frame img, #lightbox .lb-frame video", timeout=15000)
     page.wait_for_timeout(300)
     page.mouse.move(420, 40)  # the toolbar hides 2.8 s after the last mouse move: a slow load must not hide it before the test clicks
+
+
+def _eventually(fn, timeout=10.0, step=0.2):
+    """Poll the server (another process, whose index is rebuilt after a write) until fn() is truthy; the last value."""
+    end = time.time() + timeout
+    while True:
+        v = fn()
+        if v or time.time() > end:
+            return v
+        time.sleep(step)
 
 
 def _set_read_only(server, on: bool):
@@ -398,12 +425,15 @@ def test_container_mode_writes_without_a_confirmation(page, server):
     page.locator("button", has_text="Manage tags").first.click(); page.wait_for_timeout(300)
     page.locator("button", has_text="New top-level tag").first.click()
     page.wait_for_selector(".modal input", timeout=5000)  # the app's own prompt, not the browser's
-    page.locator(".modal input").fill("zz-ui-vouch"); page.locator(".modal-btns button.on").click()
-    page.wait_for_timeout(2500)
+    page.locator(".modal input").fill("zz-ui-vouch")
+    try:
+        with page.expect_response(lambda r: r.url.endswith("/api/tags/op"), timeout=10000):  # created without a question
+            page.locator(".modal-btns button.on").click()
+    except PWTimeout:
+        pass  # the assertions below say what stood in the way
     assert not dialogs, "no browser dialogs: " + str(dialogs)
     assert page.locator(".modal").count() == 0, "no confirmation about digiKam"
-    tags = json.load(urllib.request.urlopen(server + "/api/meta"))["tags"]
-    assert any(t["name"] == "zz-ui-vouch" for t in tags), "after accepting, the tag is created"
+    assert _eventually(lambda: any(t["name"] == "zz-ui-vouch" for t in json.load(urllib.request.urlopen(server + "/api/meta"))["tags"])), "after accepting, the tag is created"
 
 
 def test_appearance_setting_switches_the_theme(page, server):
@@ -573,7 +603,7 @@ def test_share_button_opens_the_device_share_sheet_with_the_picture(page, server
     page.wait_for_selector(".tile img", timeout=15000)
     page.locator(".tile").first.click()
     page.wait_for_selector("#lightbox .lb-frame img, #lightbox .lb-frame video", timeout=15000)
-    page.wait_for_timeout(1500)  # the picture for sharing is fetched once the photo is shown
+    page.wait_for_timeout(500)  # the picture for sharing is fetched on the click itself
     page.click("#lightbox .lb-top button[title='Share']")
     page.wait_for_function("window.__shared.length === 1", timeout=5000)
     shared = page.evaluate("window.__shared[0]")
@@ -603,11 +633,7 @@ def test_on_this_day_is_a_justified_gallery_without_scrollbars(page, server, lib
 def test_require_sign_in_shows_only_the_login_dialog(page, server, browser):
     """With Require sign-in on, a visitor loading the app sees the sign-in dialog and nothing of
     the library; signing in from it loads the library in place."""
-    accounts = page.request.get(server + "/api/auth/accounts").json()["accounts"]
-    if any(a["name"] == "alex" for a in accounts):
-        assert page.request.post(server + "/api/auth/login", data={"name": "alex", "password": "correct horse"}).ok
-    else:
-        assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok
+    make_admin(page, "alex", "correct horse")
     assert page.request.post(server + "/api/settings", data={"require_login": True}).ok
     try:
         ctx = browser.new_context(viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
@@ -754,7 +780,7 @@ def test_consistency_bulk_sync_bar(page, server, lib):
     boxes.first.check()
     page.wait_for_selector("#cbulk:not([hidden]) button[data-src=sidecar]", timeout=3000)
     assert "1 selected" in page.locator("#cbulk .n").inner_text()
-    page.wait_for_timeout(4000)  # through a status poll
+    page.evaluate("import('/js/main.js').then((m) => m.pollStatus())")  # one status poll with its re-render, now rather than in 20 s
     assert page.locator("#cbulk:not([hidden])").count() == 1, "the bar stays while photos are ticked"
     vp = page.viewport_size
     for b in page.locator("#cbulk button[data-src]").all():
@@ -809,7 +835,6 @@ def test_timeline_rail_ribbon_marker_and_preview(page, server, lib):
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.6)
     page.wait_for_selector("#scrub .bubble:not([hidden]) .bth img", timeout=3000)
     assert "photo" in page.locator("#scrub .bubble .bt").inner_text()
-    before = page.locator("#scrub .pos").inner_text()
     page.mouse.down(); page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.95); page.mouse.up()
     page.wait_for_timeout(300)
     assert page.locator("#main").evaluate("m => m.scrollTop") > 0
@@ -1094,7 +1119,7 @@ def test_people_page_groups_and_arranging(page, server):
         rest = page.locator(".pgroup", has=page.locator(".pghead", has_text="Everyone else"))
         # drag someone from Everyone else onto the group's first card: placed before it
         rest.locator(".card", has_text=people[0]["name"]).first.drag_to(fam.locator(".card").first)
-        page.wait_for_function(f"[...document.querySelectorAll('.pgroup')].some((s) => s.querySelector('.pghead')?.innerText.startsWith('Zz Family') && s.querySelectorAll('.card').length === 2)", timeout=5000)
+        page.wait_for_function("[...document.querySelectorAll('.pgroup')].some((s) => s.querySelector('.pghead')?.innerText.startsWith('Zz Family') && s.querySelectorAll('.card').length === 2)", timeout=5000)
         # the menu: add a third person to the group
         rest.locator(".card", has_text=people[2]["name"]).first.locator(".pmenu").click()
         page.locator(".facemenu .fmi", has_text="Zz Family").click()
@@ -1281,11 +1306,11 @@ def test_face_change_shows_before_the_server_answers(page, server):
     page.wait_for_selector(".facebox.face-unknown, .facebox.face-suggested", timeout=10000)
     before = page.locator(".facebox.face-unknown, .facebox.face-suggested").count()
     page.locator(".facebox.face-unknown, .facebox.face-suggested").first.click()
-    page.locator(".facemenu .fmi", has_text="ignore").first.click()
-    page.wait_for_timeout(250)
-    assert page.locator(".facebox.face-unknown, .facebox.face-suggested").count() == before - 1, "gone at once"
-    page.wait_for_timeout(3500)
-    assert seen["posted"]
+    with page.expect_response(lambda r: r.url.endswith("/api/faces/op"), timeout=15000) as answered:  # the slowed-down save
+        page.locator(".facemenu .fmi", has_text="ignore").first.click()
+        page.wait_for_function("(n) => document.querySelectorAll('.facebox.face-unknown, .facebox.face-suggested').length === n",
+                               arg=before - 1, timeout=2000)  # gone at once: well before the server answers
+    assert seen["posted"] and answered.value.ok
     page.unroute("**/api/faces/op")
     # put the scratch library back: every ignored face of that photo becomes unknown again
     d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{f['photo']}").read())
@@ -1358,16 +1383,17 @@ def test_removing_a_face_needs_no_question_and_can_be_undone(page, server):
     page.wait_for_selector(".facebox.face-unknown", timeout=10000)
     n = page.locator(".facebox.face-unknown").count()
     page.locator(".facebox.face-unknown").first.click()
-    page.locator(".facemenu .fmi", has_text="Remove this region").click()
-    page.wait_for_timeout(300)
+    with page.expect_response(lambda r: r.url.endswith("/api/faces/op"), timeout=10000):  # the removal reaches the server
+        page.locator(".facemenu .fmi", has_text="Remove this region").click()
+        page.wait_for_function("(n) => document.querySelectorAll('.facebox.face-unknown').length === n", arg=n - 1, timeout=3000)
     assert not dialogs, dialogs
     assert page.locator(".facebox.face-unknown").count() == n - 1
-    page.locator("#toast .lnk", has_text="Undo").click()
-    page.wait_for_timeout(300)
+    with page.expect_response(lambda r: r.url.endswith("/api/faces/op"), timeout=10000):  # and so does the undo, before the page goes
+        page.locator("#toast .lnk", has_text="Undo").click()
+        page.wait_for_function("(n) => document.querySelectorAll('.facebox.face-unknown').length === n", arg=n, timeout=3000)
     assert page.locator(".facebox.face-unknown").count() == n, "Undo puts it back"
-    page.wait_for_timeout(2500)  # both changes reach the server before the page goes
-    d = _json.loads(urllib.request.urlopen(f"{server}/api/photo/{f['photo']}").read())
-    assert any((o["x"], o["y"], o["w"], o["h"]) == (f["x"], f["y"], f["w"], f["h"]) for o in d.get("faces_other", [])), "and on the server too"
+    rect = (f["x"], f["y"], f["w"], f["h"])
+    assert _eventually(lambda: any((o["x"], o["y"], o["w"], o["h"]) == rect for o in _json.loads(urllib.request.urlopen(f"{server}/api/photo/{f['photo']}").read()).get("faces_other", []))), "and on the server too"
 
 
 def test_accept_as_it_is_removes_only_that_entry(page, server, lib):
@@ -1515,13 +1541,13 @@ def test_delete_key_moves_to_the_trash_without_a_question_and_undo_restores(page
     assert not dialogs, dialogs
     assert "trash" in page.locator("#toast").inner_text().lower()
     assert any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"])
-    page.locator("#toast .lnk", has_text="Undo").click()
-    page.wait_for_timeout(2500)
+    with page.expect_response(lambda r: r.url.endswith("/api/trash/restore"), timeout=15000):  # the undo has reached the server
+        page.locator("#toast .lnk", has_text="Undo").click()
     assert not any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"]), "back out of the trash"
 
 
 def test_import_page_plans_then_imports_a_dropped_photo(page, server, lib, tmp_path):
-    from test_import import _dated, _cleanup, _src
+    from helpers import _dated, _cleanup, _src
     new = _dated(lib, tmp_path, "1998:07:04 12:00:00")
     same = _src(lib)[0]
     page.goto(server + "/#/import")
@@ -1547,10 +1573,9 @@ def test_import_page_plans_then_imports_a_dropped_photo(page, server, lib, tmp_p
 
 
 def test_rotate_key_turns_the_photo_and_undo_from_the_toast(page, server, lib):
-    from test_lossless import _face_jpeg, _info
+    from helpers import _face_jpeg, _info
     from app.photos import lossless
-    if not lossless.jpegtran():
-        pytest.skip("jpegtran is not installed here")
+    need_tool("jpegtran", lossless.jpegtran())
     pid, path, (tag, rect), (w, h, o) = _face_jpeg(lib)
     original = path.read_bytes()
     page.goto(f"{server}/#/photos?p={pid}")
@@ -1712,13 +1737,19 @@ def test_an_added_face_stays_on_screen_while_the_library_catches_up(page, server
     page.mouse.move(box["x"] + 10, box["y"] + 10); page.mouse.down()
     page.mouse.move(box["x"] + 60, box["y"] + 70, steps=4); page.mouse.up()
     page.wait_for_selector(".modal .frow", timeout=5000)
-    page.locator(".modal .frow").first.click()
-    page.wait_for_function(f"document.querySelectorAll('.lb-frame .facebox').length > {before}", timeout=5000)
-    counts = []
-    for _ in range(16):  # the face change is saved, the index rebuilds, the page polls: the box must never vanish meanwhile
-        page.wait_for_timeout(500)
-        counts.append(page.locator(".lb-frame .facebox").count())
-    assert min(counts) > before, counts
+    # the face change is saved, the index rebuilds, the page notices (its status polls) and takes the server's version of the
+    # photo: the box must never vanish meanwhile (a MutationObserver keeps the lowest number of boxes seen on the way)
+    try:
+        with page.expect_response(lambda r: r.url.endswith(f"/api/photo/{pid}"), timeout=20000):
+            page.locator(".modal .frow").first.click()
+            page.wait_for_function(f"document.querySelectorAll('.lb-frame .facebox').length > {before}", timeout=5000)
+            page.evaluate("""() => { window.__minBoxes = Infinity;
+                new MutationObserver(() => { window.__minBoxes = Math.min(window.__minBoxes, document.querySelectorAll('.lb-frame .facebox').length); })
+                  .observe(document.querySelector('#lightbox .lb-frame'), { childList: true, subtree: true }); }""")
+    except PWTimeout:
+        pass  # the page saw no rebuilt index to take the photo from: nothing could have replaced the box
+    page.wait_for_timeout(300)  # the server's version is drawn
+    assert page.locator(".lb-frame .facebox").count() > before and page.evaluate("window.__minBoxes") > before
 
 
 def test_set_location_dialog_fits_and_who_is_this_lists_nearby_people(page, server, lib):
@@ -1745,11 +1776,7 @@ def test_set_location_dialog_fits_and_who_is_this_lists_nearby_people(page, serv
 def test_proxy_sign_in_settings(page, server):
     """Settings › Users has the proxy sign-in settings: picking Cloudflare shows the team and AUD fields, saving them
     turns verification on, and Off puts it back."""
-    accounts = page.request.get(server + "/api/auth/accounts").json()["accounts"]
-    if any(a["name"] == "alex" for a in accounts):
-        assert page.request.post(server + "/api/auth/login", data={"name": "alex", "password": "correct horse"}).ok
-    else:
-        assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok
+    make_admin(page, "alex", "correct horse")
     try:
         page.goto(server + "/#/settings?tab=users")
         page.wait_for_selector("h2:has-text('Sign-in at a proxy')", timeout=10000)
@@ -1766,3 +1793,83 @@ def test_proxy_sign_in_settings(page, server):
     finally:
         page.request.post(server + "/api/settings/proxy", data={"AUTH_PROXY": "off", "CF_ACCESS_TEAM": "", "CF_ACCESS_AUD": ""})
     assert page.request.get(server + "/api/settings/proxy").json()["mode"] == "off"
+
+
+def test_csp_lets_the_app_and_the_vendored_map_run(browser, server):
+    """The page carries a Content Security Policy: the inline theme script is hashed, Leaflet comes from /vendor (and finds
+    its marker images there), and nothing the pages do is refused. Its own context: the shared fixture bypasses the policy."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    errors, blocked, vendor = [], [], []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("console", lambda m: blocked.append(m.text) if "Content Security Policy" in m.text else None)
+    page.on("response", lambda r: vendor.append((r.url, r.status)) if "/vendor/" in r.url else None)
+    try:
+        page.goto(server + "/#/explore")
+        page.wait_for_selector("#main h1", timeout=15000)
+        assert page.locator("meta[http-equiv='Content-Security-Policy']").count() == 1
+        assert page.evaluate("document.documentElement.dataset.theme") == "light", "the inline theme script ran (its hash is in the policy)"
+        page.goto(server + "/#/map")
+        page.wait_for_selector(".leaflet-container", timeout=15000)
+        assert page.evaluate("window.L.version") == "1.9.4" and page.evaluate("typeof L.markerClusterGroup") == "function"
+        assert page.evaluate("new L.Icon.Default()._getIconUrl('icon')").endswith("/vendor/leaflet/images/marker-icon.png")
+        page.goto(server + "/#/settings")
+        page.wait_for_selector("#main h1", timeout=15000)
+        page.wait_for_timeout(500)
+        assert not blocked, blocked
+        assert vendor and all(st == 200 for _, st in vendor), vendor
+        assert not errors, errors
+    finally:
+        ctx.close()
+
+
+def test_page_title_takes_focus_and_the_status_box_is_live(page, server):
+    """After a change of page its title has focus (screen readers announce it), unless a field is being typed in;
+    the status box is a live region; the query keeps everything after the first question mark."""
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("#main h1", timeout=15000)
+    assert page.locator("#status[role=status][aria-live=polite]").count() == 1
+    page.locator("#nav a[data-v=people]").click()
+    page.wait_for_selector("#main h1:has-text('People')", timeout=15000)
+    page.wait_for_function("document.activeElement === document.querySelector('#main h1')", timeout=5000)
+    assert page.evaluate("getComputedStyle(document.activeElement).outlineStyle") == "none"
+    page.focus("#q")
+    page.evaluate("location.hash = '#/folders'")
+    page.wait_for_selector("#main h1:has-text('Folders')", timeout=15000)
+    page.wait_for_timeout(300)
+    assert page.evaluate("document.activeElement.id") == "q", "typing is not interrupted"
+    assert page.evaluate("history.replaceState(null, '', '#/photos?q=why?'); import('/js/state.js').then((m) => m.parseHash().params.get('q'))") == "why?"
+
+
+def test_update_banner_runs_the_update_and_reloads_on_the_new_version(page, server):
+    """Update now on the banner starts update.sh (mocked here), says so, and watches /api/status: a new version reloads the page."""
+    import json as _json
+    state = {"version": None}
+    def fake_status(route):
+        try:
+            r = route.fetch()
+            body = r.json()
+            body["updateAvailable"] = {"remote": "abc1234", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
+            if state["version"]:
+                body["appVersion"] = state["version"]
+            route.fulfill(response=r, body=_json.dumps(body), headers={**r.headers, "content-type": "application/json"})
+        except Exception:
+            pass  # a status request still in flight when the page reloads itself: its response is gone with the old page
+    runs = []
+    def fake_update(route):
+        if route.request.method != "POST":
+            route.fallback(); return
+        runs.append(route.request.post_data_json)
+        route.fulfill(status=200, body='{"ok": true}', headers={"content-type": "application/json"})
+    page.route("**/api/status", fake_status)
+    page.route("**/api/update", fake_update)
+    page.goto(server + "/#/photos")
+    page.wait_for_selector("#updbanner button:has-text('Update now')", timeout=10000)
+    page.locator("#updbanner button:has-text('Update now')").click()
+    page.locator(".modal-btns .pillbtn.on").click()  # the confirmation
+    page.wait_for_function("document.querySelector('#updbanner') && document.querySelector('#updbanner').innerText.includes('Updating')", timeout=5000)
+    assert runs == [{"action": "run"}]
+    assert page.locator("#updbanner button:has-text('Update now')").is_hidden()
+    with page.expect_event("load", timeout=15000):  # the version poll (every 5 s) sees the new one and reloads
+        state["version"] = "9.9.9"
+    page.wait_for_selector("#topbar", timeout=10000)

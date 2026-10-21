@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from helpers import need_tool
 from app.photos import edits, pixelguard
 
 
@@ -18,8 +19,7 @@ def _jpeg(lib, tmp_path) -> Path:
 
 
 def test_metadata_write_keeps_the_image_data(client, lib, tmp_path):
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     f = _jpeg(lib, tmp_path)
     before = pixelguard.hashes([str(f)])[str(f)]
     if not before:
@@ -30,8 +30,7 @@ def test_metadata_write_keeps_the_image_data(client, lib, tmp_path):
 
 
 def test_a_write_that_changes_the_picture_is_undone(client, lib, tmp_path):
-    if not edits.available():
-        pytest.skip("exiftool not available")
+    need_tool("exiftool", edits.available())
     from PIL import Image
     f = _jpeg(lib, tmp_path)
     original = f.read_bytes()

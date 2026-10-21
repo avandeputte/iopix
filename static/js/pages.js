@@ -5,9 +5,8 @@ import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces } from './editing.js';
 import { downloadDialog } from './download.js';
-import { tiles } from './map.js';
 import { openLightbox, personPicker, popMenu, syncLightbox } from './lightbox.js';
-import { boot, pollStatus, start } from './main.js';
+import { boot, pollStatus } from './main.js';
 
 export function card({ img, fallback, name, sub, onclick }) {
   const im = img ? h('img', { src: img, alt: '', loading: 'lazy' }) : null;
@@ -47,7 +46,7 @@ export async function showExplore() {
   setTimeout(shuffle, 0);
   // Then and now: a person's earliest and latest named face, years apart; "Others" picks new people
   const thenNow = h('div', { hidden: true });
-  const years = (ts) => new Date(ts * 1000).getFullYear();
+  const years = (ts) => new Date(ts * 1000).getUTCFullYear();  // photo times are the camera's clock stored as UTC (core.js dfDay)
   const drawThenNow = async () => {
     let r; try { r = await api('/api/thenandnow?n=3'); } catch { return; }
     if (!r.pairs.length || !thenNow.isConnected) return;
@@ -142,16 +141,20 @@ export async function showPeople() {
     s.suggested[0] ? h('a', { class: 'pill', href: '#/faces?tab=suggested' }, 'Suggestions to confirm', h('b', null, `${nf.format(s.suggested[1])} in ${nf.format(s.suggested[0])} photos`)) : null,
     s.unknown[0] ? h('a', { class: 'pill', href: '#/faces?tab=unknown' }, 'Unnamed faces', h('b', null, `${nf.format(s.unknown[1])} in ${nf.format(s.unknown[0])} photos`)) : null,
     s.ignored[0] ? h('a', { class: 'pill', href: '#/faces?tab=ignored' }, 'Ignored faces', h('b', null, nf.format(s.ignored[1]))) : null)).catch(() => {});
-  const save = async (g, change) => {
-    try { await post(`/api/people/groups/${g.id}`, change); } catch (e) { toastError(e); }
+  // a change shows at once and is saved behind it; refused by the server, the groups go back to how they were (`was`, a snapshot taken before the change)
+  const snap = () => groups.map((g) => ({ ...g, members: [...g.members] }));
+  const undo = (was) => { groups = was; draw(); };
+  const save = async (g, change, was) => {
+    try { await post(`/api/people/groups/${g.id}`, change); } catch (e) { toastError(e); if (was) undo(was); }
   };
-  const saveOrder = async () => { try { await post('/api/people/groups/order', { ids: groups.map((g) => g.id) }); } catch (e) { toastError(e); } };
+  const saveOrder = async (was) => { try { await post('/api/people/groups/order', { ids: groups.map((g) => g.id) }); } catch (e) { toastError(e); undo(was); } };
   // move person `tid` into group `to` (null: out of `from`) before person `before` (null: at the end)
   const place = (tid, from, to, before) => {
-    if (from && from !== to) { from.members = from.members.filter((x) => x !== tid); save(from, { members: from.members }); }
+    const was = snap();
+    if (from && from !== to) { from.members = from.members.filter((x) => x !== tid); save(from, { members: from.members }, was); }
     if (to) {
       const m = to.members.filter((x) => x !== tid), k = before != null ? m.indexOf(before) : -1;
-      m.splice(k < 0 ? m.length : k, 0, tid); to.members = m; save(to, { members: m });
+      m.splice(k < 0 ? m.length : k, 0, tid); to.members = m; save(to, { members: m }, was);
     }
     draw();
   };
@@ -172,11 +175,12 @@ export async function showPeople() {
       popMenu(e.currentTarget, [
         groups.length ? 'Groups' : null,
         ...groups.map((x) => [`${x.members.includes(t.id) ? '✓ ' : ''}${x.name}`, () => {
+          const was = snap();
           x.members = x.members.includes(t.id) ? x.members.filter((y) => y !== t.id) : [...x.members, t.id];
-          save(x, { members: x.members }); draw(); }]),
+          save(x, { members: x.members }, was); draw(); }]),
         g && k > 0 ? 'Order' : g && k < g.members.length - 1 ? 'Order' : null,
-        g && k > 0 ? ['Move earlier', () => { g.members.splice(k - 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }); draw(); }] : null,
-        g && k >= 0 && k < g.members.length - 1 ? ['Move later', () => { g.members.splice(k + 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }); draw(); }] : null,
+        g && k > 0 ? ['Move earlier', () => { const was = snap(); g.members.splice(k - 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }, was); draw(); }] : null,
+        g && k >= 0 && k < g.members.length - 1 ? ['Move later', () => { const was = snap(); g.members.splice(k + 1, 0, g.members.splice(k, 1)[0]); save(g, { members: g.members }, was); draw(); }] : null,
         ['New group with this person…', async () => { const n = await promptDialog('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) await newGroup(n.trim(), [t.id]); }],
       ]);
     } }, icon('more')));
@@ -185,16 +189,16 @@ export async function showPeople() {
   const newGroup = async (name, members = []) => {
     let r; try { r = await post('/api/people/groups', { name }); } catch (e) { toastError(e); return; }
     const g = { id: r.id, name, members };
-    groups.push(g); if (members.length) await save(g, { members });
-    draw();
+    groups.push(g); draw();
+    if (members.length) { const was = snap(); was[was.length - 1].members = []; await save(g, { members }, was); }  // the group exists either way; its members may not
   };
   const section = (g, list, title) => {
     const cards = h('div', { class: 'cards people' }, list.map((t) => cardFor(t, g)));
     const k = g ? groups.indexOf(g) : -1;
     const tools = editing && g ? h('span', { class: 'gtools' },
-      h('button', { class: 'iconbtn', title: 'Rename this group', onclick: async () => { const n = await promptDialog('Group name', g.name); if (n && n.trim() && n.trim() !== g.name) { g.name = n.trim(); save(g, { name: g.name }); draw(); } } }, icon('edit')),
-      k > 0 ? h('button', { class: 'iconbtn turn', title: 'Move this group up', onclick: () => { groups.splice(k - 1, 0, groups.splice(k, 1)[0]); saveOrder(); draw(); } }, icon('left')) : null,
-      k < groups.length - 1 ? h('button', { class: 'iconbtn turn', title: 'Move this group down', onclick: () => { groups.splice(k + 1, 0, groups.splice(k, 1)[0]); saveOrder(); draw(); } }, icon('right')) : null,
+      h('button', { class: 'iconbtn', title: 'Rename this group', onclick: async () => { const n = await promptDialog('Group name', g.name); if (n && n.trim() && n.trim() !== g.name) { const was = snap(); g.name = n.trim(); save(g, { name: g.name }, was); draw(); } } }, icon('edit')),
+      k > 0 ? h('button', { class: 'iconbtn turn', title: 'Move this group up', onclick: () => { const was = snap(); groups.splice(k - 1, 0, groups.splice(k, 1)[0]); saveOrder(was); draw(); } }, icon('left')) : null,
+      k < groups.length - 1 ? h('button', { class: 'iconbtn turn', title: 'Move this group down', onclick: () => { const was = snap(); groups.splice(k + 1, 0, groups.splice(k, 1)[0]); saveOrder(was); draw(); } }, icon('right')) : null,
       h('button', { class: 'iconbtn', title: 'Delete this group (the people stay)', onclick: async () => {
         if (!await confirmDialog(`Delete the group “${g.name}”? The people in it stay; only the group goes.`, { ok: 'Delete', danger: true })) return;
         try { await fetch(`/api/people/groups/${g.id}`, { method: 'DELETE' }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); }); } catch (e) { toastError(e); return; }
@@ -317,7 +321,7 @@ export async function showFolders() {
     inp.onchange = async () => {
       const files = [...inp.files]; inp.remove();
       if (!files.length) return;
-      const send = async (retried) => {
+      const send = async () => {
         const fd = new FormData(); files.forEach((f) => fd.append('files', f));
         toast(`Uploading ${plural(files.length, 'file')} to ${folder.path}…`, null, null, 120000);
         const res = await fetch(`/api/folders/${folder.id}/upload`, { method: 'POST', body: fd });
@@ -326,7 +330,7 @@ export async function showFolders() {
         return r;
       };
       try {
-        const r = await send(false);
+        const r = await send();
         toast(`${plural(r.added.length, 'file')} added to ${folder.path}` + (r.skipped.length ? `; ${plural(r.skipped.length, 'file')} skipped (${r.skipped[0].reason})` : '') + '. digiKam reads the full metadata on its next run.', null, null, 9000);
       } catch (e) { toastError(e); }
       refresh();
@@ -373,6 +377,7 @@ export async function showFolders() {
   draw('');
 }
 export const openFolders = new Set();  // which folder nodes are expanded, kept across visits
+const SMART = new Map();  // "smart album id:library version" -> the promise of its photos (count and cover), so typing in the filter box runs no search again
 /** Albums: groupings that exist only in this viewer (favorites-like lists stored in its own database). */
 export function showAlbums() {
   const body = h('div');
@@ -401,11 +406,14 @@ export function showAlbums() {
   };
   const newCard = ST.canShare || ST.canPrivate ? h('div', { class: 'card', tabindex: 0, role: 'button', onclick: newAlbum },
     h('span', { class: 'cv newalbum' }, icon('add')), h('div', { class: 'nm' }, 'New album'), h('div', { class: 'sb' }, ST.canShare ? 'Shared or private' : 'Private: only you see it')) : null;
-  // smart albums: a smart album, evaluated live (count and cover fetched when the card is drawn)
+  // smart albums: a smart album, evaluated live (count and cover fetched once per library version, SMART)
   const smart = (s) => {
     const q = new URLSearchParams(s.query);
     const c = thumbCard(null, s.name, '…', Object.fromEntries(q.entries()));
-    api('/api/photos?' + q.toString()).then((d) => { if (!c.isConnected) return; c.querySelector('.sb').textContent = plural(d.count, 'photo'); if (d.count) { const im = h('img', { src: `/thumb/${d.id[0]}`, alt: '', loading: 'lazy' }); c.querySelector('.cv').prepend(im); } }).catch(() => { c.querySelector('.sb').textContent = 'could not run the search'; });
+    const key = `${s.id}:${S.META.version}`;
+    if (!SMART.has(key)) { for (const k of SMART.keys()) if (!k.endsWith(`:${S.META.version}`)) SMART.delete(k); SMART.set(key, api('/api/photos?' + q.toString())); }
+    SMART.get(key).then((d) => { c.querySelector('.sb').textContent = plural(d.count, 'photo'); if (d.count) c.querySelector('.cv').prepend(h('img', { src: `/thumb/${d.id[0]}`, alt: '', loading: 'lazy' })); })
+      .catch(() => { SMART.delete(key); c.querySelector('.sb').textContent = 'could not run the search'; });
     const act = (ic, title, fn) => h('button', { class: 'carddl', title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
     c.querySelector('.cv').append(h('span', { class: 'cardacts' },
       act('link', 'Copy a link to this smart album', async () => { await navigator.clipboard?.writeText(location.origin + '/' + hashFor('photos', q)); toast('Link copied.'); }),
@@ -415,16 +423,18 @@ export function showAlbums() {
     c.classList.add('smart');
     return c;
   };
+  // the cards are made once; the filter box only picks which of them are shown
+  const myCards = ST.albums.map((a) => [a, mine(a)]), smCards = ST.searches.map((s) => [s, smart(s)]);
   const draw = (f) => {
     body.replaceChildren();
-    const my = ST.albums.filter((a) => !f || norm(a.name).includes(f));
-    const shared = my.filter((a) => a.shared), priv = my.filter((a) => !a.shared);
-    body.append(h('div', { class: 'cards' }, shared.map(mine), f ? null : newCard));
+    const my = myCards.filter(([a]) => !f || norm(a.name).includes(f));
+    const shared = my.filter(([a]) => a.shared), priv = my.filter(([a]) => !a.shared);
+    body.append(h('div', { class: 'cards' }, shared.map(([, c]) => c), f ? null : newCard));
     if (priv.length) body.append(h('h2', { style: '--hue:var(--c-indigo)' }, h('span', { class: 'hic' }, icon('lock')), 'Private albums', h('span', { class: 'muted' }, 'only you see these')),
-      h('div', { class: 'cards' }, priv.map(mine)));
-    const sm = ST.searches.filter((s) => !f || norm(s.name).includes(f));
+      h('div', { class: 'cards' }, priv.map(([, c]) => c)));
+    const sm = smCards.filter(([s]) => !f || norm(s.name).includes(f));
     if (sm.length || !f) body.append(h('h2', { style: '--hue:var(--c-indigo)' }, h('span', { class: 'hic' }, icon('search')), 'Smart albums', h('span', { class: 'muted' }, 'smart albumes that update themselves')),
-      sm.length ? h('div', { class: 'cards' }, sm.map(smart)) : h('div', { class: 'muted note' }, 'None yet. Filter or search the photos, then use “Save search” in the bar above the grid.'));
+      sm.length ? h('div', { class: 'cards' }, sm.map(([, c]) => c)) : h('div', { class: 'muted note' }, 'None yet. Filter or search the photos, then use “Save search” in the bar above the grid.'));
     if (!my.length && !sm.length && f) body.append(h('div', { class: 'empty' }, 'No albums match.'));
   };
   main.replaceChildren(h('div', { class: 'page' }, pageTitle('album', 'indigo', 'Albums ', h('span', { class: 'muted' }, nf.format(ST.albums.length))),
@@ -563,7 +573,6 @@ export async function showBursts(vp) {
     more.hidden = offset >= total;
     syncLightbox();
   };
-  const refresh = () => { offset = 0; src = { id: [] }; list.replaceChildren(); setTimeout(load, 1800); };
   const head = h('div', { class: 'muted intro' });
   const scoped = [...qs.keys()].length > 0;  // bursts within a search, rather than the whole library
   main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Bursts & best shots', null]]),
@@ -646,8 +655,8 @@ export function accountDialog() {
   [cur, pw].forEach((i) => { i.onkeydown = (e) => e.stopPropagation(); });
   // how this browser is signed in, and so what Sign out does
   const how = h('p', { class: 'muted small' });
-  const outBtn = h('button', { class: 'pillbtn toolbar small stack mt8', onclick: async () => {
-    back.remove(); const r = await post('/api/auth/logout', {});
+  const outBtn = h('button', { class: 'pillbtn', onclick: async () => {
+    back.remove(); let r; try { r = await post('/api/auth/logout', {}); } catch (e) { toastError(e); return; }
     if (r && r.cloudflareLogout) { location.href = r.cloudflareLogout; return; }  // Cloudflare's own sign-out page ends its session too
     if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out');
   api('/api/auth/me').then((me) => {
@@ -656,8 +665,11 @@ export function accountDialog() {
       : by === 'proxy' ? 'at the sign-in page of your proxy; sign out there.' : by === 'oneclick' ? 'here, with one click (no password).' : 'here, with a password.');
     outBtn.textContent = by === 'cloudflare' && me.throughCloudflare ? 'Sign out (of Cloudflare too)' : 'Sign out';
     outBtn.title = by === 'cloudflare' ? 'Ends the session here and Cloudflare Access’s, so Cloudflare asks for sign-in again next time' : '';
-    if (by === 'proxy') outBtn.remove();
+    if (by === 'proxy') { outBtn.remove(); allBtn.remove(); }
   }).catch(() => {});
+  const allBtn = h('button', { class: 'pillbtn', title: 'Ends this account’s sessions on every other browser and phone; this one stays signed in', onclick: async () => {
+    if (!await confirmDialog('Sign this account out everywhere else? Every other browser and phone will have to sign in again; this one stays.', { ok: 'Sign out everywhere' })) return;
+    try { await post('/api/auth/logout_all', {}); toast('Signed out everywhere else.'); } catch (e) { toastError(e); } } }, 'Sign out everywhere else');
   const back = modal(`${S.USER.name} · ${S.USER.role}`,
     h('p', { class: 'muted' }, S.USER.role === 'admin' ? 'You can change the library, the settings and the users.' : S.USER.role === 'editor' ? 'You can change the library (edits, tags, faces, places).' : 'You can browse, and keep favorites, albums and display settings.'),
     h('h4', null, 'Who you are in People'),
@@ -668,7 +680,7 @@ export function accountDialog() {
     how,
     S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', {}, cur, pw)],
     S.VIA_PROXY ? null : h('div', {}, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toastError(e); } } }, 'Change password')),
-    h('div', { class: 'modal-btns' }, outBtn,
+    h('div', { class: 'modal-btns' }, allBtn, outBtn,
       h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
 }
 export function usersSection() {

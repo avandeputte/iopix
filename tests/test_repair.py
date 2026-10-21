@@ -4,12 +4,11 @@ import os
 import shutil
 import subprocess
 
-import pytest
-
+from helpers import need_tool
 from app.photos import repair, edits
 
 FF = shutil.which("ffmpeg")
-pytestmark = pytest.mark.skipif(not FF, reason="ffmpeg is not installed here")
+need_tool("ffmpeg", FF, module_level=True)
 
 
 def _broken(dst):

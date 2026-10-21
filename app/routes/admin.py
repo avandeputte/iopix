@@ -176,6 +176,10 @@ async def api_settings(request: Request):
         geocode._cache.clear()
     if "google_maps_key" in body:  # stored, never shown back
         appstate.set_setting("google_maps_key", str(body["google_maps_key"]).strip())
+    if "google_server_key" in body:  # a second key, restricted to this server's address, for the APIs called from here
+        appstate.set_setting("google_server_key", str(body["google_server_key"]).strip())
+    if "sidecar_compat" in body:  # new sidecars as photo.xmp (digiKam's "compatible file name" option) instead of photo.jpg.xmp
+        appstate.set_setting("sidecar_compat", "1" if body["sidecar_compat"] else "0")
         maps.reset_session()
     if "bg_threads" in body:  # cores one background job may use; takes effect when the next job starts
         n = int(body["bg_threads"])
@@ -221,7 +225,7 @@ def _dir_size(path) -> int:
 
 
 @router.get("/api/analysis")
-def api_analysis():
+def api_analysis(request: Request):
     """Status of every background analysis, for the AI analysis page."""
     con = db()
     try:
@@ -240,7 +244,7 @@ def api_analysis():
     jobs = [
         {"key": "thumbs", "label": "Thumbnails", "detail": "Small previews for the grid.",
          "done": total - (prewarmer.total - prewarmer.done if prewarmer.running else 0), "total": total,
-         "running": prewarmer.running, "enabled": True, "rerun": False, "since": prewarmer.started, "last": prewarmer.last, "current": list(prewarmer.current.values())[:3]},
+         "running": prewarmer.running, "enabled": True, "rerun": False, "since": prewarmer.started, "last": prewarmer.last, "current": (list(prewarmer.current.values())[:3] if users.is_signed_in(request.state.user) else [])},
         {"key": "embeddings", "label": "Content search", "enabled": act is not None, "rerun": True,
          "detail": (f"Model: {names[act.name]}." + (("" if act is up else f" Switching to {names[up.name]}: ") + f"{nf(len(up.ids) if up.ids is not None else 0)} of {nf(total)} indexed" + ("; results come from the photos indexed so far." if act is up else f"; search stays on {names[act.name]} until it finishes.") if up else "")
                     + (f" {nf(len(act.failed))} could not be embedded (no thumbnail; see the server log)." if act is not None and act.failed else "")) if act else "Not installed (see README).",
@@ -312,6 +316,19 @@ def api_logout(request: Request):
     outside = proxyauth.external(request.headers, proxyauth.peer_of(request))
     resp = JSONResponse({"ok": True, "cloudflareLogout": "/cdn-cgi/access/logout" if outside else None})
     users.clear_session(resp, cloudflare_cookie=not outside)
+    return resp
+
+
+@router.post("/api/auth/logout_all")
+def api_logout_all(request: Request):
+    """Every session of this account ends (other browsers, phones); this one is renewed."""
+    u = request.state.user
+    if not u:
+        raise HTTPException(401, "Sign in first")
+    users.end_all_sessions(u["id"])
+    proxyauth.authlog.info("signed out everywhere: %s from %s", u["name"], proxyauth.source(request))
+    resp = JSONResponse({"ok": True})
+    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password")
     return resp
 
 
@@ -627,8 +644,10 @@ async def api_models_download(request: Request):
 
 
 @router.get("/api/update")
-def api_update():
-    """Installed commit, the last GitHub check, and whether update.sh can run here."""
+def api_update(request: Request):
+    """Installed commit, the last GitHub check, and whether update.sh can run here (admins: the log names server paths)."""
+    if not users.is_admin(request.state.user):
+        raise HTTPException(403 if request.state.user else 401, "Admins only")
     return updates.status()
 
 
@@ -700,7 +719,7 @@ def api_maintenance(request: Request):
             "embeddings": sum(e.file.stat().st_size for e in semantic.engines.values() if e.file.exists()),
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
-        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": _db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "searchModel": semantic.chosen(),
+        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": _db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "")), "sidecarCompat": edits.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),
         "scanner": _scanner_state(),
@@ -812,6 +831,8 @@ async def api_analysis_run(request: Request):
 
 @router.get("/api/backup/{which}")
 def api_backup(which: str, request: Request):
+    if request.headers.get("sec-fetch-site") == "cross-site":  # a link on another site must not start a multi-hundred-MB dump
+        raise HTTPException(403, "Open this from the viewer itself")
     """A download of digiKam's database (a consistent copy of the SQLite file, or a fresh mysqldump)
     or of the viewer's own state database. Admins only; the copy is also kept in db-backups."""
     if not users.is_admin(request.state.user):

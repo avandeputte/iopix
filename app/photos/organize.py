@@ -206,7 +206,7 @@ def restore(infos: list, check_running: bool = True) -> dict:
             shutil.move(t["trash"], dest)
             tf = Path(t["trash"])
             moves = [(t["trash"], str(dest))]
-            for s in list(tf.parent.glob(tf.name + ".xmp")) + list(tf.parent.glob(tf.stem + ".xmp")):
+            for s in [Path(x) for x in (str(tf) + ".xmp", str(tf.with_suffix(".xmp"))) if os.path.isfile(x)]:  # no glob: names may hold [ ] * ?
                 sdst = str(dest) + ".xmp" if s.name.startswith(tf.name) else str(dest.with_suffix(".xmp"))
                 shutil.move(s, sdst)
                 moves.append((str(s), sdst))
@@ -283,7 +283,7 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
     for t in items:
         try:
             tf = Path(t["trash"])
-            for s in list(tf.parent.glob(tf.name + ".xmp")) + list(tf.parent.glob(tf.stem + ".xmp")):
+            for s in [Path(x) for x in (str(tf) + ".xmp", str(tf.with_suffix(".xmp"))) if os.path.isfile(x)]:  # no glob: names may hold [ ] * ?
                 s.unlink(missing_ok=True)
             tf.unlink(missing_ok=True)
             os.remove(t["info"])

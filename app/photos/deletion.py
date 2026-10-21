@@ -53,11 +53,33 @@ def sidecars(path: str) -> list:
     return out
 
 
+def _roots() -> list:
+    try:
+        con = dkdb.connect()
+        try:
+            return [Path(v) for v in dkdb.root_paths(con).values()]
+        finally:
+            con.close()
+    except Exception:
+        return [Path(str(config.PHOTOS_ROOT))]
+
+
+def _root_of(path: str) -> Path:
+    """The album root this file sits in (the first root when none matches, as before there were several)."""
+    p = Path(path)
+    for r in _roots():
+        try:
+            p.relative_to(r)
+            return r
+        except ValueError:
+            continue
+    return Path(str(config.PHOTOS_ROOT))
+
+
 def _rel(path: str) -> Path:
     p = Path(path)
-    root = Path(str(config.PHOTOS_ROOT))
     try:
-        return p.relative_to(root)
+        return p.relative_to(_root_of(path))
     except ValueError:
         return Path(*p.parts[1:]) if p.is_absolute() else p
 
@@ -117,7 +139,8 @@ def delete(photos: list, check_running: bool = True) -> dict:
     from app.photos import history
     man = {m["id"]: m for m in manifest}
     history.record([{"photo_id": pid, "action": "deleted", "summary": "Photo deleted (files and sidecar copied to deleted-photos first)",
-                     "details": {"backup": str(dest), **{k: man.get(pid, {}).get(k) for k in ("name", "taken", "rating", "title", "caption", "tags", "files")}},
+                     "details": {"backup": str(dest), "root": str(_root_of(next((p["path"] for p in ok if p["id"] == pid), ""))),
+                                 **{k: man.get(pid, {}).get(k) for k in ("name", "taken", "rating", "title", "caption", "tags", "files")}},
                      "path": next((p["path"] for p in ok if p["id"] == pid), None)} for pid in done])
     forget(done)
     log.info("deleted %d photos (backup in %s%s)", len(done), dest, f", database backup {db_backup}" if db_backup else "")

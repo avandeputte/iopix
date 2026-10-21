@@ -154,13 +154,13 @@ def read(paths: list) -> dict:
     """{path: merged metadata}: the file's own, with the sidecar's XMP values winning where it has them
     (digiKam's default: read from the sidecar as well as the file)."""
     files = _exif(paths)
-    sides = _exif([p + ".xmp" for p in paths if os.path.exists(p + ".xmp")])
+    sides = _exif([edits.sidecar_path(p) for p in paths if os.path.isfile(edits.sidecar_path(p))])
     out = {}
     for p in paths:
         if files.get(p) is None:  # exiftool said nothing about this file: no record, so no caller writes rows from nothing
             continue
         d = dict(files[p])
-        s = sides.get(p + ".xmp") or {}
+        s = sides.get(edits.sidecar_path(p)) or {}
         for k, v in s.items():
             if k in SIDECAR_WINS and v not in (None, "", []):
                 d[k] = v
@@ -530,6 +530,15 @@ def complete(ids: list, check_running: bool = True) -> dict:
 
 
 # ---- the collection scan
+def _sweep_temp(path: str):
+    try:
+        if time.time() - os.path.getmtime(path) > 3600:
+            os.unlink(path)
+            log.info("scanner: removed a stale temporary file %s", path)
+    except OSError:
+        pass
+
+
 def _walk(root: Path):
     """{relative folder ('/' or '/a/b'): [file names]} for the photos and videos under root (hidden folders, NAS
     housekeeping folders and the trash left out)."""
@@ -540,6 +549,9 @@ def _walk(root: Path):
         rel = "/" if sub in (".", "") else "/" + sub.replace(os.sep, "/")
         files = []
         for n in filenames:
+            if n.endswith((".viewer-tmp", "_exiftool_tmp")):  # left behind by a write that died: gone after an hour
+                _sweep_temp(os.path.join(dirpath, n))
+                continue
             if n.startswith(".") or "." not in n or n.lower().endswith(".xmp"):
                 continue
             try:
@@ -694,6 +706,6 @@ def start(after_change):
                 s = scan()
                 if s.get("added") or s.get("modified") or s.get("removed"):
                     after_change()
-            except SyncError:
-                pass
+            except Exception as e:  # a pass that failed (digiKam running, a database hiccup) is tried again next time
+                log.warning("scanner: pass skipped: %s", e)
     threading.Thread(target=loop, name="file-scanner", daemon=True).start()

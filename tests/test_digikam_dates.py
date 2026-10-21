@@ -5,16 +5,14 @@ import datetime as dt
 import sqlite3
 from pathlib import Path
 
-import pytest
-
+from helpers import need_tool
 from app.digikam import dkdb
 from app.photos import edits
 from app.faces import facemgr
 
 
 def test_face_change_updates_the_file_date_digikam_compares(client, lib):
-    if not edits.available():
-        pytest.skip("exiftool is not available here")
+    need_tool("exiftool", edits.available())
     pid = lib["with_faces"][0]
     con = sqlite3.connect(lib["db"])
     rect = con.execute("SELECT value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion' LIMIT 1", (pid,)).fetchone()[0]

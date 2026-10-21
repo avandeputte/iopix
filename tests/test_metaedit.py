@@ -77,7 +77,7 @@ def test_adjust_saves_a_linked_version_and_leaves_the_original(client, lib):
         con.execute("DELETE FROM Images WHERE id = ?", (v["id"],))
         con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid IN (SELECT id FROM Tags WHERE name LIKE '% Version')", (pid,))
         con.commit(); con.close()
-        from test_import import forget_identity
+        from helpers import forget_identity
         forget_identity([v["id"]])
         new.unlink(missing_ok=True); Path(str(new) + ".xmp").unlink(missing_ok=True)
         index.build()

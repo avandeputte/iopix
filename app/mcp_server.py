@@ -645,7 +645,7 @@ def photo_file(token: str, photo_id: int) -> dict:
         out.update(exists=True, size=st.st_size, readable=os.access(path, os.R_OK), writable=os.access(path, os.W_OK), size_matches=st.st_size == r["size"])
     except OSError as e:
         out.update(exists=False, error=str(e))
-    side = path + ".xmp"
+    side = edits.sidecar_path(path)
     out["sidecar"] = {"exists": os.path.exists(side), "writable_dir": os.access(os.path.dirname(path), os.W_OK)}
     try:
         tp = thumbs.cache_path("t", r["id"], thumbs.stamp_for(r["hash"], r["size"], r["modified"]))

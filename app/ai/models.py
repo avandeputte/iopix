@@ -12,7 +12,14 @@ where to look for that.
 Downloads run in a child process with HF_HUB_OFFLINE=0 (the server itself
 never talks to the model hub), one at a time. Afterwards the in-process
 model objects are dropped so the next use loads the new files.
+
+Plain downloads are pinned to a commit or a release and carry a sha256, so a
+file that changed upstream (or in transit) is refused rather than silently
+used; moving to a newer file is a change here. installed_revision() names the
+installed copy of a model, for data computed from it (embeddings, face
+vectors) to notice when the model under it changed.
 """
+import hashlib
 import importlib.util
 import json
 import logging
@@ -32,6 +39,8 @@ from app import config
 
 MODEL_DIR = config.DATA_DIR / "models"
 RECORD = MODEL_DIR / "downloads.json"
+# OpenCV's model zoo at a fixed commit (main of 2026-10-20); the sha256 of each file is recorded with it
+_ZOO = "https://media.githubusercontent.com/media/opencv/opencv_zoo/48b10fa505aeb51fbd127fc60a5c660040e823b7/models"
 
 REGISTRY = {
     # Content search (choice "search_model"; the engines in semantic.py)
@@ -51,24 +60,33 @@ REGISTRY = {
                    "page": "https://huggingface.co/Salesforce/blip-image-captioning-large", "what": "Photo descriptions: richer and more accurate sentences, about 3 times slower.", "size": "~1.9 GB"},
     # Object detection (choice "object_model"): the same YOLOX network at four sizes
     "yolox": {"label": "YOLOX-S", "kind": "url", "file": "yolox_s.onnx", "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx", "choice": "object_model",
+              "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
               "page": "https://github.com/Megvii-BaseDetection/YOLOX/releases", "what": "Object detection (people, balls, animals, vehicles…): the small, fast model (40 AP on COCO). Misses more small or partly hidden objects than the larger sizes.", "size": "35 MB"},
     "yolox_m": {"label": "YOLOX-M", "kind": "url", "file": "yolox_m.onnx", "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.onnx", "choice": "object_model",
+                "sha256": "21ff6cfdeb53b013bac2249599e55f00bff3cfdfdab37ed7a4620818c1d15b3f",
                 "page": "https://github.com/Megvii-BaseDetection/YOLOX/releases", "what": "Object detection: medium model, noticeably more accurate (47 vs 40 AP on COCO), about 3 times slower.", "size": "101 MB"},
     "yolox_l": {"label": "YOLOX-L", "kind": "url", "file": "yolox_l.onnx", "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.onnx", "choice": "object_model",
+                "sha256": "7860ae79de6c89a3c1eb72ae9a2756c0ccfbe04b7791bb5880afabd97855a411",
                 "page": "https://github.com/Megvii-BaseDetection/YOLOX/releases", "what": "Object detection: large model (50 AP on COCO), about 6 times slower than YOLOX-S.", "size": "217 MB"},
     "yolox_x": {"label": "YOLOX-X", "kind": "url", "file": "yolox_x.onnx", "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_x.onnx", "choice": "object_model",
+                "sha256": "c892d7aaf1c4746d8a4d675bec669a4db4f434b4ee1efb654bc9b353379c7c55",
                 "page": "https://github.com/Megvii-BaseDetection/YOLOX/releases", "what": "Object detection: the largest model (51 AP on COCO), about 10 times slower than YOLOX-S.", "size": "396 MB"},
     # Face detection (choice "face_detector")
-    "yunet": {"label": "YuNet", "kind": "url", "file": "face_detection_yunet_2023mar.onnx", "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx", "choice": "face_detector",
+    "yunet": {"label": "YuNet", "kind": "url", "file": "face_detection_yunet_2023mar.onnx", "url": f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx", "choice": "face_detector",
+              "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
               "page": "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet", "what": "Face detection: OpenCV's tiny, fast detector (80% on the hard WIDER Face set). Good on clear, front-facing faces; misses more small, turned or partly hidden ones.", "size": "0.2 MB"},
     "scrfd": {"label": "SCRFD 10G", "kind": "zip", "file": "scrfd_10g.onnx", "url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip", "member": "det_10g.onnx", "choice": "face_detector",
+              "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
               "page": "https://github.com/deepinsight/insightface/tree/master/detection/scrfd", "what": "Face detection: InsightFace's detector, clearly better on small, turned and partly hidden faces (95.2% on the hard WIDER Face set vs YuNet's 80%), about 10 times slower. Comes in a 289 MB pack of which this file is kept.", "size": "17 MB (289 MB download)"},
-    "retinaface": {"label": "RetinaFace ResNet-50", "kind": "url", "file": "retinaface_resnet50.onnx", "url": "https://github.com/clibdev/Pytorch_Retinaface/releases/latest/download/retinaface-resnet-50.onnx", "choice": "face_detector",
+    "retinaface": {"label": "RetinaFace ResNet-50", "kind": "url", "file": "retinaface_resnet50.onnx", "url": "https://github.com/clibdev/Pytorch_Retinaface/releases/download/1.0.0/retinaface-resnet-50.onnx", "choice": "face_detector",
+                   "sha256": "a903411b598d92ccc6af5660d875f38783a93031be13643ed4c87851ec165898",
                    "page": "https://github.com/clibdev/Pytorch_Retinaface", "what": "Face detection: the classic heavy detector (95.5% / 94.0% / 84.4% on WIDER Face easy, medium, hard), the slowest of the three.", "size": "104 MB"},
     # Face grouping (choice "face_vectors")
-    "sface": {"label": "SFace", "kind": "url", "file": "face_recognition_sface_2021dec.onnx", "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx", "choice": "face_vectors",
+    "sface": {"label": "SFace", "kind": "url", "file": "face_recognition_sface_2021dec.onnx", "url": f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx", "choice": "face_vectors",
+              "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
               "page": "https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface", "what": "Face grouping: groups look-alike unnamed faces and suggests who they are. Small and fast, but less sure telling similar-looking people apart (relatives, children) than ArcFace.", "size": "37 MB"},
     "arcface": {"label": "ArcFace ResNet-50", "kind": "zip", "file": "arcface_w600k_r50.onnx", "url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip", "member": "w600k_r50.onnx", "choice": "face_vectors",
+                "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
                 "page": "https://github.com/deepinsight/insightface/tree/master/model_zoo", "what": "Face grouping: InsightFace's recognition model (trained on WebFace600K), much better at telling people apart; each face is aligned on its eyes, nose and mouth first, with the chosen face detector. About 5 times slower. Comes in a 289 MB pack of which this file is kept.", "size": "174 MB (289 MB download)"},
     # Data
     "geonames": {"label": "GeoNames places", "kind": "data", "url": "https://download.geonames.org/export/dump/cities1000.zip",
@@ -178,6 +196,54 @@ def local(key: str) -> dict:
     return {"installed": False}
 
 
+_hashes = {}  # (path, mtime, size) -> sha256: the model files are large and asked about at every job start
+
+
+def _sha256_of(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def file_sha256(path) -> str:
+    """sha256 of a file, remembered until the file changes."""
+    st = os.stat(path)
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    with _lock:
+        if key in _hashes:
+            return _hashes[key]
+    digest = _sha256_of(path)
+    with _lock:
+        _hashes[key] = digest
+    return digest
+
+
+def installed_revision(key: str):
+    """What identifies the installed copy of a model, for the data computed from it: the full hub commit
+    id(s) of a Hugging Face model, the sha256 of a single-file one. None when it is not installed (or
+    has no such identity, like the GeoNames export). Vectors of two revisions do not compare, so the
+    embeddings file and face_vectors_built record this and are dropped when it no longer matches."""
+    m = REGISTRY.get(key)
+    if not m:
+        return None
+    if m["kind"] == "hf":
+        shas = []
+        for repo in m["repos"]:
+            sha, _ = _hf_local(repo)
+            if sha is None:
+                return None
+            shas.append(sha)
+        return "+".join(shas)
+    if m["kind"] in ("url", "zip"):
+        try:
+            return file_sha256(path(key))
+        except OSError:
+            return None
+    return None
+
+
 # --------------------------------------------------------------------------
 # what the source has now
 # --------------------------------------------------------------------------
@@ -274,12 +340,36 @@ def download(key: str):
             _reset(key)
             with _lock:
                 _checked.pop(key, None)
+            if REGISTRY[key].get("choice") in ("search_model", "face_vectors"):
+                _recompute(key)
         except Exception as e:
             progress["error"] = str(e)[:300]
         finally:
             progress.update(running=None, finished=key)
 
     threading.Thread(target=work, name="model-download", daemon=True).start()
+
+
+def _recompute(key: str):
+    """A model whose output is stored (face vectors, embeddings) was downloaded again, possibly another
+    revision: start the job that recomputes what the revision check drops, the way core starts it after
+    a library change."""
+    group = REGISTRY[key].get("choice")
+    try:
+        if group == "face_vectors":
+            from app.faces import facevecs
+            facevecs.start()
+        elif group == "search_model":
+            from app import core
+            from app.ai.semantic import semantic
+            con = core.db()
+            try:
+                rows = [dict(r) for r in con.execute(f"SELECT {core.THUMB_COLS} FROM photos ORDER BY ts DESC")]
+            finally:
+                con.close()
+            semantic.start(rows)
+    except Exception as e:  # no index yet (a first start): the watcher starts the jobs later
+        logging.getLogger(__name__).warning("models: the %s job was not restarted after the download: %s", group, e)
 
 
 def _reset(key: str):
@@ -293,6 +383,7 @@ def _reset(key: str):
                 e._image = e._text = None
                 e._image_threads = 0
                 e._text_cache.clear()
+                e.check_revision()  # the same model downloaded again may be another revision: its embeddings are then dropped
         elif group == "caption_model":
             from app.ai import caption
             with caption._lock:
@@ -314,31 +405,38 @@ def _reset(key: str):
         traceback.print_exc()
 
 
-def fetch_file(url: str, dst, member: str = None):
+def fetch_file(url: str, dst, member: str = None, sha256: str = None):
     """Download one file to dst (through a .part file), or one member of a zip at url. The archive is
-    untrusted data: only the named member is read, and only into dst."""
+    untrusted data: only the named member is read, and only into dst. The file kept (the member, for a
+    zip) must have the given sha256; otherwise it is removed and ValueError raised. Without one the
+    download is kept unverified, with a warning."""
     import tempfile
     import zipfile
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(".part")
-    if not member:
-        try:
+    try:
+        if not member:
             urllib.request.urlretrieve(url, tmp)
-            tmp.replace(dst)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-        return
-    with tempfile.TemporaryDirectory(dir=str(dst.parent)) as d:
-        archive = os.path.join(d, "download.zip")
-        urllib.request.urlretrieve(url, archive)
-        with zipfile.ZipFile(archive) as z:
-            names = [n for n in z.namelist() if os.path.basename(n) == member and not n.endswith("/")]
-            if not names:
-                raise FileNotFoundError(f"{member} is not in {url}")
-            with z.open(names[0]) as src, open(tmp, "wb") as out:
-                shutil.copyfileobj(src, out)
-    tmp.replace(dst)
+        else:
+            with tempfile.TemporaryDirectory(dir=str(dst.parent)) as d:
+                archive = os.path.join(d, "download.zip")
+                urllib.request.urlretrieve(url, archive)
+                with zipfile.ZipFile(archive) as z:
+                    names = [n for n in z.namelist() if os.path.basename(n) == member and not n.endswith("/")]
+                    if not names:
+                        raise FileNotFoundError(f"{member} is not in {url}")
+                    with z.open(names[0]) as src, open(tmp, "wb") as out:
+                        shutil.copyfileobj(src, out)
+        if sha256:
+            got = _sha256_of(tmp)
+            if got != sha256.lower():
+                raise ValueError(f"checksum mismatch for {url}: expected {sha256[:12]}…, got {got[:12]}…; the file was not kept")
+        else:
+            logging.getLogger(__name__).warning("models: no checksum recorded for %s; the download is kept unverified", url)
+        tmp.replace(dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _download_here(key: str):
@@ -355,7 +453,7 @@ def _download_here(key: str):
         BlipProcessor.from_pretrained(m["repos"][0], cache_dir=str(MODEL_DIR))
         BlipForConditionalGeneration.from_pretrained(m["repos"][0], cache_dir=str(MODEL_DIR))
     elif m["kind"] in ("url", "zip"):
-        fetch_file(m["url"], path(key), m.get("member"))
+        fetch_file(m["url"], path(key), m.get("member"), m.get("sha256"))
     elif key == "geonames":
         from app.geo import places
         places.fetch()

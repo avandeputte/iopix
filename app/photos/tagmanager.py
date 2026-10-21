@@ -325,7 +325,7 @@ def _run_group(op: str, rows: list):
     current tag list and its face regions (what digiKam does after a tag changes: a renamed person's name is in the
     regions too)."""
     for _, p in rows:
-        side = p + ".xmp"
+        side = edits.sidecar_path(p)
         if not os.path.isfile(side):
             continue
         dst = OPS_BACKUP_DIR / op / edits._rel(side)

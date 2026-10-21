@@ -9,30 +9,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.62.0"
+version = "1.63.0"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+# upper bounds: the next major version of each package as installed and tested; raise them on purpose, after a test run
 dependencies = [
-  "fastapi",
-  "uvicorn",
-  "pillow",
-  "pillow-heif",
-  "orjson",
-  "pymysql",
-  "python-multipart",
-  "mcp",
-  "pyjwt[crypto]",   # Cloudflare Access tokens (proxy sign-in)
+  "fastapi<1",
+  "uvicorn<1",
+  "pillow<13",
+  "pillow-heif<2",
+  "orjson<4",
+  "pymysql<2",
+  "python-multipart<1",
+  "mcp<3",
+  "pyjwt[crypto]<3",   # Cloudflare Access tokens (proxy sign-in)
 ]
 
 [project.optional-dependencies]
-search = ["fastembed", "huggingface_hub", "numpy"]       # CLIP / SigLIP 2 content search (ONNX Runtime)
-ocr = ["rapidocr"]                                       # text in photos
-objects = ["numpy", "onnxruntime"]                       # YOLOX object detection
-captions = ["torch>=2,<3", "transformers>=5,<6"]         # BLIP photo descriptions (large; CPU wheels from the PyTorch index)
-ai = ["fastembed", "huggingface_hub", "numpy", "rapidocr", "onnxruntime"]
-test = ["pytest", "httpx", "playwright", "pytest-playwright", "pyflakes"]
+search = ["fastembed<1", "huggingface_hub<2", "numpy<3"]            # CLIP / SigLIP 2 content search (ONNX Runtime)
+ocr = ["rapidocr<4"]                                                 # text in photos
+objects = ["numpy<3", "onnxruntime<2"]                               # YOLOX object detection
+captions = ["torch>=2,<3", "transformers>=5,<6"]                     # BLIP photo descriptions (large; CPU wheels from the PyTorch index)
+ai = ["fastembed<1", "huggingface_hub<2", "numpy<3", "rapidocr<4", "onnxruntime<2"]
+test = ["pytest<10", "httpx<1", "playwright<2", "pytest-playwright<1", "pyflakes<5"]
 
 [project.urls]
 Homepage = "https://github.com/avandeputte/iopix"

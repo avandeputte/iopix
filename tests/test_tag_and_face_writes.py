@@ -4,6 +4,7 @@ what digiKam would not allow, and keep the index in step."""
 
 import pytest
 
+from helpers import need_tool
 from app import config
 from app.digikam import dkdb
 from app.faces import facemgr
@@ -131,9 +132,7 @@ def test_face_change_answers_before_the_sidecar_is_written(client, lib):
     import time as _t
     from app.photos import edits
     from app.faces import facemgr
-    if not edits.available():
-        import pytest
-        pytest.skip("exiftool is not available here")
+    need_tool("exiftool", edits.available())
     pid = lib["with_faces"][3]
     con = dkdb.connect()
     val = con.execute("SELECT value FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion' LIMIT 1", (pid,)).fetchone()[0]

@@ -117,6 +117,24 @@ def _norm(field: str, v):
     return (str(v).strip() if v else "")
 
 
+def _boxed_people(ids: list) -> dict:
+    """{photo id: {tag paths of the people with a face box on it}}, from digiKam's database."""
+    out = {}
+    if not ids:
+        return out
+    src = dkdb.connect()
+    try:
+        tags = dkdb.tag_tree(src)
+        for i in range(0, len(ids), 500):
+            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+            for pid, tid in src.execute(f"SELECT imageid, tagid FROM ImageTagProperties WHERE imageid IN ({chunk}) AND property IN ('tagRegion', 'autodetectedFace')"):
+                if tid in tags:
+                    out.setdefault(pid, set()).add(dkdb.tag_path(tags, tid))
+    finally:
+        src.close()
+    return out
+
+
 def db_values(photo_ids: list) -> dict:
     """{id: {field: value}} from digiKam's database (read-only), as digiKam itself would write them."""
     src = dkdb.connect(write=False)
@@ -191,12 +209,12 @@ def _can_hold_metadata(path: str) -> bool:
 def compare(photos: list) -> list:
     """photos: rows with id, path, hash, size, modified. Returns one record per photo."""
     dbv = db_values([p["id"] for p in photos])
-    sidecars = [p["path"] + ".xmp" for p in photos if os.path.isfile(p["path"] + ".xmp")]
+    sidecars = [edits.sidecar_path(p["path"]) for p in photos if os.path.isfile(edits.sidecar_path(p["path"]))]
     files = [p["path"] for p in photos if _can_hold_metadata(p["path"])]
     read = _exif_read(sidecars + files)
     records = []
     for p in photos:
-        side = read.get(p["path"] + ".xmp")
+        side = read.get(edits.sidecar_path(p["path"]))
         fil = read.get(p["path"])
         d = dbv.get(p["id"], _blank())
         vals = {"db": d, "sidecar": side, "file": fil if fil and fil.get("_present") else (None if fil is None else {})}
@@ -225,7 +243,7 @@ def _cstamp(p: dict) -> str:
     """The image file's stamp plus the sidecar's size and time: a sidecar rewritten by the viewer or by
     digiKam (the image untouched) makes the photo "changed" for "Check new and changed photos"."""
     try:
-        st = os.stat(p["path"] + ".xmp")
+        st = os.stat(edits.sidecar_path(p["path"]))
         side = f"{st.st_size}.{int(st.st_mtime)}"
     except OSError:
         side = "-"
@@ -430,26 +448,21 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     # fresh values from the source, not the stored report, in case something changed since the scan
     photos = [{"id": pid, "path": stored[pid]["path"], "name": stored[pid]["name"]} for pid in photo_ids if pid in stored]
     dbv = db_values([p["id"] for p in photos]) if source == "db" or "db" in targets else {}
-    suffix = ".xmp" if source == "sidecar" else ""
-    read = _exif_read([p["path"] + suffix for p in photos]) if source != "db" else {}
+    src_path = (lambda p: edits.sidecar_path(p["path"])) if source == "sidecar" else (lambda p: p["path"])
+    read = _exif_read([src_path(p) for p in photos]) if source != "db" else {}
 
     def source_values(p):
         if source == "db":
             return dbv.get(p["id"])
-        v = read.get(p["path"] + suffix)
+        v = read.get(src_path(p))
         return v if v and v.get("_present") else None  # no metadata block at all: nothing to copy (never "blank")
 
-    # people are on a photo because of its faces, which live in digiKam's database: a sync never adds or removes a
-    # person from a sidecar or a file tag list, nor takes one off the photo in the database
-    from app.data import index as _ix
-    _c = _ix.open_index()
-    try:
-        people = {r[0] for r in _c.execute("SELECT full FROM tags WHERE person = 1")}
-    finally:
-        _c.close()
-    is_person = (lambda t: t in people or t.startswith("People/"))
-    db_people = {pid: [t for t in v.get("tags", []) if is_person(t)] for pid, v in
-                 (dbv if dbv else db_values([p["id"] for p in photos])).items()} if "tags" in fields else {}
+    # a person with a face box on the photo is there because of the box, which lives in digiKam's database only: a
+    # sync never adds or removes such a person in a sidecar or file tag list, nor takes them off the database. A
+    # person without a box (tagged on a video, or on a photo without marking a face) is a keyword like any other
+    boxed = _boxed_people([p["id"] for p in photos]) if "tags" in fields else {}
+    is_person = (lambda pid, t: t in boxed.get(pid, ()))
+    db_people = {pid: sorted(boxed.get(pid, ())) for pid in boxed} if "tags" in fields else {}
 
     def fields_for(src_vals):
         # a file whose metadata has no tag list (IPTC keywords only, or none) says nothing about tags
@@ -465,9 +478,9 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
             cur = dbv.get(p["id"], {"tags": []})
             ch = _changes_from(src_vals, fields_for(src_vals), _norm("tags", cur.get("tags")))
             if "remove_tags" in ch:
-                ch["remove_tags"] = [t for t in ch["remove_tags"] if not is_person(t)]
+                ch["remove_tags"] = [t for t in ch["remove_tags"] if not is_person(p["id"], t)]
             if "add_tags" in ch:
-                ch["add_tags"] = [t for t in ch["add_tags"] if not is_person(t)]
+                ch["add_tags"] = [t for t in ch["add_tags"] if not is_person(p["id"], t)]
             if "caption" in ch:
                 ch["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             pending[p["id"]] = ch
@@ -492,7 +505,7 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
                 ch["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             tag_paths = None
             if "tags" in use:
-                kw = [t for t in _norm("tags", src_vals.get("tags")) if not is_person(t)]
+                kw = [t for t in _norm("tags", src_vals.get("tags")) if not is_person(p["id"], t)]
                 tag_paths = sorted(set(kw) | set(db_people.get(p["id"], [])))
             for t in file_targets:
                 if t == "sidecar":

@@ -1,8 +1,6 @@
 /** The filter drawer: browse every metadata facet. */
 import { $, api, fill, h, icon, isoDay, nf, store } from './core.js';
 import { FILTER_VIEWS, S, applyFilter, faceUrl, filterParams, go, setOne, toggle } from './state.js';
-import { people } from './pages.js';
-import { step } from './lightbox.js';
 
 export const expanded = new Set();
 export function toggleFilters(force, remember = true) {
@@ -23,13 +21,17 @@ export async function renderFilters() {
   let f;
   try { f = await api('/api/facets?' + p.toString()); } catch { return; }
   if (token !== S.facetToken) return;
+  drawFilters(el, f, p);
+}
+/** The pane from facets already fetched; "All N" and "Show less" only draw it again. */
+function drawFilters(el, f, p) {
   const has = (k, v) => p.getAll(k).includes(String(v));
   const frow = (label, count, on, onclick, extra) => h('div', { class: 'frow' + (on ? ' on' : ''), onclick, title: label }, extra, h('span', { class: 'nm' }, label),
     h('span', { class: 'ct' }, count != null ? nf.format(count) : ''));
   const section = (title, rows, limit = 8) => {
     if (!rows.length) return null;
     const open = expanded.has(title);
-    return [h('h3', null, title, rows.length > limit ? h('span', { class: 'more', onclick: () => { open ? expanded.delete(title) : expanded.add(title); renderFilters(); } },
+    return [h('h3', null, title, rows.length > limit ? h('span', { class: 'more', onclick: () => { open ? expanded.delete(title) : expanded.add(title); drawFilters(el, f, p); } },
       open ? 'Show less' : `All ${rows.length}`) : null), ...(open ? rows : rows.slice(0, limit))];
   };
   const multi = (key, list, labelOf = (v) => v, extraOf) => list.filter(([v]) => v != null).map(([v, n]) =>
