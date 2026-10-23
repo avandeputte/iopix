@@ -132,7 +132,19 @@ def test_import_run_takes_a_pattern(client, lib, tmp_path):
     if r.status_code == 409:
         import pytest; pytest.skip("digiKam is running")
     assert r.status_code == 200, r.text
-    assert r.json()["added"], r.json()
-    dk = sqlite3.connect(lib["db"])
-    assert dk.execute("SELECT count(*) FROM Albums WHERE relativePath LIKE '/Uploads/%'").fetchone()[0] >= 1, "the folder rows reached digiKam's database"
-    dk.close()
+    added = r.json()["added"]
+    assert added, r.json()
+    try:
+        dk = sqlite3.connect(lib["db"])
+        assert dk.execute("SELECT count(*) FROM Albums WHERE relativePath LIKE '/Uploads/%'").fetchone()[0] >= 1, "the folder rows reached digiKam's database"
+        dk.close()
+    finally:  # leave the scratch library as the other tests know it: no extra photo, no Uploads folder
+        import os
+        assert client.post("/api/photos/delete", json={"ids": [a["id"] for a in added], "confirm": True}).status_code == 200
+        dk = sqlite3.connect(lib["db"])
+        rels = [r[0] for r in dk.execute("SELECT relativePath FROM Albums WHERE relativePath = '/Uploads' OR relativePath LIKE '/Uploads/%'")]
+        dk.execute("DELETE FROM Albums WHERE relativePath = '/Uploads' OR relativePath LIKE '/Uploads/%'"); dk.commit(); dk.close()
+        for rel in sorted(rels, key=len, reverse=True):
+            d = os.path.join(lib["root"], rel.lstrip("/"))
+            if os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
