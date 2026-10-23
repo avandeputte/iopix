@@ -136,12 +136,22 @@ export async function showHistory(params) {
 /** Delete photos for good, after a confirmation: files, sidecars, the database rows, everything the viewer knows.
  *  The server copies the files and sidecars to data/deleted-photos and backs digiKam's database up first. */
 /** Move photos to the trash (digiKam's .dtrash, so digiKam's trash shows them too): no question, Undo in the message. */
+/** Move photos to the trash: asked first (an app dialog), then the tiles go at once and a message says what is
+ *  happening while the server works; the index catches up in the background and the page is drawn again then. */
 export async function trashPhotos(ids, after) {
-  let r;
-  try { r = await post('/api/photos/trash', { ids }); } catch (e) { toastError(e, 10000); return; }
-  ids.forEach((i) => { details.delete(i); G.sel.delete(i); });
+  const what = ids.length === 1 ? 'this photo' : `${plural(ids.length, 'photo')}`;
+  if (!await confirmDialog(`Move ${what} to the trash? ${ids.length === 1 ? 'It' : 'They'} can be put back from Folders › Trash.`, { ok: 'Move to trash', danger: true })) return;
+  // the tiles vanish now (the grid's data is left alone: the page is drawn again once the index has caught up)
+  const tiles = S.route.view === 'photos' && G.data ? ids.map((id) => $(`#grid .tile[data-i="${G.data.id.indexOf(id)}"]`)).filter(Boolean) : [];
+  tiles.forEach((t) => t.classList.add('gone'));
+  ids.forEach((i) => G.sel.delete(i));
   updateSelBar();
+  toast(`Moving ${what} to the trash…`, null, null, 60000);
+  let r;
+  try { r = await post('/api/photos/trash', { ids }); } catch (e) { tiles.forEach((t) => t.classList.remove('gone')); toastError(e, 10000); return; }
+  ids.forEach((i) => details.delete(i));
   const failed = r.failed.length ? ` ${nf.format(r.failed.length)} could not be: ${r.failed[0].error}.` : '';
+  if (r.failed.length) tiles.forEach((t) => { if (r.failed.some((f) => f.id === G.data?.id[+t.dataset.i])) t.classList.remove('gone'); });
   if (r.trashed.length) {
     const infos = r.infos || [];  // the trash records, for Undo
     toast(`${plural(r.trashed.length, 'photo')} moved to the trash.${failed}`, infos.length ? 'Undo' : null, async () => {
@@ -150,7 +160,9 @@ export async function trashPhotos(ids, after) {
     }, 9000);
   } else toast(`Nothing was moved.${failed}`, null, null, 9000);
   after?.(r);
-  S.keepView = true; S.viewKey = null; await pollStatus(); onRoute();
+  // the server rebuilds its index in the background (seconds on a large library); the page redraws when it has
+  S.keepView = true;
+  [2500, 6000, 12000].forEach((ms) => setTimeout(() => { if (!document.hidden) pollStatus(); }, ms));
 }
 /** Pick a folder of the library; onPick(folder) with {id, path}. */
 export async function folderPicker(title, onPick, exclude) {

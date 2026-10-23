@@ -40,6 +40,11 @@ def test_trash_restore_and_empty_follow_digikam(client, lib):
     assert rec["path"] == path and rec["imageid"] == str(pid) and rec["deletiontimestamp"][:4].isdigit()
     assert (root / ".dtrash" / "files" / (recs[0].stem + "." + os.path.basename(path).split(".", 1)[1])).exists()
     assert _row(lib["db"], pid) == (None, os.path.basename(path), 3), "status Trashed, no album, as CoreDB::removeItems does"
+    import time as _t
+    for _ in range(100):  # the index catches up in the background (the answer does not wait for the rebuild)
+        if _path(pid) is None:
+            break
+        _t.sleep(0.2)
     assert _path(pid) is None, "gone from the index"
     t = client.get("/api/trash").json()
     item = next(i for i in t["items"] if i["id"] == pid)

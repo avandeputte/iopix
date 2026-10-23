@@ -25,6 +25,13 @@ from app.core import _kick
 from app.core import _organize_allowed
 from app.core import _run_organize
 from app.core import _rebuild_after_write
+import threading
+
+
+def _rebuild_soon():
+    """The index catches up in the background: the answer goes out as soon as the files and digiKam's rows are
+    done (a rebuild takes seconds on a large library), and the page shows the change at once on its own."""
+    threading.Thread(target=_rebuild_after_write, name="rebuild-after-write", daemon=True).start()
 
 
 router = APIRouter()
@@ -99,7 +106,7 @@ async def api_photos_trash(request: Request):
     if not ids:
         raise HTTPException(400, "Choose photos")
     r = await run_in_threadpool(_run_organize, organize.trash, ids)
-    await run_in_threadpool(_rebuild_after_write)
+    _rebuild_soon()
     return r
 
 
