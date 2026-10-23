@@ -316,7 +316,8 @@ async def api_folder_create(request: Request):
 def api_import_layouts(request: Request):
     """The folder layouts an import can use, and the one in use."""
     from app.photos import importer
-    return {"layouts": importer.layouts(), "layout": importer.layout()}
+    # patterns: apps may send their own folder pattern ({yyyy}/{yyyy}{mm}, Uploads...) instead of a layout key
+    return {"layouts": importer.layouts(), "layout": importer.layout(), "patterns": True}
 
 
 @router.post("/api/import/stage")
@@ -336,29 +337,48 @@ async def api_import_stage(request: Request):
     token = str(form.get("token") or "") or None
     try:
         token = await run_in_threadpool(importer.stage, files, token)
-        return await run_in_threadpool(importer.plan, token, str(form.get("layout") or "") or None)
-    except dbsync.SyncError as e:
+        return await run_in_threadpool(importer.plan, token, _layout_or_pattern(str(form.get("layout") or ""), str(form.get("pattern") or "")))
+    except (dbsync.SyncError, ValueError) as e:
         raise HTTPException(400, str(e))
 
 
+def _layout_or_pattern(layout: str, pattern: str):
+    """What an import request asks for: a layout key, or (for apps) a folder pattern of its own; ValueError when the
+    pattern is not usable."""
+    if pattern:
+        from app.photos import importer
+        return importer.check_pattern(pattern)
+    from app.photos import importer
+    return layout if layout in importer.LAYOUTS else None
+
+
 @router.get("/api/import/{token}")
-def api_import_plan(token: str, layout: str = None):
+def api_import_plan(token: str, layout: str = None, pattern: str = None):
+    """The plan for a layout key, or for a folder pattern of the app's own (?pattern={yyyy}/{yyyy}{mm})."""
     from app.photos import importer
     try:
-        return importer.plan(token, layout if layout in importer.LAYOUTS else None)
+        key = _layout_or_pattern(layout or "", pattern or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        return importer.plan(token, key)
     except dbsync.SyncError as e:
         raise HTTPException(404, str(e))
 
 
 @router.post("/api/import/{token}/run")
 async def api_import_run(token: str, request: Request):
-    """Body {layout?, include?: [names], duplicates?: 'skip'|'import', remember?: bool}: import the staged files."""
+    """Body {layout?, pattern?, include?: [names], duplicates?: 'skip'|'import', remember?: bool}: import the staged
+    files. `pattern` (apps): a folder pattern of their own instead of a layout, see importer.check_pattern."""
     from app.photos import importer
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
     body = await request.json() if (await request.body()) else {}
-    key = body.get("layout") if body.get("layout") in importer.LAYOUTS else None
-    if key and body.get("remember") and users.is_admin(request.state.user):
+    try:
+        key = _layout_or_pattern(str(body.get("layout") or ""), str(body.get("pattern") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if key in importer.LAYOUTS and body.get("remember") and users.is_admin(request.state.user):
         importer.set_layout(key)
     try:
         r = await run_in_threadpool(importer.run, token, key, body.get("include"), body.get("duplicates") != "import")

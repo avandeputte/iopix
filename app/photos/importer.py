@@ -54,11 +54,46 @@ def set_layout(key: str):
     state.set_setting("import_layout", key)
 
 
+_TOKENS = ("yyyy", "mm", "dd")
+_BAD_CHARS = re.compile(r"[\\\x00-\x1f\x7f]")
+
+
+def check_pattern(pattern: str) -> str:
+    """A folder pattern an app sends instead of a layout key: a relative path whose segments may carry {yyyy},
+    {mm} and {dd} ("{yyyy}/{yyyy}{mm}", "Uploads", "Phone/{yyyy}-{mm}"). Returns it cleaned, or raises
+    ValueError in plain words. Folders that do not exist yet are created at import time."""
+    p = (pattern or "").strip()
+    if not p:
+        raise ValueError("Give a folder, like Uploads or {yyyy}/{yyyy}{mm}")
+    if len(p) > 200:
+        raise ValueError("The folder pattern is too long (200 characters at most)")
+    if _BAD_CHARS.search(p):
+        raise ValueError("The folder pattern cannot contain backslashes or control characters")
+    if p.startswith("/") or p.endswith("/"):
+        raise ValueError("The folder pattern is relative to the library: no slash at the start or the end")
+    for seg in p.split("/"):
+        if seg in ("", ".", ".."):
+            raise ValueError("Every part of the folder pattern needs a name; . and .. are not allowed")
+    for tok in re.findall(r"\{([^{}]*)\}", p):
+        if tok not in _TOKENS:
+            raise ValueError(f"Unknown placeholder {{{tok}}}: use {{yyyy}}, {{mm}} and {{dd}}")
+    if p.count("{") != p.count("}") or re.search(r"\{[^}]*\{|\}[^{]*\}(?=[^{]*\})", p) or re.search(r"\{[^}]*$", p):
+        raise ValueError("Unbalanced braces in the folder pattern; placeholders are {yyyy}, {mm} and {dd}")
+    return p
+
+
+def pattern_of(key: str = None) -> str:
+    """The {yyyy}/{mm}-style pattern for a layout key, or a custom pattern (already checked) passed as the key."""
+    if key is None:
+        return LAYOUTS[layout()][0]
+    return LAYOUTS[key][0] if key in LAYOUTS else check_pattern(key)
+
+
 def folder_for(when: str, key: str = None) -> str:
-    """The relative folder (/2006/200610) a photo taken at `when` (ISO text) goes to."""
+    """The relative folder (/2006/200610) a photo taken at `when` (ISO text) goes to; `key` is a layout key or a
+    custom pattern (check_pattern)."""
     y, m, d = when[0:4], when[5:7], when[8:10]
-    pattern = LAYOUTS[key or layout()][0]
-    return "/" + pattern.format(yyyy=y, mm=m, dd=d)
+    return "/" + pattern_of(key).format(yyyy=y, mm=m, dd=d)
 
 
 # ---- staging

@@ -98,3 +98,41 @@ def test_uploads_get_a_sidecar_too(client, lib):
         path.unlink(missing_ok=True); Path(str(path) + ".xmp").unlink(missing_ok=True)
         index.build()
     assert dkdb  # imported for the reader: the rows above are digiKam's
+
+
+def test_an_app_can_name_its_own_folder_pattern():
+    """The Mac and iPhone apps send a folder pattern of their own instead of a layout key."""
+    from app.photos import importer
+    import pytest
+    assert importer.folder_for("2024-07-04T10:00:00", "{yyyy}/{yyyy}{mm}") == "/2024/202407"
+    assert importer.folder_for("2024-07-04T10:00:00", "Uploads") == "/Uploads"
+    assert importer.folder_for("2024-07-04T10:00:00", "Phone/{yyyy}-{mm}-{dd}") == "/Phone/2024-07-04"
+    assert importer.folder_for("2024-07-04T10:00:00", "year-date") == "/2024/2024-07-04", "layout keys still work"
+    for bad in ("", "/Uploads", "Uploads/", "a//b", "a/../b", ".", "{year}", "{yyyy", "a\\b", "x" * 201, "a\x01b"):
+        with pytest.raises(ValueError):
+            importer.check_pattern(bad)
+
+
+def test_import_run_takes_a_pattern(client, lib, tmp_path):
+    import io, sqlite3
+    from PIL import Image
+    assert client.get("/api/import/layouts").json().get("patterns") is True, "apps can tell the server takes patterns"
+    buf = io.BytesIO(); Image.new("RGB", (40, 30), (10, 200, 30)).save(buf, "JPEG"); buf.seek(0)
+    r = client.post("/api/import/stage", files=[("files", ("pattern-test.jpg", buf.getvalue(), "image/jpeg"))], data={"pattern": "Phone/{yyyy}"})
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    item = next(i for i in r.json()["items"] if i["name"] == "pattern-test.jpg")
+    assert item["folder"].startswith("/Phone/") and r.json()["layout"] == "Phone/{yyyy}"
+    assert client.get(f"/api/import/{token}?pattern=/bad").status_code == 400
+    assert client.get(f"/api/import/{token}?pattern={{year}}").status_code == 400
+    assert client.get(f"/api/import/{token}?pattern=Uploads").json()["items"][0]["folder"] == "/Uploads"
+    r = client.post(f"/api/import/{token}/run", json={"pattern": "{nope}"})
+    assert r.status_code == 400 and "placeholder" in r.json()["detail"]
+    r = client.post(f"/api/import/{token}/run", json={"pattern": "Uploads/{yyyy}"})
+    if r.status_code == 409:
+        import pytest; pytest.skip("digiKam is running")
+    assert r.status_code == 200, r.text
+    assert r.json()["added"], r.json()
+    dk = sqlite3.connect(lib["db"])
+    assert dk.execute("SELECT count(*) FROM Albums WHERE relativePath LIKE '/Uploads/%'").fetchone()[0] >= 1, "the folder rows reached digiKam's database"
+    dk.close()
