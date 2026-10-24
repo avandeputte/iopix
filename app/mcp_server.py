@@ -9,6 +9,7 @@ It is served at /mcp by the web app (main.py) and can also run on its own with
 """
 import io
 import json
+import contextvars
 import os
 import re
 import sqlite3
@@ -210,7 +211,7 @@ def library_overview() -> dict:
             "items_per_year": {str(r[0]): r[1] for r in q("SELECT year, count(*) FROM photos GROUP BY 1 ORDER BY 1")},
             "cameras": {r[0]: r[1] for r in q("SELECT camera, count(*) FROM photos WHERE camera IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15")},
             "pick_labels": {PICKS[r[0]]: r[1] for r in q("SELECT pick, count(*) FROM photos GROUP BY 1")},
-            "photos_root": str(config.PHOTOS_ROOT), "web_viewer": VIEWER,
+            "web_viewer": VIEWER,
         }
     finally:
         con.close()
@@ -309,6 +310,8 @@ def get_photo(photo_id: int) -> dict:
         if not r:
             raise ToolError(f"No item with id {photo_id}")
         d = dict(r)
+        if not _anon_paths_ok():
+            d.pop("path", None)  # the file's location is for the token holder (the web API hides it from visitors too)
         extra = json.loads(d.pop("extra") or "{}")
         d["favorite"] = appstate.is_favorite(photo_id)
         for k in ("hash", "ts", "mts", "md", "day", "ntags", "album_id"):
@@ -422,6 +425,20 @@ def view_photo(photo_id: int, size: Literal["small", "large"] = "small") -> Imag
 
 
 # ---- diagnostics: what an operator would check in a shell, read-only
+token_given = contextvars.ContextVar("mcp_token_given", default=False)  # set per request by the HTTP layer
+
+
+def _request_has_token() -> bool:
+    return token_given.get()
+
+
+def _anon_paths_ok() -> bool:
+    """File paths in answers: only for a request that carried the admin token (checked by the HTTP layer when sign-in
+    is required), or on an install with no accounts at all."""
+    from app import users
+    return not users.any_users() or _request_has_token()
+
+
 def _need_token(token: str, writes: bool = False):
     """The diagnostics tools reveal paths, log lines and settings; on an endpoint without sign-in
     they take the same admin token as update_viewer (Maintenance > iopix version). writes: the tool changes the

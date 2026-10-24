@@ -317,7 +317,9 @@ def _write(found: dict) -> int:
         return 0
     added = 0
     for i in range(0, len(ops), 200):
-        res = facemgr.apply_many(ops[i:i + 200])
+        # background=True: the sidecar is left to the queue; an unknown face is not written to XMP anyway, so no
+        # sidecar is created or rewritten for each of thousands of photos inside the job
+        res = facemgr.apply_many(ops[i:i + 200], background=True)
         added += sum(1 for r in res if "error" not in r and not r.get("skipped"))
     return added
 
@@ -386,7 +388,7 @@ def start(ids: list = None, album: int = None, redo: bool = False, after=None) -
     _run["gen"] += 1
     gen = _run["gen"]
     scope = "photos" if ids is not None else "folder" if album is not None else "library"
-    progress.update(running=bool(photos), done=0, total=len(photos), added=0, photos_with_new=0, errors=0, started=int(time.time()), scope=scope)
+    progress.update(running=bool(photos), done=0, total=len(photos), added=0, photos_with_new=0, errors=0, started=int(time.time()), scope=scope, error=None)
     if not photos:
         return 0
 

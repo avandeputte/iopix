@@ -66,6 +66,7 @@ def resolve(items) -> tuple[str, list, dict | None]:
                     items.append(("qids", ",".join(map(str, concepts.photos_matching(text))) or "0"))
                 except Exception:
                     traceback.print_exc()
+                    items.append(("qids", "0"))  # one qids per q, in order: the next term's ids must not slide onto this one
     if d.get("sem") or d.get("like") or d.get("concept"):
         ids = []
         if semantic_enabled():

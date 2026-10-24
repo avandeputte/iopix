@@ -4,6 +4,8 @@ The library (digiKam's database and the photo files) is only read here; the
 few endpoints that change it (sidecars, image files, digiKam's database on
 request) are listed in WRITE_PATHS and go through the modules that own those
 writes."""
+import json
+import logging
 import threading
 import time
 from urllib.parse import urlsplit
@@ -71,7 +73,8 @@ SIGNED_IN_READ_PATHS = ("/api/geocode", "/api/placetags")
 # reads that are not for everyone, whatever the method: the server log and the merge plan (admins); the change log and
 # the elevation lookup, which spends Google credits (editors)
 ADMIN_READ_PATHS = ("/api/log", "/api/library/merge", "/api/quality")
-EDITOR_READ_PATHS = ("/api/history", "/api/elevation", "/api/import", "/api/metadata")
+EDITOR_READ_PATHS = ("/api/history", "/api/elevation", "/api/import", "/api/metadata", "/api/consistency")  # (the report lists file paths)
+MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it is read (uploads are multipart and not bound here)
 
 
 def _hits(path: str, paths) -> bool:
@@ -135,6 +138,8 @@ async def _auth_guard(request: Request, call_next):
     request.state.user = user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner
+    if request.url.path.startswith("/mcp"):
+        mcp_server.token_given.set(_mcp_token_ok(request))  # answers with file paths only for the token holder
     if user is None and users.require_login():
         path = request.url.path
         if path.startswith("/mcp"):
@@ -174,10 +179,27 @@ async def _auth_guard(request: Request, call_next):
 
 @app.middleware("http")
 async def static_revalidate(request: Request, call_next):
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if request.method not in ("GET", "HEAD", "OPTIONS") and ctype in ("application/json", "application/x-www-form-urlencoded", "text/plain", ""):  # (uploads are multipart)
+        try:
+            if int(request.headers.get("content-length") or 0) > MAX_JSON_BODY:
+                return JSONResponse({"detail": "That request is too large"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Bad Content-Length"}, status_code=400)
     response = await call_next(request)
     if "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.exception_handler(ValueError)
+@app.exception_handler(TypeError)
+@app.exception_handler(json.JSONDecodeError)
+async def _bad_input(request: Request, e: Exception):
+    """A body or parameter that is not what a route expects (a word where a number belongs, malformed JSON, a list
+    where an id belongs) is the client's mistake: a 400 that says so, not a 500 and a traceback."""
+    logging.getLogger("app").warning("bad input on %s %s: %s: %s", request.method, request.url.path, type(e).__name__, str(e)[:200])
+    return JSONResponse({"detail": f"Bad request: {str(e)[:200] or type(e).__name__}"}, status_code=400)
 
 
 app.include_router(browse.router)

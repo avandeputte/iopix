@@ -188,6 +188,7 @@ has captions && { echo "installing PyTorch and transformers (large)"; pipi --ext
 
 say "Settings"
 ENVF="$APP/iopix.env"
+umask 077  # the settings file holds the database password: private from the first byte
 {
   echo "# iopix settings, written by setup.sh (variable names as in the README). Edit and restart the service."
   echo "PHOTOS_ROOT=$PHOTOS"
@@ -206,7 +207,7 @@ ENVF="$APP/iopix.env"
 chmod 600 "$ENVF"
 mkdir -p "$DATA"
 # load what was just written for the commands below (not sourced: a path with spaces would break `. file`)
-while IFS= read -r line; do case "$line" in ''|'#'*|*[!A-Za-z0-9_]*=*) ;; *=*) export "$line";; esac; done < "$ENVF"
+while IFS= read -r line; do k="${line%%=*}"; case "$line" in ''|'#'*) ;; *=*) case "$k" in ''|*[!A-Za-z0-9_]*) ;; *) export "$line";; esac;; esac; done < "$ENVF"  # the key decides; a value may hold = too
 echo "wrote $ENVF"
 if [ -n "$MYSQL" ]; then
   echo "testing the database connection"
@@ -215,10 +216,10 @@ fi
 
 if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != sqlite ]; then
   echo "iopix's own database on MySQL/MariaDB: testing, creating it if needed"
-  "$VPY" - "$VIEWERDB" <<'PYEOF' || die "could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or switch later in Settings"
-import sys
+  IOPIX_VIEWER_DB_DSN="$VIEWERDB" "$VPY" - <<'PYEOF' || die "could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or switch later in Settings"
+import os, sys
 from app.data import vdb
-hp, rest = sys.argv[1].split("/", 1)
+hp, rest = os.environ["IOPIX_VIEWER_DB_DSN"].split("/", 1)  # from the environment: the password is not in the process list
 db, user, pw = rest.split(":", 2)
 host, _, port = hp.rpartition(":") if ":" in hp else (hp, "", "3306")
 c = {"type": "mysql", "host": host, "port": int(port or 3306), "database": db, "user": user, "password": pw}
@@ -253,12 +254,12 @@ done
 
 if [ -n "$ADMIN" ]; then
   say "Admin account"
-  "$VPY" -c "
-import sys; from app.data import state; from app import users
+  IOPIX_ADMIN_ACCOUNT="$ADMIN" "$VPY" -c "
+import os; from app.data import state; from app import users
 state.init(); users.init()
-name, pw = sys.argv[1].split(':', 1)
+name, pw = os.environ['IOPIX_ADMIN_ACCOUNT'].split(':', 1)  # from the environment: the password is not in the process list
 print('  created', users.create(name, pw, 'admin')['name']) if not users.any_users() else print('  users already exist; not touched')
-" "$ADMIN"
+"
 fi
 
 say "Service"
@@ -277,11 +278,13 @@ d = {"Label": "com.iopix", "ProgramArguments": [vpy, "-m", "uvicorn", "app.main:
      "StandardOutPath": os.path.join(env["DATA_DIR"], "server.log"), "StandardErrorPath": os.path.join(env["DATA_DIR"], "server.log")}
 os.makedirs(os.path.dirname(pl), exist_ok=True)
 with open(pl, "wb") as f: plistlib.dump(d, f)
+os.chmod(pl, 0o600)  # it carries the settings, database password included
 print("  wrote", pl)
 PYEOF
   launchctl bootout "gui/$(id -u)/com.iopix" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.digikam-viewer" 2>/dev/null && rm -f "$HOME/Library/LaunchAgents/com.digikam-viewer.plist"  # the name before the rename
-  launchctl bootstrap "gui/$(id -u)" "$PL" && echo "  started (login item)"
+  launchctl bootstrap "gui/$(id -u)" "$PL" || die "launchctl could not start the login item (see above)"
+  echo "  started (login item)"
 elif [ "$SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   UNIT=/etc/systemd/system/iopix.service
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
@@ -295,7 +298,7 @@ Type=simple
 User=$(id -un)
 EnvironmentFile=$ENVF
 WorkingDirectory=$APP
-ExecStart=$VPY -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+ExecStart="$VPY" -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Restart=always
 RestartSec=5
 Nice=5
@@ -306,9 +309,11 @@ UEOF
   if [ -f /etc/systemd/system/digikam-viewer.service ]; then  # the service under its name before the rename
     $SUDO systemctl disable --now digikam-viewer 2>/dev/null || true; $SUDO rm -f /etc/systemd/system/digikam-viewer.service
   fi
-  $SUDO systemctl daemon-reload && $SUDO systemctl enable --now iopix && echo "  started (systemd)"
+  $SUDO systemctl daemon-reload || die "systemctl daemon-reload failed"
+  $SUDO systemctl enable --now iopix || die "the iopix service could not be started (see above; journalctl -u iopix)"
+  echo "  started (systemd)"
 else
   echo "  not installed as a service. Start the viewer with:"
-  echo "    cd $APP && set -a && . $ENVF && set +a && $VPY -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+  echo "    cd \"$APP\" && ./run.sh --host 0.0.0.0 --port $PORT"
 fi
 say "Done: http://localhost:$PORT   settings: $ENVF   data: $DATA"

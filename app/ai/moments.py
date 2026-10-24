@@ -23,8 +23,9 @@ def _similarity():
         semantic.load()
         if semantic.ids is None or not len(semantic.ids):
             return None
-        pos = {int(i): k for k, i in enumerate(semantic.ids)}
-        vecs = semantic.vecs
+        with semantic._lock:  # ids and vecs as one pair (a batch being appended replaces both)
+            ids, vecs = semantic.ids, semantic.vecs
+        pos = {int(i): k for k, i in enumerate(ids)}
     except Exception:
         return None
 

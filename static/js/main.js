@@ -208,7 +208,7 @@ export async function start() {
 export async function boot() {
   S.BOOTED = true; document.body.classList.remove('locked');
   // (a search typed before the metadata arrived draws its list once it is here)
-  try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); if (NET.lost) pollSoon(4000); return; }
+  try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); S.BOOTED = false; setTimeout(boot, 5000); return; }  // tried again until it answers (the index may not be readable yet after a first start)
   if (store.get('filters', '0') === '1' && innerWidth >= 1100 && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
   await pollStatus();
   onRoute();

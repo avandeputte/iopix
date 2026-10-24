@@ -388,7 +388,7 @@ export function showAlbums() {
     const act = (ic, title, fn) => h('button', { class: 'carddl', title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
     if (!a.shared) c.querySelector('.cv').append(h('span', { class: 'privbadge', title: 'Private: only you see this album' }, icon('lock')));
     c.querySelector('.cv').append(h('span', { class: 'cardacts' },
-      act('link', 'Copy a link to this album', async () => { await navigator.clipboard?.writeText(location.origin + '/' + hashFor('photos', photosWith({ ualbum: a.id }))); toast(a.shared ? `Link copied. It works for anyone who can reach ${S.APP_NAME}.` : 'Link copied. The album is private: it opens only for you.'); }),
+      act('link', 'Copy a link to this album', () => copyLink(location.origin + '/' + hashFor('photos', photosWith({ ualbum: a.id })), a.shared ? `Link copied. It works for anyone who can reach ${S.APP_NAME}.` : 'Link copied. The album is private: it opens only for you.')),
       a.canEdit ? act('edit', 'Rename', async () => { const n = await promptDialog('Album name', a.name); if (n && n.trim()) return change(`/api/ualbums/${a.id}`, { name: n.trim() }); }) : null,
       a.canEdit && ST.canShare && ST.canPrivate ? act(a.shared ? 'lock' : 'group', a.shared ? 'Make private (only you will see it)' : 'Share with everyone',
         async () => { if (await confirmDialog(a.shared ? `Make “${a.name}” private? Only you will see it; other users lose it from their Albums.` : `Share “${a.name}” with everyone who can use ${S.APP_NAME}? Editors and admins can then change it.`)) return change(`/api/ualbums/${a.id}`, { shared: !a.shared }); }) : null,
@@ -416,7 +416,7 @@ export function showAlbums() {
       .catch(() => { SMART.delete(key); c.querySelector('.sb').textContent = 'could not run the search'; });
     const act = (ic, title, fn) => h('button', { class: 'carddl', title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
     c.querySelector('.cv').append(h('span', { class: 'cardacts' },
-      act('link', 'Copy a link to this smart album', async () => { await navigator.clipboard?.writeText(location.origin + '/' + hashFor('photos', q)); toast('Link copied.'); }),
+      act('link', 'Copy a link to this smart album', () => copyLink(location.origin + '/' + hashFor('photos', q), 'Link copied.')),
       act('edit', 'Rename', async () => { const n = await promptDialog('Smart album name', s.name); if (n && n.trim()) return change(`/api/searches/${s.id}`, { name: n.trim() }); }),
       act('download', 'Download as a zip', () => downloadDialog(q)),
       act('trash', 'Delete this smart album (the photos are not touched)', async () => { if (await confirmDialog(`Delete the smart album “${s.name}”?`, { ok: 'Delete', danger: true })) return change(`/api/searches/${s.id}`, { delete: true }); })));
@@ -486,6 +486,11 @@ export function showPlaces(vp) {
 }
 
 /** A main page's title with its navigation icon in the page's colour (as in the left rail). */
+/** A link to the clipboard; on a plain http address (a LAN install) browsers offer no clipboard, so the link is shown to copy by hand. */
+export async function copyLink(url, said) {
+  if (!navigator.clipboard) { promptDialog('Copy this link', { value: url }); return; }
+  try { await navigator.clipboard.writeText(url); toast(said); } catch { promptDialog('Copy this link', { value: url }); }
+}
 export const pageTitle = (ic, hue, ...kids) => h('h1', { class: 'ptitle', style: `--hue:var(--c-${hue})` }, h('span', { class: 'pic' }, icon(ic)), ...kids);
 export const conceptCard = (c) => thumbCard(c.cover, c.name[0].toUpperCase() + c.name.slice(1), nf.format(c.n), { concept: c.name });
 export async function showDetected() {

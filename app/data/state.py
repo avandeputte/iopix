@@ -13,6 +13,7 @@ import contextvars
 import logging
 import shutil
 import sqlite3
+from urllib.parse import quote
 import threading
 import time
 
@@ -33,7 +34,7 @@ def migrate_legacy():
     tmp = STATE_DB.with_name(STATE_DB.name + ".migrating")
     tmp.unlink(missing_ok=True)
     if old_state.exists():  # the state file is the base: same tables, same ids
-        src = sqlite3.connect(f"file:{old_state}?mode=ro", uri=True)
+        src = sqlite3.connect(f"file:{quote(str(old_state))}?mode=ro", uri=True)
         try:
             dst = sqlite3.connect(tmp)
             try:

@@ -52,7 +52,7 @@ async def api_faces_detect(request: Request):
     def after():
         _rebuild_after_write()
         facevecs.start()
-    n = facedetect.start(ids or None, int(album) if album is not None else None, bool(body.get("redo")), after=after)
+    n = await run_in_threadpool(facedetect.start, ids or None, int(album) if album is not None else None, bool(body.get("redo")), after)  # reads the whole library's rows
     return {"done": False, "queued": n}
 
 
@@ -212,10 +212,15 @@ def api_faces_queue(kind: str = "suggested", tag: int = None, offset: int = 0, l
 def facecrop(photo_id: int, x: int, y: int, w: int, h: int):
     """A square crop around any face rectangle (upright pixels), for the face queues."""
     row = _photo_row(photo_id)
+    pw, ph = row.get("w") or 0, row.get("h") or 0
+    if w < 8 or h < 8 or x < 0 or y < 0 or (pw and ph and (x + w > pw * 1.05 or y + h > ph * 1.05)):  # a rectangle that is not in the photo makes no crop (and no cache file)
+        raise HTTPException(400, "The rectangle is not inside the photo")
     try:
         path = thumbs.make_face(0, row, (x, y, w, h))
-    except Exception:
+    except FileNotFoundError:
         raise HTTPException(404)
+    except OSError as e:
+        raise HTTPException(503, f"The file could not be read right now: {type(e).__name__}")
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 

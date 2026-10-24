@@ -26,7 +26,8 @@ BRANCH="${IOPIX_BRANCH:-${DIGIKAM_VIEWER_BRANCH:-main}}"
 REF="${IOPIX_REF:-${DIGIKAM_VIEWER_REF:-$BRANCH}}"
 RESULT="${IOPIX_RESULT:-${DIGIKAM_VIEWER_RESULT:-}}"
 case "$REF" in -*|*..*|*/*/*) printf 'error: bad ref: %s\n' "$REF" >&2; exit 1;; esac  # a commit id or a branch, never an option or a path
-FORCE=0; [ "$1" = "--force" ] && FORCE=1
+FORCE=0; CHECK=0
+for a in "$@"; do case "$a" in --force) FORCE=1;; --check) CHECK=1;; *) printf 'error: unknown option %s (--check, --force)\n' "$a" >&2; exit 2;; esac; done
 TMP=""; NOTED=0
 # on a failure the result file gets die's own words; the generic line is for failures that never reached die (set -e)
 cleanup() { rc=$?; [ -n "$TMP" ] && rm -rf "${TMP:?}"; [ $rc -ne 0 ] && [ "$NOTED" = 0 ] && [ -n "$RESULT" ] && printf 'error: update.sh failed (exit %s); see the log\n' "$rc" > "$RESULT" 2>/dev/null; true; }
@@ -45,7 +46,7 @@ remote_commit() { "$PYF" -c 'import sys, json, urllib.request
 req = urllib.request.Request(sys.argv[1], headers={"User-Agent": "iopix-update", "Accept": "application/vnd.github+json"})
 with urllib.request.urlopen(req, timeout=30) as r:
     print(json.load(r)["sha"])' "https://api.github.com/repos/$REPO/commits/${1:-$BRANCH}" 2>/dev/null; }
-if [ "$1" = "--check" ]; then
+if [ "$CHECK" = 1 ]; then
   L="$(local_commit)"; R="$(remote_commit "$REF")" || R=""  # a failed lookup must reach die, not set -e
   [ -n "$R" ] || die "could not reach GitHub (api.github.com) from here, or no such commit: $REF"
   if [ "$L" = "$R" ]; then echo "up to date ($(echo "$L" | cut -c1-7))"; else echo "update available: $(echo "$R" | cut -c1-7) (installed $(echo "$L" | cut -c1-7))"; fi
@@ -122,7 +123,9 @@ else:
 print("\n".join(deps))
 PYEOF
 pipi() { if command -v uv >/dev/null 2>&1; then uv pip install -q -p "$VPY" "$@"; else "$VPY" -m pip install -q "$@"; fi; }
-pipi -r "$TMP/requirements.txt" || { [ -n "$STAGE" ] && rm -rf "${STAGE:?}"; die "installing the Python packages failed; the installed version is unchanged (code and packages)"; }
+case ",$G," in *,captions,*) PIPX="--extra-index-url https://download.pytorch.org/whl/cpu";; *) PIPX="";; esac  # the CPU torch wheels, as setup.sh installed them (PyPI's carry CUDA, gigabytes)
+# shellcheck disable=SC2086
+pipi $PIPX -r "$TMP/requirements.txt" || { [ -n "$STAGE" ] && rm -rf "${STAGE:?}"; die "installing the Python packages failed; the installed version is unchanged (code and packages)"; }
 
 say "Installing the new code"
 if [ -d .git ]; then

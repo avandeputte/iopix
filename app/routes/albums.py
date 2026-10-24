@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
+from starlette.concurrency import run_in_threadpool
 
 from app.data import state as appstate
 from app import users
@@ -53,7 +54,7 @@ def api_state(request: Request):
 @router.post("/api/favorites")
 async def api_favorites(request: Request):
     body = await request.json()
-    appstate.set_favorites(_with_hashes(body.get("ids", [])), bool(body.get("on", True)))
+    await run_in_threadpool(lambda: appstate.set_favorites(_with_hashes(body.get("ids", [])), bool(body.get("on", True))))  # the viewer database may be MySQL
     return {"ok": True}
 
 
@@ -109,6 +110,8 @@ async def api_ualbum_update(album_id: int, request: Request):
 @router.post("/api/searches")
 async def api_search_create(request: Request):
     """A smart album: {name, query} where query is the photo filter query string (as in #/photos?...)."""
+    if not users.can_write(request.state.user):  # smart albums are shared by everyone: editors and admins keep them, as with shared albums
+        raise HTTPException(403, "Only editors and admins can create smart albums")
     body = await request.json()
     name = str(body.get("name", "")).strip()[:200]
     query = str(body.get("query", "")).strip().lstrip("?")[:4000]
@@ -120,6 +123,8 @@ async def api_search_create(request: Request):
 @router.post("/api/searches/{search_id}")
 async def api_search_update(search_id: int, request: Request):
     """Body: {name} to rename, {delete: true} to remove."""
+    if not users.can_write(request.state.user):
+        raise HTTPException(403, "Only editors and admins can change smart albums")
     body = await request.json()
     if body.get("delete"):
         appstate.delete_search(search_id)

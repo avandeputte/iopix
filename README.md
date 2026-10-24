@@ -273,6 +273,7 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `BG_THREADS` | half the cores | cores one background job may use (capped at cores − 1; also in Settings) |
 | `PREWARM_WORKERS` / `ANALYSIS_WORKERS` | `BG_THREADS` | thread counts for the thumbnail pre-warm and the analysis job, if you want them different |
 | `PREWARM` | `1` | build all grid thumbnails in the background after startup |
+| `SCANNER_LOOP` | `1` | `0` keeps the file scanner's background loop off (the test suite sets it; Maintenance can still start a scan) |
 | `REINDEX_POLL` | `20` | seconds between checks for digiKam database changes |
 | `THUMB_HEIGHT` / `THUMB_MAX_WIDTH` / `THUMB_QUALITY` | `360` / `1080` / `76` | grid thumbnail size and JPEG quality |
 | `PREVIEW_SIZE` / `PREVIEW_QUALITY` | `2560` / `86` | viewer previews: long edge and JPEG quality |

@@ -235,3 +235,31 @@ def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(l
         dk.executemany("DELETE FROM TagProperties WHERE tagid = ?", [(t,) for t in ids])
         dk.executemany("DELETE FROM Tags WHERE id = ?", [(t,) for t in sorted(ids, reverse=True)])
         dk.commit(); dk.close()
+
+
+def test_a_file_of_an_unknown_kind_is_not_reported_gone(lib, tmp_path):
+    """digiKam knows more formats than the viewer reads: a .crw row stays as it is, and a present file whose name
+    the listing spells in NFD is not "gone" either."""
+    from app.photos import scanner
+    import sqlite3, unicodedata
+    con = sqlite3.connect(lib["db"])
+    pid, name, album = con.execute("SELECT i.id, i.name, i.album FROM Images i WHERE i.status = 1 LIMIT 1").fetchone()
+    rel = con.execute("SELECT relativePath FROM Albums WHERE id = ?", (album,)).fetchone()[0]
+    con.close()
+    folder = Path(lib["root"]) / rel.strip("/")
+    src = folder / name
+    crw = folder / "old.crw"; shutil.copy2(src, crw)
+    nfd = folder / unicodedata.normalize("NFD", "café.jpg"); shutil.copy2(src, nfd)
+    con = sqlite3.connect(lib["db"])
+    con.execute("INSERT INTO Images (album, name, status, category, modificationDate, fileSize, uniqueHash) VALUES (?, 'old.crw', 1, 1, '2020-01-01T00:00:00', 1, 'x')", (album,))
+    con.execute("INSERT INTO Images (album, name, status, category, modificationDate, fileSize, uniqueHash) VALUES (?, ?, 1, 1, '2020-01-01T00:00:00', 1, 'y')", (album, unicodedata.normalize("NFC", "café.jpg")))
+    con.commit(); con.close()
+    try:
+        scanner.scan(check_running=False)
+        con = sqlite3.connect(lib["db"])
+        rows = {r[0]: r[1] for r in con.execute("SELECT name, status FROM Images WHERE name IN ('old.crw', ?)", (unicodedata.normalize("NFC", "café.jpg"),))}
+        con.close()
+        assert rows["old.crw"] == 1 and rows[unicodedata.normalize("NFC", "café.jpg")] == 1, rows
+    finally:
+        crw.unlink(missing_ok=True); nfd.unlink(missing_ok=True)
+        con = sqlite3.connect(lib["db"]); con.execute("DELETE FROM Images WHERE name IN ('old.crw', ?)", (unicodedata.normalize("NFC", "café.jpg"),)); con.commit(); con.close()

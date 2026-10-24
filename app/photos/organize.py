@@ -104,7 +104,7 @@ def trash(ids: list, check_running: bool = True) -> dict:
                 raise SyncError("the file is not on disk")
             files_dir, info_dir = _trash_dirs(r["root_path"])
             base = _trash_base(info_dir, r["name"])
-            suffix = r["name"].split(".", 1)[1] if "." in r["name"] else ""
+            suffix = r["name"].rsplit(".", 1)[1] if "." in r["name"] else ""  # the extension only: "my.photo.jpg" keeps one stem
             dst = files_dir / (f"{base}.{suffix}" if suffix else base)
             rec = info_dir / f"{base}.dtrashinfo"
             rec.write_text(json.dumps({"path": r["path"], "deletiontimestamp": now, "imageid": str(r["id"])}, indent=4) + "\n")
@@ -113,16 +113,22 @@ def trash(ids: list, check_running: bool = True) -> dict:
             except OSError:
                 pass
             sides = sidecars_of(r["path"])
+            done_moves = []  # (now, was): what to put back if a later step of this photo fails
             shutil.move(r["path"], dst)
+            done_moves.append((str(dst), r["path"]))
             side_moves, side_from = [], []
-            for s in sides:  # sidecars ride along, beside the file, under the trash name
-                tail = s[len(r["path"]):] if s.startswith(r["path"]) else ".xmp"
-                sdst = files_dir / (dst.name + tail) if tail.startswith(".") and s.startswith(r["path"]) else files_dir / (base + ".xmp")
+            for s in sides:  # sidecars ride along, beside the file, under the trash name (photo.jpg.xmp, or photo.xmp as restore() looks for it)
+                sdst = files_dir / (dst.name + ".xmp") if s.startswith(r["path"]) else dst.with_suffix(".xmp")
                 shutil.move(s, sdst)
+                done_moves.append((str(sdst), s))
                 side_moves.append(str(sdst)); side_from.append(s)
             moved.append({**r, "trash": str(dst), "info": str(rec), "sides": side_moves, "sides_from": side_from})
         except (OSError, SyncError) as e:
+            if "done_moves" in locals() and done_moves:  # half moved: the file and its sidecars go back, the record goes
+                _move_back(done_moves, str(rec))
             failed.append({"id": r["id"], "error": str(e)})
+        finally:
+            done_moves = []
     if moved:
         try:
             with dbsync.write_transaction(db_path, check_running) as con:
@@ -159,22 +165,57 @@ def listing() -> list:
         if not info.is_dir():
             continue
         for rec in info.glob("*.dtrashinfo"):
-            try:
-                d = json.loads(rec.read_text())
-            except (OSError, ValueError):
-                continue
-            base = rec.stem
-            orig = d.get("path") or ""
-            suffix = os.path.basename(orig).split(".", 1)[1] if "." in os.path.basename(orig) else ""
-            f = files / (f"{base}.{suffix}" if suffix else base)
-            try:
-                iid = int(d.get("imageid") or -1)
-            except ValueError:
-                iid = -1
-            out.append({"id": iid if iid in status or iid > 0 else None, "name": os.path.basename(orig), "path": orig, "when": d.get("deletiontimestamp"),
-                        "trash": str(f), "info": str(rec), "root": rid, "exists": f.exists(), "size": f.stat().st_size if f.exists() else 0})
+            t = _item(rec, rid, files, status)
+            if t:
+                out.append(t)
     out.sort(key=lambda x: x.get("when") or "", reverse=True)
     return out
+
+
+def _item(rec: Path, rid, files: Path, status: dict = None):
+    """One trash record as listing() describes it, or None for one that cannot be read."""
+    try:
+        d = json.loads(rec.read_text())
+    except (OSError, ValueError):
+        return None
+    base = rec.stem
+    orig = d.get("path") or ""
+    suffix = os.path.basename(orig).rsplit(".", 1)[1] if "." in os.path.basename(orig) else ""
+    f = files / (f"{base}.{suffix}" if suffix else base)
+    if not f.exists() and "." in os.path.basename(orig):  # a record from before v1.71, whose file carries everything after the first dot
+        old = files / f"{base}.{os.path.basename(orig).split('.', 1)[1]}"
+        if old.exists():
+            f = old
+    try:
+        iid = int(d.get("imageid") or -1)
+    except ValueError:
+        iid = -1
+    return {"id": iid if (status is not None and iid in status) or iid > 0 else None, "name": os.path.basename(orig), "path": orig, "when": d.get("deletiontimestamp"),
+            "trash": str(f), "info": str(rec), "root": rid, "exists": f.exists(), "size": f.stat().st_size if f.exists() else 0}
+
+
+def item_for(info: str):
+    """The trash entry a .dtrashinfo path names, when that path is a record inside an album root's trash; else None."""
+    if not info or not info.endswith(".dtrashinfo"):
+        return None
+    rec = Path(info)
+    try:
+        real = rec.resolve(strict=True)
+    except OSError:
+        return None
+    con = dkdb.connect()
+    try:
+        roots = dkdb.root_paths(con)
+    finally:
+        con.close()
+    for rid, rpath in roots.items():
+        info_dir = (Path(rpath) / ".dtrash" / "info")
+        try:
+            if real.parent == info_dir.resolve():
+                return _item(rec, rid, Path(rpath) / ".dtrash" / "files")
+        except OSError:
+            continue
+    return None
 
 
 def _by_info(infos: list) -> list:
@@ -206,7 +247,7 @@ def restore(infos: list, check_running: bool = True) -> dict:
             shutil.move(t["trash"], dest)
             tf = Path(t["trash"])
             moves = [(t["trash"], str(dest))]
-            for s in [Path(x) for x in (str(tf) + ".xmp", str(tf.with_suffix(".xmp"))) if os.path.isfile(x)]:  # no glob: names may hold [ ] * ?
+            for s in _trash_sidecars(tf):
                 sdst = str(dest) + ".xmp" if s.name.startswith(tf.name) else str(dest.with_suffix(".xmp"))
                 shutil.move(s, sdst)
                 moves.append((str(s), sdst))
@@ -246,11 +287,25 @@ def _move_back(pairs: list, record: str):
             pass
 
 
+def _trash_sidecars(tf: Path) -> list:
+    """The sidecars that went into the trash with this file: photo.jpg.xmp, photo.xmp, and the name an older
+    version gave a photo.xmp sidecar (the first stem only). No glob: names may hold [ ] * ?."""
+    names = [str(tf) + ".xmp", str(tf.with_suffix(".xmp")), str(tf.parent / (tf.name.split(".", 1)[0] + ".xmp"))]
+    out = []
+    for x in names:
+        if os.path.isfile(x) and x not in out:
+            out.append(x)
+    return [Path(x) for x in out]
+
+
 def _restore_rows(done: list, ids: list, db_path, check_running: bool):
-    """The one database write of a restore: rows marked visible again (a refusal leaves nothing half done)."""
+    """The one database write of a restore: rows marked visible again (a refusal leaves nothing half done).
+    Only a row that is in the trash (status 3) is revived: SQLite reuses ids, so the number may since belong to a
+    new photo, which is then left alone and the file registered anew."""
     with dbsync.write_transaction(db_path, check_running) as con:
         for t in done:
-            if t["id"] and con.execute("SELECT 1 FROM Images WHERE id = ?", (t["id"],)).fetchone():
+            row = con.execute("SELECT status FROM Images WHERE id = ?", (t["id"],)).fetchone() if t["id"] else None
+            if row and row[0] == TRASHED:
                 con.execute("UPDATE Images SET status = ?, album = ?, name = ? WHERE id = ?", (VISIBLE, t["album"], t["dest"].name, t["id"]))
                 ids.append(t["id"])
             else:  # trashed by digiKam before this row was known here, or the row is gone: register the file anew
@@ -279,20 +334,12 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
     items = _by_info(infos) if infos is not None else listing()
-    gone, failed = [], []
-    for t in items:
-        try:
-            tf = Path(t["trash"])
-            for s in [Path(x) for x in (str(tf) + ".xmp", str(tf.with_suffix(".xmp"))) if os.path.isfile(x)]:  # no glob: names may hold [ ] * ?
-                s.unlink(missing_ok=True)
-            tf.unlink(missing_ok=True)
-            os.remove(t["info"])
-            gone.append(t)
-        except OSError as e:
-            failed.append({"info": t["info"], "error": str(e)})
-    ids = [t["id"] for t in gone if t["id"]]
+    # destructive and final: the database is backed up and its rows go first (a refused write then changes
+    # nothing), the files only after the rows are gone
+    ids = [t["id"] for t in items if t["id"]]
     if ids:
         from app.photos import deletion
+        dkdb.backup(db_path, force=True)
         with dbsync.write_transaction(db_path, check_running) as con:
             for i in range(0, len(ids), 300):
                 chunk = ",".join(map(str, ids[i:i + 300]))
@@ -301,8 +348,20 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
                 con.execute(f"UPDATE Tags SET icon = NULL WHERE icon IN ({chunk})")
                 con.execute(f"UPDATE Albums SET icon = NULL WHERE icon IN ({chunk})")
                 con.execute(f"DELETE FROM Images WHERE id IN ({chunk})")
+    gone, failed = [], []
+    for t in items:
+        try:
+            tf = Path(t["trash"])
+            for s in _trash_sidecars(tf):
+                s.unlink(missing_ok=True)
+            tf.unlink(missing_ok=True)
+            os.remove(t["info"])
+            gone.append(t)
+        except OSError as e:
+            failed.append({"info": t["info"], "error": str(e)})
+    if ids:
         from app.photos import history
-        history.record([{"photo_id": t["id"], "action": "deleted", "summary": "Deleted for good from the trash", "path": t["path"]} for t in gone if t["id"]])
+        history.record([{"photo_id": t["id"], "action": "deleted", "summary": "Deleted for good from the trash", "path": t["path"]} for t in items if t["id"]])
         deletion.forget(ids)
     return {"deleted": len(gone), "failed": failed}
 

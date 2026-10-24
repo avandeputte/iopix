@@ -68,27 +68,29 @@ LINE=$(grep -a -n '^__PAYLOAD_BELOW__$' "$0" | head -1 | cut -d: -f1)  # -a: the
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 tail -n +$((LINE + 1)) "$0" | tar xzf - -C "$TMP"
 rm -rf "$PREFIX/app.new"; mv "$TMP/iopix" "$PREFIX/app.new"
-if [ -d "$PREFIX/app" ]; then rm -rf "$PREFIX/app.old"; mv "$PREFIX/app" "$PREFIX/app.old"; fi
+if [ -d "$PREFIX/app" ]; then  # a re-run upgrades the code: the settings, the Python environment and the installed commit stay
+  for keep in iopix.env .venv COMMIT; do [ -e "$PREFIX/app/$keep" ] && mv "$PREFIX/app/$keep" "$PREFIX/app.new/$keep"; done
+  rm -rf "$PREFIX/app.old"; mv "$PREFIX/app" "$PREFIX/app.old"
+fi
 mv "$PREFIX/app.new" "$PREFIX/app"; rm -rf "$PREFIX/app.old"
 VERSION=$(cat "$PREFIX/app/VERSION")
 
 # --- everything else is the interactive setup script shipped with the app ----------------------
 say "Running the setup"
-ARGS="--photos $PHOTOS --data $DATA --port $PORT $SD"
+set -- --photos "$PHOTOS" --data "$DATA" --port "$PORT" $SD  # the arguments as a list: a folder with a space in its name stays one word
 # the passwords go to setup.sh in its environment, not on its command line (visible in the process list)
-if [ -n "$MYSQL" ]; then export IOPIX_MYSQL="$MYSQL"; else ARGS="$ARGS --sqlite $DKDB"; fi
+if [ -n "$MYSQL" ]; then export IOPIX_MYSQL="$MYSQL"; else set -- "$@" --sqlite "$DKDB"; fi
 [ -n "$ADMIN" ] && export IOPIX_ADMIN="$ADMIN"
-[ "$MODELS" = none ] && ARGS="$ARGS --features none" 
-[ -n "$FEATURES" ] && ARGS="$ARGS --features $FEATURES"
-[ "$CAPTIONS" = 1 ] && ARGS="$ARGS --features search,places,objects,ocr,captions"
-[ "$SERVICE" = 0 ] && ARGS="$ARGS --no-service"
-[ "$YES" = 1 ] && ARGS="$ARGS --yes"
+[ "$MODELS" = none ] && set -- "$@" --features none
+[ -n "$FEATURES" ] && set -- "$@" --features "$FEATURES"
+[ "$CAPTIONS" = 1 ] && set -- "$@" --features search,places,objects,ocr,captions
+[ "$SERVICE" = 0 ] && set -- "$@" --no-service
+[ "$YES" = 1 ] && set -- "$@" --yes
 # the service runs as a dedicated user: create it, hand it the folders, run setup as root with the unit's user set below
 if ! id "$USER_NAME" >/dev/null 2>&1; then
   useradd --system --home-dir "$PREFIX" --shell /usr/sbin/nologin "$USER_NAME" 2>/dev/null || useradd -r -d "$PREFIX" -s /bin/false "$USER_NAME"
 fi
-# shellcheck disable=SC2086
-sh "$PREFIX/app/setup.sh" $ARGS --no-service
+sh "$PREFIX/app/setup.sh" "$@" --no-service
 # --read-only: lock the viewer to browsing, whatever the settings say (setup.sh does not ask about it)
 [ "$READ_ONLY" = 1 ] && { grep -q '^READ_ONLY=' "$PREFIX/app/iopix.env" || echo "READ_ONLY=1" >> "$PREFIX/app/iopix.env"; }
 # the app folder and its venv belong to the service user: update.sh, run from the web app as that user, replaces
@@ -104,7 +106,7 @@ elif [ "$SERVICE" = 1 ]; then
 fi
 if [ "$SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   say "Installing the systemd service"
-  sed -e "s|@PREFIX@|$PREFIX|g" -e "s|@USER@|$USER_NAME|g" -e "s|@HOST@|$HOST|g" -e "s|@PORT@|$PORT|g" "$PREFIX/app/iopix.service" | sed -e "s|EnvironmentFile=.*|EnvironmentFile=$PREFIX/app/iopix.env|" -e "s|ExecStart=.*|ExecStart=$PREFIX/app/.venv/bin/python -m uvicorn app.main:app --host $HOST --port $PORT|" > /etc/systemd/system/iopix.service
+  sed -e "s|@PREFIX@|$PREFIX|g" -e "s|@USER@|$USER_NAME|g" -e "s|@HOST@|$HOST|g" -e "s|@PORT@|$PORT|g" "$PREFIX/app/iopix.service" | sed -e "s|EnvironmentFile=.*|EnvironmentFile=$PREFIX/app/iopix.env|" -e "s|ExecStart=.*|ExecStart=\"$PREFIX/app/.venv/bin/python\" -m uvicorn app.main:app --host $HOST --port $PORT|" > /etc/systemd/system/iopix.service
   systemctl daemon-reload && systemctl enable --now iopix.service && sleep 2
   systemctl is-active --quiet iopix.service && say "iopix $VERSION is running on port $PORT" || say "the service did not start; see: journalctl -u iopix"
 fi

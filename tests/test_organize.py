@@ -156,3 +156,30 @@ def test_a_photo_on_its_way_to_the_trash_stays_out_of_a_rebuild(lib):
         index.HIDDEN.discard(pid)
     index.build()
     assert _path(pid) is not None
+
+
+def test_trash_keeps_a_compat_sidecar_of_a_name_with_two_dots(client, lib):
+    """"my.photo.jpg" with a photo.xmp-style sidecar: the sidecar goes to the trash and comes back with the photo."""
+    import shutil
+    pid = lib["ids"][43]
+    path = _path(pid)
+    d, name = os.path.split(path)
+    new = os.path.join(d, "my.photo" + os.path.splitext(name)[1])
+    shutil.move(path, new)
+    side = os.path.splitext(new)[0] + ".xmp"
+    Path(side).write_text("<x:xmpmeta xmlns:x='adobe:ns:meta/'/>\n")
+    import sqlite3
+    con = sqlite3.connect(lib["db"]); con.execute("UPDATE Images SET name = ? WHERE id = ?", (os.path.basename(new), pid)); con.commit(); con.close()
+    index.build()
+    r = client.post("/api/photos/trash", json={"ids": [pid]})
+    assert r.status_code == 200 and r.json()["trashed"] == [pid], r.text
+    assert not os.path.exists(new) and not os.path.exists(side)
+    root = Path(lib["root"])
+    files = list((root / ".dtrash" / "files").iterdir())
+    assert any(f.suffix == ".xmp" for f in files), [f.name for f in files]
+    item = next(i for i in client.get("/api/trash").json()["items"] if i["id"] == pid)
+    assert item["exists"]
+    r = client.post("/api/trash/restore", json={"infos": [item["info"]]})
+    assert r.status_code == 200 and r.json()["restored"] == [pid], r.text
+    assert os.path.exists(new) and os.path.exists(side), "the photo and its sidecar are back"
+    assert not list((root / ".dtrash" / "files").iterdir()), "nothing left behind in the trash"

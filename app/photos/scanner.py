@@ -31,6 +31,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 from app import config
@@ -539,19 +540,24 @@ def _sweep_temp(path: str):
         pass
 
 
+_nfc = lambda s: unicodedata.normalize("NFC", s)  # noqa: E731  (APFS/HFS+ list NFD names; digiKam stores NFC)
+
+
 def _walk(root: Path):
-    """{relative folder ('/' or '/a/b'): [file names]} for the photos and videos under root (hidden folders, NAS
-    housekeeping folders and the trash left out)."""
-    out = {}
-    for dirpath, dirnames, filenames in os.walk(root):
+    """{relative folder ('/' or '/a/b'): (every file name there, NFC; the photo and video names)} under root (hidden
+    folders, NAS housekeeping folders and the trash left out; symlinked folders followed, as digiKam does). A folder
+    that could not be listed is left out and named in `unreadable`: nothing in it may count as gone."""
+    out, unreadable = {}, []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True, onerror=lambda e: unreadable.append(getattr(e, "filename", None) or str(e))):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS)
         sub = os.path.relpath(dirpath, root)
         rel = "/" if sub in (".", "") else "/" + sub.replace(os.sep, "/")
-        files = []
+        files, names = [], set()
         for n in filenames:
             if n.endswith((".viewer-tmp", "_exiftool_tmp")):  # left behind by a write that died: gone after an hour
                 _sweep_temp(os.path.join(dirpath, n))
                 continue
+            names.add(_nfc(n))  # a file of a kind the viewer does not read (.crw, .jxl, .flv…) is still there
             if n.startswith(".") or "." not in n or n.lower().endswith(".xmp"):
                 continue
             try:
@@ -559,7 +565,8 @@ def _walk(root: Path):
             except SyncError:
                 continue
             files.append(n)
-        out[rel] = files
+        out[rel] = (names, files)
+    out["__unreadable__"] = unreadable
     return out
 
 
@@ -604,12 +611,16 @@ def scan(check_running: bool = True) -> dict:
                 progress["skipped"].append(f"{root_dir}: not there or empty (unmounted?); left alone")
                 continue
             disk = _walk(rd)
-            gone = [k for k in mine if k[2] not in disk.get(k[1], {})]
+            unreadable = disk.pop("__unreadable__")
+            if unreadable:
+                progress["skipped"].append(f"{root_dir}: {len(unreadable)} folder(s) could not be listed ({unreadable[0]}); nothing counted as gone there")
+            gone = [] if unreadable else [k for k in mine if _nfc(k[2]) not in disk.get(_nfc(k[1]), (set(), []))[0]]
             if len(gone) > 20 and len(gone) > 0.3 * len(mine):
                 progress["skipped"].append(f"{root_dir}: {len(gone)} of {len(mine)} photos would be removed; left alone (a disk not fully mounted?)")
                 continue
-            vanished += [mine[k][0] for k in gone]
-            for rel, files in disk.items():
+            # (id, album, name, path) as snapshotted: checked again before the row changes
+            vanished += [(mine[k][0], mine[k][3], k[2], str(rd / k[1].strip("/") / k[2]) if k[1] != "/" else str(rd / k[2])) for k in gone]
+            for rel, (_names, files) in disk.items():
                 for name in files:
                     path = str(rd / rel.strip("/") / name) if rel != "/" else str(rd / name)
                     k = (root_id, rel, name)
@@ -669,12 +680,20 @@ def scan(check_running: bool = True) -> dict:
                                 (unique_hash(path, version), st[1] if st else None, st[0] if st else None, iid))
             progress["modified"] = len(modified)
         if vanished:  # CoreDB::removeItems: status Trashed, no album; digiKam's own cleanup later marks them obsolete
+            # the walk took a while: a photo moved, renamed or trashed meanwhile (its row changed) or whose file is
+            # back is left alone; only a row still as snapshotted, with nothing on disk, is marked
+            still = []
             with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-                con.executemany("UPDATE Images SET status = 3, album = NULL WHERE id = ?", [(i,) for i in vanished])
-            history.record([{"photo_id": i, "action": "deleted", "summary": "No longer on disk (found by the file scanner)"} for i in vanished])
-            progress["removed"] = len(vanished)
+                for iid, album, name, path in vanished:
+                    row = con.execute("SELECT album, name FROM Images WHERE id = ? AND status = 1", (iid,)).fetchone()
+                    if not row or row[0] != album or row[1] != name or os.path.exists(path):
+                        continue
+                    con.execute("UPDATE Images SET status = 3, album = NULL WHERE id = ?", (iid,))
+                    still.append((iid, path))
+            history.record([{"photo_id": i, "action": "deleted", "summary": "No longer on disk (found by the file scanner)", "path": p, "details": {"path": p}} for i, p in still])
+            progress["removed"] = len(still)
         if added_ids or modified or vanished or made:
-            log.info("scanner: %d added, %d modified, %d removed, %d folders", len(added_ids), len(modified), len(vanished), progress["folders"])
+            log.info("scanner: %d added, %d modified, %d removed, %d folders", len(added_ids), len(modified), progress["removed"], progress["folders"])
     except Exception as e:
         progress["error"] = f"{type(e).__name__}: {str(e)[:200]}"
         log.warning("scanner: the scan stopped: %s", e, exc_info=True)

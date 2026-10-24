@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sqlite3
+from urllib.parse import quote
 import subprocess
 import threading
 import time
@@ -333,7 +334,12 @@ def add_missing_columns(con: VConn) -> list:
         have = set(columns(con, name))
         for col, definition in declared_columns(my if con.mysql else sq).items():
             if col not in have:
-                con.execute(f"ALTER TABLE {name} ADD COLUMN {definition}")
+                try:
+                    con.execute(f"ALTER TABLE {name} ADD COLUMN {definition}")
+                except Exception as e:  # another process (the MCP server, a second worker) added it a moment ago
+                    if "duplicate column" not in str(e).lower() and "1060" not in str(e):
+                        raise
+                    continue
                 added.append(f"{name}.{col}")
     if added:
         log.info("viewer database: columns added: %s", ", ".join(added))
@@ -412,7 +418,7 @@ def _backup_before_migration(tag: str):
         d.mkdir(parents=True, exist_ok=True)
         if not is_mysql():
             dst = d / f"viewer-before-{tag}-{stamp}.db"
-            src = sqlite3.connect(f"file:{SQLITE_FILE}?mode=ro", uri=True)
+            src = sqlite3.connect(f"file:{quote(str(SQLITE_FILE))}?mode=ro", uri=True)
             try:
                 out = sqlite3.connect(str(dst))
                 try:
@@ -442,6 +448,7 @@ def _old_ai_shape(con: VConn) -> bool:
     """Whether the AI tables are still in their pre-1.43 shape (a stamp column per table, five marker tables)."""
     have = table_names(con)
     return ("ai_text_and_faces" in have or "ai_objects_scanned" in have or "ai_faces_scanned" in have
+            or "ai_quality_old" in have or "ai_descriptions_old" in have or "image_data_checksums_old" in have  # a migration that stopped halfway
             or "stamp" in columns(con, "ai_quality") or "stamp" in columns(con, "ai_descriptions")
             or "path" in columns(con, "image_data_checksums"))
 
@@ -460,35 +467,37 @@ def _migrate_ai_tables(con: VConn):
 
     old = {}
     for t in ("ai_quality", "ai_descriptions", "image_data_checksums"):
-        if t in have and (("stamp" in columns(con, t)) or (t == "image_data_checksums" and "path" in columns(con, t))):
+        if t + "_old" in have:  # renamed by a run that did not finish: carried on from here
+            old[t] = t + "_old"
+        elif t in have and (("stamp" in columns(con, t)) or (t == "image_data_checksums" and "path" in columns(con, t))):
             rename(t, t + "_old"); old[t] = t + "_old"
     for name, (cols, sq, my) in TABLES.items():
         if name.startswith("ai_") or name == "image_data_checksums":
             con.execute(my if con.mysql else sq)
     if "ai_quality" in old:
-        con.execute("INSERT INTO ai_quality (photo_id, sharp, bright, clip_lo, clip_hi) SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality_old")
-        con.execute("INSERT INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'quality', stamp, NULL FROM ai_quality_old")
+        con.execute("INSERT OR IGNORE INTO ai_quality (photo_id, sharp, bright, clip_lo, clip_hi) SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality_old")
+        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'quality', stamp, NULL FROM ai_quality_old")
         con.execute("DROP TABLE ai_quality_old")
     if "ai_descriptions" in old:
-        con.execute("INSERT INTO ai_descriptions (photo_id, text) SELECT photo_id, text FROM ai_descriptions_old")
-        con.execute("INSERT INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'captions', stamp, NULL FROM ai_descriptions_old")
+        con.execute("INSERT OR IGNORE INTO ai_descriptions (photo_id, text) SELECT photo_id, text FROM ai_descriptions_old")
+        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'captions', stamp, NULL FROM ai_descriptions_old")
         con.execute("DROP TABLE ai_descriptions_old")
     if "ai_text_and_faces" in have:
-        con.execute("INSERT INTO ai_text (photo_id, text) SELECT photo_id, text FROM ai_text_and_faces")
-        con.execute("INSERT INTO ai_face_count (photo_id, nfaces, faceq) SELECT photo_id, nfaces, faceq FROM ai_text_and_faces")
-        con.execute("INSERT INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'vision', stamp, NULL FROM ai_text_and_faces")
+        con.execute("INSERT OR IGNORE INTO ai_text (photo_id, text) SELECT photo_id, text FROM ai_text_and_faces")
+        con.execute("INSERT OR IGNORE INTO ai_face_count (photo_id, nfaces, faceq) SELECT photo_id, nfaces, faceq FROM ai_text_and_faces")
+        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'vision', stamp, NULL FROM ai_text_and_faces")
         con.execute("DROP TABLE ai_text_and_faces")
     if "ai_objects_scanned" in have:
-        con.execute("INSERT INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'objects', stamp, NULL FROM ai_objects_scanned")
+        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'objects', stamp, NULL FROM ai_objects_scanned")
         con.execute("DROP TABLE ai_objects_scanned")
     if "ai_faces_scanned" in have:
         rows = con.execute("SELECT photo_id, stamp, found, added, checked FROM ai_faces_scanned").fetchall()
-        con.executemany("INSERT INTO ai_scans (photo_id, job, stamp, detail) VALUES (?, 'facedetect', ?, ?)",
+        con.executemany("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) VALUES (?, 'facedetect', ?, ?)",
                         [(r[0], r[1], json.dumps({"found": r[2], "added": r[3], "checked": r[4]})) for r in rows])
         con.execute("DROP TABLE ai_faces_scanned")
     if "image_data_checksums" in old:
         # the photo each path stood for is known from photo_identity; paths no photo has any more are dropped
-        con.execute("INSERT INTO image_data_checksums (photo_id, hash, algorithm, verified) "
+        con.execute("INSERT OR IGNORE INTO image_data_checksums (photo_id, hash, algorithm, verified) "
                     "SELECT i.dk_id, c.hash, c.algorithm, c.verified FROM image_data_checksums_old c JOIN photo_identity i ON i.path = c.path WHERE i.dk_id IS NOT NULL")
         con.execute("DROP TABLE image_data_checksums_old")
     log.info("viewer database: AI tables restructured (ai_scans, ai_text, ai_face_count; checksums by photo)")
@@ -586,6 +595,8 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
     q = (lambda t: f"`{t}`") if dst.mysql else (lambda t: t)
     qs = (lambda t: f"`{t}`") if src.mysql else (lambda t: t)
     rename_old_tables(dst)  # a target last written by an older viewer
+    if dst.mysql:  # digiKam's root tag has id 0, which MySQL would otherwise replace with the next AUTO_INCREMENT value
+        dst.execute("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_AUTO_VALUE_ON_ZERO')")
     for name, (cols, sq, my) in TABLES.items():  # the whole schema first, then the rows
         if drop:
             dst.execute(f"DROP TABLE IF EXISTS {q(name)}")
@@ -605,11 +616,15 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
         use = [c for c in cols if c in have]
         collist = ", ".join(("`key`" if c == "key" and dst.mysql else c) for c in use)
         sel = ", ".join(("`key`" if c == "key" and src.mysql else c) for c in use)
-        rows = src.execute(f"SELECT {sel} FROM {qs(name)}").fetchall()
-        for i in range(0, len(rows), 2000):
-            dst.executemany(f"INSERT OR REPLACE INTO {q(name)} ({collist}) VALUES ({','.join('?' * len(use))})", [tuple(r) for r in rows[i:i + 2000]])
+        cur, n = src.execute(f"SELECT {sel} FROM {qs(name)}"), 0
+        while True:  # in slices: the face embeddings and tag rows of a large library do not all sit in memory at once
+            rows = cur.fetchmany(2000)
+            if not rows:
+                break
+            dst.executemany(f"INSERT OR REPLACE INTO {q(name)} ({collist}) VALUES ({','.join('?' * len(use))})", [tuple(r) for r in rows])
+            n += len(rows)
         dst.commit()
-        counts[name] = len(rows)
+        counts[name] = n
         if progress:
             progress(name, len(rows))
     return counts
@@ -628,9 +643,17 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
             with _lock:        # SQLite file, so there is nothing to copy; only the configuration changes
                 save_settings(c)
             return {"ok": True, "copied": {}, "database": describe()}
-    elif is_mysql() and all(str(c[k]) == str(cur[k]) for k in ("host", "port", "database")):
-        # copying a database onto itself would drop every table and then copy from the empty result
-        raise ValueError("The viewer already uses that MySQL database")
+    elif cur["type"] == "mysql" and all(str(c[k]) == str(cur[k]) for k in ("host", "port", "database")):
+        # the configured database again: copying it onto itself would drop every table and then copy from the
+        # empty result; while the viewer runs on the SQLite fallback (that server was unreachable at start) the
+        # copy would come from the fallback file and overwrite what the server holds. Nothing is copied: the
+        # connection is tested, the settings saved, and the restart brings the viewer back onto it.
+        if error is None:
+            raise ValueError("The viewer already uses that MySQL database")
+        test_connection(c)
+        with _lock:
+            save_settings(c)
+        return {"ok": True, "copied": {}, "database": describe()}
     counts = {}
     with _lock:
         dst = connect(cfg=c)
@@ -653,7 +676,7 @@ def snapshot_sqlite(dst_path: Path):
     """A SQLite copy of the current viewer database, whatever it runs on (the portable backup form)."""
     dst_path.unlink(missing_ok=True)
     if not is_mysql():
-        src = sqlite3.connect(f"file:{SQLITE_FILE}?mode=ro", uri=True)
+        src = sqlite3.connect(f"file:{quote(str(SQLITE_FILE))}?mode=ro", uri=True)
         try:
             out = sqlite3.connect(str(dst_path))
             try:

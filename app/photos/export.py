@@ -1,6 +1,6 @@
 """Export: copies of photos made for sharing, never the library files themselves.
 
-prepare(path, opts) -> bytes or None
+prepare(path, opts) -> a context manager giving the path of the converted file (or None for the untouched original)
     None: the original goes into the archive as it is. Otherwise a copy: resized so the long edge is at most
     opts["size"] pixels, and/or converted to JPEG (HEIC, PNG, TIFF, WebP and RAW previews too), upright with the
     orientation flag reset; its metadata copied from the original by exiftool (dates, camera, keywords, captions,
@@ -9,6 +9,7 @@ name_for(pattern, ts, name, used) -> the file name in the archive (or a library 
     (2026-10-17_143205.jpg), "date-name" (2026-10-17_IMG_1234.jpg) or "date-seq" (2026-10-17_001.jpg).
 """
 import datetime as _dt
+import contextlib
 import os
 import subprocess
 import tempfile
@@ -37,10 +38,14 @@ def _exiftool(args: list, path: str):
                    capture_output=True, text=True, timeout=600)
 
 
+@contextlib.contextmanager
 def prepare(path: str, opts: dict):
-    """The bytes to put in the archive for this file, or None for the untouched original."""
+    """A context giving the path of the file to put in the archive (a converted copy in a temp folder, removed on
+    exit), or None for the untouched original. The copy stays on disk and is streamed from there: a video with its
+    location removed is not read whole into memory."""
     if not wants_change(opts):
-        return None
+        yield None
+        return
     ext = os.path.splitext(path)[1].lower()
     size = int(opts.get("size") or 0)
     convert = opts.get("fmt") == "jpeg" and ext not in (".jpg", ".jpeg", ".jpe")
@@ -69,8 +74,7 @@ def prepare(path: str, opts: dict):
                     dst.write(chunk)
         if opts.get("nogps"):
             _exiftool(GPS_TAGS, out)
-        with open(out, "rb") as f:
-            return f.read()
+        yield out
 
 
 def out_ext(path: str, opts: dict) -> str:

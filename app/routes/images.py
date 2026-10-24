@@ -61,8 +61,10 @@ def face(tag_id: int):
     d = dict(row)
     try:
         path = thumbs.make_face(tag_id, d, (d["x"], d["y"], d["fw"], d["fh"]))
-    except Exception:
+    except FileNotFoundError:
         raise HTTPException(404)
+    except OSError as e:
+        raise HTTPException(503, f"The file could not be read right now: {type(e).__name__}")
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 
@@ -154,9 +156,9 @@ FILTER_KEYS_IGNORED = {"sort", "name", "sidecars", "part", "part_mb", "sem_k", "
 def _zip_parts(items, part_mb: int):
     """The files for a download, split into parts of at most part_mb megabytes each.
     The split is by album order, so the parts are stable between calls."""
-    if not any(k not in FILTER_KEYS_IGNORED and v != "" for k, v in items):
-        raise HTTPException(400, "Choose an album, a search or a selection first; the whole library is not offered as one download.")
     where, params, _ = resolve(items)
+    if where.strip() in ("", "1", "1=1") or not any(k not in FILTER_KEYS_IGNORED and v != "" for k, v in items):
+        raise HTTPException(400, "Choose an album, a search or a selection first; the whole library is not offered as one download.")
     con = db()
     try:
         rows = con.execute(
@@ -216,10 +218,13 @@ def _zip_response(items, sidecars: int, name: str):
             fname2 = export.name_for(pattern, ts, fname, used.setdefault(folder, set()), ext)
             arc = f"{folder}/{fname2}".lstrip("/")
             try:
-                data = export.prepare(path, opts)
+                with export.prepare(path, opts) as made:
+                    if made is None:
+                        yield path, arc
+                    else:
+                        yield made, arc  # streamed from the temp copy while it exists
             except Exception:  # a file Pillow cannot read: the original goes in instead
-                data, arc = None, f"{folder}/{export.name_for(pattern, ts, fname, used[folder])}".lstrip("/")
-            yield (data if data is not None else path), arc
+                yield path, f"{folder}/{export.name_for(pattern, ts, fname, used[folder])}".lstrip("/")
             side = edits.sidecar_path(path)
             if sidecars and os.path.isfile(side) and not opts["nogps"]:
                 yield side, (arc + ".xmp" if side == path + ".xmp" else os.path.splitext(arc)[0] + ".xmp")

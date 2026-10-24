@@ -5,6 +5,7 @@ people; CC BY 4.0, geonames.org) stored in data/geonames. Nothing is looked
 up online. Run `python -m app.geo.places fetch` once to download the data.
 """
 import io
+import os
 import math
 import sys
 import urllib.request
@@ -16,6 +17,8 @@ DIR = config.DATA_DIR / "geonames"
 BASE = "https://download.geonames.org/export/dump/"
 FILES = ("cities1000.txt", "admin1CodesASCII.txt", "countryInfo.txt")
 CELL = 0.5  # degrees
+CELLS_X = int(round(360 / CELL))
+
 _geo = None
 
 
@@ -28,12 +31,23 @@ def signature() -> str:
 
 
 def fetch():
+    """The three GeoNames files, written as .part first and renamed together at the end: a download that stops
+    halfway leaves what was there (or nothing) rather than a truncated file every index build would trip on."""
     DIR.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(BASE + "cities1000.zip", timeout=120) as r:
-        zipfile.ZipFile(io.BytesIO(r.read())).extract("cities1000.txt", DIR)
-    for name in FILES[1:]:
-        with urllib.request.urlopen(BASE + name, timeout=120) as r:
-            (DIR / name).write_bytes(r.read())
+    parts = []
+    try:
+        with urllib.request.urlopen(BASE + "cities1000.zip", timeout=120) as r:
+            data = zipfile.ZipFile(io.BytesIO(r.read())).read("cities1000.txt")
+        (DIR / "cities1000.txt.part").write_bytes(data); parts.append("cities1000.txt")
+        for name in FILES[1:]:
+            with urllib.request.urlopen(BASE + name, timeout=120) as r:
+                (DIR / (name + ".part")).write_bytes(r.read())
+            parts.append(name)
+        for name in parts:
+            os.replace(DIR / (name + ".part"), DIR / name)
+    finally:
+        for name in FILES:
+            (DIR / (name + ".part")).unlink(missing_ok=True)
 
 
 class Geocoder:
@@ -51,9 +65,14 @@ class Geocoder:
         with open(DIR / "cities1000.txt", encoding="utf-8") as f:
             for line in f:
                 c = line.split("\t")
+                if len(c) < 15:  # a truncated last line
+                    continue
                 if c[7] == "PPLX":  # a neighbourhood of a city; name the city instead
                     continue
-                lat, lon, cc = float(c[4]), float(c[5]), c[8]
+                try:
+                    lat, lon, cc = float(c[4]), float(c[5]), c[8]
+                except ValueError:
+                    continue
                 place = (lat, lon, c[1], admin1.get(f"{cc}.{c[10]}"), countries.get(cc, cc), int(c[14] or 0))
                 self.cells.setdefault((math.floor(lat / CELL), math.floor(lon / CELL)), []).append(place)
         self.cache = {}
@@ -69,8 +88,8 @@ class Geocoder:
             span = range(-reach, reach + 1)
             for dy in span:
                 for dx in span:
-                    for p in self.cells.get((cy + dy, cx + dx), ()):
-                        d = math.hypot(p[0] - lat, (p[1] - lon) * coslat) * 111.2
+                    for p in self.cells.get((cy + dy, (cx + dx + CELLS_X // 2) % CELLS_X - CELLS_X // 2), ()):  # the cells wrap at the antimeridian
+                        d = math.hypot(p[0] - lat, (((p[1] - lon + 180) % 360) - 180) * coslat) * 111.2
                         # favour real towns slightly over tiny hamlets that happen to be nearer
                         d_adj = d - min(3.0, math.log10(max(p[5], 1000)) - 3.0)
                         if d_adj < best_d:

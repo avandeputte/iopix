@@ -268,11 +268,27 @@ def move_backups(old_path: str, new_path: str):
                     pass  # a backup left behind is harmless
 
 
-def ensure_backup(target: str):
+def _photo_of_sidecar(side: str) -> str:
+    """The photo a sidecar belongs to: photo.jpg for photo.jpg.xmp; for photo.xmp (the compatible naming) the
+    image file beside it with that stem, so the backup is named like _backup_path(photo) everywhere."""
+    stem = side[:-4]
+    if os.path.isfile(stem):
+        return stem
+    d, name = os.path.split(stem)
+    try:
+        for n in os.listdir(d or "."):
+            if n != name + ".xmp" and os.path.splitext(n)[0] == name and not n.lower().endswith(".xmp"):
+                return os.path.join(d, n)
+    except OSError:
+        pass
+    return stem
+
+
+def ensure_backup(target: str, photo_path: str = None):
     """Whatever exiftool is about to rewrite gets a backup first: sidecars under
     sidecar-backups (once, before the viewer's first change), image files under file-backups."""
     if target.endswith(".xmp"):
-        photo = target[:-4]
+        photo = photo_path or _photo_of_sidecar(target)
         backup = _backup_path(photo)
         if not backup.exists() and not Path(str(backup) + ".created").exists() and os.path.exists(target):
             backup.parent.mkdir(parents=True, exist_ok=True)
@@ -330,7 +346,7 @@ def _prepare(photo_path: str) -> str:
     if not os.path.exists(side) and not backup.exists() and not created.exists():
         backup.parent.mkdir(parents=True, exist_ok=True)
         created.write_text("The viewer created this sidecar; there was none before.\n")  # so revert deletes it
-    ensure_backup(side)
+    ensure_backup(side, photo_path)
     if not os.path.exists(side):
         with open(side, "x", encoding="utf-8") as f:
             f.write(SKELETON)

@@ -193,7 +193,8 @@ def api_status(request: Request):
         return {"version": _public_version(), "app": _app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
                 "usersExist": users.any_users(), "signedIn": False, "isAdmin": False, "user": None, "readOnly": appstate.read_only(),
                 "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK, "editing": False, "dbWrite": False, "pendingEdits": 0}
-    return {"version": _public_version(), "error": state["error"], "rev": appstate.rev, "app": _app_stamp(),
+    admin = users.is_admin(user)
+    return {"version": _public_version(), "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev, "app": _app_stamp(),
             "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
                        "current": list(prewarmer.current.values())[:3] if users.is_signed_in(user) else []},  # file paths: not for anonymous clients
             "semantic": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done,
@@ -204,7 +205,7 @@ def api_status(request: Request):
             "isAdmin": users.is_admin(user), "signedIn": users.is_signed_in(user), "requireLogin": users.require_login(),
             "updateAvailable": updates.available() if users.is_admin(user) and updates.auto_check_enabled() else None,
             "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK,
-            "digikam": index.status(), "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
+            "digikam": index.status() if admin else {k: v for k, v in index.status().items() if k != "error"}, "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
             "appVersion": APP_VERSION, "commit": updates.local_commit()[:7], "appName": app_name(),
             "tagJobs": {**tagmanager.progress, "pending": tagmanager.pending_jobs()},
             "analysis": analysis.progress, "jobs": bgjobs.status()}

@@ -7,7 +7,7 @@ Type=simple
 User=@USER@
 EnvironmentFile=@PREFIX@/app/iopix.env
 WorkingDirectory=@PREFIX@/app
-ExecStart=@PREFIX@/app/.venv/bin/python -m uvicorn app.main:app --host @HOST@ --port @PORT@
+ExecStart="@PREFIX@/app/.venv/bin/python" -m uvicorn app.main:app --host @HOST@ --port @PORT@
 Restart=always
 RestartSec=5
 # CPU-heavy background jobs run inside this process; keep it below interactive work

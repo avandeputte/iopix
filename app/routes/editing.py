@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import secrets
+import time
 
 from fastapi import APIRouter
 from fastapi import HTTPException
@@ -196,13 +197,16 @@ async def api_consistency_scan(request: Request):
     rescan_all=0 only compares photos not checked since they last changed."""
     items = await _form_items(request)
     d = dict(items)
-    where, params, _ = resolve([(k, v) for k, v in items if k != "rescan_all"])
-    con = db()
-    try:
-        rows = [dict(r) for r in con.execute(
-            f"SELECT id, path, name, video, hash, size, modified FROM photos WHERE {where} ORDER BY ts DESC", params)]
-    finally:
-        con.close()
+
+    def rows_for():  # the whole library's rows: not on the event loop
+        where, params, _ = resolve([(k, v) for k, v in items if k != "rescan_all"])
+        con = db()
+        try:
+            return [dict(r) for r in con.execute(
+                f"SELECT id, path, name, video, hash, size, modified FROM photos WHERE {where} ORDER BY ts DESC", params)]
+        finally:
+            con.close()
+    rows = await run_in_threadpool(rows_for)
     consistency.scan(rows, rescan_all=d.get("rescan_all", "1") != "0")
     return {"queued": len(rows)}
 
@@ -237,7 +241,7 @@ async def api_edits_db_apply():
     if dkdb.standalone():
         raise HTTPException(409, "Sync with digiKam is off: the edits stay in the sidecars and in the viewer, and go into digiKam's database when sync is turned on again")
     try:
-        result = dbsync.apply_pending()
+        result = await run_in_threadpool(dbsync.apply_pending)  # every pending edit, with a backup first: minutes on a large backlog
     except dbsync.SyncError as e:
         log.warning("apply to digiKam's database refused: %s", e)
         raise HTTPException(409, str(e))
@@ -287,9 +291,12 @@ async def api_gpx_preview(request: Request):
     photos = [{"id": r["id"], "ts": r["ts"], "name": r["name"]} for r in rows if not (only_missing and r["lat"] is not None)]
     matches = gpx.correlate(points, photos, utc_offset, clock_shift, max_gap)
     token = secrets.token_hex(8)
-    if len(_gpx_tracks) > 20:
-        _gpx_tracks.clear()
-    _gpx_tracks[token] = points
+    now = time.time()  # a few recent tracks only: a 50 MB track parsed is a lot of points to keep for the server's lifetime
+    for k in [k for k, (t, _p) in _gpx_tracks.items() if now - t > 1800]:
+        del _gpx_tracks[k]
+    while len(_gpx_tracks) >= 5:
+        del _gpx_tracks[next(iter(_gpx_tracks))]
+    _gpx_tracks[token] = (now, points)
     names = {p["id"]: p["name"] for p in photos}
     matched = [dict(m, name=names[m["id"]]) for m in matches if m["matched"]]
     return {"token": token, "track": gpx.summary(points), "considered": len(photos), "skipped_with_position": len(rows) - len(photos),
@@ -301,7 +308,7 @@ async def api_gpx_apply(request: Request):
     """Body: {token, ids, utc_offset, clock_shift, max_gap, only_missing}. Writes the matched
     positions as GPS edits (sidecar, file if enabled; database on the next apply)."""
     body = await request.json()
-    points = _gpx_tracks.get(str(body.get("token")))
+    points = (_gpx_tracks.get(str(body.get("token"))) or (None, None))[1]
     if not points:
         raise HTTPException(409, "The track preview has expired; load the GPX file again")
     ids = [int(i) for i in body.get("ids", [])][:20000]
@@ -349,7 +356,7 @@ async def api_placetags_run(request: Request):
     p = await run_in_threadpool(placetags.plan, sel)
     if p["missing_tags"] and dbsync.digikam_running():
         raise HTTPException(409, "digiKam is running. Quit digiKam first; new place tags are created in its database.")
-    placetags.run(sel)
+    await run_in_threadpool(placetags.run, sel)
     return {"to_tag": p["to_tag"], "creating": len(p["missing_tags"])}
 
 

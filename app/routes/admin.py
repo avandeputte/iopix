@@ -72,6 +72,8 @@ def api_settings_get(request: Request):
     out = _settings_public()
     if not users.is_admin(request.state.user):
         out.pop("database", None); out.pop("album_roots", None)
+    if not users.can_write(request.state.user):  # the owner's name and contact (the edit templates) and recent tags are the editors' business
+        out.pop("templates", None); out.pop("recent_tags", None); out.pop("google_maps_key_set", None)
     return out
 
 
@@ -282,7 +284,7 @@ async def api_login(request: Request):
     if wait:
         proxyauth.authlog.warning("sign-in as %r from %s refused: %d s to wait after repeated failures", name, src, wait)
         raise HTTPException(429, f"Too many attempts; try again in {wait} seconds", headers={"Retry-After": str(wait)})
-    u = users.authenticate(name, str(body.get("password", "")))
+    u = users.authenticate(name, str(body.get("password", ""))[:1024])
     if not u:
         wait = max(users.login_failed(key), users.login_failed(nkey, users.LOCK_AFTER_NAME))
         proxyauth.authlog.warning("failed sign-in as %r from %s (wrong user name or password%s)", name, src, f"; {wait} s wait" if wait else "")
@@ -293,7 +295,7 @@ async def api_login(request: Request):
         raise HTTPException(403, "From outside your network, sign in with an account that has a password")
     proxyauth.authlog.info("signed in: %s (%s, %s) from %s", u["name"], u["role"], "one click" if u.get("passwordless") else "password", src)
     resp = JSONResponse({"user": u, "settings": users.get_settings(u["id"])})
-    users.set_session(resp, u["id"], "oneclick" if u.get("passwordless") else "password")
+    users.set_session(resp, u["id"], "oneclick" if u.get("passwordless") else "password", users.over_https(request))
     return resp
 
 
@@ -366,7 +368,9 @@ async def api_my_password(request: Request):
     if not u:
         raise HTTPException(401, "Sign in first")
     body = await request.json()
-    if not u.get("passwordless") and not users.authenticate(u["name"], str(body.get("current", ""))):
+    if u.get("passwordless"):  # shared by whoever clicks it: a password set from one browser would lock the others out
+        raise HTTPException(403, "This account signs in with one click; an admin can give it a password under Settings › Users")
+    if not users.authenticate(u["name"], str(body.get("current", ""))):
         proxyauth.authlog.warning("password change for %s refused from %s (wrong current password)", u["name"], proxyauth.source(request))
         raise HTTPException(403, "The current password is wrong")
     try:
@@ -375,7 +379,7 @@ async def api_my_password(request: Request):
         raise HTTPException(400, str(e))
     proxyauth.authlog.info("password changed: %s from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"ok": True})
-    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password")  # the old sessions are dead now; this one goes on
+    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password", users.over_https(request))  # the old sessions are dead now; this one goes on
     return resp
 
 
@@ -384,14 +388,17 @@ async def api_setup(request: Request):
     """First admin, allowed only while no user exists."""
     if users.any_users():
         raise HTTPException(409, "Users already exist; sign in as an admin")
+    if proxyauth.external(request.headers, proxyauth.peer_of(request)):  # a fresh install is open: the first account is made from inside the network
+        proxyauth.authlog.warning("first-account setup refused from outside (%s)", proxyauth.source(request))
+        raise HTTPException(403, "The first account is created from inside your network (or on the server itself)")
     body = await request.json()
     try:
-        u = users.create(str(body.get("name", "")), str(body.get("password", "")), "admin")
+        u = users.create(str(body.get("name", ""))[:64], str(body.get("password", ""))[:1024], "admin")
     except ValueError as e:
         raise HTTPException(400, str(e))
     proxyauth.authlog.info("first account created and signed in: %s (admin) from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"user": u})
-    users.set_session(resp, u["id"], "password")
+    users.set_session(resp, u["id"], "password", users.over_https(request))
     return resp
 
 

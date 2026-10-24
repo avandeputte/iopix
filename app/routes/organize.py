@@ -180,7 +180,7 @@ def api_trash_thumb(request: Request, info: str):
     from app.photos import organize
     if not users.can_write(request.state.user):
         raise HTTPException(403 if request.state.user else 401, "Editors only")
-    item = next((t for t in organize.listing() if t["info"] == info), None)
+    item = organize.item_for(info)  # that one record, after checking it sits in an album root's trash (not a scan of the whole trash per thumbnail)
     if not item or not item["exists"]:
         raise HTTPException(404)
     import hashlib
@@ -364,7 +364,7 @@ async def api_folder_create(request: Request):
         raise HTTPException(403, "Creating folders is turned off (needs DB_WRITE and EDITING)")
     body = await request.json()
     try:
-        result = folders.create(int(body.get("parent") or 0), str(body.get("name", "")))
+        result = await run_in_threadpool(folders.create, int(body.get("parent") or 0), str(body.get("name", "")))
     except dbsync.SyncError as e:
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
@@ -454,7 +454,10 @@ async def api_import_run(token: str, request: Request):
 @router.post("/api/import/{token}/discard")
 def api_import_discard(token: str):
     from app.photos import importer
-    importer.discard(token)
+    try:
+        importer.discard(token)
+    except dbsync.SyncError as e:  # not a token of ours
+        raise HTTPException(404, str(e))
     return {"ok": True}
 
 

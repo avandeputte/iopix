@@ -202,11 +202,13 @@ def identity(headers_in, peer: str):
         return _cf_email(token, team, aud)
     if not _from_trusted(peer):
         return None
-    for name in headers():
-        value = (headers_in.get(name) or "").strip()
-        if value:
-            return value
-    return None
+    found = {name: (headers_in.get(name) or "").strip() for name in headers()}
+    values = {v for v in found.values() if v}
+    if len(values) > 1:  # the proxy sets one of these; a second one with another value came from the client and was passed through
+        log.warning("proxy sign-in refused: %s carry different identities (%s)", ", ".join(n for n, v in found.items() if v),
+                    "set AUTH_PROXY_HEADER to the one header your proxy sets")
+        return None
+    return next(iter(values), None)
 
 
 def deny_unknown() -> bool:

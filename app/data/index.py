@@ -396,13 +396,16 @@ def _drop(con, ids):
 def drop_photos(ids, dst_path: Path = config.INDEX_DB):
     """Take photos out of the live index now (moved to the trash in the background); builds leave them out
     too until HIDDEN lets go of them, once digiKam's rows say where they are."""
-    HIDDEN.update(int(i) for i in ids)
+    if not dst_path.exists():
+        raise RuntimeError("the index is not built yet")
     con = sqlite3.connect(str(dst_path), timeout=15)
     try:
+        con.execute("PRAGMA journal_mode = MEMORY")  # no journal file beside an index that readers open read-only and a build replaces
         _drop(con, ids)
         con.commit()
     finally:
         con.close()
+    HIDDEN.update(int(i) for i in ids)  # only once they are out: a failed drop hides nothing
 
 
 def build(dst_path: Path = config.INDEX_DB, source: tuple = None) -> dict:
@@ -413,6 +416,18 @@ def build(dst_path: Path = config.INDEX_DB, source: tuple = None) -> dict:
         stats = _build(dst_path, source)
     if stats["resolved_edits"] and Path(dst_path) == config.INDEX_DB:  # digiKam now agrees with these edits; stop tracking them
         edits.resolved(stats["resolved_edits"], stats.get("resolved_snapshot"))
+        # forgetting them changed the edits' signature, which is part of the version this index was stamped with:
+        # the stamp follows, or ensure_fresh would build the same index once more
+        try:
+            con = sqlite3.connect(str(dst_path), timeout=15)
+            try:
+                con.execute("PRAGMA journal_mode = MEMORY")
+                con.execute("UPDATE meta SET value = ? WHERE key = 'version'", (_version_for(last_source["version"]),))
+                con.commit()
+            finally:
+                con.close()
+        except sqlite3.Error as e:
+            log.warning("the index version was not restamped after resolving edits (%s); one extra build follows", e)
     return stats
 
 
@@ -450,6 +465,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
             root_path = dkdb.root_paths(con)
         finally:
             con.close()
+    all_images = raw["images"]  # the renumbering check below sees every photo, hidden ones included (a photo queued for the trash is not "gone")
     if HIDDEN:  # on their way to the trash: left out before anything is counted (digiKam's rows may not say so yet)
         hidden = set(HIDDEN)
         raw["images"] = [r for r in raw["images"] if r[0] not in hidden]
@@ -476,9 +492,9 @@ def _build(dst_path: Path, source: tuple) -> dict:
         a["path"] = rel if single_root else f"/{a['label']}{'' if rel == '/' else rel}"
     if kind == "digikam":
         full_paths = {r[0]: root_path[albums[r[1]]["root"]] + albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
-                      for r in raw["images"] if r[1] in albums and albums[r[1]]["root"] in root_path}
+                      for r in all_images if r[1] in albums and albums[r[1]]["root"] in root_path}
         try:
-            sync_photo_ids(raw["images"], full_paths)
+            sync_photo_ids(all_images, full_paths)
         except Exception as e:  # bookkeeping only; the index must still be built
             log.warning("photo_ids were not updated: %s", e)
 
@@ -765,6 +781,11 @@ def _build(dst_path: Path, source: tuple) -> dict:
         tmp.unlink(missing_ok=True)  # never leave a half-written index behind
         raise
     dst.close()
+    for tail in ("-journal", "-wal", "-shm"):  # a journal left by a crash would be applied to the new file
+        try:
+            os.unlink(str(dst_path) + tail)
+        except OSError:
+            pass
     os.replace(tmp, dst_path)
     phases["write"] = time.time() - t2
     log.info("index built from %s in %.1fs: %d photos (%s)", "digiKam's database" if direct else "the library copy", time.time() - t0, len(photos),

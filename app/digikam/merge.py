@@ -234,15 +234,18 @@ def apply(check_running: bool = True) -> dict:
             q("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", (photomap.get(r[0], r[0]), tagmap.get(r[1], r[1]), r[2], val)); cnt("faces")
     # ---- afterwards: the viewer's data follows uploaded photos to their digiKam ids, then the library is digiKam's again
     remap = {o: t for o, t in photomap.items() if o != t}
-    if remap:
+    if remap:  # digiKam has the rows now: whatever fails here is logged, the merge itself is done
         from app.data import index, state
-        with state._lock:
-            c = state.connect()
-            try:
-                index._rekey(c, remap)
-                c.commit()
-            finally:
-                c.close()
+        try:
+            with state._lock:
+                c = state.connect()
+                try:
+                    index._rekey(c, remap)
+                    c.commit()
+                finally:
+                    c.close()
+        except Exception as e:
+            log.warning("the viewer's data about %d uploaded photos was not renumbered (%s); the next index build renumbers by file", len(remap), e)
         try:
             from app.ai import semantic
             semantic.remap_ids(remap)

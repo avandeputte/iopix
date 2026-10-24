@@ -69,6 +69,9 @@ def hash_password(pw: str) -> str:
     return f"scrypt2${n}${r}${p}$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(h).decode()
 
 
+_DUMMY_HASH = None  # a hash to check an unknown name against (made once, so a miss costs the same as a wrong password)
+
+
 def check_password(pw: str, stored: str) -> bool:
     try:
         parts = stored.split("$")
@@ -198,8 +201,10 @@ def update(user_id: int, role: str = None, password: str = None, name: str = Non
                 con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (hash_password(password), user_id))
         if name is not None:
             name = name.strip()
-            if not name:
-                raise ValueError("A user name is needed")
+            if not name or len(name) > 64:
+                raise ValueError("A user name is needed (up to 64 characters)")
+            if con.execute("SELECT 1 FROM user_accounts WHERE lower(name) = lower(?) AND id != ?", (name, user_id)).fetchone():
+                raise ValueError("That user name is taken")
             con.execute("UPDATE user_accounts SET name = ? WHERE id = ?", (name, user_id))
         if listed is not None:  # off the sign-in screen's account list: the account signs in through "Other", by name
             con.execute("UPDATE user_accounts SET listed = ? WHERE id = ?", (1 if listed else 0, user_id))
@@ -225,6 +230,10 @@ def authenticate(name: str, password: str):
     try:
         r = con.execute("SELECT id, hash FROM user_accounts WHERE name = ?", (name.strip(),)).fetchone()
         if not r:
+            global _DUMMY_HASH
+            if _DUMMY_HASH is None:
+                _DUMMY_HASH = hash_password("not a real password")
+            check_password(password, _DUMMY_HASH)  # the same work as for a wrong password: an unknown name is not told apart by its timing
             return None
         if r[1] and not check_password(password, r[1]):  # an empty hash is a passwordless viewer: one click signs in
             return None
@@ -358,9 +367,15 @@ def make_token(user_id: int) -> str:
 VIA_COOKIE = "iopix_via"  # how the session began (password, oneclick, cloudflare, proxy): shown in the account dialog only
 
 
-def set_session(response, user_id: int, via: str):
-    response.set_cookie(COOKIE, make_token(user_id), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
-    response.set_cookie(VIA_COOKIE, via, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
+def set_session(response, user_id: int, via: str, secure: bool = False):
+    """secure: the request came over HTTPS (the proxy said so): the cookie is never sent over plain HTTP then."""
+    response.set_cookie(COOKIE, make_token(user_id), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/", secure=secure)
+    response.set_cookie(VIA_COOKIE, via, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/", secure=secure)
+
+
+def over_https(request) -> bool:
+    """Whether the client reached the viewer over HTTPS: directly, or through a proxy that says so."""
+    return request.url.scheme == "https" or (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower() == "https"
 
 
 def clear_session(response, cloudflare_cookie: bool = False):

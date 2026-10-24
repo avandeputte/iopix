@@ -396,7 +396,7 @@ export async function gpxDialog(ids) {
       const map = L.map(mapEl).fitBounds([[t.bbox[0], t.bbox[1]], [t.bbox[2], t.bbox[3]]]);
       { const rm = back.remove; back.remove = () => { try { map.remove(); } catch { /* already gone */ } rm(); }; }  // the map (and its window listeners) goes with the dialog
       tiles().addTo(map);
-      r.matches.slice(0, 500).forEach((m) => L.circleMarker([m.lat, m.lon], { radius: 4, color: '#1a73e8', fillOpacity: .8 }).bindTooltip(m.name).addTo(map));
+      r.matches.slice(0, 500).forEach((m) => L.circleMarker([m.lat, m.lon], { radius: 4, color: '#1a73e8', fillOpacity: .8 }).bindTooltip(h('span', null, m.name)).addTo(map));
     } catch { mapEl.hidden = true; }
   };
   const back = modal(`Correlate ${nf.format(ids.length)} photos with a GPS track`,

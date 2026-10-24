@@ -211,6 +211,8 @@ def _pixel_job(photos: list, gen: int):
                     if p["id"] in o_todo:
                         done.append((p["id"], st))
                         orows += [(p["id"], *o) for o in out.get("objects", [])]
+                if gen != _run["gen"]:  # reset while this batch was computed: its results are of the model before
+                    return
                 if qrows:
                     with _writer() as con:
                         con.executemany("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
@@ -247,8 +249,17 @@ class _OCR:
         return [(x[1], x[2]) for x in (res or []) if len(x) > 2]
 
 
+_ocr_lock = threading.Lock()
+
+
 def _ocr_engine():
-    """RapidOCR, if installed (./enable-ocr.sh). None otherwise; the import is tried once."""
+    """RapidOCR, if installed. None otherwise; the import is tried once, by one thread (a second caller waits for the
+    load instead of seeing "no OCR" while it is in progress)."""
+    with _ocr_lock:
+        return _ocr_engine_locked()
+
+
+def _ocr_engine_locked():
     global _ocr
     if _ocr is None:
         _ocr = False
@@ -350,6 +361,8 @@ def _vision_job(photos: list, gen: int):
                 if gen != _run["gen"]:
                     return
                 for rows in pool.map(recognise, batches[i:i + n]):  # (photo, stamp, text, nfaces, faceq)
+                    if gen != _run["gen"]:
+                        return
                     with _writer() as con:
                         con.executemany("INSERT OR REPLACE INTO ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
                         con.executemany("INSERT OR REPLACE INTO ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
@@ -381,6 +394,8 @@ def _caption_job(photos: list, gen: int):
                 progress["captions"]["done"] += len(batch)
                 continue
             rows = [(p["id"], _stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
+            if gen != _run["gen"]:
+                return
             with _writer() as con:
                 con.executemany("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
                 con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])

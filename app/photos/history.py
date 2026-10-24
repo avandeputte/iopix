@@ -270,7 +270,7 @@ def restore(entry_id: int, kind: str) -> dict:
             raise FileNotFoundError("The copy of the sidecar from before this change is gone")
         side = edits.sidecar_path(photo["path"])
         mine = snapshot(pid, side)
-        edits.ensure_backup(side)
+        edits.ensure_backup(side, photo["path"])
         shutil.copy2(e["sidecar"], side)
         _pending_from_sidecar(photo)
         record([{"photo_id": pid, "action": "restore", "summary": f"Sidecar put back as it was before change #{entry_id}", "sidecar": mine, "path": photo["path"]}])
@@ -279,8 +279,18 @@ def restore(entry_id: int, kind: str) -> dict:
         b = Path(e["file_copy"]) if e.get("file_copy") and os.path.isfile(e["file_copy"]) else edits.file_backup_path(photo["path"])
         if not b.exists():
             raise FileNotFoundError("The original of this file is no longer in file-backups")
+        from app.photos import lossless
+        from app.digikam import dbsync, dkdb
+        db_path = dkdb.sqlite_path()
+        dbsync.preflight(db_path, True, "the photo")  # the row changes too: refused while digiKam runs, before the file is touched
+        keep = lossless._copy_before(photo["path"])  # what the file is now (rotations and crops since), kept with this entry
         shutil.copy2(b, photo["path"])
-        record([{"photo_id": pid, "action": "restore", "summary": "Image file put back as it was before the viewer first wrote into it", "path": photo["path"]}])
+        # the row says "look at this file again": digiKam (and the scanner) read its size, dimensions and orientation back
+        with dbsync.write_transaction(db_path, True) as con:
+            con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (os.stat(photo["path"]).st_size, pid))
+        lossless._forget_checksum(pid)
+        record([{"photo_id": pid, "action": "restore", "summary": "Image file put back as it was before the viewer first wrote into it", "path": photo["path"],
+                 "file_copy": keep, "details": {"kept": keep}}])
         index.build()  # digiKam rescans the file on its own (its time and size changed) and reads it back
         return {"restored": "original"}
     raise ValueError("Unknown kind of restore")

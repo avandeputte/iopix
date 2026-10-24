@@ -146,7 +146,7 @@ export async function trashPhotos(ids, after) {
   ids.forEach((i) => { G.sel.delete(i); details.delete(i); });
   updateSelBar();
   after?.();
-  const comeBack = () => { S.keepView = true; S.viewKey = null; onRoute(); };
+  const comeBack = () => { S.quietUntil = 0; S.keepView = true; S.viewKey = null; onRoute(); };
   let job;
   try { job = (await post('/api/photos/trash', { ids, background: true })).job; } catch (e) { comeBack(); toastError(e, 10000); return; }
   S.quietUntil = Date.now() + 60000;  // the index catches up in the background: the page is not drawn again for it
@@ -159,7 +159,7 @@ export async function trashPhotos(ids, after) {
   })();
   toast(`${ids.length === 1 ? 'Photo' : plural(ids.length, 'photo')} moved to the trash.`, 'Undo', async () => {
     try { const r = await result; if (!r.infos?.length) { toast('Nothing was moved, so there is nothing to put back.'); return; } await post('/api/trash/restore', { infos: r.infos }); toast('Restored.'); } catch (e) { toastError(e); return; }
-    S.keepView = true; S.viewKey = null; pollSoon(600);
+    S.quietUntil = 0; S.keepView = true; S.viewKey = null; pollSoon(600);
   }, 9000);
   result.then((r) => {
     if (!r.failed?.length) return;

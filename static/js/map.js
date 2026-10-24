@@ -139,7 +139,7 @@ function mapSearch(map) {
     results.hidden = true; input.value = x.name;
     if (pin) map.removeLayer(pin);
     pin = L.marker([x.lat, x.lon], { icon: L.divIcon({ className: '', html: '<div class="fpin"></div>', iconSize: [30, 42], iconAnchor: [15, 40] }) })
-      .addTo(map).bindTooltip(x.name);
+      .addTo(map).bindTooltip(h('span', null, x.name));  // an element: Leaflet would set a string as HTML
     map.setView([x.lat, x.lon], Math.min(Math.max(x.zoom || 12, 11), 17));
   };
   const look = async () => {

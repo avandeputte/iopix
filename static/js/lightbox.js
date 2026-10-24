@@ -301,6 +301,10 @@ export async function transformPhotos(ids, op) {
 }
 /** Adjust: exposure, contrast, saturation, warmth, straighten and auto levels, previewed live on screen and saved
  *  as a new version next to the original (digiKam's "save as new version"); the original stays as it is. */
+/** The one editing mode in progress on the photo shown (adjust, crop, draw a face, move a face). It captures the
+ *  photo it started on: stepping to another photo or closing the viewer ends it, so it can never act on the wrong photo. */
+function setMode(stop) { endMode(); LB.mode = { stop }; }
+export function endMode() { const m = LB.mode; LB.mode = null; if (m) m.stop(); }
 function startAdjust() {
   const { stage, frame } = LB.el, d = LB.detail;
   if (!d || d.video) return;
@@ -322,7 +326,8 @@ function startAdjust() {
   };
   const auto = h('input', { type: 'checkbox', onchange: () => { v.autolevel = auto.checked; preview(); } });
   frame.style.overflow = 'hidden';  // the straightened preview shows what the saved crop keeps
-  const stop = () => { if (img) { img.style.filter = ''; img.style.transform = ''; } frame.style.overflow = ''; bar.remove(); };
+  const stop = () => { if (img) { img.style.filter = ''; img.style.transform = ''; } frame.style.overflow = ''; bar.remove(); if (LB.mode?.stop === stop) LB.mode = null; };
+  setMode(stop);
   const save = async () => {
     fill(saveBtn, 'Saving…'); saveBtn.disabled = true;
     let r;
@@ -379,7 +384,8 @@ export function startCrop() {
     place();
   };
   const up = () => { if (drag) { drag = null; return; } if (!start) return; start = null; if (!r || r.w < 16 || r.h < 16) { r = null; box.hidden = true; } };
-  const stop = () => { stage.removeEventListener('pointerdown', down, true); stage.removeEventListener('pointermove', move, true); stage.removeEventListener('pointerup', up, true); stage.style.cursor = ''; box.remove(); bar.remove(); };
+  const stop = () => { stage.removeEventListener('pointerdown', down, true); stage.removeEventListener('pointermove', move, true); stage.removeEventListener('pointerup', up, true); stage.style.cursor = ''; box.remove(); bar.remove(); if (LB.mode?.stop === stop) LB.mode = null; };
+  setMode(stop);
   const apply = async () => {
     if (!r || r.w < 16 || r.h < 16) { toast('Drag a rectangle first.'); return; }
     const id = d.id, rect = [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)];
@@ -395,12 +401,12 @@ export function startCrop() {
 }
 /** A source list without item k: the id list and every array alongside it (w, h, ts...), index lists (geo, faces)
  *  and index-keyed maps (video) shifted, so what is shown stays the photo at that position. */
+const INDEX_LISTS = new Set(['geo', 'faces']);  // lists of positions into id (every other array runs alongside id)
 export function dropIndex(src, k) {
-  const n = src.id.length, out = {};
+  const out = {};
   for (const [key, v] of Object.entries(src)) {
     if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-      if (v.length === n && key !== 'id') out[key] = Array.from(v).filter((_, i) => i !== k);
-      else if (key === 'id') out[key] = Array.from(v).filter((_, i) => i !== k);
+      if (!INDEX_LISTS.has(key)) out[key] = Array.from(v).filter((_, i) => i !== k);
       else out[key] = Array.from(v).filter((i) => i !== k).map((i) => (i > k ? i - 1 : i));  // a list of indices
     } else if (v instanceof Set) out[key] = new Set([...v].filter((i) => i !== k).map((i) => (i > k ? i - 1 : i)));
     else if (v && typeof v === 'object' && Object.keys(v).every((x) => /^\d+$/.test(x))) {
@@ -422,7 +428,7 @@ export function deleteCurrent() {
 }
 export function closeLightbox(fromUser) {
   if (!LB.open) return;
-  stopSlideshow();
+  endMode(); stopSlideshow();
   LB.open = false; LB.token++;
   LB.el.frame.replaceChildren();
   unpeek();
@@ -438,6 +444,7 @@ export function closeLightbox(fromUser) {
   if (src === G.data && S.route.view === 'photos') { scrollToIndex(i); renderGrid(true); }
 }
 export function step(d) {
+  if (LB.mode) return;  // a crop or face box in progress belongs to this photo: finish or cancel it first
   const n = LB.i + d;
   if (n < 0 || n >= LB.src.id.length) { if (LB.play) stopSlideshow(); return; }
   LB.i = n;
@@ -448,7 +455,7 @@ export function step(d) {
 export function showItem() {
   const { src, i, el } = LB;
   const id = src.id[i], token = ++LB.token;
-  unpeek(); $('.sharemenu')?.remove();
+  endMode(); unpeek(); $('.sharemenu')?.remove();
   LB.scale = 1; LB.tx = LB.ty = 0; LB.detail = null; LB.hires = false;
   const img = h('img', { src: `/thumb/${id}`, alt: '', draggable: 'false' });
   LB.img = img;
@@ -490,7 +497,11 @@ export function showItem() {
     el.objectsBtn.style.display = d.boxes?.length ? '' : 'none';
     renderFaces();
     if (LB.info) renderInfo();
-  }).catch(() => {});
+  }).catch((e) => {
+    if (token !== LB.token) return;
+    el.frame.replaceChildren(h('div', { class: 'empty error', style: 'color:#fff' }, /404/.test(e.message) ? 'This photo is no longer in the library.' : e.message));
+    [el.facesBtn, el.addFaceBtn, el.delBtn, el.editBtn, el.objectsBtn].forEach((b) => { b.style.display = 'none'; });
+  });
   // warm the neighbors so stepping feels instant
   for (const j of [i + 1, i - 1, i + 2]) {
     if (j < 0 || j >= src.id.length) continue;
@@ -811,7 +822,8 @@ export function startDrawFace() {
     if (w < 8 || hh < 8) { box.remove(); return; }
     personPicker((t) => { box.remove(); faceOp({ op: 'add', image: d.id, rect: [x, y, w, hh], tag: t.id }); }, d.id);
   };
-  const stop = () => { stage.removeEventListener('pointerdown', down, true); stage.removeEventListener('pointermove', move, true); stage.removeEventListener('pointerup', up, true); stage.style.cursor = ''; };
+  const stop = () => { stage.removeEventListener('pointerdown', down, true); stage.removeEventListener('pointermove', move, true); stage.removeEventListener('pointerup', up, true); stage.style.cursor = ''; box.remove(); if (LB.mode?.stop === stop) LB.mode = null; };
+  setMode(stop);
   stage.style.cursor = 'crosshair';
   stage.addEventListener('pointerdown', down, true); stage.addEventListener('pointermove', move, true); stage.addEventListener('pointerup', up, true);
 }
@@ -844,7 +856,8 @@ export function adjustFace(f, d) {
     r = { x, y, w, h: hh }; place();
   });
   box.addEventListener('pointerup', () => { drag = null; });
-  const done = () => { bar.remove(); box.remove(); frame.querySelectorAll('.facebox').forEach((x) => { x.style.visibility = ''; }); document.removeEventListener('keydown', esc, true); };
+  const done = () => { bar.remove(); box.remove(); frame.querySelectorAll('.facebox').forEach((x) => { x.style.visibility = ''; }); document.removeEventListener('keydown', esc, true); if (LB.mode?.stop === done) LB.mode = null; };
+  setMode(done);
   const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } };
   document.addEventListener('keydown', esc, true);
   const bar = h('div', { class: 'adjustbar' }, h('span', null, `Adjusting ${f.name || 'this face'}: drag to move, drag a corner to resize.`),
@@ -1021,7 +1034,7 @@ document.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-back')) return;  // a dialog is open: its keys are its own (Space on a button, Delete in a field)
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   if (LB.open) {
-    if (e.key === 'Escape') closeLightbox(true);
+    if (e.key === 'Escape') { if (LB.mode) endMode(); else closeLightbox(true); }
     else if (e.key === 'ArrowRight') step(1);
     else if (e.key === 'ArrowLeft') step(-1);
     else if (e.key === 'i' || e.key === 'I') toggleInfo();

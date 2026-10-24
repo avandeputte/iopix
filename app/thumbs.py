@@ -194,7 +194,7 @@ def make(kind: str, photo: dict) -> Path:
 def make_face(tag_id: int, photo: dict, rect: tuple, size: int = 256) -> Path:
     """Square crop around a face rectangle (given in upright full-size pixels)."""
     x, y, w, h = rect
-    dst = config.CACHE_DIR / "f" / f"{tag_id}-{photo['id']}-{x}-{y}-{w}.jpg"
+    dst = config.CACHE_DIR / "f" / f"{tag_id}-{photo['id']}-{x}-{y}-{w}-{h}.jpg"  # the whole rectangle: a taller box at the same origin is another crop
     if dst.exists():
         return dst
     with _building(dst):

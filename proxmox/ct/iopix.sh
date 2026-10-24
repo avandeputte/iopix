@@ -109,7 +109,7 @@ function update_script() {
   exit
 }
 
-ask_app_settings
+if command -v pveversion >/dev/null 2>&1; then ask_app_settings; fi  # on the Proxmox host; inside the container `update` needs no answers
 if [[ "${IOPIX_WRITE:-0}" = 1 ]]; then var_unprivileged="0"; fi
 start
 build_container

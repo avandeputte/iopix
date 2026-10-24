@@ -192,8 +192,6 @@ class Engine:
         if not enabled():
             return
         self.load()
-        self._run += 1
-        run = self._run
         with self._lock:  # drop any id embedded twice by overlapping runs
             _, keep = np.unique(self.ids, return_index=True)
             if len(keep) != len(self.ids):
@@ -202,8 +200,9 @@ class Engine:
         have = set(self.ids.tolist())
         todo = [p for p in photos if p["id"] not in have]
         if self.running and {p["id"] for p in todo} <= self._todo_ids:
-            self._run -= 1  # nothing new to embed: let the running job carry on instead of restarting it
-            return
+            return  # nothing new to embed: the running job carries on (its run number untouched, so it never sees a bump and stops)
+        self._run += 1
+        run = self._run
         self._todo_ids = {p["id"] for p in todo}
         self.total, self.done = len(todo), 0
         if not todo:

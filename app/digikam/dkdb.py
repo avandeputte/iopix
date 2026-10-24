@@ -223,6 +223,9 @@ class _Cursor:
     def fetchall(self):
         return [self._fix(r) for r in self._cur.fetchall()]
 
+    def fetchmany(self, n: int = 1000):
+        return [self._fix(r) for r in self._cur.fetchmany(n)]
+
     def __iter__(self):
         for r in self._cur:
             yield self._fix(r)
@@ -481,17 +484,12 @@ def stamp_files(items: list):
                 if st[1] != was[1] or own > recorded + 2:
                     continue  # the image file itself was rewritten: digiKam's rescan takes care of it (new hash)
                 rows.append((st[0], int(iid)))
-            if rows:
-                with write_lock:
-                    con.begin_write()
-                    con.executemany("UPDATE Images SET modificationDate = ? WHERE id = ?", rows)
-                    con.commit()
-                    note_own_write()
-        except BaseException:
-            con.rollback()
-            raise
         finally:
             con.close()
+        if rows:  # the one write: through the same guarded transaction as every other (schema check, integrity, digiKam not started meanwhile)
+            from app.digikam import dbsync
+            with dbsync.write_transaction(sqlite_path(), check_running=False) as wcon:
+                wcon.executemany("UPDATE Images SET modificationDate = ? WHERE id = ?", rows)
     except Exception as e:  # digiKam then rescans these files once; nothing is lost
         import logging
         logging.getLogger("app.digikam.dkdb").warning("file dates were not updated in digiKam's database: %s", e)
@@ -573,7 +571,11 @@ def backup(db_path=None, force: bool = False):
         while dst.exists():
             n += 1
             dst = BACKUP_DIR / f"digikam4-{stamp}-{n}.db"
-        shutil.copy2(src, dst)
+        with write_lock:  # not in the middle of a write of the viewer's own: the copy is a consistent database
+            shutil.copy2(src, dst)
+            for tail in ("-journal", "-wal"):  # a hot journal or WAL beside it belongs to the copy too
+                if os.path.exists(str(src) + tail):
+                    shutil.copy2(str(src) + tail, str(dst) + tail)
         _prune("digikam4-*.db")
         return dst
     if settings()["backup"] == "skip":
