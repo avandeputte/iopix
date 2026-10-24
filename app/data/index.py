@@ -82,7 +82,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "10"  # 10: folder date, category and chosen cover
+SCHEMA_VERSION = "11"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 

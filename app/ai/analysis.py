@@ -435,8 +435,9 @@ def results() -> dict:
             out.setdefault(r[0], {}).update(vfaces=r[1], faceq=r[2])
         for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'"):
             out.setdefault(r[0], {}).update(objects={}, npeople=0)
+        from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
         for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
-            out.setdefault(r[0], {}).update(caption_ai=r[1])
+            out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
         for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):
             d = out.setdefault(pid, {})
             d.setdefault("objects", {})[cls] = n
