@@ -353,7 +353,6 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 .tile:hover .tcheck, body.selecting .tcheck { opacity: .75; }
 .tcheck:hover { opacity: 1 !important; }
 .tile.sel { background: var(--accent-bg); }
-.tile.gone { display: none; }  /* moved to the trash a moment ago; the grid is drawn again once the index has caught up */
 .tile.sel img { transform: scale(.86); border-radius: var(--r-s); }
 .tile.sel .tcheck { opacity: 1; color: var(--accent); background: #fff; filter: none; }
 .fbadge { position: absolute; left: 5px; bottom: 4px; width: 14px; height: 14px; color: #fff; filter: drop-shadow(0 0 2px rgba(0,0,0,.8)); pointer-events: none; }

@@ -1544,6 +1544,9 @@ def test_person_options_menu_opens_in_front_of_the_map(page, server, lib):
     assert hit == "menu", (hit, b, page.viewport_size)
 
 
+SHOWN = "(id) => { return [...document.querySelectorAll('#grid img')].some((i) => new RegExp(`/thumb/${id}(\\D|$)`).test(i.getAttribute('src'))); }"  # the photo's tile is on the page
+
+
 def test_delete_key_asks_then_moves_to_the_trash_at_once_and_undo_restores(page, server, lib):
     """Delete asks first (the app's own dialog, never the browser's); on OK the tile is gone at once and a message
     says what is happening, before the server (which rebuilds its index in the background) has answered."""
@@ -1557,6 +1560,7 @@ def test_delete_key_asks_then_moves_to_the_trash_at_once_and_undo_restores(page,
     tile.locator(".tcheck").click(force=True)
     page.wait_for_selector("#selbar", timeout=5000)
     before = page.locator("#grid .tile:visible").count()
+    assert page.evaluate(SHOWN, pid)
     page.keyboard.press("Delete")
     page.wait_for_selector(".modal-back", timeout=5000)
     assert "trash" in page.locator(".modal").inner_text().lower()
@@ -1565,15 +1569,17 @@ def test_delete_key_asks_then_moves_to_the_trash_at_once_and_undo_restores(page,
     assert page.locator("#grid .tile:visible").count() == before, "Escape keeps the photo"
     page.keyboard.press("Delete")
     page.wait_for_selector(".modal-back", timeout=5000)
-    with page.expect_response(lambda r: r.url.endswith("/api/photos/trash"), timeout=15000) as resp:
+    with page.expect_response(lambda r: "/api/photos/trash/" in r.url, timeout=15000):  # the background move is done
         page.locator(".modal button", has_text="Move to trash").click()
-        page.wait_for_function("(n) => document.querySelectorAll('#grid .tile:not(.gone)').length === n", arg=before - 1, timeout=1500)  # gone before the server answers
-        assert "moving" in page.locator("#toast").inner_text().lower()
-    assert resp.value.ok
-    page.wait_for_timeout(800)
+        page.wait_for_function(SHOWN.replace("return", "return !"), arg=pid, timeout=1500)  # gone before the server answers
+    assert not page.evaluate(SHOWN, pid)
     assert not dialogs, dialogs
     assert "trash" in page.locator("#toast").inner_text().lower()
     assert any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"])
+    # another page, and back: the photo does not come back while the library catches up
+    page.evaluate("location.hash = '#/explore'"); page.wait_for_timeout(300)
+    page.evaluate("location.hash = '#/photos?sort=old'"); page.wait_for_selector("#grid .tile img", timeout=10000)
+    assert not page.evaluate(SHOWN, pid)
     with page.expect_response(lambda r: r.url.endswith("/api/trash/restore"), timeout=15000):  # the undo has reached the server
         page.locator("#toast .lnk", has_text="Undo").click()
     assert not any(t["id"] == pid for t in _json.loads(urllib.request.urlopen(server + "/api/trash").read())["items"]), "back out of the trash"

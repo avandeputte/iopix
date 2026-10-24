@@ -124,3 +124,35 @@ def test_rename_and_move_folders_with_their_subfolders(client, lib):
     shutil.rmtree(base / "zz-org-c")
     con = sqlite3.connect(lib["db"]); con.execute("DELETE FROM Albums WHERE id IN (?,?,?)", (a["id"], b["id"], c["id"])); con.commit(); con.close()
     index.build()
+
+
+def test_trash_in_the_background_leaves_every_page_at_once(client, lib):
+    """{background: true}: the photo is out of the index (and the cached answers) before the answer goes out; the
+    move happens after, and its result (for Undo) comes from the job; a rebuild in between leaves it out too."""
+    pid = lib["ids"][41]
+    path = _path(pid)
+    assert pid in client.get("/api/photos?sort=old").json()["id"]
+    r = client.post("/api/photos/trash", json={"ids": [pid], "background": True})
+    assert r.status_code == 200 and r.json()["queued"] == [pid], r.text
+    job = r.json()["job"]
+    assert _path(pid) is None and pid not in client.get("/api/photos?sort=old").json()["id"], "gone before the move is done"
+    j = client.get(f"/api/photos/trash/{job}?wait=20").json()
+    assert j["done"] and j["trashed"] == [pid] and not j["failed"] and len(j["infos"]) == 1
+    assert not os.path.exists(path) and _row(lib["db"], pid)[2] == 3
+    assert pid not in index.HIDDEN
+    r = client.post("/api/trash/restore", json={"infos": j["infos"]})
+    assert r.status_code == 200 and r.json()["restored"] == [pid], r.text
+    assert os.path.exists(path) and _path(pid) == path
+    assert client.get("/api/photos/trash/nope").status_code == 404
+
+
+def test_a_photo_on_its_way_to_the_trash_stays_out_of_a_rebuild(lib):
+    pid = lib["ids"][42]
+    index.HIDDEN.add(pid)
+    try:
+        index.build()
+        assert _path(pid) is None
+    finally:
+        index.HIDDEN.discard(pid)
+    index.build()
+    assert _path(pid) is not None

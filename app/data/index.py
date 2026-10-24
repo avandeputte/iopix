@@ -380,6 +380,29 @@ def _camera(make, model):
 
 
 _build_lock = threading.Lock()  # one build at a time in this process: the watcher, a request and the MCP server can all ask
+HIDDEN: set = set()  # photos on their way to the trash: out of the index at once, and out of every build until the move is done
+
+
+def _drop(con, ids):
+    """Delete these photos from an index database (the photo rows, their tags, faces and text)."""
+    ids = sorted(int(i) for i in ids)
+    for i in range(0, len(ids), 900):
+        part = ids[i:i + 900]
+        q = ",".join("?" * len(part))
+        for table, col in (("photos", "id"), ("photo_tags", "photo_id"), ("faces", "photo_id"), ("fts", "rowid")):
+            con.execute(f"DELETE FROM {table} WHERE {col} IN ({q})", part)
+
+
+def drop_photos(ids, dst_path: Path = config.INDEX_DB):
+    """Take photos out of the live index now (moved to the trash in the background); builds leave them out
+    too until HIDDEN lets go of them, once digiKam's rows say where they are."""
+    HIDDEN.update(int(i) for i in ids)
+    con = sqlite3.connect(str(dst_path), timeout=15)
+    try:
+        _drop(con, ids)
+        con.commit()
+    finally:
+        con.close()
 
 
 def build(dst_path: Path = config.INDEX_DB, source: tuple = None) -> dict:
@@ -716,6 +739,8 @@ def _build(dst_path: Path, source: tuple) -> dict:
         dst.executemany("INSERT INTO albums (id, pid, path, name, root, caption, n, adate, category, icon) VALUES (?,?,?,?,?,?,?,?,?,?)", [
             (aid, a["pid"], a["path"], a["name"], root_path[a["root"]], a["caption"], album_n[aid], a["date"], a["category"], a["icon"])
             for aid, a in albums.items()])
+        if HIDDEN:  # on their way to the trash: digiKam's rows may not say so yet
+            _drop(dst, set(HIDDEN))
         dst.execute("""
             UPDATE albums SET
               n_all  = (SELECT count(*) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),

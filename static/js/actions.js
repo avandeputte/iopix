@@ -2,7 +2,7 @@
 import { $, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, store } from './core.js';
 import { S, ST, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError, ualbumById } from './state.js';
 import { crumbs } from './search.js';
-import { G, renderGrid } from './grid.js';
+import { G, dropPhotos, renderGrid } from './grid.js';
 import { copyMetadata, dateEditor, editDialog, editPhotos, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
 import { pageTitle } from './pages.js';
@@ -135,34 +135,37 @@ export async function showHistory(params) {
 }
 /** Delete photos for good, after a confirmation: files, sidecars, the database rows, everything the viewer knows.
  *  The server copies the files and sidecars to data/deleted-photos and backs digiKam's database up first. */
-/** Move photos to the trash (digiKam's .dtrash, so digiKam's trash shows them too): no question, Undo in the message. */
-/** Move photos to the trash: asked first (an app dialog), then the tiles go at once and a message says what is
- *  happening while the server works; the index catches up in the background and the page is drawn again then. */
+/** Move photos to the trash (digiKam's .dtrash, so digiKam's trash shows them too), asked first (an app dialog).
+ *  The photos leave the screen at once and the server takes them out of every page before it answers; the files
+ *  and digiKam's rows follow in the background. Undo waits for that, then puts them back; a photo that could not
+ *  be moved comes back with a message. The library's catching up later redraws nothing in view. */
 export async function trashPhotos(ids, after) {
   const what = ids.length === 1 ? 'this photo' : `${plural(ids.length, 'photo')}`;
   if (!await confirmDialog(`Move ${what} to the trash? ${ids.length === 1 ? 'It' : 'They'} can be put back from Folders › Trash.`, { ok: 'Move to trash', danger: true })) return;
-  // the tiles vanish now (the grid's data is left alone: the page is drawn again once the index has caught up)
-  const tiles = S.route.view === 'photos' && G.data ? ids.map((id) => $(`#grid .tile[data-i="${G.data.id.indexOf(id)}"]`)).filter(Boolean) : [];
-  tiles.forEach((t) => t.classList.add('gone'));
-  ids.forEach((i) => G.sel.delete(i));
+  if (S.route.view === 'photos') dropPhotos(ids);
+  ids.forEach((i) => { G.sel.delete(i); details.delete(i); });
   updateSelBar();
-  toast(`Moving ${what} to the trash…`, null, null, 60000);
-  let r;
-  try { r = await post('/api/photos/trash', { ids }); } catch (e) { tiles.forEach((t) => t.classList.remove('gone')); toastError(e, 10000); return; }
-  ids.forEach((i) => details.delete(i));
-  const failed = r.failed.length ? ` ${nf.format(r.failed.length)} could not be: ${r.failed[0].error}.` : '';
-  if (r.failed.length) tiles.forEach((t) => { if (r.failed.some((f) => f.id === G.data?.id[+t.dataset.i])) t.classList.remove('gone'); });
-  if (r.trashed.length) {
-    const infos = r.infos || [];  // the trash records, for Undo
-    toast(`${plural(r.trashed.length, 'photo')} moved to the trash.${failed}`, infos.length ? 'Undo' : null, async () => {
-      try { await post('/api/trash/restore', { infos }); toast('Restored.'); } catch (e) { toastError(e); return; }
-      S.keepView = true; S.viewKey = null; pollSoon(600);
-    }, 9000);
-  } else toast(`Nothing was moved.${failed}`, null, null, 9000);
-  after?.(r);
-  // the server rebuilds its index in the background (seconds on a large library); the page redraws when it has
-  S.keepView = true;
-  [2500, 6000, 12000].forEach((ms) => setTimeout(() => { if (!document.hidden) pollStatus(); }, ms));
+  after?.();
+  const comeBack = () => { S.keepView = true; S.viewKey = null; onRoute(); };
+  let job;
+  try { job = (await post('/api/photos/trash', { ids, background: true })).job; } catch (e) { comeBack(); toastError(e, 10000); return; }
+  S.quietUntil = Date.now() + 60000;  // the index catches up in the background: the page is not drawn again for it
+  const result = (async () => {
+    for (let i = 0; i < 40; i++) {
+      const r = await api(`/api/photos/trash/${job}?wait=25`);
+      if (r.done) return r;
+    }
+    throw new Error('The move to the trash is taking long; see Folders › Trash.');
+  })();
+  toast(`${ids.length === 1 ? 'Photo' : plural(ids.length, 'photo')} moved to the trash.`, 'Undo', async () => {
+    try { const r = await result; await post('/api/trash/restore', { infos: r.infos || [] }); toast('Restored.'); } catch (e) { toastError(e); return; }
+    S.keepView = true; S.viewKey = null; pollSoon(600);
+  }, 9000);
+  result.then((r) => {
+    if (!r.failed?.length) return;
+    toast(`${plural(r.failed.length, 'photo')} could not be moved to the trash: ${r.failed[0].error}`, null, null, 10000);
+    comeBack();
+  }).catch((e) => toastError(e));
 }
 /** Pick a folder of the library; onPick(folder) with {id, path}. */
 export async function folderPicker(title, onPick, exclude) {

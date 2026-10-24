@@ -1,4 +1,5 @@
 """Organizing the library: lossless edits, trash, move and rename, delete, folders, upload, import and the share target."""
+import logging
 import os
 
 from fastapi import APIRouter
@@ -25,6 +26,9 @@ from app.core import _kick
 from app.core import _organize_allowed
 from app.core import _run_organize
 from app.core import _rebuild_after_write
+from app.core import CACHES
+from app.digikam import dkdb
+import secrets
 import threading
 
 
@@ -102,12 +106,62 @@ async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
     from app.photos import organize
     _organize_allowed()
-    ids = [int(i) for i in (await request.json()).get("ids") or []][:20000]
+    body = await request.json()
+    ids = [int(i) for i in body.get("ids") or []][:20000]
     if not ids:
         raise HTTPException(400, "Choose photos")
+    if body.get("background"):
+        return await run_in_threadpool(_trash_in_background, ids)
     r = await run_in_threadpool(_run_organize, organize.trash, ids)
     _rebuild_soon()
     return r
+
+
+TRASH_JOBS: dict = {}  # job -> {"done": Event, "result": {trashed, infos, failed}}; the last few only
+
+
+def _trash_in_background(ids: list) -> dict:
+    """{background: true}: the photos leave every page at once (out of the index and its caches) and the answer goes
+    out; moving the files and writing digiKam's rows happen after, then the index catches up. The result (for Undo,
+    and any photo that could not be moved, which comes back) is GET /api/photos/trash/{job}."""
+    from app.photos import organize
+    _run_organize(dbsync.preflight, dkdb.sqlite_path(), True, "the photos")  # digiKam open, read-only...: refused now, not later
+    index.drop_photos(ids)
+    for c in CACHES:
+        c.cache_clear()
+    job = secrets.token_hex(6)
+    TRASH_JOBS[job] = {"done": threading.Event(), "result": None}
+    for old in list(TRASH_JOBS)[:-50]:
+        TRASH_JOBS.pop(old, None)
+
+    def work():
+        try:
+            r = _run_organize(organize.trash, ids)
+        except HTTPException as e:
+            r = {"trashed": [], "infos": [], "failed": [{"id": i, "error": e.detail} for i in ids]}
+        except Exception as e:  # the cause goes to the log; the photos come back
+            logging.getLogger("app.photos.organize").exception("moving photos to the trash failed")
+            r = {"trashed": [], "infos": [], "failed": [{"id": i, "error": str(e)} for i in ids]}
+        index.HIDDEN.difference_update(ids)
+        TRASH_JOBS[job]["result"] = r
+        TRASH_JOBS[job]["done"].set()
+        _rebuild_after_write()  # the photos that could not be moved come back
+    threading.Thread(target=work, name="trash", daemon=True).start()
+    return {"job": job, "queued": ids}
+
+
+@router.get("/api/photos/trash/{job}")
+async def api_photos_trash_job(request: Request, job: str, wait: float = 0):
+    """How a background move to the trash went: {done, trashed, infos, failed}; wait (seconds, at most 30) holds the
+    answer until it is done."""
+    if not users.can_write(request.state.user):
+        raise HTTPException(403 if request.state.user else 401, "Editors only")
+    j = TRASH_JOBS.get(job)
+    if not j:
+        raise HTTPException(404, "No such job")
+    if wait > 0:
+        await run_in_threadpool(j["done"].wait, min(wait, 30))
+    return {"done": j["done"].is_set(), **(j["result"] or {})}
 
 
 @router.get("/api/trash")

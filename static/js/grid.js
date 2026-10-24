@@ -1,10 +1,10 @@
 /** The timeline grid: layout, virtual rendering, selection by click and keyboard. */
 import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
-import { S, ST, applyFilter, filterParams, loadState, savedSearchFor, toast, toastError } from './state.js';
+import { S, ST, applyFilter, filterParams, loadState, onRoute, savedSearchFor, toast, toastError } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
-import { LB, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
+import { LB, dropIndex, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
 
 export const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM
@@ -57,6 +57,25 @@ export async function showPhotos(fp) {
   syncLightbox();
 }
 
+/** Take photos out of the grid on screen now (moved to the trash): the others close up and the scroll position stays. */
+export function dropPhotos(ids) {
+  if (!G.data) return;
+  const gone = new Set(ids), ks = [];
+  G.data.id.forEach((id, i) => { if (gone.has(id)) ks.push(i); });
+  if (!ks.length) return;
+  let d = G.data;
+  for (const k of ks.reverse()) d = dropIndex(d, k);
+  d.count = d.id.length;
+  if (!d.count) { S.viewKey = null; onRoute(); return; }
+  G.data = d; G.geo = new Set(d.geo || []); G.faces = new Set(d.faces || []);
+  G.ar = new Float32Array(d.count);
+  for (let i = 0; i < d.count; i++) G.ar[i] = Math.min(2.6, Math.max(0.5, d.w[i] / (d.h[i] || 1)));
+  const top = main.scrollTop;
+  G.rendered.forEach((el) => el.remove()); G.rendered.clear();
+  layoutGrid();
+  main.scrollTop = top;
+  renderGrid(true);
+}
 export function layoutGrid() {
   const grid = $('#grid'), d = G.data;
   if (!grid || !d) return;
