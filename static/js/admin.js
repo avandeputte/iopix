@@ -191,7 +191,7 @@ export function analysisSection(view, part = 'jobs') {
       h('div', { class: 'muted note mt6' },
         others.map((other) => h('div', { style: 'margin-bottom:4px' },
           other.key === 'siglip2'
-            ? 'SigLIP 2 base is also installed. Measured on 2,160 photos against their tags it was slightly better on average than CLIP (better for animals, zoo, costumes; worse for weddings, bowling, food), and it indexes about 4 times slower. '
+            ? 'SigLIP 2 base is also installed: a newer model, generally more accurate than CLIP, though which one finds a given subject better varies; it indexes about 4 times slower. '
             : other.key === 'jinaclip' ? 'Jina CLIP v1 is also installed: a larger CLIP that understands longer, more natural queries; it indexes about 3 times slower than CLIP. '
             : `${other.label} is also installed. `,
           'Switching re-indexes the whole library in the background when that model has no index yet; search stays on the current model until it finishes, and you can switch back at any time. ',

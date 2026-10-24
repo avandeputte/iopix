@@ -48,14 +48,14 @@ REGISTRY = {
              "page": "https://huggingface.co/Qdrant/clip-ViT-B-32-vision", "what": "Content search: the original model. The fastest to index and the smallest; good with short queries (a dog, a beach), weaker with longer descriptions.",
              "size": "~600 MB"},
     "siglip2": {"label": "SigLIP 2 base", "kind": "hf", "repos": ["onnx-community/siglip2-base-patch16-224-ONNX"], "choice": "search_model",
-                "page": "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX", "what": "Content search: a little better than CLIP on average in a test on 2,160 of your photos (better for animals and costumes, worse for weddings and food), about 4 times slower to index.",
+                "page": "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX", "what": "Content search: Google's newer model, generally more accurate than CLIP, with results that differ from it by subject; about 4 times slower to index.",
                 "size": "~1.5 GB"},
     "jinaclip": {"label": "Jina CLIP v1", "kind": "hf", "repos": ["jinaai/jina-clip-v1"], "choice": "search_model",
                  "page": "https://huggingface.co/jinaai/jina-clip-v1", "what": "Content search: a larger CLIP (ViT-B/16 images, a BERT text side) that understands longer, more natural queries.",
                  "size": "~900 MB"},
     # Photo descriptions (choice "caption_model")
     "blip": {"label": "BLIP base (captions)", "kind": "hf", "repos": ["Salesforce/blip-image-captioning-base"], "choice": "caption_model",
-             "page": "https://huggingface.co/Salesforce/blip-image-captioning-base", "what": "Photo descriptions: short, plain sentences (\u201ca group of people standing on a beach\u201d). The fastest, about 0.5 s a photo.", "size": "~950 MB"},
+             "page": "https://huggingface.co/Salesforce/blip-image-captioning-base", "what": "Photo descriptions: short, plain sentences (\u201ca group of people standing on a beach\u201d). The fastest of the two.", "size": "~950 MB"},
     "blip_large": {"label": "BLIP large (captions)", "kind": "hf", "repos": ["Salesforce/blip-image-captioning-large"], "choice": "caption_model",
                    "page": "https://huggingface.co/Salesforce/blip-image-captioning-large", "what": "Photo descriptions: richer and more accurate sentences, about 3 times slower.", "size": "~1.9 GB"},
     # Object detection (choice "object_model"): the same YOLOX network at four sizes
