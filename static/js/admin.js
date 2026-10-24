@@ -161,7 +161,7 @@ export function analysisSection(view, part = 'jobs') {
   let timer = 0;  // one poll per section while a job runs; a section drawn again stops polling (body.isConnected)
   const draw = async () => {
     let d;
-    try { d = await api('/api/analysis'); } catch { return; }
+    try { d = await api('/api/analysis'); } catch (e) { if (body.isConnected) fill(body, errorBox(e)); return; }  // say so, never an empty tab
     if (S.route.view !== view || !body.isConnected) return;
     const q = d.queue || {};
     const sel = h('select', { onchange: async (e) => { try { await post('/api/settings', { bg_threads: +e.target.value }); toast('Applies when the next job starts.'); } catch (err) { toastError(err); } } },
