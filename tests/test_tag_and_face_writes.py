@@ -310,6 +310,9 @@ def test_people_on_a_video_and_one_person_per_name(lib, client):
         dk = sqlite3.connect(lib["db"])
         assert dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (vid, kid)).fetchone()
         dk.close()
+        from app.photos import history
+        said = history.entries(photo_id=vid, limit=1)["entries"][0]["summary"]
+        assert said == "Zz Kid Person added to the photo (no face box)", said  # a first add, not "put back"
         path = dict(__import__("app.digikam.dbsync", fromlist=["x"])._photo_paths([vid]))[vid]
         out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
         tags = _json.loads(out)[0].get("TagsList") or []

@@ -217,7 +217,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     labels = {"name": "Face named {name}", "confirm": "Suggested face confirmed as {name}", "ignore": "Face marked as ignored", "unknown": "Face name removed (now unknown)",
               "remove": "Face region removed", "add": "Face added for {name}", "move": "Face region moved", "detected": "Unnamed face added by face detection",
               "suggest": "Suggestion for {name} put back", "untag": "{name} taken off the photo (no face box)",
-              "tagonly": "{name} put back on the photo (no face box)"}
+              "tagonly": "{name} added to the photo (no face box)"}
     done = [r for r in results if "error" not in r and not r.get("skipped")]
     try:
         paths = dict(dbsync._photo_paths(list({r["image"] for r in done})))

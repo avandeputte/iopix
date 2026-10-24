@@ -249,7 +249,7 @@ export function photoActions(anchor, d) {
     manage && S.FACE_DETECT && !d.video ? ['Detect faces', () => detectFaces([d.id])] : null,
     manage && !d.video ? ['Add a face by hand…', () => startDrawFace()] : null,
     manage && !d.video && faceRegions(d).some((f) => f.kind === 'unknown') ? [`Remove all unnamed face regions (${faceRegions(d).filter((f) => f.kind === 'unknown').length})`, () => removeUnnamedFaces(d)] : null,
-    manage ? [d.video ? 'Add a person to this video…' : 'Add a person without a face box…', () => personPicker((t) => faceOp({ op: 'tagonly', image: d.id, tag: t.id }, () => faceOp({ op: 'untag', image: d.id, tag: t.id })), d.id)] : null,
+    manage ? [d.video ? 'Add a person to this video…' : 'Add a person without a face box…', () => personPicker((t) => faceOp({ op: 'tagonly', image: d.id, tag: t.id }, () => faceOp({ op: 'untag', image: d.id, tag: t.id }), `Added ${t.name}.`), d.id)] : null,
     d.lat != null ? 'Around this photo' : null,
     d.lat != null ? ['Day’s trail on the map', () => { closeLightbox(false); LB.pushed = false; go('map', photosWith({ from: d.day, to: d.day, trail: d.day })); }] : null,
     d.lat != null ? ['Photos nearby', () => filterFromLightbox({ bbox: [d.lat - 0.01, d.lon - 0.015, d.lat + 0.01, d.lon + 0.015].map((x) => x.toFixed(4)).join(',') })] : null,
@@ -685,7 +685,7 @@ export function tagOnlyMenu(anchor, f, d) {
     `${f.name} · no face box`,
     ['Show all photos of ' + f.name, () => filterFromLightbox({ tag: f.tag })],
     !d.video ? [`Mark ${f.name}’s face…`, () => startDrawFace()] : null,
-    [`Not in this photo: take ${f.name} off`, () => faceOp({ op: 'untag', image: d.id, tag: f.tag }, () => faceOp({ op: 'tagonly', image: d.id, tag: f.tag })), 'danger'],
+    [`Not in this photo: take ${f.name} off`, () => faceOp({ op: 'untag', image: d.id, tag: f.tag }, () => faceOp({ op: 'tagonly', image: d.id, tag: f.tag }, null, `${f.name} put back.`)), 'danger'],
   ]);
 }
 export function applyFaceLocally(d, op) {
@@ -737,7 +737,7 @@ export function faceOp(op, undo, said) {
   if (cached) cached.then((cd) => { if (cd && cd !== shown && cd.faces) ops.forEach((o) => applyFaceLocally(cd, o)); }).catch(() => {});  // a copy the viewer is not showing (a still pending one gets the change from reapplyRecent)
   redrawPhoto(id);
   const name = op.tag ? S.tagById.get(op.tag)?.name : null;
-  said = said || { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `${name} put back.` }[op.op];
+  said = said || { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `Added ${name}.` }[op.op];
   if (said) undo ? toast(said, 'Undo', undo, 7000) : toast(said);
   const prev = FACE_Q.get(id) || Promise.resolve();
   const send = () => ops.length === 1 ? post('/api/faces/op', op) : post('/api/faces/batch', { ops }).then((r) => { if (r.failed?.length) throw new Error(r.failed[0].error); });
