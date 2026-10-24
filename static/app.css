@@ -13,6 +13,8 @@
   --z-bar: 20; --z-selbar: 25; --z-panel: 30; --z-lightbox: 100; --z-banner: 120; --z-modal: 150; --z-map: 500; --z-tray: 900; --z-menu: 1000; --z-toast: 2000; --z-top: 3000;
   --bg: #ffffff; --bg2: #f1f3f4; --bg3: #e8eaed; --fg: #202124; --fg2: #5f6368; --line: #dadce0;
   --brand: #4a5aa0; --brand-deep: #3b4a8c; --brand-ink: #3b4a8c;
+  /* the name iopix in two colours (as on the icon): "io" in the sun's gold, "pix" in the sky's indigo; the gold is a shade deeper on white to stay readable */
+  --name-io: #e2a93a; --name-pix: #3b4a8c;
   --accent: #1a73e8; --accent-bg: #e8f0fe; --tile: #e8eaed; --shadow: 0 2px 10px rgba(0,0,0,.18);
   --c-blue: #1a73e8; --c-purple: #8e44d6; --c-rose: #e0426a; --c-amber: #e8a100; --c-green: #1e8e3e; --c-teal: #0b8a9e; --c-orange: #e8710a; --c-cyan: #1294b8; --c-slate: #5f6b7a; --c-indigo: #4b53c7;
   --mix: 12%;
@@ -20,12 +22,14 @@
 }
 :root[data-theme="dark"] { --warn: #fcad70; --danger: #f28b82; --ok: #81c995; --star: #fdd663; --bg: #17181b; --bg2: #24262b; --bg3: #2f3237; --fg: #e8eaed; --fg2: #9aa0a6; --line: #3c4043;
     --brand: #7f8fd0; --brand-deep: #5f6fb4; --brand-ink: #b4bfee;
+    --name-io: #f6cf72; --name-pix: #ffffff;
     --accent: #8ab4f8; --accent-bg: #283447; --tile: #2a2c31; --shadow: 0 2px 12px rgba(0,0,0,.6);
     --c-blue: #8ab4f8; --c-purple: #c58af9; --c-rose: #ff8a9e; --c-amber: #fdd663; --c-green: #81c995; --c-teal: #78d9ec; --c-orange: #fcad70; --c-cyan: #7fd1e8; --c-slate: #a8b4c2; --c-indigo: #a3a9ff;
     --mix: 22%; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --warn: #fcad70; --danger: #f28b82; --ok: #81c995; --star: #fdd663; --bg: #17181b; --bg2: #24262b; --bg3: #2f3237; --fg: #e8eaed; --fg2: #9aa0a6; --line: #3c4043;
     --brand: #7f8fd0; --brand-deep: #5f6fb4; --brand-ink: #b4bfee;
+    --name-io: #f6cf72; --name-pix: #ffffff;
     --accent: #8ab4f8; --accent-bg: #283447; --tile: #2a2c31; --shadow: 0 2px 12px rgba(0,0,0,.6);
     --c-blue: #8ab4f8; --c-purple: #c58af9; --c-rose: #ff8a9e; --c-amber: #fdd663; --c-green: #81c995; --c-teal: #78d9ec; --c-orange: #fcad70; --c-cyan: #7fd1e8; --c-slate: #a8b4c2; --c-indigo: #a3a9ff;
     --mix: 22%; }
@@ -68,6 +72,11 @@ body.noadmin #topbar a.tool[href="#/maintenance"] { display: none; }  /* the ico
 .brand { display: flex; align-items: center; gap: 10px; width: 196px; flex: none; padding-left: 10px; }  /* 14 + 10 + 14 = 38px: the logo's centre is the side menu's centre */
 .logo { width: 28px; height: 28px; border-radius: var(--r-s); background: url(icons/mark.svg) center / contain no-repeat; }
 .brand-name { font-size: var(--fs-l); font-weight: 500; white-space: nowrap; color: var(--brand-ink); letter-spacing: .01em; }
+.brand-name:has(.io) { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.02em; }  /* the name is iopix: bold and tight, as on the icon */
+.brand-name .io { color: var(--name-io); } .brand-name .pix { color: var(--name-pix); }
+.signin-brand { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; }
+.signin-brand .logo { width: 36px; height: 36px; }
+.signin-brand .brand-name, .signin-brand .brand-name:has(.io) { font-size: var(--fs-xxl); }
 #search { position: relative; flex: 1; max-width: 860px; min-width: 0; }
 #searchbox { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 2px 4px 2px 12px; border-radius: var(--r-pill); background: var(--bg2); color: var(--fg2); }
 #searchbox > .ic { width: 20px; height: 20px; }

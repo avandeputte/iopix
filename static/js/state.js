@@ -111,8 +111,15 @@ export function applyTheme() {
 }
 
 
+/** The app's name as a .brand-name span: when it is iopix, "io" and "pix" in their two colours (Settings › Name can change it). */
+export function brandName(el = h('span', { class: 'brand-name' })) {
+  const n = S.APP_NAME || 'iopix';
+  if (n.toLowerCase() === 'iopix') fill(el, h('span', { class: 'io' }, n.slice(0, 2)), h('span', { class: 'pix' }, n.slice(2)));
+  else el.textContent = n;
+  return el;
+}
 export function applyAppName() {
-  const b = $('.brand-name'); if (b) b.textContent = S.APP_NAME;
+  document.querySelectorAll('.brand-name').forEach((b) => brandName(b));
   document.title = S.APP_NAME;
   const meta = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (meta) meta.content = S.APP_NAME;
 }

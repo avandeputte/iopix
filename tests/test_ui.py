@@ -311,7 +311,7 @@ def test_pasting_a_coordinate_pair_fills_both_fields(page, server, lib):
 
 def test_pwa_service_worker_caches_the_shell(page, server):
     page.goto(server + "/#/photos")
-    out = page.evaluate("""async () => { const r = await navigator.serviceWorker.ready; const c = await caches.open('iopix-shell-v3');
+    out = page.evaluate("""async () => { const r = await navigator.serviceWorker.ready; const c = await caches.open('iopix-shell-v4');
         return { state: r.active && r.active.state, cached: (await c.keys()).map((k) => new URL(k.url).pathname) }; }""")
     assert out["state"] in ("activating", "activated")  # ready resolves while the worker may still be activating for a tick
     assert {"/", "/app.js", "/js/core.js", "/js/lightbox.js", "/app.css", "/manifest.webmanifest", "/icons/icon-192.png"} <= set(out["cached"]), "the shell and every module are cached"
@@ -953,12 +953,21 @@ def test_app_name_shows_in_the_top_bar_and_tab(page, server):
     try:
         page.goto(server + "/#/photos")
         page.wait_for_function("document.querySelector('.brand-name') && document.querySelector('.brand-name').textContent === 'iothing Photos'", timeout=10000)
+        assert page.locator(".brand-name .io").count() == 0  # another name is one colour
         assert page.title() == "iothing Photos"
         page.goto(server + "/#/settings")
         page.wait_for_selector(".srow:has-text('Name')", timeout=10000)
         assert page.locator(".srow", has_text="calls itself").locator("input").input_value() == "iothing Photos"
     finally:
         set_name("")
+
+
+def test_the_name_iopix_is_written_in_two_colours(page, server):
+    page.goto(server + "/#/photos")
+    page.wait_for_selector(".brand-name .io", timeout=10000)
+    assert page.locator(".brand-name").text_content() == "iopix"
+    io, pix = page.evaluate("[...document.querySelectorAll('.brand-name .io, .brand-name .pix')].map((e) => getComputedStyle(e).color)")
+    assert io != pix  # gold and indigo, from the --name-io/--name-pix tokens
 
 
 def test_server_log_dialog_opens_from_maintenance(page, server):

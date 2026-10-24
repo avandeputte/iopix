@@ -1,6 +1,6 @@
 /** The pages: explore, people, places, folders, albums, tags, import and the trash. */
 import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, errorBox, fill, fmtBytes, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
-import { NAV, S, ST, applyBadgePref, applyTheme, avatarOf, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
+import { NAV, S, ST, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces } from './editing.js';
@@ -628,6 +628,7 @@ export function loginDialog(required) {
   const back = modal('Sign in', tiles, form,
     h('p', { class: 'muted small' }, required ? `Sign in to use ${S.APP_NAME}.` : 'Without signing in you can browse everything; signing in keeps your display settings, favorites and albums on the server, and editors can change the library.'),
     h('div', { class: 'modal-btns' }, required ? null : h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: submit }, 'Sign in')));
+  back.querySelector('.modal').prepend(h('div', { class: 'signin-brand' }, h('span', { class: 'logo' }), brandName()));  // the logo and the name above the title
   if (required) { back.onclick = null; back.classList.add('required'); }
   api('/api/auth/accounts').then((d) => {
     if (!d.accounts.length) { name.focus(); return; }
