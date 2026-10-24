@@ -6,12 +6,15 @@
 #   ./setup.sh --yes ...       no questions: defaults and the flags below
 #
 # Flags (each one skips its question): --photos DIR  --sqlite DIR | --mysql HOST:PORT/DB:USER:PASS
+#   --iopix-db sqlite | HOST:PORT/DB:USER:PASS   iopix's own database (favorites, albums, AI results...): a SQLite
+#   file in the data folder (the default) or MySQL/MariaDB; the database is created when the user may
 #   --features search,places,objects,ocr,captions  --search-model clip|siglip2  --port N
 #   --admin NAME:PASSWORD | --no-admin   --service | --no-service   --data DIR   --python PATH
 #   --system-deps | --no-system-deps   install (or skip) python3, exiftool, ffmpeg and the MariaDB client with brew/apt/dnf/zypper/pacman
 # Secrets can stay off the command line (process lists show arguments): IOPIX_ADMIN=NAME:PASSWORD and
-#   IOPIX_MYSQL=HOST:PORT/DB:USER:PASS in the environment do what --admin and --mysql do; with --mysql or
-#   IOPIX_MYSQL given without the password part, IOPIX_MYSQL_PASSWORD supplies it. The flags win when both are given.
+#   IOPIX_MYSQL=HOST:PORT/DB:USER:PASS and IOPIX_VIEWER_DB=... in the environment do what --admin, --mysql and
+#   --iopix-db do; with --mysql or IOPIX_MYSQL given without the password part, IOPIX_MYSQL_PASSWORD supplies it
+#   (IOPIX_VIEWER_DB_PASSWORD for --iopix-db). The flags win when both are given.
 # Run it again at any time: it keeps what is installed and only adds what you choose.
 set -e
 cd "$(dirname "$0")"
@@ -19,20 +22,24 @@ APP="$(pwd)"
 OS="$(uname -s)"
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
-YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""
+YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; VIEWERDB=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --yes) YES=1; shift;; --photos) PHOTOS="$2"; shift 2;; --sqlite) SQLITE="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;;
+    --yes) YES=1; shift;; --photos) PHOTOS="$2"; shift 2;; --sqlite) SQLITE="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --iopix-db) VIEWERDB="$2"; shift 2;;
     --features) FEATURES="$2"; shift 2;; --search-model) SEARCH_MODEL="$2"; shift 2;; --port) PORT="$2"; shift 2;;
     --admin) ADMIN="$2"; shift 2;; --no-admin) NO_ADMIN=1; shift;; --service) SERVICE=1; shift;; --no-service) SERVICE=0; shift;;
     --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
 # the same answers from the environment, for installers that would rather not put passwords on a command line
 [ -n "$ADMIN" ] || ADMIN="${IOPIX_ADMIN:-}"
 [ -n "$MYSQL" ] || MYSQL="${IOPIX_MYSQL:-}"
+[ -n "$VIEWERDB" ] || VIEWERDB="${IOPIX_VIEWER_DB:-}"
+if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != sqlite ] && [ -n "${IOPIX_VIEWER_DB_PASSWORD:-}" ]; then
+  case "${VIEWERDB#*/}" in *:*:*) ;; *) VIEWERDB="$VIEWERDB:$IOPIX_VIEWER_DB_PASSWORD";; esac
+fi
 if [ -n "$MYSQL" ] && [ -n "${IOPIX_MYSQL_PASSWORD:-}" ]; then
   case "${MYSQL#*/}" in *:*:*) ;; *) MYSQL="$MYSQL:$IOPIX_MYSQL_PASSWORD";; esac  # DB:USER given, the password comes from the environment
 fi
@@ -127,6 +134,16 @@ if [ -z "$MYSQL" ] && [ -z "$SQLITE" ]; then
 fi
 [ -z "$SQLITE" ] || [ -f "$SQLITE/digikam4.db" ] || die "digikam4.db not found in $SQLITE"
 ask DATA "Folder for the viewer's own data (index, thumbnails, models, backups)" "${DATA:-$APP/data}"
+# iopix's own database: favorites, albums, users, AI results. Asked once; a later run keeps what data/viewer-db.json says
+if [ -z "$VIEWERDB" ] && [ ! -f "$DATA/viewer-db.json" ]; then
+  if yesno "Keep iopix's own database (favorites, albums, users, AI results) on MySQL/MariaDB too (no: a SQLite file in the data folder)?" n; then
+    if [ -n "$MYSQL" ]; then dhp=${MYSQL%%/*}; drest=${MYSQL#*/}; drest=${drest#*:}; dh=${dhp%%:*}; dp=${dhp##*:}; du=${drest%%:*}; else dh=127.0.0.1; dp=3306; du=iopix; fi
+    ask VH "MySQL host for iopix's database" "$dh"; ask VP "port" "$dp"; ask VD "database (created if the user may)" "iopix"; ask VU "user" "$du"; secret VW "password"
+    VIEWERDB="$VH:$VP/$VD:$VU:$VW"
+  else
+    VIEWERDB=sqlite
+  fi
+fi
 ask PORT "Port" "${PORT:-8600}"
 
 # --- features ---------------------------------------------------------------------------------------
@@ -194,6 +211,37 @@ echo "wrote $ENVF"
 if [ -n "$MYSQL" ]; then
   echo "testing the database connection"
   "$VPY" -c "from app.digikam import dkdb; r = dkdb.test_connection(); print(f\"  OK: {r['images']} photos, {r['tags']} tags, DBVersion {r['dbVersion']}, root {r['roots']}\")" || die "could not connect to the database with those settings"
+fi
+
+if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != sqlite ]; then
+  echo "iopix's own database on MySQL/MariaDB: testing, creating it if needed"
+  "$VPY" - "$VIEWERDB" <<'PYEOF' || die "could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or switch later in Settings"
+import sys
+from app.data import vdb
+hp, rest = sys.argv[1].split("/", 1)
+db, user, pw = rest.split(":", 2)
+host, _, port = hp.rpartition(":") if ":" in hp else (hp, "", "3306")
+c = {"type": "mysql", "host": host, "port": int(port or 3306), "database": db, "user": user, "password": pw}
+try:
+    vdb.test_connection(c)
+except Exception as e:
+    if "1049" not in str(e) and "Unknown database" not in str(e):
+        raise SystemExit(f"  {e}")
+    import pymysql  # the database is not there yet: create it, if this user may
+    con = pymysql.connect(host=c["host"], port=c["port"], user=user, password=pw, connect_timeout=8)
+    try:
+        con.cursor().execute(f"CREATE DATABASE IF NOT EXISTS `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+    except Exception as e2:
+        raise SystemExit(f"  the database {db} does not exist and {user} may not create it ({e2}); create it, then run setup.sh again")
+    finally:
+        con.close()
+    print(f"  created the database {db}")
+r = vdb.test_connection(c)
+vdb.save_settings(c)
+print(f"  OK: {r['version']}; iopix keeps its data in {db} on {host} ({len(r['tables'])} of its tables already there)")
+PYEOF
+elif [ "$VIEWERDB" = sqlite ] && [ -f "$DATA/viewer-db.json" ]; then
+  echo "note: $DATA/viewer-db.json already points iopix at a database; left as it is (Settings › Database switches)"
 fi
 
 say "Models"

@@ -290,8 +290,9 @@ def connect(timeout: float = 10, cfg: dict = None) -> VConn:
 
 
 def columns(con: VConn, table: str) -> list:
-    if con.mysql:
-        return [r[0] for r in con.execute(f"SHOW COLUMNS FROM `{table}`")]
+    if con.mysql:  # a table that is not there has no columns (as PRAGMA says on SQLite): a fresh, empty database
+        return [r[0] for r in con.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? "
+                                          "ORDER BY ordinal_position", (table,))]
     return [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
 
 

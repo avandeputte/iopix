@@ -15,6 +15,7 @@
 #   --features LIST     search,places,objects,ocr,captions (default: ask; "none" for browsing only)
 #   --admin NAME:PASS   the admin account (default: ask); IOPIX_ADMIN=NAME:PASS in the environment does the
 #                       same without the password in the process list, and IOPIX_MYSQL=HOST:PORT/DB:USER:PASSWORD stands in for --mysql
+#   --iopix-db sqlite|HOST:PORT/DB:USER:PASS  iopix's own database (default: ask; IOPIX_VIEWER_DB in the environment does the same)
 #   --models LIST       kept for compatibility: "none" means --features none
 #   --captions          shorthand for all features including captions
 #   --read-only         lock the viewer to browsing (READ_ONLY=1)
@@ -37,11 +38,11 @@ say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --photos) PHOTOS="$2"; shift 2;; --digikam-db) DKDB="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;;
+    --photos) PHOTOS="$2"; shift 2;; --digikam-db) DKDB="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --iopix-db) export IOPIX_VIEWER_DB="$2"; shift 2;;
     --prefix) PREFIX="$2"; shift 2;; --data) DATA="$2"; shift 2;; --port) PORT="$2"; shift 2;; --host) HOST="$2"; shift 2;;
     --user) USER_NAME="$2"; shift 2;; --models) MODELS="$2"; shift 2;; --features) FEATURES="$2"; shift 2;; --admin) ADMIN="$2"; shift 2;; --captions) CAPTIONS=1; shift;;
     --read-only) READ_ONLY=1; shift;; --no-service) SERVICE=0; shift;; --no-system-deps) SYSDEPS=0; shift;; --yes) YES=1; shift;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done

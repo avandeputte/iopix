@@ -3,7 +3,8 @@
 # this is the ct/ script; proxmox/install/iopix-install.sh runs inside the container.
 #
 # After the framework's own questions (resources, network) it asks about the app: where the photos
-# and digiKam's database are on this host (or MariaDB details), which features to install (each
+# and digiKam's database are on this host (or MariaDB details), where iopix keeps its own database
+# (SQLite in the container, or MariaDB), which features to install (each
 # downloads its model), and the admin account. It then creates the container, bind-mounts the
 # library into it and runs the app's own setup.sh inside with those answers, which installs the
 # packages, downloads the models, writes the settings, creates the admin and starts the service.
@@ -35,7 +36,7 @@ color
 catch_errors
 
 # the DKV_* names from before the rename still fill in the answers
-for _v in PHOTOS DB FEATURES WRITE ADMIN; do eval "[[ -n \"\${IOPIX_$_v:-}\" ]] || IOPIX_$_v=\"\${DKV_$_v:-}\""; done
+for _v in PHOTOS DB VIEWER_DB FEATURES WRITE ADMIN; do eval "[[ -n \"\${IOPIX_$_v:-}\" ]] || IOPIX_$_v=\"\${DKV_$_v:-}\""; done
 # ---- the app's own questions (whiptail on the host; env vars IOPIX_* skip them for unattended runs)
 ask_app_settings() {
   local bt="iopix"
@@ -55,6 +56,20 @@ ask_app_settings() {
       f=$(whiptail --backtitle "$bt" --inputbox "Folder on this host containing digikam4.db (bind-mounted read-only; drop ro=1 later for database writes):" 10 72 "/mnt/digikamDB" 3>&1 1>&2 2>&3) || exit 1
       [[ -f "$f/digikam4.db" ]] || { msg_error "digikam4.db not found in $f"; exit 1; }
       IOPIX_DB="sqlite:$f"
+    fi
+  fi
+  if [[ -z "${IOPIX_VIEWER_DB:-}" ]]; then
+    if whiptail --backtitle "$bt" --defaultno --yesno "Keep iopix's own database on MySQL/MariaDB too?\n\nIt holds favorites, albums, users, face groups and AI results.\n\nNo: a SQLite file in the container's data folder (it can be moved to MariaDB later in Settings)." 14 76 3>&1 1>&2 2>&3; then
+      local vh vp vd vu vw dh="192.168.1.2" dp="3306" du="iopix"
+      if [[ "$IOPIX_DB" == mysql:* ]]; then local r="${IOPIX_DB#mysql:}"; dh="${r%%:*}"; r="${r#*:}"; dp="${r%%/*}"; r="${r#*/}"; r="${r#*:}"; du="${r%%:*}"; fi
+      vh=$(whiptail --backtitle "$bt" --inputbox "MariaDB host or IP for iopix's database" 9 60 "$dh" 3>&1 1>&2 2>&3) || exit 1
+      vp=$(whiptail --backtitle "$bt" --inputbox "Port" 9 60 "$dp" 3>&1 1>&2 2>&3) || exit 1
+      vd=$(whiptail --backtitle "$bt" --inputbox "Database (created if the user may)" 9 60 "iopix" 3>&1 1>&2 2>&3) || exit 1
+      vu=$(whiptail --backtitle "$bt" --inputbox "User" 9 60 "$du" 3>&1 1>&2 2>&3) || exit 1
+      vw=$(whiptail --backtitle "$bt" --passwordbox "Password" 9 60 3>&1 1>&2 2>&3) || exit 1
+      IOPIX_VIEWER_DB="$vh:$vp/$vd:$vu:$vw"
+    else
+      IOPIX_VIEWER_DB="sqlite"
     fi
   fi
   if [[ -z "${IOPIX_FEATURES:-}" ]]; then
@@ -115,6 +130,7 @@ pct reboot "$CTID"; sleep 8
 msg_ok "Mounted the library"
 
 msg_info "Running the app's setup inside the container (packages, models, settings, admin, service)"
+[[ -n "${IOPIX_VIEWER_DB:-}" ]] && SECRETS+="IOPIX_VIEWER_DB=$(printf '%q' "$IOPIX_VIEWER_DB")"$'\n'
 [[ -n "${IOPIX_ADMIN:-}" ]] && SECRETS+="IOPIX_ADMIN=$(printf '%q' "$IOPIX_ADMIN")"$'\n'
 # the answers with passwords go in as a root-only file (pushed, read into setup.sh's environment, removed), never as arguments
 SECF="$(mktemp)"; chmod 600 "$SECF"; printf '%s' "$SECRETS" > "$SECF"
@@ -126,7 +142,7 @@ WRAPPED="set -a; . /opt/iopix/setup.env; set +a; rm -f /opt/iopix/setup.env; $SE
 if ! pct exec "$CTID" -- bash -c "$WRAPPED"; then
   msg_error "setup.sh failed inside the container; last lines of /opt/iopix/setup.log:"
   pct exec "$CTID" -- tail -n 40 /opt/iopix/setup.log || true
-  msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_MYSQL=host:port/db:user:password for MariaDB) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
+  msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_MYSQL=host:port/db:user:password for MariaDB, IOPIX_VIEWER_DB=the same form for iopix's own database) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
   exit 1
 fi
 # the container cannot see digiKam's process on the host: ask before database writes instead of pgrep

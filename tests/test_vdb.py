@@ -185,3 +185,27 @@ def test_columns_added_since_a_database_was_created_are_added_on_open(tmp_path, 
     assert tuple(vc.execute("SELECT name, session_gen FROM user_accounts").fetchone()) == ("old", 0)
     assert vdb.add_missing_columns(vc) == []  # a second open adds nothing
     vc.raw.close()
+
+
+def test_a_fresh_empty_mysql_database_gets_every_table(client):
+    """setup.sh points a new install at an empty MySQL/MariaDB database: the first start creates the tables (a
+    column check on a table not there yet used to fail, and the viewer fell back to SQLite)."""
+    cfg = _mysql_cfg()
+    if not cfg:
+        pytest.skip("VIEWER_TEST_MYSQL not set")
+    import pymysql
+    cfg = {**cfg, "database": cfg["database"] + "_fresh"}
+    admin = pymysql.connect(host=cfg["host"], port=cfg["port"], user=cfg["user"], password=cfg["password"], autocommit=True)
+    admin.cursor().execute(f"DROP DATABASE IF EXISTS `{cfg['database']}`")
+    admin.cursor().execute(f"CREATE DATABASE `{cfg['database']}` CHARACTER SET utf8mb4")
+    try:
+        con = vdb.connect(cfg=cfg)
+        try:
+            assert vdb.columns(con, "ai_quality") == []
+            vdb.ensure_schema(con)
+            assert set(vdb.TABLES) <= vdb.table_names(con)
+        finally:
+            con.close()
+    finally:
+        admin.cursor().execute(f"DROP DATABASE IF EXISTS `{cfg['database']}`")
+        admin.close()
