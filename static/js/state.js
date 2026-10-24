@@ -203,7 +203,10 @@ export function onRoute() {
     const again = key === S.drawnKey;
     const quiet = S.keepView || again;
     S.viewKey = key; S.drawnKey = key;
+    const kept = again && S.route.view !== 'photos' ? { nodes: [...main.childNodes], top: main.scrollTop } : null;
+    $('#libnote')?.remove();  // what it offered is being drawn now
     if (again && S.route.view === 'photos' && keepPlace()) { /* the grid stays on screen until the new one is laid out */ }
+    else if (kept) { /* another page drawn again: it stays on screen, and at the same place, until the new one is drawn */ }
     else { if (quiet) G.restore = main.scrollTop; else clearSelection(true); main.scrollTop = 0; }
     S.keepView = false;
     removeScrubber();
@@ -213,7 +216,20 @@ export function onRoute() {
     // the filter pane belongs to the photo and map views: it steps aside elsewhere and comes back with them
     if (!FILTER_VIEWS.includes(S.route.view)) { if (!$('#filters').hidden) toggleFilters(false, false); }
     else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= 1100) toggleFilters(true, false);
-    done = Promise.resolve(VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp));
+    const drawn = VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp);
+    done = Promise.resolve(drawn);
+    if (kept) {
+      // a page that fetches first puts up a "Loading…" line: the page as it was stays in its place meanwhile
+      const only = (el) => el && el.parentElement.children.length === 1 ? el : null, first = only(main.firstElementChild);
+      const waiting = drawn instanceof Promise && kept.nodes.length && !main.contains(kept.nodes[0]) && first && (first.matches('.empty') || first.matches('.page') && only(first.firstElementChild)?.matches('.empty'));
+      const placeholder = waiting ? [...main.childNodes] : null;
+      if (waiting) { main.replaceChildren(...kept.nodes); main.scrollTop = kept.top; }
+      done = done.then(() => {
+        if (S.viewKey !== key) return;
+        if (placeholder && main.contains(kept.nodes[0])) main.replaceChildren(...placeholder);  // the page ended on its message (an error, nothing to show)
+        main.scrollTop = kept.top;
+      });
+    }
     if (!$('#filters').hidden) renderFilters();
     if (!quiet) done.then(() => focusTitle(key));
   } else if (S.route.params.get('tab')) $('.stabs')?.show?.(S.route.params.get('tab'));  // Settings: a link to another tab of the page open

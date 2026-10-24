@@ -2185,7 +2185,6 @@ def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, s
     assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
 
 
-
 def test_badges_on_thumbnails_outside_the_photos_grid(page, server):
     """The favorite, face-tag and GPS badges of the Photos grid also mark the thumbnails of Explore › Rediscover
     (and On this day, bursts, duplicates), from the same component: /api/badges answers what /api/photos does."""
@@ -2226,6 +2225,62 @@ def test_badges_on_thumbnails_outside_the_photos_grid(page, server):
         assert img["x"] + img["width"] - box["x"] - box["width"] < 12 and img["y"] + img["height"] - box["y"] - box["height"] < 12, (box, img)
     finally:
         page.request.post(server + "/api/favorites", data={"ids": [fav], "on": False})
+
+
+# what sits in the middle of the page: the thumbnail, card or row there, and how far from the top of the window
+_WHAT_IS_THERE = """() => { const m = document.querySelector('#main').getBoundingClientRect(), x = m.left + m.width / 2, y = m.top + m.height / 2;
+  for (const dy of [0, 20, -20, 40, -40, 60, -60, 80, -80]) for (const dx of [0, -200, 200]) { const e = document.elementFromPoint(x + dx, y + dy)?.closest('.tile, .ghead, .card, .pcard, .frow, .trow, .row, li, a');
+    if (e) { const img = e.querySelector('img'); return [(e.textContent || '').trim().slice(0, 40), e.dataset.i || (img ? img.getAttribute('src') || '' : ''), Math.round(e.getBoundingClientRect().top)]; } }
+  return null; }"""
+
+
+@pytest.mark.parametrize("view", ["photos", "folders", "tags", "people"])
+def test_a_library_change_does_not_redraw_the_page_being_looked_at(browser, server, view):
+    """A change from elsewhere (here: an edit through the API, as digiKam or a job would make) leaves the page as it is,
+    scroll position and all, and offers a note; Show changes draws it again in the same place."""
+    import json as _json
+    ctx = browser.new_context(viewport={"width": 1280, "height": 420}, bypass_csp=True)
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    pid = _json.loads(urllib.request.urlopen(server + "/api/photos").read())["id"][2]
+
+    def call(path, body):
+        req = urllib.request.Request(server + path, data=_json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()
+
+    poll = "import('/js/main.js').then((m) => m.pollStatus()).then(() => import('/js/state.js')).then((m) => m.S.META.version)"
+    try:
+        page.goto(f"{server}/#/{view}")
+        page.wait_for_selector("#main .tile img, #main .tree, #main .cards, #main .page", timeout=15000)
+        page.wait_for_timeout(800)
+        page.evaluate(poll)  # whatever the server had waiting is taken in before the test's own change
+        page.wait_for_timeout(500)
+        room = page.locator("#main").evaluate("m => m.scrollHeight - m.clientHeight")
+        assert room > 60, f"{view}: the page must scroll for this test ({room}px)"
+        page.locator("#main").evaluate(f"m => m.scrollTop = {int(room * 0.6)}")
+        page.wait_for_timeout(300)
+        top = page.locator("#main").evaluate("m => m.scrollTop")
+        seen = page.evaluate(_WHAT_IS_THERE)
+        page.evaluate("document.querySelector('#main').firstElementChild.dataset.old = '1'")  # a redraw replaces this element
+        meta = page.evaluate("import('/js/state.js').then((m) => m.S.META.version)")
+        call("/api/edit", {"ids": [pid], "changes": {"rating": 1}})
+        assert _eventually(lambda: page.evaluate(poll) != meta, 15), "the page saw the change"
+        page.wait_for_selector("#libnote", timeout=5000)
+        assert page.evaluate("document.querySelector('#main').firstElementChild.dataset.old") == "1", f"{view} was drawn again under the user"
+        assert seen and page.evaluate(_WHAT_IS_THERE) == seen, f"{view} moved under the user: {seen} / {page.evaluate(_WHAT_IS_THERE)}"
+        page.click("#libnote .pillbtn")
+        page.wait_for_function("!document.querySelector('#main').firstElementChild?.dataset.old", timeout=10000)
+        page.wait_for_selector("#main .tile img, #main .tree, #main .cards, #main .page", timeout=10000)
+        page.wait_for_timeout(600)
+        assert page.locator("#libnote").count() == 0
+        now = page.evaluate(_WHAT_IS_THERE)
+        assert now == seen, f"{view}: Show changes moved the page (scroll {top} -> {page.locator('#main').evaluate('m => m.scrollTop')}): {seen} / {now}"
+    finally:
+        call("/api/edit/revert", {"ids": [pid]})
+        ctx.close()
+    assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
+
 
 def _units_page(browser, server, locale):
     ctx = browser.new_context(locale=locale, viewport={"width": 1280, "height": 900}, bypass_csp=True)
@@ -2293,3 +2348,45 @@ def test_location_dialog_speaks_the_chosen_units(browser, server, lib):
             assert len(pg.locator(".modal select.sharepick option").all_inner_texts()) == 6
         finally:
             ctx.close()
+
+
+def test_badges_change_at_once_on_every_thumbnail(page, server):
+    """A favorite, a person added (even without a face box) and a location set show on the photo's thumbnails right
+    away, on Explore too, without waiting for the index or a redraw; taking them off clears the badge just as fast."""
+    import json
+    page.goto(server + "/#/photos")
+    page.wait_for_selector("#grid .tile", timeout=15000)
+    d = page.evaluate("(async () => (await fetch('/api/photos')).json())()")
+    geo, faces, vids = set(d["geo"]), set(d["faces"]), {int(k) for k in d["video"]}
+    plain = next((d["id"][i] for i in range(d["count"]) if i not in faces and i not in vids), None)
+    nogeo = next((d["id"][i] for i in range(d["count"]) if i not in geo and d["id"][i] != plain), None)
+    person = page.evaluate("import('/js/state.js').then((m) => m.S.META.tags.find((t) => t.person && t.nAll)?.id)")
+    if not (plain and person):
+        pytest.skip("the test library needs a photo without people and a named person")
+    ids = [x for x in (plain, nogeo) if x]
+    page.route("**/api/random*", lambda route: route.fulfill(content_type="application/json", body=json.dumps(
+        {"id": ids, "w": [300] * len(ids), "h": [200] * len(ids), "ts": [d["ts"][d["id"].index(x)] for x in ids]})))
+    page.goto(server + "/#/explore")
+    page.reload()
+    page.wait_for_selector(f"h2:has-text('Rediscover') + .jrows .tile.badged[data-id='{plain}']", timeout=15000)
+    page.wait_for_timeout(500)  # the /api/badges answer
+    tile = lambda x: page.locator(f"h2:has-text('Rediscover') + .jrows .tile[data-id='{x}']")  # noqa: E731
+    fast = {"timeout": 1500}
+    assert tile(plain).locator(".fbadge").count() == 0 and tile(plain).locator(".cbadge[title='Has face tags']").count() == 0
+    page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], true))")
+    tile(plain).locator(".fbadge").wait_for(**fast)
+    try:
+        page.evaluate(f"import('/js/lightbox.js').then((m) => m.faceOp({{ op: 'tagonly', image: {plain}, tag: {person} }}))")
+        tile(plain).locator(".cbadge[title='Has face tags']").wait_for(**fast)
+        page.wait_for_timeout(300)
+        page.evaluate(f"import('/js/lightbox.js').then((m) => m.faceOp({{ op: 'untag', image: {plain}, tag: {person} }}))")
+        page.wait_for_timeout(300)
+        tile(plain).locator(".cbadge[title='Has face tags']").wait_for(state="detached", **fast)
+        if nogeo:
+            page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: {{ lat: 48.8584, lon: 2.2945, alt: null }} }}))")
+            tile(nogeo).locator(".cbadge[title='Has GPS coordinates']").wait_for(timeout=5000)
+            page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: null }}))")
+            tile(nogeo).locator(".cbadge[title='Has GPS coordinates']").wait_for(state="detached", timeout=5000)
+    finally:
+        page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], false))")
+    tile(plain).locator(".fbadge").wait_for(state="detached", **fast)

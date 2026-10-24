@@ -111,11 +111,12 @@ const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', '
 function redrawLive() {
   const r = S.liveRedraw;
   if (S.viewKey !== r.key) { S.liveRedraw = null; return; }  // drawn again since (a change of page): nothing stale left
+  // a change from elsewhere (digiKam, a scan, a job, another person) never redraws the page being looked at: a note offers it
+  if (!r.quiet && !S.keepView) { S.liveRedraw = null; libraryNote(r.key); return; }
   const a = document.activeElement;
   if (S.arrangePeople || (a && main.contains(a) && a.matches('input, textarea'))) return;
   S.liveRedraw = null;
   const pf = main.querySelector('.pagefilter'), kept = pf && pf.value ? { value: pf.value, start: pf.selectionStart, end: pf.selectionEnd } : null;
-  const quiet = r.quiet || S.keepView;
   S.keepView = true; S.viewKey = null;
   onRoute().then(() => {
     const el = main.querySelector('.pagefilter');
@@ -123,7 +124,14 @@ function redrawLive() {
     el.value = kept.value; el.dispatchEvent(new Event('input'));
     try { el.setSelectionRange(kept.start, kept.end); } catch { /* not a text field */ }
   });
-  if (!quiet && S.route.view === 'photos') toast('Library updated from digiKam.');
+}
+/** The library changed while a list page was on screen: the page stays as it is, and this note draws it again on request
+ *  (in place: the same scroll position). A change of page draws the new one fresh and takes the note away (state.js). */
+function libraryNote(key) {
+  if ($('#libnote')) return;
+  document.body.append(h('div', { id: 'libnote' }, h('span', null, 'The library has changed.'),
+    h('button', { class: 'pillbtn on', onclick: () => { $('#libnote')?.remove(); if (S.viewKey === key) { S.liveRedraw = { key, quiet: true }; redrawLive(); } } }, 'Show changes'),
+    h('button', { class: 'iconbtn', title: 'Not now: the changes show when the page is next opened', onclick: (e) => e.currentTarget.parentElement.remove() }, icon('close'))));
 }
 /** A new version of the viewer is on the server: a small note to load it now; it also loads at the next change of page. */
 function updateReadyNote() {

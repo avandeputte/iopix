@@ -764,8 +764,8 @@ body.nobadges .cbadges, body.nobadges .fbadge { display: none; }
 .fpinlabel { font-size: var(--fs-m); max-width: 240px; }
 .modal.svmodal { width: min(960px, 94vw); } .svframe { width: 100%; height: min(62vh, 560px); border: 0; border-radius: var(--r-m); background: var(--bg3); }
 .leaflet-control-layers { border-radius: var(--r-m) !important; font-size: var(--fs-m); }
-#reloadnote { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; z-index: var(--z-top); display: flex; gap: 10px; align-items: center; background: var(--bg); color: var(--fg); padding: 8px 8px 8px 16px; border-radius: var(--r-pill); box-shadow: var(--shadow); font-size: var(--fs-m); }
-#reloadnote .pillbtn, #reloadnote .iconbtn { flex: none; }  /* the words wrap, the buttons do not */
+#reloadnote, #libnote { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; z-index: var(--z-top); display: flex; gap: 10px; align-items: center; background: var(--bg); color: var(--fg); padding: 8px 8px 8px 16px; border-radius: var(--r-pill); box-shadow: var(--shadow); font-size: var(--fs-m); }
+#reloadnote .pillbtn, #reloadnote .iconbtn, #libnote .pillbtn, #libnote .iconbtn { flex: none; }  /* the words wrap, the buttons do not */
 .pphead { font-size: var(--fs-s); text-transform: uppercase; letter-spacing: .04em; padding: 8px 8px 2px; }
 .alist .frow.near .nm { font-weight: 500; }
 .pgroup { margin-bottom: 22px; border-radius: var(--r-l); }
@@ -906,8 +906,8 @@ button.lnk:hover { text-decoration: underline; }
   #scrub { top: calc(var(--topbar) + env(safe-area-inset-top) + 8px); bottom: calc(64px + env(safe-area-inset-bottom)); }
   body.crumbed #scrub { top: calc(var(--topbar) + env(safe-area-inset-top) + 44px); }
   #toast { bottom: calc(68px + env(safe-area-inset-bottom)); }
-  #reloadnote { bottom: calc(68px + env(safe-area-inset-bottom)); border-radius: var(--r-l); }  /* above the bottom bar; the words may take two lines */
-  html.vpshort #reloadnote { bottom: 68px; }
+  #reloadnote, #libnote { bottom: calc(68px + env(safe-area-inset-bottom)); border-radius: var(--r-l); }  /* above the bottom bar; the words may take two lines */
+  html.vpshort #reloadnote, html.vpshort #libnote { bottom: 68px; }
   .cbulk { bottom: calc(56px + env(safe-area-inset-bottom)); }
   .gbar { height: 42px; }
   html.vpshort #nav { padding-bottom: 0; height: 56px; }

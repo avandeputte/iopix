@@ -139,8 +139,9 @@ export async function showPeople() {
   if (S.route.view !== 'people') return;
   editing = canEdit && !!S.arrangePeople;
   const body = h('div');
-  const todo = h('div', { class: 'pills', style: 'margin:6px 0 4px' });
-  api('/api/faces/summary').then((s) => fill(todo,
+  // drawn again in place: the row of faces to review keeps its height until its counts arrive, so the cards below stay put
+  const todo = h('div', { class: 'pills', style: `margin:6px 0 4px;min-height:${main.querySelector('.page > .pills')?.offsetHeight || 0}px` });
+  api('/api/faces/summary').finally(() => { todo.style.minHeight = ''; }).then((s) => fill(todo,
     s.suggested[0] ? h('a', { class: 'pill', href: '#/faces?tab=suggested' }, 'Suggestions to confirm', h('b', null, `${nf.format(s.suggested[1])} in ${nf.format(s.suggested[0])} photos`)) : null,
     s.unknown[0] ? h('a', { class: 'pill', href: '#/faces?tab=unknown' }, 'Unnamed faces', h('b', null, `${nf.format(s.unknown[1])} in ${nf.format(s.unknown[0])} photos`)) : null,
     s.ignored[0] ? h('a', { class: 'pill', href: '#/faces?tab=ignored' }, 'Ignored faces', h('b', null, nf.format(s.ignored[1]))) : null)).catch(() => {});
