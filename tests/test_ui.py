@@ -2124,3 +2124,60 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
         assert page.locator("#updbanner").bounding_box()["width"] > 300
     finally:
         ctx.close()
+
+
+def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, server):
+    """Photos page: open a photo far down the grid, change the library while the viewer is open (as a face edit does),
+    close the viewer with its X, and with Back: the grid is drawn again with the same photo at the same height,
+    not from the top."""
+    import json as _json
+    ctx = browser.new_context(viewport={"width": 1280, "height": 560}, bypass_csp=True)
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    ids = _json.loads(urllib.request.urlopen(server + "/api/photos").read())["id"]
+
+    def edit(pid, changes):
+        req = urllib.request.Request(server + "/api/edit", data=_json.dumps({"ids": [pid], "changes": changes}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()
+
+    def revert(pid):
+        req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [pid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()
+
+    try:
+        page.goto(server + "/#/photos")
+        page.wait_for_selector(".tile img", timeout=15000)
+        room = page.locator("#main").evaluate("m => m.scrollHeight - m.clientHeight")
+        assert room > 400, f"the scratch grid must scroll for this test ({room}px)"
+        touched = []
+        for close in ("x", "back"):
+            page.locator("#main").evaluate(f"m => m.scrollTop = {int(room * 0.6)}")
+            page.wait_for_timeout(400)
+            top = page.locator("#main").evaluate("m => m.scrollTop")
+            tile = page.locator(".tile").nth(page.locator(".tile").count() // 2)  # one in the middle of the screen
+            idx = int(tile.get_attribute("data-i"))
+            pid = ids[idx]
+            y0 = tile.evaluate("t => t.getBoundingClientRect().top")
+            tile.click()
+            page.wait_for_selector("#lightbox:not([hidden]) .lb-frame img", timeout=10000)
+            meta = page.evaluate("import('/js/state.js').then((m) => m.S.META.version)")
+            edit(pid, {"rating": 3 if close == "x" else 4}); touched.append(pid)  # the library changes under the open viewer
+            assert _eventually(lambda: page.evaluate("import('/js/main.js').then((m) => m.pollStatus()).then(() => import('/js/state.js')).then((m) => m.S.META.version)") != meta, 15), "the page saw the change"
+            if close == "x":
+                page.mouse.move(420, 40)
+                page.click("#lightbox .lb-top .iconbtn >> nth=0")
+            else:
+                page.go_back()
+            page.wait_for_selector("#lightbox", state="hidden", timeout=5000)
+            page.wait_for_selector(".tile img", timeout=10000)
+            page.wait_for_timeout(500)
+            now = page.locator("#main").evaluate("m => m.scrollTop")
+            assert now > 100, f"closed with {close}: the grid went back to the top ({top} -> {now})"
+            y1 = page.locator(f'.tile[data-i="{idx}"]').evaluate("t => t.getBoundingClientRect().top")
+            assert abs(y1 - y0) <= 2, f"closed with {close}: the photo moved from {y0} to {y1} (scroll {top} -> {now})"
+    finally:
+        for pid in set(touched):
+            revert(pid)
+        ctx.close()
+    assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]

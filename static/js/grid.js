@@ -8,7 +8,7 @@ import { LB, dropIndex, openLightbox, sizeFrame, syncLightbox } from './lightbox
 
 export const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM
-export const G = { sel: new Set(), lastSel: -1, data: null, items: [], ar: null, total: 0, top0: 0, restore: 0, rendered: new Map(), token: 0,
+export const G = { sel: new Set(), lastSel: -1, data: null, items: [], ar: null, total: 0, top0: 0, restore: 0, anchor: null, keepAt: -1, rendered: new Map(), token: 0,
   size: store.get('tile', 'M') in SIZES ? store.get('tile', 'M') : 'M', group: store.get('group', 'day') === 'month' ? 'month' : 'day', lastTop: 0, lastT: 0, settle: 0, scrub: null };
 /** The section a timestamp belongs to in the chronological grid: its day, or its month. */
 export function groupKey(ts) {
@@ -22,10 +22,11 @@ export async function showPhotos(fp) {
   G.data = null;
   G.rendered.clear();
   const grid = h('div', { id: 'grid' }, h('div', { class: 'empty' }, 'Loading…'));
-  main.replaceChildren(grid);
+  if (!G.anchor) main.replaceChildren(grid);  // drawn again in place: the grid on screen stays until the new one is ready
   let data;
-  try { data = await api('/api/photos?' + fp.toString()); } catch (e) { grid.replaceChildren(h('div', { class: 'empty' }, 'Could not load photos: ' + e.message)); return; }
+  try { data = await api('/api/photos?' + fp.toString()); } catch (e) { main.replaceChildren(grid); grid.replaceChildren(h('div', { class: 'empty' }, 'Could not load photos: ' + e.message)); return; }
   if (token !== G.token || S.route.view !== 'photos') return;
+  if (G.anchor) main.replaceChildren(grid);
   G.data = data;
   G.geo = new Set(data.geo || []);
   G.faces = new Set(data.faces || []);
@@ -51,7 +52,11 @@ export async function showPhotos(fp) {
     return;
   }
   layoutGrid();
-  if (G.restore) { main.scrollTop = G.restore; G.restore = 0; }
+  const k = G.anchor ? data.id.indexOf(G.anchor.id) : -1, it = k >= 0 ? G.items.find((x) => !x.head && k >= x.s && k < x.e) : null;
+  if (it) main.scrollTop = it.y - G.anchor.off;
+  else if (G.anchor) main.scrollTop = G.anchor.top;
+  else if (G.restore) main.scrollTop = G.restore;
+  G.anchor = null; G.restore = 0;
   renderGrid(true);
   updateSelBar();
   syncLightbox();
@@ -159,6 +164,17 @@ export function itemAt(y) { // last item starting at or above y
 export function firstVisibleIndex() {
   if (!G.items.length) return 0;
   return G.items[itemAt(main.scrollTop + 1)].s;
+}
+/** The grid is about to be drawn again in place: remember which photo sits where, so the new grid puts it at the
+ *  same height (the one the viewer just showed, else the first one on screen). False when there is no grid to keep. */
+export function keepPlace() {
+  if (!G.data || !G.items.length || !$('#grid')) return false;
+  const i = G.keepAt >= 0 && G.keepAt < G.data.id.length ? G.keepAt : LB.open && LB.src === G.data ? LB.i : firstVisibleIndex();
+  const it = G.items.find((x) => !x.head && i >= x.s && i < x.e);
+  G.keepAt = -1;
+  if (!it) return false;
+  G.anchor = { id: G.data.id[i], off: it.y - main.scrollTop, top: main.scrollTop };
+  return true;
 }
 export function scrollToIndex(i, top = false) {
   const it = G.items.find((x) => !x.head && i >= x.s && i < x.e);

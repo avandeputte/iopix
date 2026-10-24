@@ -1,6 +1,6 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
 import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDur, h, icon, nf, norm, plural, post, store } from './core.js';
-import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
+import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, onRoute, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, renderGrid, scrollToIndex } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
 import { dateEditor, detectFaces, editControls, editPhotos, locationDialog, metadataEditor, tagDialog, tagPicker, templatePicker } from './editing.js';
@@ -436,12 +436,13 @@ export function closeLightbox(fromUser) {
   $('.facemenu')?.remove();
   $('#lightbox').hidden = true;
   const src = LB.src, i = LB.i;
+  // the grid shows the photo just seen; when the library changed meanwhile the grid is drawn again, keeping that photo where it is
+  if (src === G.data && S.route.view === 'photos') { scrollToIndex(i); renderGrid(true); if (S.viewKey === null) G.keepAt = i; }
   if (fromUser) {
     if (LB.pushed) { LB.pushed = false; history.back(); }
-    else { const p = new URLSearchParams(S.route.params); p.delete('p'); history.replaceState(null, '', hashFor(S.route.view, p)); S.route = parseHash(); S.lastHash = location.hash; }
+    else { const p = new URLSearchParams(S.route.params); p.delete('p'); history.replaceState(null, '', hashFor(S.route.view, p)); S.route = parseHash(); S.lastHash = location.hash; if (S.viewKey === null) onRoute(); }
   }
   LB.pushed = false;
-  if (src === G.data && S.route.view === 'photos') { scrollToIndex(i); renderGrid(true); }
 }
 export function step(d) {
   if (LB.mode) return;  // a crop or face box in progress belongs to this photo: finish or cancel it first

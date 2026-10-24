@@ -1,7 +1,7 @@
 /** What the whole app shares: user and settings, the library's metadata, the route and the navigation, status polling. */
 import { $, api, fill, h, main, norm, store } from './core.js';
 import { crumbs, renderChips } from './search.js';
-import { G, removeScrubber, showPhotos } from './grid.js';
+import { G, keepPlace, removeScrubber, showPhotos } from './grid.js';
 import { clearSelection, showHistory, showImport, showQuality, showTrash } from './actions.js';
 import { MORE_VIEWS, currentNav, showAlbums, showAnalysis, showBursts, showDetected, showEvents, showExplore, showFolders, showPeople, showPlaces } from './pages.js';
 import { showConsistency, showDuplicates, showFaces, showMaintenance, showSettings, showTags } from './admin.js';
@@ -20,6 +20,7 @@ export const S = {
   albumById: new Map(),
   route: { view: 'photos', params: new URLSearchParams() },
   viewKey: null,
+  drawnKey: null,  // the page last drawn: viewKey is cleared to have it drawn again, this one is not
   SEM: { enabled: false },
   CONCEPTS: null,
   APP_STAMP: null,
@@ -197,11 +198,14 @@ export function onRoute() {
   $('#nav .navmore')?.classList.toggle('on', MORE_VIEWS.includes(cur));
   renderChips();
   if (key !== S.viewKey) {
-    const quiet = S.keepView;  // drawn again in place (after an edit, a library update): focus stays where it is
-    S.viewKey = key;
-    if (S.keepView) G.restore = main.scrollTop; else clearSelection(true);
+    // the page on screen drawn again (after an edit, a library update, closing the viewer on a list that changed
+    // meanwhile): it keeps its place, the selection and the focus, and the photos grid keeps the same photo at the same height
+    const again = key === S.drawnKey;
+    const quiet = S.keepView || again;
+    S.viewKey = key; S.drawnKey = key;
+    if (again && S.route.view === 'photos' && keepPlace()) { /* the grid stays on screen until the new one is laid out */ }
+    else { if (quiet) G.restore = main.scrollTop; else clearSelection(true); main.scrollTop = 0; }
     S.keepView = false;
-    main.scrollTop = 0;
     removeScrubber();
     if (M.map && S.route.view !== 'map') { M.map.remove(); M.map = null; }  // Leaflet keeps window listeners until the map is removed
     crumbs(null);  // each view sets its own trail
