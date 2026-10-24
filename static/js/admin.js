@@ -552,7 +552,7 @@ function settingsTabs(page, view) {
     try { localStorage.setItem(`iopix.${view}Tab`, k); } catch { /* private window */ }
     if (S.route.params.get('tab') !== k) { S.route.params.set('tab', k); history.replaceState(null, '', hashFor(view, S.route.params)); }
   };
-  tabs.forEach(([k, label]) => bar.append(h('button', { class: 'pillbtn', role: 'tab', 'data-tab': k, onclick: () => show(k) }, typeof label === 'function' ? label() : label)));
+  tabs.forEach(([k, label]) => bar.append(h('button', { class: 'pillbtn stab', role: 'tab', 'data-tab': k, onclick: () => show(k) }, typeof label === 'function' ? label() : label)));
   bar.show = show;
   page.querySelector('.stab-mark').before(bar);
   show(pick);
@@ -648,7 +648,7 @@ export async function settingsPage(view) {
         const type = h('select', null, h('option', { value: 'sqlite', selected: d.type !== 'mysql' }, 'SQLite file (viewer.db in the data folder)'), h('option', { value: 'mysql', selected: d.type === 'mysql' }, 'MySQL / MariaDB'));
         const f = { host: inp('host', 'host'), port: inp('port', 'port', 'text', 70), database: inp('database', 'database'), user: inp('user', 'user'), password: inp('password', d.password_set ? 'password (stored; leave empty to keep)' : 'password', 'password', 220) };
         const my = h('div', { class: 'toolbar tight mt6',}, f.host, f.port, f.database, f.user, f.password);
-        const copy = h('input', { type: 'checkbox', checked: true }), drop = h('input', { type: 'checkbox', checked: true });
+        const copy = h('input', { type: 'checkbox', checked: true }), drop = h('input', { type: 'checkbox' });  // dropping is opt-in: the target may be a database in use
         const opts = h('div', { style: 'display:grid;gap:4px;margin-top:8px;font-size:13px' },
           h('label', { class: 'chk',}, copy, 'Copy all the data from the current database to the new one'),
           h('label', { class: 'chk',}, drop, `Drop and recreate ${S.APP_NAME}’s tables at the target first (a clean slate; anything already there is lost)`));

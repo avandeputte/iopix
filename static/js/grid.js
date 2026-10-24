@@ -67,7 +67,7 @@ export function dropPhotos(ids) {
   for (const k of ks.reverse()) d = dropIndex(d, k);
   d.count = d.id.length;
   if (!d.count) { S.viewKey = null; onRoute(); return; }
-  G.data = d; G.geo = new Set(d.geo || []); G.faces = new Set(d.faces || []);
+  G.data = d; G.geo = new Set(d.geo || []); G.faces = new Set(d.faces || []); G.lastSel = -1;  // the shift-click anchor was an index into the old list
   G.ar = new Float32Array(d.count);
   for (let i = 0; i < d.count; i++) G.ar[i] = Math.min(2.6, Math.max(0.5, d.w[i] / (d.h[i] || 1)));
   const top = main.scrollTop;

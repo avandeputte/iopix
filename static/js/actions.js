@@ -158,7 +158,7 @@ export async function trashPhotos(ids, after) {
     throw new Error('The move to the trash is taking long; see Folders › Trash.');
   })();
   toast(`${ids.length === 1 ? 'Photo' : plural(ids.length, 'photo')} moved to the trash.`, 'Undo', async () => {
-    try { const r = await result; await post('/api/trash/restore', { infos: r.infos || [] }); toast('Restored.'); } catch (e) { toastError(e); return; }
+    try { const r = await result; if (!r.infos?.length) { toast('Nothing was moved, so there is nothing to put back.'); return; } await post('/api/trash/restore', { infos: r.infos }); toast('Restored.'); } catch (e) { toastError(e); return; }
     S.keepView = true; S.viewKey = null; pollSoon(600);
   }, 9000);
   result.then((r) => {

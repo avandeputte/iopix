@@ -55,6 +55,7 @@ export const S = {
   placeRows: [],
   lastHash: null,  // the hash onRoute last drew (a link click fires popstate and hashchange for the same hash)
   liveRedraw: null,  // a list page the library changed under, waiting to be redrawn (main.js)
+  quietUntil: 0,  // until then (a minute after a move to the trash) the library's catching up redraws no page: the page already shows it
 };
 
 /** A person's badge picture; the version key busts the cache when digiKam's tag icon changes. */

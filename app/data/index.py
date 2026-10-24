@@ -450,6 +450,9 @@ def _build(dst_path: Path, source: tuple) -> dict:
             root_path = dkdb.root_paths(con)
         finally:
             con.close()
+    if HIDDEN:  # on their way to the trash: left out before anything is counted (digiKam's rows may not say so yet)
+        hidden = set(HIDDEN)
+        raw["images"] = [r for r in raw["images"] if r[0] not in hidden]
     version = _version_for(ver)
     last_source.update(kind=kind, version=ver)
     phases = {"read": time.time() - t0}
@@ -739,7 +742,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
         dst.executemany("INSERT INTO albums (id, pid, path, name, root, caption, n, adate, category, icon) VALUES (?,?,?,?,?,?,?,?,?,?)", [
             (aid, a["pid"], a["path"], a["name"], root_path[a["root"]], a["caption"], album_n[aid], a["date"], a["category"], a["icon"])
             for aid, a in albums.items()])
-        if HIDDEN:  # on their way to the trash: digiKam's rows may not say so yet
+        if HIDDEN:  # added to the trash while this build ran: out of the tables too (the counts follow at the next build)
             _drop(dst, set(HIDDEN))
         dst.execute("""
             UPDATE albums SET

@@ -145,7 +145,12 @@ body.filters-open #main { right: 340px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-s); overflow: hidden; }
 .seg button { width: 30px; height: 30px; color: var(--fg2); font-size: var(--fs-s); }
 .seg button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
-.stabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+/* the tabs of Settings and Maintenance: words on a line, the open one underlined (nothing else on the page looks like this; the buttons are pills) */
+.stabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
+.stabs .pillbtn { height: 40px; padding: 0 12px; border: 0; border-radius: 0; background: none; color: var(--fg2); font-weight: 500; position: relative; }
+.stabs .pillbtn:hover { color: var(--fg); background: none; }
+.stabs .pillbtn.on { color: var(--accent); background: none; }
+.stabs .pillbtn.on::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent); }
 .ghead { position: absolute; left: 8px; right: 0; display: flex; align-items: flex-end; padding-bottom: 8px; font-size: var(--fs-base); font-weight: 500; }
 .ghead .n { color: var(--fg2); font-weight: 400; margin-left: 10px; font-size: var(--fs-s); }
 .grow { position: absolute; left: 0; right: 0; display: flex; gap: 4px; }
