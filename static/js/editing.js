@@ -1,5 +1,5 @@
 /** Metadata editing dialogs: rating, titles, captions, tags, dates, locations and templates. */
-import { $, UTC, api, date, dfTimeLocal, fill, fmtWhen, h, icon, nf, norm, plural, post } from './core.js';
+import { $, UTC, accuracyChoices, api, date, dfTimeLocal, fill, fmtDist, fmtWhen, fromHeight, h, heightUnit, icon, nf, norm, plural, post, toHeight } from './core.js';
 import { S, go, hashFor, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G } from './grid.js';
 import { confirmDialog, modal } from './actions.js';
@@ -241,7 +241,10 @@ export async function locationDialog(ids, current, after) {
   // current: {lat, lon, alt} or null. Drag the marker or click the map; coordinates can also be typed.
   const lat = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'latitude', value: current?.lat ?? '', style: 'width:140px' });
   const lon = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'longitude', value: current?.lon ?? '', style: 'width:140px' });
-  const alt = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: 'altitude m', value: current?.alt ?? '', style: 'width:110px', oninput: () => { altAuto = false; fill(altNote); } });
+  const alt = h('input', { class: 'einput', type: 'number', step: 'any', placeholder: `altitude ${heightUnit()}`, value: toHeight(current?.alt), style: 'width:110px', oninput: () => { altAuto = false; altM = null; fill(altNote); } });
+  // the altitude in metres as it came (feet shown are rounded): kept unless the field is typed in
+  let altM = current?.alt ?? null;
+  const setAlt = (m) => { altM = m ?? null; alt.value = toHeight(m); };
   // the altitude follows the position (ground height from Google or Open-Meteo) until it is typed by hand
   let altAuto = current?.alt == null, altTimer = 0;
   const altNote = h('span', { class: 'muted smaller' });
@@ -253,7 +256,7 @@ export async function locationDialog(ids, current, after) {
       try {
         const r = await api(`/api/elevation?lat=${encodeURIComponent(la)}&lon=${encodeURIComponent(lo)}`);
         if (!altAuto || la !== lat.value || lo !== lon.value) return;
-        alt.value = r.alt; fill(altNote, `ground height from ${r.source}`);
+        setAlt(r.alt); fill(altNote, `ground height from ${r.source}`);
       } catch { fill(altNote, 'no altitude service reachable'); }
     }, 400);
   };
@@ -261,8 +264,11 @@ export async function locationDialog(ids, current, after) {
   // only the town is known: the pin goes to the town's center (search for it), with no altitude and how far off it may
   // be, saved as the position's accuracy (EXIF GPSHPositioningError, digiKam's ImagePositions.accuracy)
   const accSel = h('select', { class: 'sharepick', title: 'How far from the pin the photo may have been taken', onchange: () => drawCircle() },
-    [[1000, 'within about 1 km'], [2000, 'within about 2 km'], [5000, 'within about 5 km'], [10000, 'within about 10 km'], [25000, 'within about 25 km']]
-      .map(([v, l]) => h('option', { value: v, selected: v === (current?.accuracy ? [1000, 2000, 5000, 10000, 25000].reduce((a, b) => Math.abs(b - current.accuracy) < Math.abs(a - current.accuracy) ? b : a) : 2000) }, l)));
+    (() => {  // the photo's own value stays a choice when it is not one of the round numbers, so saving keeps it
+      const vs = accuracyChoices(), cur = current?.accuracy ? Math.round(current.accuracy) : vs[1];
+      if (!vs.includes(cur)) vs.push(cur);
+      return vs.sort((a, b) => a - b).map((v) => h('option', { value: v, selected: v === cur }, `within about ${fmtDist(v)}`));
+    })());
   const townOnly = h('input', { type: 'checkbox', checked: !!current?.accuracy, onchange: () => setTownMode() });
   let circle = null;
   const drawCircle = () => {
@@ -275,7 +281,7 @@ export async function locationDialog(ids, current, after) {
     const on = townOnly.checked;
     accSel.disabled = !on;
     alt.disabled = on;
-    if (on) { alt.value = ''; altAuto = false; fill(altNote, 'no altitude for an approximate position'); search.placeholder = 'Search the town, e.g. “Mt Lebanon, PA”'; }
+    if (on) { setAlt(null); altAuto = false; fill(altNote, 'no altitude for an approximate position'); search.placeholder = 'Search the town, e.g. “Mt Lebanon, PA”'; }
     else { altAuto = alt.value === ''; fill(altNote); search.placeholder = 'Search an address or place, e.g. “Mt Lebanon High School”'; fetchAlt(); }
     drawCircle();
   };
@@ -301,7 +307,7 @@ export async function locationDialog(ids, current, after) {
   };
   // "Suggest location": the places of the photos taken nearest in time, and on request a landmark Google recognizes
   const sugBox = h('div', { class: 'alist', style: 'max-height:200px;margin-top:4px', hidden: true });
-  const useSpot = (x) => { lat.value = x.lat; lon.value = x.lon; if (x.alt != null) { alt.value = x.alt; altAuto = false; fill(altNote, 'altitude from that photo'); } sugBox.hidden = true; place(); if (map) map.setView([x.lat, x.lon], 16); };
+  const useSpot = (x) => { lat.value = x.lat; lon.value = x.lon; if (x.alt != null) { setAlt(x.alt); altAuto = false; fill(altNote, 'altitude from that photo'); } sugBox.hidden = true; place(); if (map) map.setView([x.lat, x.lon], 16); };
   const ago = (m) => { const a = Math.abs(m); const t = a < 60 ? `${a} min` : a < 1440 ? `${Math.round(a / 6) / 10} h` : `${Math.round(a / 144) / 10} days`; return m === 0 ? 'same time' : m < 0 ? `${t} before` : `${t} after`; };
   const suggest = async () => {
     sugBox.hidden = false; fill(sugBox, h('div', { class: 'muted', style: 'padding:6px 8px' }, 'Looking at the photos taken around the same time…'));
@@ -326,11 +332,11 @@ export async function locationDialog(ids, current, after) {
       accSel, h('span', { class: 'muted small' }, 'the pin marks the town’s center; the photo is shown as approximate')),
     mapEl,
     h('div', { class: 'toolbar',}, lat, lon, alt, altNote,
-      h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; alt.value = d.alt ?? ''; altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
+      h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; setAlt(d.alt); altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
       h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
       current ? h('button', { class: 'pillbtn', onclick: async () => { { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); } } }, 'Remove location') : null,
-      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : +alt.value } })) after?.(); } }, icon('place'), 'Save location')));
+      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : altM ?? fromHeight(alt.value) } })) after?.(); } }, icon('place'), 'Save location')));
   let map, marker;
   const place = () => { fetchAlt(); if (!map || !lat.value || !lon.value) return; const ll = [+lat.value, +lon.value]; marker ? marker.setLatLng(ll) : (marker = L.marker(ll, { draggable: true }).addTo(map).on('dragend', () => { const p = marker.getLatLng(); lat.value = p.lat.toFixed(6); lon.value = p.lng.toFixed(6); fetchAlt(); drawCircle(); })); map.setView(ll, townOnly.checked ? Math.min(Math.max(map.getZoom(), 10), 13) : Math.max(map.getZoom(), 12)); drawCircle(); };
   // a pasted "40.4441, -79.9623" (comma, semicolon or space separated; N/S/E/W suffixes allowed) fills both fields
@@ -384,7 +390,7 @@ export async function gpxDialog(ids) {
     token = r.token; preview = r;
     const t = r.track;
     fill(result,
-      h('p', null, `Track: ${nf.format(t.points)} points, ${t.km} km, ${fmtWhen(t.start)} to ${dfTimeLocal.format(date(t.end))} (in this browser’s time zone).`),
+      h('p', null, `Track: ${nf.format(t.points)} points, ${fmtDist(t.km * 1000)}, ${fmtWhen(t.start)} to ${dfTimeLocal.format(date(t.end))} (in this browser’s time zone).`),
       h('p', null, h('b', null, `${nf.format(r.matched)} of ${nf.format(r.considered)} photos match`), r.unmatched ? ` (${nf.format(r.unmatched)} were taken too far from any track point)` : '', r.skipped_with_position ? `; ${nf.format(r.skipped_with_position)} already had a position and were left alone.` : '.'),
       r.matched ? h('div', { class: 'muted small' }, 'Typical gap between photo time and nearest track point: ', `${Math.round(r.matches.reduce((a, m) => a + m.gap, 0) / r.matches.length)} s`, '. If photos land in the wrong place, the camera clock or the UTC offset is off; adjust and match again.') : null);
     mapEl.hidden = !r.matched;

@@ -1,5 +1,5 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
-import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDur, h, icon, nf, norm, plural, post, store } from './core.js';
+import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, h, icon, nf, norm, plural, post, store } from './core.js';
 import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, onRoute, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, renderGrid, scrollToIndex } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
@@ -980,10 +980,10 @@ export function renderInfo() {
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
         d.region ? [', ', lnk(d.region, { region: d.region })] : null, d.country ? [', ', lnk(d.country, { country: d.country })] : null) : null,
       ex.gpsAccuracy ? h('div', { class: 'approx', title: 'Only the town is known: the pin marks its center' }, icon('place'),
-        `Approximate location · within about ${ex.gpsAccuracy >= 1000 ? `${+(ex.gpsAccuracy / 1000).toFixed(1)} km` : `${Math.round(ex.gpsAccuracy)} m`}`) : null,
+        `Approximate location · within about ${fmtDist(ex.gpsAccuracy)}`) : null,
       mapEl,
       h('div', { class: 'irow' }, icon('place'), h('div', null, h('div', { class: 'a' }, `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`),
-        h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${Math.round(d.alt)} m altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
+        h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${fmtHeight(d.alt)} altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
           h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel), ' · ', h('button', { type: 'button', class: 'lnk', onclick: () => streetView(d.lat, d.lon, d.name) }, 'Street View'))))] : null,
     show('details') && kv.length ? [h('h4', null, 'Details'), h('div', { class: 'kv' }, kv)] : null,
     show('camera') && ckv.length ? [h('h4', null, 'Camera'), h('div', { class: 'kv' }, ckv)] : null,

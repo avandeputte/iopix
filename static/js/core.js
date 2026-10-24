@@ -133,6 +133,28 @@ export function fmtBytes(b) {
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
   return `${b >= 100 || i === 0 ? Math.round(b) : b.toFixed(1)} ${u[i]}`;
 }
+// Distances are kept in metres and shown in the units chosen under Settings › Display: 'auto' (the default) follows the
+// browser's region, miles and feet where roads are signed in miles (the US and its territories, the UK, Liberia, Myanmar)
+export const UNITS = [['auto', 'Automatic'], ['mi', 'Miles'], ['km', 'Kilometres']];
+const MILE_REGIONS = ['US', 'PR', 'GU', 'VI', 'AS', 'MP', 'UM', 'GB', 'LR', 'MM'];
+export function regionUsesMiles(lang) {
+  try { const l = new Intl.Locale(lang || 'en-US'); return MILE_REGIONS.includes(l.region || l.maximize().region); } catch { return false; }
+}
+export const useMiles = () => { const u = store.get('units', 'auto'); return u === 'mi' || (u !== 'km' && regionUsesMiles(navigator.language)); };
+const FT = 3.28084, MI = 1609.344, nf1 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+/** A distance in metres in words: "350 m", "1.2 km"; "800 ft", "0.7 mi". */
+export function fmtDist(m) {
+  if (useMiles()) return m < MI / 10 ? `${nf.format(Math.round(m * FT))} ft` : `${nf1.format(m / MI)} mi`;
+  return m < 1000 ? `${nf.format(Math.round(m))} m` : `${nf1.format(m / 1000)} km`;
+}
+/** A height (altitude) in metres: "312 m" or "1,024 ft". */
+export const fmtHeight = (m) => `${nf.format(Math.round(useMiles() ? m * FT : m))} ${heightUnit()}`;
+export const heightUnit = () => (useMiles() ? 'ft' : 'm');
+/** Height between metres and the units shown, for an input field (feet to one decimal, so a metre value survives). */
+export const toHeight = (m) => (m == null || m === '' ? '' : useMiles() ? Math.round(m * FT * 10) / 10 : m);
+export const fromHeight = (v) => (v === '' || v == null ? null : useMiles() ? +v / FT : +v);
+/** How far off an approximate position may be: round numbers of the units shown, in metres. */
+export const accuracyChoices = () => [1, 2, 5, 10, 25].map((n) => Math.round(n * (useMiles() ? MI : 1000)));
 export function fmtDur(s) {
   s = Math.round(s || 0);
   const m = Math.floor(s / 60), hh = Math.floor(m / 60);

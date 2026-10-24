@@ -1250,6 +1250,7 @@ def test_only_the_town_is_known_saves_an_approximate_location(page, server, lib)
     """Set location › Only the town is known: no altitude, a radius, saved as the position's accuracy; the info panel
     then says the location is approximate."""
     import json as _json
+    page.add_init_script("localStorage.setItem('iopix.units', 'km')")  # the sizes below are in kilometres
     pid = lib["ids"][2]
     _open_photo(page, server, pid)
     page.keyboard.press("i")
@@ -1678,6 +1679,7 @@ def test_folder_properties_dialog(page, server):
 
 
 def test_map_place_mode_shows_the_tray(page, server):
+    page.add_init_script("localStorage.setItem('iopix.units', 'km')")  # the sizes below are in kilometres
     page.goto(server + "/#/map")
     try:
         page.wait_for_selector(".mapbar button:has-text('Place photos')", timeout=15000)
@@ -2181,3 +2183,71 @@ def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, s
             revert(pid)
         ctx.close()
     assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
+
+
+def _units_page(browser, server, locale):
+    ctx = browser.new_context(locale=locale, viewport={"width": 1280, "height": 900}, bypass_csp=True)
+    pg = ctx.new_page()
+    pg.goto(server + "/#/settings")
+    pg.wait_for_selector("#unitseg", timeout=10000)
+    return ctx, pg
+
+
+_FMT = """async (u) => { const c = await import('/js/core.js'); localStorage.setItem('iopix.units', u);
+    return [c.fmtDist(100), c.fmtDist(1609.344), c.fmtDist(25000), c.fmtHeight(300), c.heightUnit(), c.accuracyChoices()[0],
+            c.fromHeight(c.toHeight(123.4)) ]; }"""
+
+
+def test_units_follow_the_browser_region_and_the_setting(browser, server):
+    """Settings > Display > Units: Automatic gives miles and feet to a US browser and kilometres to a German one;
+    Miles or Kilometres fixes it. Distances are kept in metres either way."""
+    ctx, pg = _units_page(browser, server, "en-US")
+    try:
+        assert pg.locator("#unitseg [data-units=auto]").inner_text() == "Automatic (miles here)"
+        assert "on" in pg.locator("#unitseg [data-units=auto]").get_attribute("class"), "Automatic is the default"
+        mi = pg.evaluate(_FMT, "auto")
+        assert mi[:5] == ["328 ft", "1 mi", "15.5 mi", "984 ft", "ft"], mi
+        assert mi[5] == 1609 and abs(mi[6] - 123.4) < 0.05, mi
+        km = pg.evaluate(_FMT, "km")
+        assert km[:5] == ["100 m", "1.6 km", "25 km", "300 m", "m"] and km[5] == 1000, km
+        pg.evaluate("localStorage.removeItem('iopix.units')")
+        pg.reload()
+        pg.click("#unitseg [data-units=km]")
+        assert pg.evaluate("localStorage.getItem('iopix.units')") == "km"
+        assert "on" in pg.locator("#unitseg [data-units=km]").get_attribute("class")
+    finally:
+        ctx.close()
+    ctx, pg = _units_page(browser, server, "de-DE")
+    try:
+        assert pg.locator("#unitseg [data-units=auto]").inner_text() == "Automatic (kilometres here)"
+        assert pg.evaluate(_FMT, "auto")[1] == "1,6 km"
+        assert pg.evaluate(_FMT, "mi")[1] == "1 mi"
+    finally:
+        ctx.close()
+
+
+def test_location_dialog_speaks_the_chosen_units(browser, server, lib):
+    """The location dialog's altitude field and "Only the town is known" sizes follow Units; an altitude
+    left alone is saved in metres exactly as it was."""
+    pid = next(i for i in lib["ids"] if i not in lib["videos"])
+    for units, alt_ph, first in (("mi", "altitude ft", "within about 1 mi"), ("km", "altitude m", "within about 1 km")):
+        ctx = browser.new_context(locale="en-US", viewport={"width": 1280, "height": 900}, bypass_csp=True)
+        pg = ctx.new_page()
+        try:
+            pg.goto(server + "/#/settings")
+            pg.evaluate(f"localStorage.setItem('iopix.units', '{units}')")
+            _open_photo(pg, server, pid)
+            pg.evaluate("import('/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, alt: 250.37}))" % pid)
+            pg.wait_for_selector(f".modal input[placeholder='{alt_ph}']", timeout=5000)
+            opts = pg.locator(".modal select.sharepick option").all_inner_texts()
+            assert opts[0] == first and len(opts) == 5, opts
+            shown = pg.locator(f".modal input[placeholder='{alt_ph}']").input_value()
+            assert shown == ("821.4" if units == "mi" else "250.37"), shown
+            pg.locator(".modal button", has_text="Cancel").click()
+            # a stored approximate position that is not one of the round sizes stays a choice, selected
+            pg.evaluate("import('/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, accuracy: 3000}))" % pid)
+            pg.wait_for_selector(".modal select.sharepick", timeout=5000)
+            assert pg.locator(".modal select.sharepick").input_value() == "3000"
+            assert len(pg.locator(".modal select.sharepick option").all_inner_texts()) == 6
+        finally:
+            ctx.close()

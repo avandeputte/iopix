@@ -1,5 +1,5 @@
 /** The map page (Leaflet, loaded on demand). */
-import { $, api, date, dfDay, dfTime, errorBox, fill, h, icon, main, nf, plural, store } from './core.js';
+import { $, accuracyChoices, api, date, dfDay, dfTime, errorBox, fill, fmtDist, h, icon, main, nf, plural, store } from './core.js';
 import { S, applyFilter, filterParams, go, toast, toastError } from './state.js';
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
@@ -115,7 +115,7 @@ export async function showMap(fp) {
     L.circleMarker(pts[0], { radius: 7, color: cssVar('--ok'), fillOpacity: 1 }).bindTooltip('Start · ' + dfTime.format(date(t.ts[0]))).addTo(map);
     L.circleMarker(pts[pts.length - 1], { radius: 7, color: cssVar('--danger'), fillOpacity: 1 }).bindTooltip('End · ' + dfTime.format(date(t.ts[t.ts.length - 1]))).addTo(map);
     const km = pts.reduce((a, p, i) => i ? a + Math.hypot(p[0] - pts[i - 1][0], (p[1] - pts[i - 1][1]) * Math.cos(p[0] * Math.PI / 180)) * 111.2 : 0, 0);
-    bar.append(h('span', { class: 'pillbtn', style: 'cursor:default' }, `Trail: ${t.id.length} photos, ${km.toFixed(1)} km, ${dfTime.format(date(t.ts[0]))} to ${dfTime.format(date(t.ts[t.ts.length - 1]))}`));
+    bar.append(h('span', { class: 'pillbtn', style: 'cursor:default' }, `Trail: ${t.id.length} photos, ${fmtDist(km * 1000)}, ${dfTime.format(date(t.ts[0]))} to ${dfTime.format(date(t.ts[t.ts.length - 1]))}`));
     map.fitBounds(L.latLngBounds(pts).pad(0.15));
   }).catch(() => {});
   if (S.CAN_MANAGE) bar.append(h('button', { class: 'pillbtn' + (M.placing ? ' on' : ''), title: 'Put photos without a location on the map: select them in the tray, then click the map or drag them onto it. Markers can then be dragged to a better spot.',
@@ -216,7 +216,7 @@ async function placeTray(map, fp, el) {
   // only the town is known: the photos go to the town's center, saved as approximate (no altitude, an accuracy radius)
   const townOnly = h('input', { type: 'checkbox', onchange: () => { accSel.disabled = !townOnly.checked; search.placeholder = townOnly.checked ? 'Find the town' : 'Find a place, landmark or address'; } });
   const accSel = h('select', { class: 'sharepick', disabled: true, title: 'How far from the spot the photos may have been taken' },
-    [[1000, '~1 km'], [2000, '~2 km'], [5000, '~5 km'], [10000, '~10 km'], [25000, '~25 km']].map(([v, l]) => h('option', { value: v, selected: v === 2000 }, l)));
+    accuracyChoices().map((v, i) => h('option', { value: v, selected: i === 1 }, `~${fmtDist(v)}`)));
   // find a place: a name, landmark or address (the same search as Set location), then the map zooms there
   let st = 0;
   const results = h('div', { class: 'alist', hidden: true, style: 'max-height:180px' });

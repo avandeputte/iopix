@@ -1,5 +1,5 @@
 /** Settings, maintenance, the model table, consistency, face quality, the history page and faces. */
-import { $, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
+import { $, UNITS, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, regionUsesMiles, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, faceUrl, filterParams, go, hashFor, infoPrefsEditor, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs } from './search.js';
 import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
@@ -586,6 +586,9 @@ export async function settingsPage(view) {
     row('Appearance', `Light (the default) or dark colors, or follow the device’s setting. ${S.USER ? 'Saved with your account, so it follows you to other devices.' : 'Remembered in this browser; sign in to keep it with an account.'}`,
       h('div', { class: 'eseg', id: 'themeseg' }, THEMES.map(([k, label]) => h('button', { class: store.get('theme', 'light') === k ? 'on' : '', 'data-theme': k, onclick: (e) => {
         store.set('theme', k); applyTheme(); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); } }, label)))),
+    row('Units', `How distances and heights read: the size of an approximate location, a day’s trail, altitude. Automatic follows this browser’s language and region, so miles and feet in the US, kilometres and metres in most other places. ${S.USER ? 'Saved with your account, so it follows you to other devices.' : 'Remembered in this browser; sign in to keep it with an account.'}`,
+      h('div', { class: 'eseg', id: 'unitseg' }, UNITS.map(([k, label]) => h('button', { class: store.get('units', 'auto') === k ? 'on' : '', 'data-units': k, onclick: (e) => {
+        store.set('units', k); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); } }, k === 'auto' ? `${label} (${regionUsesMiles(navigator.language) ? 'miles' : 'kilometres'} here)` : label)))),
     row('Thumbnail badges', 'The small marks on thumbnails: face tags, GPS coordinates and favorites. This is remembered per browser.',
       h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer' }, h('input', { type: 'checkbox', checked: store.get('badges', '1') !== '0',
         onchange: (e) => { store.set('badges', e.target.checked ? '1' : '0'); applyBadgePref(); } }), 'Show badges')),
