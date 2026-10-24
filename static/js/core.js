@@ -140,13 +140,40 @@ export function fmtRange(a, b) {
   const x = dfMonth.format(date(a)), y = dfMonth.format(date(b));
   return x === y ? x : `${x} – ${y}`;
 }
+/** The connection to the server. A request that never reaches it (Wi-Fi to cellular on leaving the house, a tunnel)
+ *  makes fetch reject with a TypeError ("Load failed" in Safari, "Failed to fetch" in Chrome). Reads wait and try
+ *  again, sooner when the device is back online or the app comes back to the front; when they give up, NET.lost is
+ *  set and main.js draws a page left showing NO_CONNECTION again once the server answers. */
+export const NET = { lost: false };
+export const NO_CONNECTION = 'No connection to the server.';
+const isNetErr = (e) => e instanceof TypeError;
+const netError = (more = '') => Object.assign(new Error(NO_CONNECTION + more), { net: true });
+export function netWait(ms) {
+  return new Promise((ok) => {
+    const done = () => { clearTimeout(t); window.removeEventListener('online', done); document.removeEventListener('visibilitychange', vis); ok(); };
+    const vis = () => { if (document.visibilityState === 'visible') done(); };
+    const t = setTimeout(done, ms);
+    window.addEventListener('online', done); document.addEventListener('visibilitychange', vis);
+  });
+}
 export async function api(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(`${r.status} ${path}`);
-  return r.json();
+  for (const wait of [1000, 3000, 6000, 0]) {
+    let r;
+    try { r = await fetch(path); } catch (e) {
+      if (!isNetErr(e)) throw e;
+      if (!wait) { NET.lost = true; throw netError(' Trying again…'); }
+      await netWait(wait); continue;
+    }
+    if (!r.ok) throw new Error(`${r.status} ${path}`);
+    return r.json();
+  }
 }
 export async function post(path, body) {
-  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  let r;
+  try { r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {
+    if (isNetErr(e)) { NET.lost = true; throw netError(' Try again in a moment.'); }  // not sent again by itself: it changes something
+    throw e;
+  }
   if (!r.ok) {
     let msg = `${r.status} ${path}`; try { msg = (await r.json()).detail || msg; } catch { /* not json */ }
     throw new Error(msg);

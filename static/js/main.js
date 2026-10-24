@@ -1,5 +1,5 @@
 /** Startup: metadata, state, the first route. */
-import { $, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
+import { $, NET, NO_CONNECTION, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
 import { FILTER_VIEWS, NAV, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toast, toastError } from './state.js';
 import { initSearch } from './search.js';
 import { confirmDialog } from './actions.js';
@@ -134,6 +134,7 @@ export async function pollStatus() {
   let delay = 20000;
   try {
     const s = await api('/api/status');
+    if (NET.lost) reconnected();
     if (s.requireLogin && !s.user && S.USER) { location.reload(); return; }  // the session ended: the sign-in screen, not a dead page
     const el = $('#status');
     const progress = (label, p, ms) => { el.replaceChildren(label, h('br'), `${nf.format(p.done)} / ${nf.format(p.total)}`, h('div', { class: 'bar' }, h('i', { style: `width:${(100 * p.done / p.total).toFixed(1)}%` }))); delay = ms; };
@@ -177,9 +178,20 @@ export async function pollStatus() {
       else S.STALE_VIEW = true;
     }
     if (S.liveRedraw) redrawLive();
-  } catch { /* server restarting */ }
+  } catch { if (NET.lost) delay = 4000; }  // server restarting, or no network: look again soon
   pollSoon(delay);
 }
+/** The server answers again after a lost connection: what failed for want of it is loaded again. Only a page that
+ *  shows the "no connection" message is drawn again (a page in use is left as it is); broken thumbnails reload. */
+function reconnected() {
+  NET.lost = false;
+  if (!S.META) { boot(); return; }  // the library never loaded
+  if (main.textContent.includes(NO_CONNECTION)) { S.viewKey = null; onRoute(); }
+  document.querySelectorAll('img').forEach((i) => { if (i.complete && !i.naturalWidth && i.src) { const src = i.src; i.src = ''; i.src = src; } });
+}
+const lookAgain = () => { if (NET.lost) pollSoon(300); };
+window.addEventListener('online', lookAgain);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lookAgain(); });
 export async function start() {
   await loadUser();
   $('#nav').replaceChildren(...NAV.map(([v, label, ic, href]) => h('a', { href: href || `#/${v}`, 'data-v': v }, icon(ic), label)),
@@ -193,7 +205,7 @@ export async function start() {
 export async function boot() {
   S.BOOTED = true; document.body.classList.remove('locked');
   // (a search typed before the metadata arrived draws its list once it is here)
-  try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); return; }
+  try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); if (NET.lost) pollSoon(4000); return; }
   if (store.get('filters', '0') === '1' && innerWidth >= 1100 && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
   await pollStatus();
   onRoute();

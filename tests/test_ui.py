@@ -2051,3 +2051,28 @@ def test_quality_page_keeps_its_place_after_an_edit_in_the_viewer(page, server, 
         assert page.evaluate("document.querySelector('.qsec[data-check=nolocation]')?.dataset.mark") == "kept", "closing the viewer drew the report again"
     finally:
         post_("/api/edit/revert", {"ids": [pid]})
+
+
+def test_a_lost_connection_is_retried_and_the_page_recovers(page, server):
+    # leaving home: Wi-Fi drops, requests fail with "Load failed"; reads try again by themselves
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("#nav a", timeout=10000)
+    fails = {"n": 0}
+    def flaky(route):
+        if fails["n"] < 2:
+            fails["n"] += 1
+            return route.abort("internetdisconnected")
+        return route.continue_()
+    page.route("**/api/photos?*", flaky)
+    page.goto(server + "/#/photos")
+    page.wait_for_selector(".tile, #grid .tile, [data-i]", timeout=15000)
+    assert fails["n"] == 2
+    assert "No connection" not in page.locator("#main").text_content()
+    page.unroute("**/api/photos?*")
+    # down for longer than the retries: the page says so, and draws itself again once the server answers
+    page.route("**/api/**", lambda r: r.abort("internetdisconnected"))
+    page.goto(server + "/#/folders")
+    page.wait_for_function("document.querySelector('#main').textContent.includes('No connection to the server')", timeout=20000)
+    page.unroute("**/api/**")
+    page.evaluate("window.dispatchEvent(new Event('online'))")
+    page.wait_for_function("!document.querySelector('#main').textContent.includes('No connection to the server')", timeout=20000)
