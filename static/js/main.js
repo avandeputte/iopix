@@ -197,12 +197,46 @@ window.addEventListener('online', lookAgain);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lookAgain(); });
 export async function start() {
   await loadUser();
-  $('#nav').replaceChildren(...NAV.map(([v, label, ic, href]) => h('a', { href: href || `#/${v}`, 'data-v': v }, icon(ic), label)),
-    h('button', { class: 'navmore', 'data-v': 'more', title: 'More', onclick: moreSheet }, icon('more'), 'More'), h('div', { id: 'status', role: 'status', 'aria-live': 'polite' }));
+  // the sidebar: the destinations in groups (a gap after Favorites, Places and Map), then Settings and Maintenance at
+  // the foot above the status line. On phones the same links are the bottom bar: four of them and More.
+  const link = ([v, label, ic, href]) => h('a', { href: href || `#/${v}`, 'data-v': v }, icon(ic), h('span', { class: 'nl' }, label));
+  $('#nav').append(...NAV.map((n) => [link(n), ['favorites', 'places'].includes(n[0]) ? h('div', { class: 'navgap' }) : null]).flat().filter(Boolean),
+    h('button', { class: 'navmore', 'data-v': 'more', title: 'More', onclick: moreSheet }, icon('more'), 'More'),
+    h('div', { class: 'navfoot' }, link(['settings', 'Settings', 'gear']), link(['maintenance', 'Maintenance', 'wrench']), h('div', { id: 'status', role: 'status', 'aria-live': 'polite' })));
+  initSidebar();
   initSearch();
   applyBadgePref(); applyTheme();
   if (S.REQUIRE_LOGIN && !S.USER) { document.body.classList.add('locked'); loginDialog(true); return; }  // boot() runs after sign-in
   await boot();
+}
+/** The sidebar docks beside the page on a wide screen, unless its button put it away (remembered). Put away, or on a
+ *  narrower screen, it hides off the left edge and the menu button in the top bar slides it over the page; choosing a
+ *  destination, the dimmed page or Escape puts it away again. Phones keep the bottom bar instead. */
+const DOCK_MIN = 1100;
+function initSidebar() {
+  const body = document.body, btn = $('#sidebtn');
+  const canDock = () => innerWidth >= DOCK_MIN;
+  const setOpen = (on) => { body.classList.toggle('side-open', on); $('#navscrim').hidden = !on; };
+  const apply = () => {
+    const docked = canDock() && store.get('sidebar', '1') === '1';
+    body.classList.toggle('side-docked', docked);
+    if (docked) setOpen(false);
+    const [ic, title] = docked ? ['menuOpen', 'Hide the sidebar'] : canDock() ? ['pin', 'Keep the sidebar open'] : ['close', 'Close the sidebar'];
+    btn.replaceChildren(icon(ic)); btn.title = title; btn.setAttribute('aria-label', title);
+  };
+  btn.onclick = () => {
+    if (body.classList.contains('side-docked')) store.set('sidebar', '0');
+    else if (canDock()) store.set('sidebar', '1');
+    else { setOpen(false); return; }
+    apply();
+  };
+  $('#menubtn').onclick = () => setOpen(true);
+  $('#navscrim').onclick = () => setOpen(false);
+  $('#nav').addEventListener('click', (e) => { if (e.target.closest('a') && !body.classList.contains('side-docked')) setOpen(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && body.classList.contains('side-open')) { setOpen(false); e.stopPropagation(); } }, true);
+  addEventListener('resize', apply);
+  S.applySidebar = apply;  // the stored choice can change with the account (signed-in users keep it on the server)
+  apply();
 }
 /** Load the library and show the first view; once per page load, after sign-in when that is required. */
 export async function boot() {

@@ -18,7 +18,7 @@
 </head>
 <body>
 <header id="topbar">
-  <a class="brand" href="#/explore" title="Home"><span class="logo"></span><span class="brand-name"><span class="io">io</span><span class="pix">pix</span></span></a>
+  <button id="menubtn" class="iconbtn" title="Show the sidebar" aria-label="Show the sidebar"><span class="ic" data-ic="menu"></span></button>
   <div id="search">
     <div id="searchbox">
       <span class="ic" data-ic="search"></span>
@@ -30,10 +30,14 @@
   </div>
   <button id="filterbtn" class="pillbtn" title="Browse and filter by any metadata"><span class="ic" data-ic="tune"></span><span>Filters</span></button>
   <span id="usermenu"></span>
-  <a class="iconbtn tool" href="#/settings" data-v="settings" title="Settings"><span class="ic" data-ic="gear"></span></a>
-  <a class="iconbtn tool" href="#/maintenance" data-v="maintenance" title="Maintenance"><span class="ic" data-ic="wrench"></span></a>
 </header>
-<nav id="nav"></nav>
+<nav id="nav">
+  <div class="navhead">
+    <a class="brand" href="#/explore" title="Home"><span class="brand-name"><span class="io">io</span><span class="pix">pix</span></span></a>
+    <button id="sidebtn" class="iconbtn"><span class="ic" data-ic="menuOpen"></span></button>
+  </div>
+</nav>
+<div id="navscrim" hidden></div>
 <nav id="crumbbar" class="crumbs" hidden></nav>
 <main id="main"></main>
 <aside id="filters" hidden></aside>

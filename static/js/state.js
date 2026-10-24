@@ -108,6 +108,7 @@ export const THEMES = [['light', 'Light'], ['dark', 'Dark'], ['system', 'System'
 export function applyTheme() {
   const t = store.get('theme', 'light');
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  S.applySidebar?.();  // docked or put away is a display preference too: it follows the account
   requestAnimationFrame(() => { const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = getComputedStyle(document.body).backgroundColor; });
 }
 
@@ -192,7 +193,7 @@ export function onRoute() {
   const vp = new URLSearchParams(S.route.params); vp.delete('p');
   const key = S.route.view + '?' + (PARAM_VIEWS.includes(S.route.view) ? vp : fp).toString();
   const cur = currentNav();
-  document.querySelectorAll('#nav a, #topbar a.tool').forEach((a) => a.classList.toggle('on', a.dataset.v === cur));
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.v === cur));
   $('#nav .navmore')?.classList.toggle('on', MORE_VIEWS.includes(cur));
   renderChips();
   if (key !== S.viewKey) {

@@ -18,18 +18,19 @@
   --accent: #1a73e8; --accent-bg: #e8f0fe; --tile: #e8eaed; --shadow: 0 2px 10px rgba(0,0,0,.18);
   --c-blue: #1a73e8; --c-purple: #8e44d6; --c-rose: #e0426a; --c-amber: #e8a100; --c-green: #1e8e3e; --c-teal: #0b8a9e; --c-orange: #e8710a; --c-cyan: #1294b8; --c-slate: #5f6b7a; --c-indigo: #4b53c7;
   --mix: 12%;
-  --topbar: 52px; --nav: 76px;
+  --topbar: 56px; --side: 236px; --nav: 0px;  /* --nav: what the docked sidebar takes from the page's left edge (0 when put away) */
+  --side-bg: #f6f7f9;
 }
 :root[data-theme="dark"] { --warn: #fcad70; --danger: #f28b82; --ok: #81c995; --star: #fdd663; --bg: #17181b; --bg2: #24262b; --bg3: #2f3237; --fg: #e8eaed; --fg2: #9aa0a6; --line: #3c4043;
     --brand: #7f8fd0; --brand-deep: #5f6fb4; --brand-ink: #b4bfee;
-    --name-io: #f6cf72; --name-pix: #ffffff;
+    --name-io: #f6cf72; --name-pix: #ffffff; --side-bg: #1e2024;
     --accent: #8ab4f8; --accent-bg: #283447; --tile: #2a2c31; --shadow: 0 2px 12px rgba(0,0,0,.6);
     --c-blue: #8ab4f8; --c-purple: #c58af9; --c-rose: #ff8a9e; --c-amber: #fdd663; --c-green: #81c995; --c-teal: #78d9ec; --c-orange: #fcad70; --c-cyan: #7fd1e8; --c-slate: #a8b4c2; --c-indigo: #a3a9ff;
     --mix: 22%; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --warn: #fcad70; --danger: #f28b82; --ok: #81c995; --star: #fdd663; --bg: #17181b; --bg2: #24262b; --bg3: #2f3237; --fg: #e8eaed; --fg2: #9aa0a6; --line: #3c4043;
     --brand: #7f8fd0; --brand-deep: #5f6fb4; --brand-ink: #b4bfee;
-    --name-io: #f6cf72; --name-pix: #ffffff;
+    --name-io: #f6cf72; --name-pix: #ffffff; --side-bg: #1e2024;
     --accent: #8ab4f8; --accent-bg: #283447; --tile: #2a2c31; --shadow: 0 2px 12px rgba(0,0,0,.6);
     --c-blue: #8ab4f8; --c-purple: #c58af9; --c-rose: #ff8a9e; --c-amber: #fdd663; --c-green: #81c995; --c-teal: #78d9ec; --c-orange: #fcad70; --c-cyan: #7fd1e8; --c-slate: #a8b4c2; --c-indigo: #a3a9ff;
     --mix: 22%; }
@@ -53,8 +54,6 @@ input, select { font: inherit; color: inherit; }
 .pillbtn:disabled { opacity: .45; pointer-events: none; }
 
 /* ---- top bar */
-/* settings and maintenance: small, quiet icons at the top right, not part of the main navigation */
-#topbar a.tool { width: 30px; height: 30px; color: var(--fg2); opacity: .7; }
 #usermenu { margin-left: auto; display: inline-flex; }
 #usermenu .tool { width: 30px; height: 30px; color: var(--fg2); opacity: .85; }
 #usermenu .tool:hover { opacity: 1; background: var(--bg3); }
@@ -65,14 +64,16 @@ input, select { font: inherit; color: inherit; }
 .avatar.big { width: 48px; height: 48px; font-size: var(--fs-xxl); }
 img.avatar { object-fit: cover; }
 .avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--c-amber); color: #1f2730; font-size: var(--fs-s); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-body.noadmin #topbar a.tool[href="#/maintenance"] { display: none; }  /* the icons sit alone at the far right; Filters stays with the search box */
-#topbar a.tool .ic, #usermenu .tool .ic { width: 18px; height: 18px; }
-#topbar a.tool:hover, #topbar a.tool.on { opacity: 1; background: var(--bg3); }
-#topbar { position: fixed; inset: 0 0 auto 0; height: var(--topbar); display: flex; align-items: center; gap: 12px; padding: 0 14px; background: var(--bg); z-index: var(--z-bar); }
-.brand { display: flex; align-items: center; gap: 10px; width: 196px; flex: none; padding-left: 10px; }  /* 14 + 10 + 14 = 38px: the logo's centre is the side menu's centre */
+body.noadmin #nav a[data-v="maintenance"] { display: none; }
+#usermenu .tool .ic { width: 18px; height: 18px; }
+/* the search floats at the top of the page, beside the sidebar; the menu button shows only while the sidebar is put away */
+#topbar { position: fixed; inset: 0 0 auto var(--nav); height: var(--topbar); display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; background: var(--bg); z-index: var(--z-bar); }
+#menubtn { margin-left: -8px; }
+body.side-docked #menubtn { display: none; }
+.brand { display: flex; align-items: center; min-width: 0; }
 .logo { width: 28px; height: 28px; border-radius: var(--r-s); background: url(icons/mark.svg) center / contain no-repeat; }
 .brand-name { font-size: var(--fs-l); font-weight: 500; white-space: nowrap; color: var(--brand-ink); letter-spacing: .01em; }
-.brand-name:has(.io) { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.02em; }  /* the name is iopix: bold and tight, as on the icon */
+.brand-name:has(.io) { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }  /* the name is iopix: bold and tight, as on the icon */
 .brand-name .io { color: var(--name-io); } .brand-name .pix { color: var(--name-pix); }
 .signin-brand { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; }
 .signin-brand .logo { width: 36px; height: 36px; }
@@ -100,19 +101,31 @@ body.noadmin #topbar a.tool[href="#/maintenance"] { display: none; }  /* the ico
 .sg .kind { margin-left: auto; color: var(--fg2); font-size: var(--fs-s); white-space: nowrap; }
 .sg .sub { color: var(--fg2); font-size: var(--fs-s); margin-left: 6px; }
 
-/* ---- nav rail */
-#nav { position: fixed; top: var(--topbar); bottom: 0; left: 0; width: var(--nav); display: flex; flex-direction: column; align-items: center; gap: 2px; padding-top: 6px; z-index: 10; background: var(--bg); }
-#nav a { width: 68px; padding: 8px 0 6px; border-radius: var(--r-l); display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: var(--fs-s); color: var(--fg2); }
+/* ---- sidebar: the name on top, the destinations in groups, Settings and Maintenance at the foot.
+   Docked (body.side-docked) on a wide screen; otherwise hidden off the left edge and slid over the page (body.side-open). */
+#nav { position: fixed; top: 0; bottom: 0; left: 0; width: var(--side); display: flex; flex-direction: column; gap: 2px; padding: 0 12px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--side-bg); z-index: var(--z-panel); transform: translateX(-100%); visibility: hidden; transition: transform .2s ease, visibility 0s .2s; }
+body.side-open #nav { transform: none; visibility: visible; transition: transform .2s ease; box-shadow: var(--shadow); }
+body.side-docked #nav { transform: none; visibility: visible; transition: none; z-index: 10; box-shadow: none; border-right: 1px solid var(--line); }
+body.side-docked { --nav: var(--side); }
+#navscrim { position: fixed; inset: 0; z-index: calc(var(--z-panel) - 1); background: rgba(0,0,0,.32); }
+.navhead { display: flex; align-items: center; justify-content: space-between; flex: none; height: var(--topbar); padding-left: 12px; margin-bottom: 10px; }
+#sidebtn { width: 34px; height: 34px; margin-right: -4px; opacity: .75; } #sidebtn:hover { opacity: 1; } #sidebtn .ic { width: 20px; height: 20px; }
+#nav a { flex: none; display: flex; align-items: center; gap: 14px; height: 40px; padding: 0 12px; border-radius: var(--r-m); font-size: var(--fs-base); color: var(--fg); }
 #nav a:hover { background: none; color: var(--fg); }
 #nav a.on { background: color-mix(in srgb, var(--hue, var(--accent)) var(--mix), transparent); color: var(--hue, var(--accent)); font-weight: 600; }
-#nav a .ic { transition: transform .15s; color: var(--hue, var(--fg2)); }  /* each destination's icon in its own colour */
-#nav a:hover .ic { transform: translateY(-1px) scale(1.08); color: var(--hue, var(--fg)); }
+#nav a .ic { width: 20px; height: 20px; transition: transform .15s; color: var(--hue, var(--fg2)); }  /* each destination's icon in its own colour */
+#nav a:hover .ic { transform: scale(1.08); color: var(--hue, var(--fg)); }
 #nav a[data-v="photos"] { --hue: var(--c-blue); } #nav a[data-v="explore"] { --hue: var(--c-purple); } #nav a[data-v="favorites"] { --hue: var(--c-rose); }
 #nav a[data-v="people"] { --hue: var(--c-amber); } #nav a[data-v="places"] { --hue: var(--c-green); }
 #nav a[data-v="tags"] { --hue: var(--c-orange); } #nav a[data-v="map"] { --hue: var(--c-cyan); }
 #nav a[data-v="folders"] { --hue: var(--c-teal); } #nav a[data-v="albums"] { --hue: var(--c-indigo); }
-#status { margin-top: auto; padding: 8px 4px 10px; font-size: var(--fs-xs); color: var(--fg2); text-align: center; line-height: 1.3; }
-#status .bar { height: 3px; border-radius: var(--r-xs); background: var(--bg3); margin: 4px 6px 0; overflow: hidden; }
+#nav a[data-v="settings"], #nav a[data-v="maintenance"] { color: var(--fg2); }
+.navgap { flex: none; height: 14px; }
+#nav .navmore { display: none; }
+.navfoot { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+#status { padding: 8px 12px 12px; font-size: var(--fs-xs); color: var(--fg2); line-height: 1.3; }
+#status .bar { height: 3px; border-radius: var(--r-xs); background: var(--bg3); margin: 4px 0 0; overflow: hidden; }
 #status .bar i { display: block; height: 100%; background: var(--accent); }
 
 /* ---- main */
@@ -350,7 +363,7 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 #toast a, #toast .lnk { color: #8ab4f8; margin-left: 16px; cursor: pointer; }
 
 /* ---- selection, favorites, app albums, duplicates */
-#selbar { position: fixed; inset: 0 0 auto 0; height: var(--topbar); z-index: var(--z-selbar); background: var(--bg); display: flex; align-items: center; gap: 8px; padding: 0 16px; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+#selbar { position: fixed; inset: 0 0 auto var(--nav); height: var(--topbar); z-index: var(--z-selbar); background: var(--bg); display: flex; align-items: center; gap: 8px; padding: 0 16px; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
 #selbar .n { font-size: var(--fs-xl); margin-left: 4px; }
 #selbar .sp { flex: 1; }
 #selbar .pillbtn .ic { width: 20px; height: 20px; }
@@ -803,12 +816,15 @@ button.lnk:hover { text-decoration: underline; }
   .cbulk { left: 0; bottom: calc(56px + env(safe-area-inset-bottom)); }
   /* ---- small screens: bottom nav, full-width filters, no hover-only controls */
   :root { --topbar: 48px; --nav: 0px; }
-  .brand { display: none; }
-  #topbar { gap: 8px; padding: 0 8px; }
+  #menubtn, #navscrim, .navhead, .navgap, .navfoot, #nav a[data-v="settings"], #nav a[data-v="maintenance"] { display: none; }  /* Settings and Maintenance are under More */
+  #topbar { gap: 8px; padding: 0 8px; left: 0; }
   #filterbtn span:last-child { display: none; }
   #filterbtn { padding: 0 8px; border: 0; }
-  #nav { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: 56px; flex-direction: row; justify-content: flex-start; overflow-x: auto; padding: 0; border-top: 1px solid var(--line); }
-  #nav a { width: auto; min-width: 62px; flex: 1; border-radius: 0; }
+  #nav { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: 56px; flex-direction: row; justify-content: flex-start; overflow-x: auto; padding: 0; gap: 0;
+    border-top: 1px solid var(--line); border-right: 0; background: var(--bg); transform: none; visibility: visible; transition: none; box-shadow: none; z-index: 10; }
+  #nav a { width: auto; min-width: 62px; flex: 1; border-radius: 0; height: auto; flex-direction: column; gap: 2px; padding: 8px 0 6px; font-size: var(--fs-s); color: var(--fg2); }
+  #nav a .ic { width: 24px; height: 24px; }
+  #nav .navmore { display: flex; }
   #nav { padding-bottom: env(safe-area-inset-bottom); height: calc(56px + env(safe-area-inset-bottom)); }
   #main, #filters { bottom: calc(56px + env(safe-area-inset-bottom)); }
   #topbar { padding-top: env(safe-area-inset-top); height: calc(var(--topbar) + env(safe-area-inset-top)); }
@@ -907,7 +923,7 @@ button.lnk:hover { text-decoration: underline; }
   .page.psz-s .cards.people { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); } .page.psz-l .cards.people { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .mapbar { flex-wrap: wrap; right: 12px; } .mapbar .mapfind input { width: 150px; } .mapbar .mapfind .mapsr { width: min(340px, 90vw); }
   #selbar .pillbtn.selic { width: 34px; }
-  #topbar a.tool, #usermenu .tool { width: 40px; height: 40px; } #topbar a.tool .ic, #usermenu .tool .ic { width: 22px; height: 22px; }
+  #usermenu .tool { width: 40px; height: 40px; } #usermenu .tool .ic { width: 22px; height: 22px; }
 }
 
 /* ==== touch screens ==== */

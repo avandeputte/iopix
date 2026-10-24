@@ -266,8 +266,7 @@ def test_settings_and_maintenance_pages(page, server):
     page.locator(".stabs button", has_text="Library").click()
     assert page.locator(".srow b", has_text="Metadata consistency").count() == 1, "consistency sits under Library"
     assert page.locator(".stable.wide tr").count() >= 10 and page.locator(".stable.wide button", has_text="Rebuild").count() == 1
-    assert page.locator("#nav a", has_text="Maintenance").count() == 0, "no longer in the main navigation"
-    assert page.locator("#topbar a.tool[href='#/maintenance']").count() == 1 and page.locator("#topbar a.tool[href='#/settings']").count() == 1
+    assert page.locator(".navfoot a[data-v=maintenance]").count() == 1 and page.locator(".navfoot a[data-v=settings]").count() == 1, "at the foot of the sidebar"
 
 
 def test_keyboard_navigation(page, server, lib):
@@ -332,7 +331,7 @@ def test_users_flow_in_the_browser(page, server, browser):
     page.locator(".modal button", has_text="Create").click()
     page.wait_for_selector("#usermenu .avatar", timeout=5000)
     page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
-    assert page.locator("#topbar a.tool[href='#/maintenance']").is_visible()
+    assert page.locator("#nav a[data-v=maintenance]").is_visible()
     # a visitor in a fresh context: read-only, no maintenance icon, sign-in dialog
     ctx = browser.new_context(viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
     visitor.goto(server + "/#/photos?p=" + str(json.load(urllib.request.urlopen(server + "/api/photos"))["id"][0]))
@@ -341,7 +340,7 @@ def test_users_flow_in_the_browser(page, server, browser):
         visitor.locator('[title^="Info"]').click(); visitor.wait_for_timeout(400)
     assert visitor.locator(".lb-info h4", has_text="People").count() == 1, "the panel is open"
     assert visitor.locator(".lb-info input[placeholder='Title']").count() == 0
-    assert not visitor.locator("#topbar a.tool[href='#/maintenance']").is_visible()
+    assert not visitor.locator("#nav a[data-v=maintenance]").is_visible()
     visitor.keyboard.press("Escape"); visitor.wait_for_timeout(400)  # the lightbox covers the top bar
     visitor.locator("#usermenu button").click()
     visitor.wait_for_selector(".modal .account", timeout=5000)
@@ -914,13 +913,32 @@ def test_info_panel_order_and_section_preference(page, server, lib):
     assert page.locator(".lb-info h4", has_text="Camera").count() == 1
 
 
-def test_logo_lines_up_with_the_side_menu(page, server):
-    """The logo's centre is the side menu's centre, so the brand mark and the menu icons share one axis."""
-    page.goto(server + "/#/photos")
-    page.wait_for_selector("#nav a .ic", timeout=10000)
-    logo = page.locator(".brand .logo").bounding_box()
-    ic = page.locator("#nav a .ic").first.bounding_box()
-    assert abs((logo["x"] + logo["width"] / 2) - (ic["x"] + ic["width"] / 2)) < 1.5, (logo, ic)
+def test_sidebar_docks_hides_and_slides_over(browser, server):
+    """Wide screen: the sidebar (name, destinations, Settings) is docked beside the page; its button puts it away
+    (remembered), the menu button then slides it over the page and choosing a destination puts it away again.
+    A narrower screen never docks it."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 860}); page = ctx.new_page()
+    try:
+        page.goto(server + "/#/photos"); page.wait_for_selector("body.side-docked #nav a.on", timeout=10000)
+        assert page.locator(".navhead .brand-name").is_visible() and page.locator(".navhead .logo").count() == 0
+        assert page.locator(".navfoot a[data-v=settings]").is_visible() and not page.locator("#menubtn").is_visible()
+        nav, main = page.locator("#nav").bounding_box(), page.locator("#main").bounding_box()
+        assert abs(main["x"] - (nav["x"] + nav["width"])) < 1.5, (nav, main)
+        page.locator("#sidebtn").click(); page.wait_for_timeout(300)
+        assert page.locator("#menubtn").is_visible() and not page.locator("#nav").is_visible()
+        assert page.locator("#main").bounding_box()["x"] == 0
+        page.reload(); page.wait_for_selector("#menubtn", state="visible", timeout=10000)
+        assert not page.evaluate("document.body.classList.contains('side-docked')"), "put away stays put away"
+        page.locator("#menubtn").click(); page.wait_for_selector("body.side-open #nav a[data-v=people]", state="visible", timeout=3000)
+        page.wait_for_timeout(300); page.locator("#nav a[data-v=people]").click()
+        page.wait_for_function("!document.body.classList.contains('side-open')", timeout=3000)
+        assert page.locator("#navscrim").is_hidden()
+        page.locator("#menubtn").click(); page.wait_for_timeout(300); page.locator("#sidebtn").click()  # the pin docks it again
+        page.wait_for_selector("body.side-docked", timeout=3000)
+        page.set_viewport_size({"width": 1000, "height": 760}); page.wait_for_timeout(200)
+        assert not page.evaluate("document.body.classList.contains('side-docked')") and page.locator("#menubtn").is_visible()
+    finally:
+        ctx.close()
 
 
 def test_digikam_offline_banner_and_sync_setting(page, server):
@@ -1380,7 +1398,7 @@ def test_explore_is_home_and_menu_icons_are_coloured(page, server):
     page.set_viewport_size({"width": 1280, "height": 800})
     page.goto(server + "/")
     page.wait_for_selector("#nav a[data-v=explore].on", timeout=10000)
-    assert page.locator("#nav a").first.get_attribute("data-v") == "explore"
+    assert page.locator("#nav > a").first.get_attribute("data-v") == "explore"
     grey = page.evaluate("getComputedStyle(document.body).getPropertyValue('--fg2')")
     col = page.evaluate("getComputedStyle(document.querySelector('#nav a[data-v=people] .ic')).color")
     assert col and "rgb" in col and page.evaluate("(c) => { const d = document.createElement('div'); d.style.color = c; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; }", grey.strip()) != col, col
@@ -2062,7 +2080,7 @@ def test_quality_page_keeps_its_place_after_an_edit_in_the_viewer(page, server, 
 def test_a_lost_connection_is_retried_and_the_page_recovers(page, server):
     # leaving home: Wi-Fi drops, requests fail with "Load failed"; reads try again by themselves
     page.goto(server + "/#/explore")
-    page.wait_for_selector("#nav a", timeout=10000)
+    page.wait_for_selector("#nav > a", timeout=10000)
     fails = {"n": 0}
     def flaky(route):
         if fails["n"] < 2:
@@ -2090,7 +2108,7 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page()
     try:
-        page.goto(server + "/#/explore"); page.wait_for_selector("#nav a", timeout=10000)
+        page.goto(server + "/#/explore"); page.wait_for_selector("#nav > a", timeout=10000)
         page.evaluate("() => { import('/js/state.js').then((st) => st.toast('3 photos moved to the trash. 1 could not be: the file is not on disk.', 'Undo', () => {}, 60000)); }")
         page.evaluate("() => { const n = document.createElement('div'); n.id = 'reloadnote'; n.innerHTML = '<span>A new version of iopix is ready.</span><button class=\"pillbtn on\">Load it now</button><button class=\"iconbtn\">x</button>'; document.body.append(n); }")
         page.wait_for_timeout(300)
