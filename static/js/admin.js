@@ -6,7 +6,7 @@ import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
 import { pageTitle, setupDialog, usersSection } from './pages.js';
 import { details, openLightbox, personPicker, syncLightbox } from './lightbox.js';
-import { badgeTiles } from './grid.js';
+import { badgeTiles, setBadges } from './grid.js';
 import { awaitReindex, indexMeta, runUpdate } from './main.js';
 
 /** Maintenance › AI analysis and models: one table, a row per feature, with the model it runs on (download,
@@ -382,6 +382,8 @@ export async function facesBatch(ops, msg) {
   const now = Date.now();
   ops.forEach((o) => DECIDED.set(faceKey(o), now));
   toast(`${msg}: ${plural(ops.length, 'face')}.`, null, null, 4000);
+  const named = [...new Set(ops.filter((o) => ['name', 'add', 'confirm'].includes(o.op)).map((o) => o.image))];
+  if (named.length) setBadges(named, { faces: true });
   post('/api/faces/batch', { ops }).then(async (r) => {
     if (r.failed.length) {
       r.failed.forEach((f) => { const o = ops.find((x) => x.image === f.image); if (o) DECIDED.delete(faceKey(o)); });

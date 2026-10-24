@@ -2,7 +2,7 @@
 import { $, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, store } from './core.js';
 import { S, ST, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError, ualbumById } from './state.js';
 import { crumbs } from './search.js';
-import { G, dropPhotos, renderGrid } from './grid.js';
+import { G, dropPhotos, renderGrid, setBadges } from './grid.js';
 import { copyMetadata, dateEditor, editDialog, editPhotos, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
 import { pageTitle } from './pages.js';
@@ -219,6 +219,7 @@ export async function setFavorite(ids, on) {
   ids.forEach((id) => (on ? ST.fav.add(id) : ST.fav.delete(id)));
   ST.rev++;
   if (S.route.view === 'photos' && G.data) redrawTiles();
+  setBadges(ids);  // the heart on every other thumbnail of them (Explore, bursts...)
   updateSelBar();
   if (LB.open) updateFavBtn();
   if (ids.length > 1) toast(`${on ? 'Added' : 'Removed'} ${nf.format(ids.length)} ${on ? 'to' : 'from'} favorites.`);

@@ -1,11 +1,11 @@
 /** Metadata editing dialogs: rating, titles, captions, tags, dates, locations and templates. */
 import { $, UTC, accuracyChoices, api, date, dfTimeLocal, fill, fmtDist, fmtWhen, fromHeight, h, heightUnit, icon, nf, norm, plural, post, toHeight } from './core.js';
 import { S, go, hashFor, photosWith, pollSoon, toast, toastError } from './state.js';
-import { G } from './grid.js';
+import { G, setBadges } from './grid.js';
 import { confirmDialog, modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
 import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
-import { LB, details, getDetail, renderInfo, renderTitle, showItem } from './lightbox.js';
+import { LB, details, getDetail, hasPeople, renderInfo, renderTitle, showItem } from './lightbox.js';
 import { awaitReindex, pollStatus } from './main.js';
 
 export function applyLocal(d, ch) {
@@ -15,7 +15,7 @@ export function applyLocal(d, ch) {
   if ('gps' in ch) { d.lat = ch.gps ? ch.gps.lat : null; d.lon = ch.gps ? ch.gps.lon : null; d.alt = ch.gps ? ch.gps.alt : null; (d.extra ||= {}).gpsAccuracy = ch.gps?.accuracy || undefined; }
   if (ch.template) { d.creator = ch.template.creator || null; d.copyright = ch.template.copyrightNotice || null; (d.extra ||= {}).copyright = Object.fromEntries(Object.entries(ch.template).filter(([, v]) => v)); }
   for (const id of ch.remove_tags || []) d.tags = d.tags.filter((t) => t.id !== id);
-  for (const id of ch.add_tags || []) { const t = S.tagById.get(id); if (t && !d.tags.some((x) => x.id === id)) d.tags.push({ id, name: t.name, full: t.full, person: 0 }); }
+  for (const id of ch.add_tags || []) { const t = S.tagById.get(id); if (t && !d.tags.some((x) => x.id === id)) d.tags.push({ id, name: t.name, full: t.full, person: t.person ? 1 : 0 }); }
   d.edited = 1;
 }
 /** Every EXIF, IPTC and XMP field of a photo's file and sidecar; editable ones are changed in place, then the
@@ -97,6 +97,11 @@ export async function editPhotos(ids, changes) {
   try { r = await post('/api/edit', { ids, changes }); } catch (e) { toast('Could not save the change: ' + e.message); return false; }
   // a time shift lands differently on each photo, so those are re-fetched rather than patched locally
   for (const id of ids) { if ('shift' in changes) details.delete(id); else details.get(id)?.then((d) => applyLocal(d, changes)); }
+  // the location and face badges of their thumbnails change at once
+  if ('gps' in changes) setBadges(ids, { geo: !!changes.gps });
+  const person = (list) => (list || []).some((t) => S.tagById.get(t)?.person);
+  if (person(changes.add_tags)) setBadges(ids, { faces: true });
+  else if (person(changes.remove_tags)) ids.forEach((id) => details.get(id)?.then((d) => setBadges([id], { faces: hasPeople(d) })).catch(() => {}));
   if (LB.open && ids.includes(LB.src.id[LB.i])) {
     const d = await getDetail(LB.src.id[LB.i]);
     if (LB.open && LB.src.id[LB.i] === d.id) { LB.detail = d; renderTitle(); if (LB.info) renderInfo(); }  // unless the user has moved on meanwhile

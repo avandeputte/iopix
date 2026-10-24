@@ -186,10 +186,28 @@ export function scrollToIndex(i, top = false) {
 /** The marks on a photo thumbnail, the same in every view: favorite (bottom left), video length (top right), face tags
  *  and GPS coordinates (bottom right). video: seconds (0 = unknown) for a video, undefined for a still. */
 export function tileBadges(id, { video, faces, geo } = {}) {
+  MARKS.set(id, { video, faces, geo });
   const marks = [faces ? h('span', { class: 'cbadge', title: 'Has face tags' }, icon('face')) : null, geo ? h('span', { class: 'cbadge', title: 'Has GPS coordinates' }, icon('place')) : null].filter(Boolean);
   return [ST.fav.has(id) ? h('span', { class: 'fbadge' }, icon('heart')) : null,
     video != null ? h('span', { class: 'vbadge' }, video ? fmtDur(video) : null, icon('play')) : null,
     marks.length ? h('span', { class: 'cbadges' }, marks) : null].filter(Boolean);
+}
+const MARKS = new Map();  // photo id -> the marks its thumbnails were last drawn with
+/** A change shown at once on every thumbnail of these photos, before the index catches up: patch = {faces?, geo?};
+ *  the favorite heart follows ST.fav. The Photos grid's own lists are patched too, for the tiles it draws later. */
+export function setBadges(ids, patch = {}) {
+  const at = G.data && ids.length > 20 ? new Map(G.data.id.map((x, i) => [x, i])) : null;
+  for (const id of ids) {
+    const i = G.data ? (at ? at.get(id) : G.data.id.indexOf(id)) : -1;
+    if (i != null && i >= 0) for (const k of ['faces', 'geo']) if (k in patch) patch[k] ? G[k].add(i) : G[k].delete(i);
+    const marks = { ...MARKS.get(id), ...patch };
+    if (!MARKS.has(id) && G.data && i >= 0) Object.assign(marks, { video: G.data.video[i] });
+    document.querySelectorAll(`.tile[data-id="${id}"]`).forEach((t) => {
+      t.querySelectorAll(':scope > .fbadge, :scope > .vbadge, :scope > .cbadges').forEach((e) => e.remove());
+      t.append(...tileBadges(id, marks));
+    });
+    MARKS.set(id, marks);
+  }
 }
 /** Badges for the .tile[data-id] thumbnails under root that were drawn without the Photos grid's data
  *  (Rediscover, bursts, duplicates...): their marks come from /api/badges, a batch at a time. */
@@ -227,7 +245,7 @@ export function renderGrid(force) {
         const img = document.createElement('img');
         img.alt = ''; img.decoding = 'async'; img.draggable = false;
         if (fast) img.dataset.src = `/thumb/${d.id[i]}`; else img.src = `/thumb/${d.id[i]}`;
-        const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, tabindex: 0, role: 'button', style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
+        const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, 'data-id': d.id[i], tabindex: 0, role: 'button', style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
           h('span', { class: 'tcheck', title: 'Select' }, icon('check')), tileBadges(d.id[i], { video: d.video[i], faces: G.faces.has(i), geo: G.geo.has(i) }));
         el.append(tile);
       }

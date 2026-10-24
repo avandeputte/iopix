@@ -1,7 +1,7 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
 import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, h, icon, nf, norm, plural, post, store } from './core.js';
 import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, onRoute, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
-import { G, renderGrid, scrollToIndex } from './grid.js';
+import { G, renderGrid, scrollToIndex, setBadges } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
 import { dateEditor, detectFaces, editControls, editPhotos, locationDialog, metadataEditor, tagDialog, tagPicker, templatePicker } from './editing.js';
 import { tagOp } from './admin.js';
@@ -688,6 +688,7 @@ export function tagOnlyMenu(anchor, f, d) {
     [`Not in this photo: take ${f.name} off`, () => faceOp({ op: 'untag', image: d.id, tag: f.tag }, () => faceOp({ op: 'tagonly', image: d.id, tag: f.tag }, null, `${f.name} put back.`)), 'danger'],
   ]);
 }
+export const hasPeople = (d) => !!(d.faces?.length || d.tags?.some((t) => t.person));
 export function applyFaceLocally(d, op) {
   const same = (f) => f.x === op.rect?.[0] && f.y === op.rect?.[1] && f.w === op.rect?.[2] && f.h === op.rect?.[3];
   const t = op.tag ? S.tagById.get(op.tag) : null;
@@ -736,6 +737,11 @@ export function faceOp(op, undo, said) {
   if (shown) ops.forEach((o) => applyFaceLocally(shown, o));
   if (cached) cached.then((cd) => { if (cd && cd !== shown && cd.faces) ops.forEach((o) => applyFaceLocally(cd, o)); }).catch(() => {});  // a copy the viewer is not showing (a still pending one gets the change from reapplyRecent)
   redrawPhoto(id);
+  // the face badge on its thumbnails follows at once: a named face, or a person tagged without a box
+  if (shown) setBadges([id], { faces: hasPeople(shown) });
+  else if (cached) cached.then((cd) => { if (cd?.faces) setBadges([id], { faces: hasPeople(cd) }); }).catch(() => {});
+  else if (ops.some((o) => ['name', 'add', 'confirm', 'tagonly'].includes(o.op))) setBadges([id], { faces: true });
+  else getDetail(id).then((cd) => setBadges([id], { faces: hasPeople(cd) })).catch(() => {});  // a removal: does anyone stay? (the fetched copy gets this change re-applied)
   const name = op.tag ? S.tagById.get(op.tag)?.name : null;
   said = said || { name: `Named ${name}.`, confirm: 'Confirmed.', ignore: 'Face ignored.', unknown: 'Name removed; the face stays as unknown.', remove: 'Face region removed.', add: `Added ${name}.`, move: 'Region moved.', detected: 'Face put back.', suggest: 'Suggestion put back.', untag: `${name} taken off this photo.`, tagonly: `Added ${name}.` }[op.op];
   if (said) undo ? toast(said, 'Undo', undo, 7000) : toast(said);
@@ -745,7 +751,7 @@ export function faceOp(op, undo, said) {
     toast(`That face change did not go through: ${e.message}`, null, null, 9000);
     RECENT_FACE_OPS.set(id, (RECENT_FACE_OPS.get(id) || []).filter((x) => !recs.includes(x)));
     details.delete(id);
-    if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id) { LB.detail = fresh; redrawPhoto(id); } });
+    getDetail(id).then((fresh) => { setBadges([id], { faces: hasPeople(fresh) }); if (LB.open && LB.src.id[LB.i] === id) { LB.detail = fresh; redrawPhoto(id); } }).catch(() => {});
     return false;
   });
   FACE_Q.set(id, mine);
