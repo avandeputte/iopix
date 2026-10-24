@@ -6,6 +6,7 @@ import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
 import { pageTitle, setupDialog, usersSection } from './pages.js';
 import { details, openLightbox, personPicker, syncLightbox } from './lightbox.js';
+import { badgeTiles } from './grid.js';
 import { awaitReindex, indexMeta, runUpdate } from './main.js';
 
 /** Maintenance › AI analysis and models: one table, a row per feature, with the model it runs on (download,
@@ -819,9 +820,10 @@ export async function showDuplicates() {
       : 'No byte-identical files found. digiKam’s file hashes say every item is unique.'),
     d.groups.map((g) => h('div', { class: 'dupgroup' }, h('div', { class: 'muted' }, `${g.items.length} copies · ${fmtBytes(g.size)} each`),
       h('div', { class: 'duprow' }, g.items.map((x) => { const i = k++; return h('div', { class: 'dupitem' },
-        h('div', { class: 'tile', style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, i, true) }, h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+        h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, i, true) }, h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
         h('div', { class: 'nm', title: x.name }, x.name), h('a', { class: 'sb lnk', href: hashFor('photos', photosWith({ album: albumIdByPath(x.album), sort: 'old' })) }, x.album.replace(/^\//, ''))); })))),
     nearDupsSection(src)));
+  badgeTiles(main);
   syncLightbox();
 }
 /** Near-duplicates: look-alike photos found with the content-search embeddings (resized, re-saved, burst neighbors). */
@@ -845,9 +847,10 @@ export function nearDupsSection(src) {
       h('div', { class: 'toolbar my10',}, S.IS_ADMIN ? h('span', null, 'Strictness: ', level) : null, run, h('span', { class: 'muted' }, note)),
       d.groups.map((g) => h('div', { class: 'dupgroup' }, h('div', { class: 'muted' }, `${g.n} similar · ${Math.round(g.score * 100)}% alike${g.identical ? ' · also byte-identical' : ''}`),
         h('div', { class: 'duprow' }, g.items.map((x) => { const i = src.id.push(x.id) - 1; return h('div', { class: 'dupitem' },
-          h('div', { class: 'tile', style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, i, true) }, h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+          h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, i, true) }, h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
           h('div', { class: 'nm', title: x.name }, x.name), h('div', { class: 'sb' }, `${fmtBytes(x.size || 0)}${x.sharpn != null ? ' · sharpness ' + Math.round(x.sharpn * 100) + '%' : ''}`),
           h('a', { class: 'sb lnk', href: hashFor('photos', photosWith({ album: albumIdByPath(x.album), sort: 'old' })) }, x.album.replace(/^\//, ''))); })))));
+    badgeTiles(sec);
     if (p.running) later(4000);
   };
   draw();

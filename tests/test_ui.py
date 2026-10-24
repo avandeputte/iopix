@@ -2185,6 +2185,48 @@ def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, s
     assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
 
 
+
+def test_badges_on_thumbnails_outside_the_photos_grid(page, server):
+    """The favorite, face-tag and GPS badges of the Photos grid also mark the thumbnails of Explore › Rediscover
+    (and On this day, bursts, duplicates), from the same component: /api/badges answers what /api/photos does."""
+    import json
+    page.goto(server + "/#/photos")
+    page.wait_for_selector("#grid .tile", timeout=15000)
+    d = page.evaluate("(async () => (await fetch('/api/photos')).json())()")
+    geo, faces, vids = set(d["geo"]), set(d["faces"]), {int(k) for k in d["video"]}
+    at = {x: i for i, x in enumerate(d["id"])}
+    pick = lambda ok, but=(): next((x for x in d["id"] if ok(at[x]) and x not in but), None)  # noqa: E731
+    g = pick(lambda i: i in geo)
+    f = pick(lambda i: i in faces, (g,)) or pick(lambda i: i in faces)
+    fav = pick(lambda i: i not in vids, (g, f))
+    bare = pick(lambda i: i not in geo and i not in faces and i not in vids, (g, f, fav))
+    if not (g and f and fav):
+        pytest.skip("the test library needs geotagged and face-tagged photos")
+    ids = [x for x in dict.fromkeys((g, f, fav, bare)) if x]
+    b = page.evaluate(f"(async () => (await fetch('/api/badges?ids={','.join(map(str, ids))}')).json())()")
+    assert set(b["geo"]) == {x for x in ids if at[x] in geo} and set(b["faces"]) == {x for x in ids if at[x] in faces}, b
+    r = page.request.post(server + "/api/favorites", data={"ids": [fav], "on": True})
+    assert r.ok
+    try:
+        page.route("**/api/random*", lambda route: route.fulfill(content_type="application/json", body=json.dumps(
+            {"id": ids, "w": [300] * len(ids), "h": [200] * len(ids), "ts": [d["ts"][at[x]] for x in ids]})))
+        page.goto(server + "/#/explore")
+        page.reload()
+        sec = page.locator("h2:has-text('Rediscover') + .jrows")
+        page.wait_for_selector("h2:has-text('Rediscover') + .jrows .tile.badged .cbadge", timeout=15000)
+        tile = lambda x: sec.locator(f".tile[data-id='{x}']")  # noqa: E731
+        for x in ids:
+            assert tile(x).locator(".cbadge[title='Has GPS coordinates']").count() == (at[x] in geo), x
+            assert tile(x).locator(".cbadge[title='Has face tags']").count() == (at[x] in faces), x
+        assert tile(fav).locator(".fbadge").count() == 1
+        if bare:
+            assert tile(bare).locator(".fbadge, .cbadge, .vbadge").count() == 0
+        # the same look as on the Photos grid: same classes, so the same size and place
+        box, img = tile(g).locator(".cbadges").bounding_box(), tile(g).bounding_box()
+        assert img["x"] + img["width"] - box["x"] - box["width"] < 12 and img["y"] + img["height"] - box["y"] - box["height"] < 12, (box, img)
+    finally:
+        page.request.post(server + "/api/favorites", data={"ids": [fav], "on": False})
+
 def _units_page(browser, server, locale):
     ctx = browser.new_context(locale=locale, viewport={"width": 1280, "height": 900}, bypass_csp=True)
     pg = ctx.new_page()

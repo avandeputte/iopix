@@ -6,6 +6,7 @@ import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharing
 import { detectFaces } from './editing.js';
 import { downloadDialog } from './download.js';
 import { openLightbox, personPicker, popMenu, syncLightbox } from './lightbox.js';
+import { badgeTiles, tileBadges } from './grid.js';
 import { boot, pollStatus } from './main.js';
 
 export function card({ img, fallback, name, sub, onclick }) {
@@ -38,10 +39,11 @@ export async function showExplore() {
   const shuffle = async () => {
     let r; try { r = await api('/api/random?n=36'); } catch { return; }
     if (!r.id.length || !rediscover.isConnected) return;
-    const tiles = r.id.map((id, i) => h('div', { class: 'tile', style: `--ar:${Math.max(0.5, Math.min(2.2, r.w[i] / (r.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(r.ts[i])),
+    const tiles = r.id.map((id, i) => h('div', { class: 'tile', 'data-id': id, style: `--ar:${Math.max(0.5, Math.min(2.2, r.w[i] / (r.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(r.ts[i])),
       onclick: () => openLightbox({ id: r.id }, i, true) }, h('img', { src: `/thumb/${id}`, alt: '', loading: 'lazy' })));
     fill(rediscover, h('h2', { style: '--hue:var(--c-indigo)' }, h('span', { class: 'hic' }, icon('spark')), 'Rediscover', h('button', { type: 'button', class: 'lnk', onclick: shuffle }, 'Shuffle')), h('div', { class: 'jrows' }, tiles));
     rediscover.hidden = false;
+    badgeTiles(rediscover);
   };
   setTimeout(shuffle, 0);
   // Then and now: a person's earliest and latest named face, years apart; "Others" picks new people
@@ -119,7 +121,8 @@ export async function showExplore() {
     if (S.route.view !== 'explore' || !d.count) return;
     for (let i = 0; i < Math.min(d.count, 8); i++) {  // one row or so; "See all" has the rest
       strip.append(h('div', { class: 'tile', style: `--ar:${Math.max(0.5, Math.min(2.2, d.w[i] / (d.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(d.ts[i])),
-        onclick: () => go('photos', photosWith({ md, p: d.id[i] })) }, h('img', { src: `/thumb/${d.id[i]}`, loading: 'lazy', alt: '' })));
+        onclick: () => go('photos', photosWith({ md, p: d.id[i] })) }, h('img', { src: `/thumb/${d.id[i]}`, loading: 'lazy', alt: '' }),
+        tileBadges(d.id[i], { video: d.video[i], faces: d.faces.includes(i), geo: d.geo.includes(i) })));
     }
     otd.hidden = false;
   } catch { /* optional section */ }
@@ -559,7 +562,7 @@ export async function showBursts(vp) {
     const start = src.id.length;
     g.items.forEach((x) => src.id.push(x.id));
     const row = h('div', { class: 'duprow' }, g.items.map((x, k) => h('div', { class: 'dupitem burstitem' + (x.best ? ' best' : '') + '' },
-      h('div', { class: 'tile', style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, start + k, true) },
+      h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, start + k, true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' }), x.best ? h('span', { class: 'bestbadge' }, icon('star'), 'Best') : null),
       h('div', { class: 'sb' }, [x.sharpn != null ? `sharpness ${pct(x.sharpn)}` : null, x.faceq != null ? `faces ${pct(x.faceq)}` : null].filter(Boolean).join(' · ') || ' '),)));
     return h('div', { class: 'dupgroup' }, h('div', { style: 'display:flex;gap:14px;align-items:baseline;flex-wrap:wrap' },
@@ -574,6 +577,7 @@ export async function showBursts(vp) {
     total = d.bursts;
     if (!offset) head.textContent = d.bursts ? `${nf.format(d.bursts)} bursts covering ${nf.format(d.photos)} photos. The best frame is picked by sharpness and how good the faces look; check it before rejecting the rest.` : 'No bursts found here.';
     list.append(...d.groups.map(group));
+    badgeTiles(list);
     offset += d.groups.length;
     more.hidden = offset >= total;
     syncLightbox();

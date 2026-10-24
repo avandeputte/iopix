@@ -183,6 +183,27 @@ export function scrollToIndex(i, top = false) {
   else if (it.y < main.scrollTop || it.y + it.h > main.scrollTop + main.clientHeight) main.scrollTop = it.y - main.clientHeight / 2 + it.h / 2;
 }
 
+/** The marks on a photo thumbnail, the same in every view: favorite (bottom left), video length (top right), face tags
+ *  and GPS coordinates (bottom right). video: seconds (0 = unknown) for a video, undefined for a still. */
+export function tileBadges(id, { video, faces, geo } = {}) {
+  const marks = [faces ? h('span', { class: 'cbadge', title: 'Has face tags' }, icon('face')) : null, geo ? h('span', { class: 'cbadge', title: 'Has GPS coordinates' }, icon('place')) : null].filter(Boolean);
+  return [ST.fav.has(id) ? h('span', { class: 'fbadge' }, icon('heart')) : null,
+    video != null ? h('span', { class: 'vbadge' }, video ? fmtDur(video) : null, icon('play')) : null,
+    marks.length ? h('span', { class: 'cbadges' }, marks) : null].filter(Boolean);
+}
+/** Badges for the .tile[data-id] thumbnails under root that were drawn without the Photos grid's data
+ *  (Rediscover, bursts, duplicates...): their marks come from /api/badges, a batch at a time. */
+export async function badgeTiles(root) {
+  const tiles = [...root.querySelectorAll('.tile[data-id]:not(.badged)')];
+  tiles.forEach((t) => t.classList.add('badged'));
+  for (let k = 0; k < tiles.length; k += 300) {
+    const part = tiles.slice(k, k + 300);
+    let r; try { r = await api(`/api/badges?ids=${[...new Set(part.map((t) => t.dataset.id))].join(',')}`); } catch { continue; }
+    const geo = new Set(r.geo), faces = new Set(r.faces);
+    for (const t of part) { const id = +t.dataset.id; t.append(...tileBadges(id, { video: r.video[id], faces: faces.has(id), geo: geo.has(id) })); }
+  }
+}
+
 export function renderGrid(force) {
   const grid = $('#grid'), d = G.data;
   if (!grid || !d || !G.items.length) return;
@@ -207,10 +228,7 @@ export function renderGrid(force) {
         img.alt = ''; img.decoding = 'async'; img.draggable = false;
         if (fast) img.dataset.src = `/thumb/${d.id[i]}`; else img.src = `/thumb/${d.id[i]}`;
         const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, tabindex: 0, role: 'button', style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
-          h('span', { class: 'tcheck', title: 'Select' }, icon('check')), ST.fav.has(d.id[i]) ? h('span', { class: 'fbadge' }, icon('heart')) : null);
-        if (i in d.video) tile.append(h('span', { class: 'vbadge' }, d.video[i] ? fmtDur(d.video[i]) : null, icon('play')));
-        const marks = [G.faces.has(i) ? h('span', { class: 'cbadge', title: 'Has face tags' }, icon('face')) : null, G.geo.has(i) ? h('span', { class: 'cbadge', title: 'Has GPS coordinates' }, icon('place')) : null].filter(Boolean);
-        if (marks.length) tile.append(h('span', { class: 'cbadges' }, marks));
+          h('span', { class: 'tcheck', title: 'Select' }, icon('check')), tileBadges(d.id[i], { video: d.video[i], faces: G.faces.has(i), geo: G.geo.has(i) }));
         el.append(tile);
       }
     }
