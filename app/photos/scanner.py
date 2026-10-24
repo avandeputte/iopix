@@ -215,6 +215,36 @@ def _tag_paths(d: dict) -> list:
     return []
 
 
+def _sensor_grid(regions: list, applied, file_wh):
+    """The orientation of the grid an MWG region list was measured on, when that is not the file's own: Apple
+    writes the camera's face regions on the sensor's landscape grid (AppliedToDimensions 5712x4284, say) also
+    into a file whose pixels are stored upright (4284x5712, orientation 1), as the iPhone 17 does and exports
+    from Photos do. digiKam takes the fractions as they are and so puts those faces on the wrong part of the
+    picture. None when the region grid and the file's grid have the same shape. Otherwise the turn that makes
+    the region grid upright: 8 when Apple's face roll angles say the camera was turned the other way, else 6,
+    the usual way an upright picture comes off the sensor."""
+    (W, H), (fw, fh) = applied, file_wh
+    if not (W and H and fw and fh) or W == H or fw == fh or (W > H) == (fw > fh):
+        return None
+    rolls = []
+    for r in regions:
+        for k, v in (r.get("Extensions") or {}).items() if isinstance(r.get("Extensions"), dict) else ():
+            if str(k).endswith("AngleInfoRoll") and _num(v) is not None:
+                rolls.append(round(_num(v) / 90) % 4)
+    return 8 if rolls.count(1) > rolls.count(3) else 6
+
+
+def _to_file_grid(area, grid: int, orientation: int):
+    """A region's (centre x, centre y, w, h) fractions on a grid that turns upright by `grid`, as fractions of
+    the file's own grid (which turns upright by `orientation`)."""
+    from app.faces.facemgr import _unrotate
+    cx, cy, w, h = area
+    inv = {6: 8, 8: 6}.get(grid, grid)
+    ux, uy, uw, uh, *_ = _unrotate(cx - w / 2, cy - h / 2, w, h, 1, 1, inv)  # upright
+    x, y, w, h, *_ = _unrotate(ux, uy, uw, uh, 1, 1, orientation or 1)  # the file's grid
+    return x + w / 2, y + h / 2, w, h
+
+
 def _regions(d: dict) -> list:
     """[(name, (x, y, w, h) in the file's own pixel grid, (W, H)) or (name, None, None) for a name-only region], as
     digiKam reads them (DMetadata::getItemFacesMap): the MWG region list, then Microsoft's MP regions for names the MWG
@@ -238,11 +268,15 @@ def _regions(d: dict) -> list:
     if isinstance(ri, dict):
         dims = ri.get("AppliedToDimensions") or {}
         W, H = _num(dims.get("W")) or fw, _num(dims.get("H")) or fh
-        for r in ri.get("RegionList") or []:
-            if not isinstance(r, dict) or (r.get("Type") not in (None, "Face")):
-                continue
+        regions = [r for r in ri.get("RegionList") or [] if isinstance(r, dict) and r.get("Type") in (None, "Face")]
+        grid = _sensor_grid(regions, (W, H), (fw, fh))
+        for r in regions:
             a = r.get("Area") or {}
-            add(name_of(r.get("Name")), *(_num(a.get(k)) for k in ("X", "Y", "W", "H")), W, H)
+            area = tuple(_num(a.get(k)) for k in ("X", "Y", "W", "H"))
+            if grid and None not in area:
+                add(name_of(r.get("Name")), *_to_file_grid(area, grid, _num(d.get("Orientation"), int) or 1), fw, fh)
+            else:
+                add(name_of(r.get("Name")), *area, W, H)
     mp = d.get("RegionInfoMP")
     if isinstance(mp, dict):
         for r in mp.get("Regions") or []:

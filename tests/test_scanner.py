@@ -193,6 +193,29 @@ def test_regions_are_read_as_digikam_reads_them():
     assert got["Bob"] == ((100, 100, 200, 200), (1000, 500)) and got["Cid"] == (None, None), "MP regions, a name-only one too"
 
 
+def test_apple_regions_on_the_sensor_grid_land_on_the_face():
+    """An iPhone file stored upright (4284x5712, orientation 1) whose face regions Apple measured on the sensor's
+    landscape grid (AppliedToDimensions 5712x4284): the face is turned onto the file's grid, not read as fractions
+    of the upright picture (which put IMG_7479's face on the chest). The same region in a file stored on the
+    sensor grid with orientation 6 gives the same upright box; Apple's roll angle of 90 turns it the other way."""
+    from app.photos import scanner
+    region = {"Name": "P", "Type": "Face", "Area": {"X": 0.2779, "Y": 0.5726, "W": 0.0944, "H": 0.1251}}
+    info = {"AppliedToDimensions": {"W": 5712, "H": 4284, "Unit": "pixel"}, "RegionList": [region]}
+    upright = {"ImageSize": "4284 5712", "Orientation": 1, "RegionInfo": info}
+    [(name, rect, wh)] = scanner._regions(upright)
+    assert (rect, wh) == ((1563, 1318, 536, 539), (4284, 5712))
+    assert scanner._upright(rect, wh, 1) == (1563, 1318, 536, 539)
+    sensor = {"ImageSize": "5712 4284", "Orientation": 6, "RegionInfo": info}
+    [(name, rect, wh)] = scanner._regions(sensor)
+    assert scanner._upright(rect, wh, 6) == (1563, 1318, 536, 539), "a file on the sensor grid is read as before"
+    turned = dict(region, Extensions={"XMP-apple-fi:AngleInfoRoll": 92})
+    [(name, rect, wh)] = scanner._regions(dict(upright, RegionInfo=dict(info, RegionList=[turned])))
+    assert rect == (round((0.5726 - 0.1251 / 2) * 4284), round((1 - 0.2779 - 0.0944 / 2) * 5712), 536, 539)
+    export = {"ImageSize": "1536 2048", "Orientation": 1, "RegionInfo": dict(info, AppliedToDimensions={"W": 4032, "H": 3024})}
+    [(name, rect, wh)] = scanner._regions(export)
+    assert wh == (1536, 2048) and rect == (560, 472, 192, 193), "a smaller export of the photo: scaled to the file"
+
+
 def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(lib):
     """A face named "Zz Kw Person" on a photo that has the keyword People/Zz Fam/Zz Kw Person: that keyword becomes the
     person (one tag, not two); an unnamed face is an Unknown face without the Unknown tag on the photo."""
