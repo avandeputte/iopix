@@ -341,7 +341,7 @@ body.locked #main, body.locked #nav, body.locked #filters { visibility: hidden; 
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .modal .alist .frow.on { opacity: .6; }  /* a zip part already downloaded */
 
-#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323232; color: #fff; padding: 12px 20px; border-radius: var(--r-s); z-index: var(--z-toast); box-shadow: var(--shadow); }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; background: #323232; color: #fff; padding: 12px 20px; border-radius: var(--r-s); z-index: var(--z-toast); box-shadow: var(--shadow); }
 #toast a, #toast .lnk { color: #8ab4f8; margin-left: 16px; cursor: pointer; }
 
 /* ---- selection, favorites, app albums, duplicates */
@@ -588,14 +588,15 @@ body.nobadges .cbadges, body.nobadges .fbadge { display: none; }
 #selbar .pillbtn { height: 34px; }
 
 /* the update banner: bottom right, above everything but dialogs */
-#updbanner, #dkbanner { position: fixed; right: 16px; bottom: 16px; z-index: var(--z-banner); display: flex; gap: 12px; align-items: center; max-width: 520px; padding: 12px 10px 12px 14px;
+/* the cards (an update, digiKam's state) stack in one corner, each as tall as its words need */
+#banners { position: fixed; right: 16px; bottom: 16px; z-index: var(--z-banner); display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 520px; }
+#updbanner, #dkbanner { display: flex; gap: 12px; align-items: center; max-width: 100%; box-sizing: border-box; padding: 12px 10px 12px 14px;
   background: var(--bg); border-radius: var(--r-l); box-shadow: var(--shadow); border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent); font-size: var(--fs-m); }
 #updbanner .ic-wrap, #dkbanner .ic-wrap { width: 34px; height: 34px; border-radius: var(--r-m); flex: none; display: inline-flex; align-items: center; justify-content: center; color: #fff;
   background: var(--brand-deep); }
 #updbanner .ic-wrap .ic, #dkbanner .ic-wrap .ic { width: 20px; height: 20px; }
 #updbanner .muted, #dkbanner .muted { font-size: var(--fs-s); margin-top: 2px; white-space: normal; }
 #updbanner .pillbtn, #dkbanner .pillbtn { height: 32px; }
-body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update card sits above the digiKam card */
 
 /* metadata consistency: the summary tiles are the filter; everything in one column */
 .cpage .ctools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px; }
@@ -700,7 +701,7 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 
 /* Crop */
 .facebox.cropbox { border-color: #fff; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); cursor: move; border-radius: var(--r-xs); }
-.cropbar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: var(--z-menu); display: flex; gap: 8px; align-items: center; background: var(--bg); color: var(--fg); border-radius: var(--r-pill); padding: 6px 8px 6px 14px; box-shadow: var(--shadow); font-size: var(--fs-m); }
+.cropbar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); box-sizing: border-box; z-index: var(--z-menu); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--bg); color: var(--fg); border-radius: var(--r-pill); padding: 6px 8px 6px 14px; box-shadow: var(--shadow); font-size: var(--fs-m); }
 .cropbar span { min-width: 72px; font-variant-numeric: tabular-nums; }
 
 /* Folder properties */
@@ -745,7 +746,8 @@ body:has(#dkbanner) #updbanner { bottom: 96px; }  /* both at once: the update ca
 .fpinlabel { font-size: var(--fs-m); max-width: 240px; }
 .modal.svmodal { width: min(960px, 94vw); } .svframe { width: 100%; height: min(62vh, 560px); border: 0; border-radius: var(--r-m); background: var(--bg3); }
 .leaflet-control-layers { border-radius: var(--r-m) !important; font-size: var(--fs-m); }
-#reloadnote { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: var(--z-top); display: flex; gap: 10px; align-items: center; background: var(--bg); color: var(--fg); padding: 8px 8px 8px 16px; border-radius: var(--r-pill); box-shadow: var(--shadow); font-size: var(--fs-m); }
+#reloadnote { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; z-index: var(--z-top); display: flex; gap: 10px; align-items: center; background: var(--bg); color: var(--fg); padding: 8px 8px 8px 16px; border-radius: var(--r-pill); box-shadow: var(--shadow); font-size: var(--fs-m); }
+#reloadnote .pillbtn, #reloadnote .iconbtn { flex: none; }  /* the words wrap, the buttons do not */
 .pphead { font-size: var(--fs-s); text-transform: uppercase; letter-spacing: .04em; padding: 8px 8px 2px; }
 .alist .frow.near .nm { font-weight: 500; }
 .pgroup { margin-bottom: 22px; border-radius: var(--r-l); }
@@ -841,7 +843,11 @@ button.lnk:hover { text-decoration: underline; }
   .gbar .dlbtn span:last-child { display: none; }
   .gbar select { max-width: 120px; }
   #scrub .ribbon { width: 10px; } #scrub .pos { font-size: var(--fs-xs); padding: 0 5px; } #scrub .bubble .bth img { width: 44px; height: 44px; }
-  #updbanner, #dkbanner { left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom)); max-width: none; } body:has(#dkbanner) #updbanner { bottom: calc(150px + env(safe-area-inset-bottom)); }
+  /* the cards wrap on phones: icon, words and the close on the first row, the buttons on their own row below */
+  #banners { left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom)); max-width: none; align-items: stretch; }
+  #updbanner, #dkbanner { flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 12px; }
+  #updbanner > div, #dkbanner > div { flex: 1 1 200px; min-width: 0; }
+  #updbanner .pillbtn, #dkbanner .pillbtn { order: 1; }
   #topbar { padding: env(safe-area-inset-top) 8px 0 8px; height: calc(var(--topbar) + env(safe-area-inset-top)); }
   #selbar { padding: env(safe-area-inset-top) 6px 0 6px; height: calc(var(--topbar) + env(safe-area-inset-top)); overflow-x: auto; scrollbar-width: none; }
   #selbar .pillbtn > span:not(.ic), #selbar .lnk { display: none; }  /* icons only: every action stays on screen */
@@ -878,7 +884,9 @@ button.lnk:hover { text-decoration: underline; }
   /* Bottom-anchored pieces on phones: above the bottom bar, clear of the home indicator */
   #scrub { top: calc(var(--topbar) + env(safe-area-inset-top) + 8px); bottom: calc(64px + env(safe-area-inset-bottom)); }
   body.crumbed #scrub { top: calc(var(--topbar) + env(safe-area-inset-top) + 44px); }
-  #toast { bottom: calc(68px + env(safe-area-inset-bottom)); max-width: calc(100vw - 24px); }
+  #toast { bottom: calc(68px + env(safe-area-inset-bottom)); }
+  #reloadnote { bottom: calc(68px + env(safe-area-inset-bottom)); border-radius: var(--r-l); }  /* above the bottom bar; the words may take two lines */
+  html.vpshort #reloadnote { bottom: 68px; }
   .cbulk { bottom: calc(56px + env(safe-area-inset-bottom)); }
   .gbar { height: 42px; }
   html.vpshort #nav { padding-bottom: 0; height: 56px; }

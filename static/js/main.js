@@ -46,6 +46,8 @@ export async function awaitReindex(until = () => true, tries = 20, ms = 400) {
 }
 /** For admins: digiKam's database is unreachable (the viewer works from its copy of the library) or Sync with digiKam is off.
  *  Dismissed for this browser session, per episode. */
+/** The corner the cards stack in (the update card above digiKam's), made when the first card needs it. */
+function banners() { return $('#banners') || document.body.appendChild(h('div', { id: 'banners' })); }
 export function dkBanner(d) {
   let b = $('#dkbanner');
   const show = d && S.IS_ADMIN && (!d.sync || !d.reachable || d.conflict);
@@ -64,7 +66,7 @@ export function dkBanner(d) {
     h('span', { class: 'ic-wrap', style: 'background:var(--c-orange)' }, icon('wrench')),
     h('div', null, h('b', null, text[0]), h('div', { class: 'muted' }, text[1], ' ', h('a', { href: '#/settings', class: 'lnk' }, 'Settings'))),
     h('button', { class: 'iconbtn', title: 'Hide for now', onclick: () => { try { sessionStorage.setItem('iopix.digikamBannerDismissed', key); } catch { /* private mode */ } b.remove(); } }, icon('close')));
-  document.body.append(b);
+  banners().append(b);
 }
 /** The "a newer version is out" banner, for admins, when the daily check found one; dismissed per version in this browser. */
 export function updateBanner(u) {
@@ -87,7 +89,7 @@ export function updateBanner(u) {
   const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Details');
   b = h('div', { id: 'updbanner', 'data-remote': u.remote }, h('span', { class: 'ic-wrap' }, icon('spark')), text, run, more,
     h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('iopix.updateDismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
-  document.body.append(b);
+  banners().prepend(b);
 }
 /** Run update.sh on the server (POST /api/update run), then watch for the new version: /api/status every 5 s until its
  *  appVersion or commit differs from what runs here, and the page reloads. After 3 minutes without a change the update

@@ -2082,3 +2082,27 @@ def test_a_lost_connection_is_retried_and_the_page_recovers(page, server):
     page.unroute("**/api/**")
     page.evaluate("window.dispatchEvent(new Event('online'))")
     page.wait_for_function("!document.querySelector('#main').textContent.includes('No connection to the server')", timeout=20000)
+
+
+def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, server):
+    """A note centred with left: 50% used to be sized to the right half of the screen, so its words wrapped into a
+    tall column on phones; the update and digiKam cards stack in one corner instead of overlapping."""
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    page = ctx.new_page()
+    try:
+        page.goto(server + "/#/explore"); page.wait_for_selector("#nav a", timeout=10000)
+        page.evaluate("() => { import('/js/state.js').then((st) => st.toast('3 photos moved to the trash. 1 could not be: the file is not on disk.', 'Undo', () => {}, 60000)); }")
+        page.evaluate("() => { const n = document.createElement('div'); n.id = 'reloadnote'; n.innerHTML = '<span>A new version of iopix is ready.</span><button class=\"pillbtn on\">Load it now</button><button class=\"iconbtn\">x</button>'; document.body.append(n); }")
+        page.wait_for_timeout(300)
+        for sel in ("#toast", "#reloadnote"):
+            box = page.locator(sel).bounding_box()
+            assert box["width"] > 300 and box["height"] < 90, (sel, box)
+            assert box["x"] >= 0 and box["x"] + box["width"] <= 390, (sel, box)
+        page.evaluate("() => { import('/js/main.js').then((m) => { m.updateBanner({ version: '9.9.9', remote: 'r', message: 'v9.9.9: words' }); m.dkBanner({ sync: true, reachable: false, since: 1760000000 }); }); }")
+        page.wait_for_timeout(300)
+        if page.locator("#dkbanner").count():  # admins only
+            u, d = page.locator("#updbanner").bounding_box(), page.locator("#dkbanner").bounding_box()
+            assert u["y"] + u["height"] <= d["y"], "the update card sits above the digiKam card, not on it"
+        assert page.locator("#updbanner").bounding_box()["width"] > 300
+    finally:
+        ctx.close()
