@@ -1,5 +1,6 @@
 """What every part of the server shares: the index connection, the state the pages poll, the refresh loop, the response helpers and the guards the editing endpoints use."""
 import gzip
+import hashlib
 import logging
 import os
 import sqlite3
@@ -257,8 +258,13 @@ def _setup_file_log():
 
 
 def jresp(request: Request, data) -> Response:
+    """JSON, gzipped when large, with an ETag: a client that sends it back (If-None-Match) gets 304 and no body while
+    the answer is unchanged (the apps' reloads of meta, photos and state)."""
     body = orjson.dumps(data)
-    headers = {"Cache-Control": "no-store"}
+    etag = 'W/"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Accept-Encoding, Cookie"}
+    if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
+        return Response(status_code=304, headers=headers)
     if len(body) > 2048 and "gzip" in request.headers.get("accept-encoding", ""):
         body = gzip.compress(body, compresslevel=3)
         headers["Content-Encoding"] = "gzip"

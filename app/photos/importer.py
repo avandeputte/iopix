@@ -160,6 +160,42 @@ def _sha256(path, limit: int = None) -> str:
     return h.hexdigest()
 
 
+_HASHES = {}  # (path, size, mtime) -> SHA-256 of a library file: each one is read once however often it is compared
+
+
+def _lib_sha256(path: str):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (path, st.st_size, st.st_mtime_ns)
+    if key not in _HASHES:
+        if len(_HASHES) > 100000:
+            _HASHES.clear()
+        try:
+            _HASHES[key] = _sha256(path)
+        except OSError:
+            return None
+    return _HASHES[key]
+
+
+def present(files: list) -> list:
+    """Which of these files ({size, sha256}) the library already has, by the import's own duplicate test (the same
+    size, then the same SHA-256 of the whole file): [{sha256, id}]."""
+    want = {}
+    for f in files:
+        want.setdefault(int(f["size"]), set()).add(str(f["sha256"]).lower())
+    same = _same_size(set(want))
+    out = []
+    for size, hs in want.items():
+        for pid, path in same.get(size) or []:
+            h = _lib_sha256(path)
+            if h in hs:
+                out.append({"sha256": h, "id": pid})
+                hs.discard(h)
+    return out
+
+
 def _same_size(sizes: set) -> dict:
     """{size: [(photo id, path)]} for library photos of these sizes."""
     if not sizes:
@@ -200,10 +236,7 @@ def plan(token: str, key: str = None) -> dict:
             mine = _sha256(p)
             for pid, path in cands:
                 if path not in hashes:
-                    try:
-                        hashes[path] = _sha256(path)
-                    except OSError:
-                        hashes[path] = None
+                    hashes[path] = _lib_sha256(path)
                 if hashes[path] == mine:
                     dup = pid
                     break

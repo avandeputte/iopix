@@ -169,6 +169,9 @@ async def _auth_guard(request: Request, call_next):
         if _hits(path, SIGNED_IN_PATHS) and not users.is_signed_in(user):
             return JSONResponse({"detail": "Sign in to keep favorites and albums."}, status_code=401)
     response = await call_next(request)
+    if (user and not request.state.via_proxy and cookie_uid == user["id"] and path not in ("/api/auth/logout", "/api/auth/logout_all", "/api/auth/password")
+            and users.renew_due(session) and "set-cookie" not in response.headers):
+        users.set_session(response, user["id"], request.cookies.get(users.VIA_COOKIE) or "password", users.over_https(request))
     if request.state.via_proxy and user and cookie_uid != user["id"] and path != "/api/auth/logout":
         # signed in at the proxy (Cloudflare Access): a session here too, so the same browser stays signed in on the
         # home network, where requests reach the viewer directly without Cloudflare

@@ -387,6 +387,14 @@ def clear_session(response, cloudflare_cookie: bool = False):
         response.delete_cookie("CF_Authorization", path="/")
 
 
+def renew_due(token: str) -> bool:
+    """A session in use is renewed (a fresh 30 days) once a day, so a device used at least once a month stays signed in."""
+    try:
+        return int(token.split(".")[1]) - time.time() < (SESSION_DAYS - 1) * 86400
+    except (ValueError, IndexError, AttributeError):
+        return False
+
+
 def user_from_token(token: str):
     try:
         uid, exp, sig = token.split(".")

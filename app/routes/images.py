@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
 from app import thumbs
@@ -78,6 +79,23 @@ def original(photo_id: int, dl: int = 0):
     return FileResponse(row["path"], media_type=mime, filename=row["name"],
                         content_disposition_type="attachment" if dl else "inline",
                         headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/video/{photo_id}.mp4")
+def video_copy(photo_id: int):
+    """A copy of a video that phones play (H.264 and AAC in an MP4, Range requests for seeking), for videos whose
+    /api/photo answer says playable: false. Made on the first request: until it is ready the answer is 503 with
+    Retry-After and {status: converting}; 422 {status: failed} when it cannot be made."""
+    from app import videostream
+    row = _photo_row(photo_id)
+    if not row["video"] or not os.path.isfile(row["path"]):
+        raise HTTPException(404, "No such video")
+    st = videostream.start(row)
+    if st == "ready":
+        return FileResponse(videostream.copy_path(row), media_type="video/mp4", headers={"Cache-Control": "private, max-age=3600"})
+    if st == "failed":
+        return JSONResponse({"status": "failed", "detail": f"The video could not be converted: {videostream.error(row)}"}, status_code=422)
+    return JSONResponse({"status": st}, status_code=503, headers={"Retry-After": "5"})
 
 
 class _Sink:

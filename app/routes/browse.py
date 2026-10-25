@@ -1,5 +1,6 @@
 """Browsing: photos, metadata, facets, map, events, status, detected content and duplicates."""
 import gzip
+import hashlib
 import json
 import re
 import sqlite3
@@ -146,13 +147,18 @@ def api_photos(request: Request):
         # the prefix makes cached results expire when favorites, albums or embeddings change
         # an album filter depends on who asks (private albums), so the cached answer is kept per user then
         who = f".u{(request.state.user or {}).get('id')}" if "ualbum" in request.url.query else ""
-        body = _photos_cached(state["version"], f"{appstate.rev}.{semantic.key}{who}|{request.url.query}")
+        key = f"{appstate.rev}.{semantic.key}{who}|{request.url.query}"
+        # the answer is fixed by the index version and the cache key: their hash is its ETag (304 while unchanged)
+        etag = 'W/"' + hashlib.blake2b(f"{state['version']}|{key}".encode(), digest_size=12).hexdigest() + '"'
+        headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Accept-Encoding, Cookie"}
+        if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
+            return Response(status_code=304, headers=headers)
+        body = _photos_cached(state["version"], key)
     except sqlite3.OperationalError as e:
         raise HTTPException(400, f"Bad query: {e}")
     if "gzip" in request.headers.get("accept-encoding", ""):
-        return Response(body, media_type="application/json",
-                        headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"})
-    return Response(gzip.decompress(body), media_type="application/json")
+        return Response(body, media_type="application/json", headers={**headers, "Content-Encoding": "gzip"})
+    return Response(gzip.decompress(body), media_type="application/json", headers=headers)
 
 
 
@@ -307,6 +313,19 @@ def api_events(request: Request):
     return jresp(request, {"events": _events(state["version"])})
 
 
+@router.get("/api/explore")
+def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
+    """Everything the Explore page fetches, in one request (the apps): {random, thenAndNow, events, onThisDay,
+    peopleGroups}, each as its own endpoint gives it (/api/random, /api/thenandnow, /api/events, /api/photos?md=,
+    /api/people/groups). md: the viewer's own today as MM-DD; without it, onThisDay is null."""
+    from app.routes.faces import api_people_groups
+    on_this_day = None
+    if re.fullmatch(r"\d\d-\d\d", md or ""):
+        on_this_day = orjson.loads(gzip.decompress(_photos_cached(state["version"], f"{appstate.rev}.{semantic.key}|md={md}")))
+    return jresp(request, {"random": api_random(request, n), "thenAndNow": api_then_and_now(request, pairs),
+                           "events": _events(state["version"]), "onThisDay": on_this_day, "peopleGroups": api_people_groups(request)})
+
+
 @router.get("/api/bursts")
 def api_bursts(request: Request, offset: int = 0, limit: int = 40):
     """Bursts within the current filters, newest first, each with its frames and best pick."""
@@ -372,6 +391,11 @@ def api_photo(photo_id: int, request: Request):
             raise HTTPException(404)
         d = dict(row)
         d["extra"] = json.loads(d["extra"]) if d["extra"] else {}
+        if d["video"]:
+            # whether Apple's players take the original as it is (/orig/<id>); if not, /video/<id>.mp4 is a copy they play
+            from app import videostream
+            v = d["extra"].get("video") or {}
+            d["playable"] = videostream.playable(d["name"], v.get("codec"), v.get("audio"))
         album = con.execute("SELECT id, path, name FROM albums WHERE id = ?", (d["album_id"],)).fetchone()
         d["album"] = {"id": album["id"], "path": album["path"], "name": album["name"]} if album else None
         d["tags"] = [dict(r) for r in con.execute(

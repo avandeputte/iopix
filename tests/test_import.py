@@ -148,3 +148,27 @@ def test_import_run_takes_a_pattern(client, lib, tmp_path):
             d = os.path.join(lib["root"], rel.lstrip("/"))
             if os.path.isdir(d) and not os.listdir(d):
                 os.rmdir(d)
+
+
+def test_one_request_import_and_the_already_there_check(client, lib, tmp_path):
+    """POST /api/import stages and imports in one request (the apps' background uploads), duplicates left out;
+    POST /api/import/check answers which files (size and SHA-256) the library already has."""
+    import hashlib
+    src, src_id = _src(lib)
+    new = _dated(lib, tmp_path)
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    have = client.post("/api/import/check", json={"files": [{"size": len(src.read_bytes()), "sha256": sha(src.read_bytes())},
+                                                              {"size": len(new.read_bytes()), "sha256": sha(new.read_bytes())}]})
+    assert have.status_code == 200 and have.json()["present"] == [{"sha256": sha(src.read_bytes()), "id": src_id}], have.text
+    assert client.post("/api/import/check", json={"files": [{"size": 1, "sha256": "nope"}]}).status_code == 400
+    try:
+        r = client.post("/api/import", data={"pattern": "{yyyy}/{yyyy}{mm}"},
+                        files=[("files", ("same.jpg", src.read_bytes(), "image/jpeg")), ("files", ("trip.jpg", new.read_bytes(), "image/jpeg"))])
+        assert r.status_code == 200, r.text
+        res = r.json()
+        assert [a["folder"] for a in res["added"]] == ["/1999/199912"] and res["skipped"][0]["duplicate_of"] == src_id
+        assert Path(res["added"][0]["path"]).read_bytes() == new.read_bytes()
+        again = client.post("/api/import/check", json={"files": [{"size": len(new.read_bytes()), "sha256": sha(new.read_bytes())}]}).json()["present"]
+        assert again == [{"sha256": sha(new.read_bytes()), "id": res["added"][0]["id"]}], "the new file counts once imported"
+    finally:
+        _cleanup(client, lib, ["/1999"])

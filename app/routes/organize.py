@@ -1,6 +1,7 @@
 """Organizing the library: lossless edits, trash, move and rename, delete, folders, upload, import and the share target."""
 import logging
 import os
+import re
 
 from fastapi import APIRouter
 from fastapi import HTTPException
@@ -381,11 +382,8 @@ def api_import_layouts(request: Request):
     return {"layouts": importer.layouts(), "layout": importer.layout(), "patterns": True}
 
 
-@router.post("/api/import/stage")
-async def api_import_stage(request: Request):
-    """Multipart `files` (and an optional `token` to add to an import started earlier): the files are kept
-    aside and looked at; nothing goes into the library yet. Returns the plan."""
-    from app.photos import importer
+async def _uploads(request: Request):
+    """The multipart form of an upload and its `files` (the open upload files, spooled to disk by Starlette)."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
     form = await request.form()
@@ -394,7 +392,56 @@ async def api_import_stage(request: Request):
         raise HTTPException(400, "No files")
     if any((f.size or 0) > 2 * 1024 ** 3 for f in ups):
         raise HTTPException(413, "Files over 2 GB cannot be uploaded this way")
-    files = [(f.filename, f.file) for f in ups[:500]]  # the open upload file (spooled to disk by Starlette), not its bytes
+    return form, [(f.filename, f.file) for f in ups[:500]]
+
+
+@router.post("/api/import")
+async def api_import_now(request: Request):
+    """One request (the apps' background uploads): multipart `files` plus `layout` or `pattern` and `duplicates`
+    ('skip', the default, or 'import'), staged and imported at once. Returns what a run returns: {added, skipped}."""
+    from app.photos import importer
+    form, files = await _uploads(request)
+    try:
+        key = _layout_or_pattern(str(form.get("layout") or ""), str(form.get("pattern") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        token = await run_in_threadpool(importer.stage, files, None)
+    except (dbsync.SyncError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    try:
+        r = await run_in_threadpool(importer.run, token, key, None, str(form.get("duplicates") or "") != "import")
+    except dbsync.SyncError as e:
+        await run_in_threadpool(importer.discard, token)  # nothing was imported: the app sends the files again
+        raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
+    except (*DB_ERRORS, ValueError) as e:
+        raise HTTPException(500, f"The import failed and was rolled back: {e}")
+    await run_in_threadpool(_rebuild_after_write)
+    return r
+
+
+@router.post("/api/import/check")
+async def api_import_check(request: Request):
+    """Body {files: [{size, sha256}]}: which of them the library already has, by the import's duplicate test (the
+    same size, then the same SHA-256 of the whole file). Returns {present: [{sha256, id}]}."""
+    from app.photos import importer
+    body = await request.json()
+    files = body.get("files") if isinstance(body, dict) else None
+    if not isinstance(files, list) or len(files) > 5000:
+        raise HTTPException(400, "Send {files: [{size, sha256}]}, at most 5000")
+    for f in files:
+        if not (isinstance(f, dict) and isinstance(f.get("size"), int) and f["size"] >= 0
+                and isinstance(f.get("sha256"), str) and re.fullmatch(r"[0-9a-fA-F]{64}", f["sha256"])):
+            raise HTTPException(400, "Each file needs its size in bytes and the SHA-256 of its contents (64 hex digits)")
+    return {"present": await run_in_threadpool(importer.present, files)}
+
+
+@router.post("/api/import/stage")
+async def api_import_stage(request: Request):
+    """Multipart `files` (and an optional `token` to add to an import started earlier): the files are kept
+    aside and looked at; nothing goes into the library yet. Returns the plan."""
+    from app.photos import importer
+    form, files = await _uploads(request)
     token = str(form.get("token") or "") or None
     try:
         token = await run_in_threadpool(importer.stage, files, token)

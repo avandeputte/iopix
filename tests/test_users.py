@@ -248,3 +248,20 @@ def test_an_account_can_be_left_off_the_sign_in_list(client, fresh):
     assert client.post(f"/api/users/{alex['id']}", json={"listed": True}).status_code == 200
     client.cookies.clear()
     assert [a["name"] for a in client.get("/api/auth/accounts").json()["accounts"]] == ["alex", "kid"]
+
+
+def test_a_session_in_use_is_renewed(client, fresh, monkeypatch):
+    """A device that uses its session gets a fresh 30 days (at most once a day): the iPhone app stays signed in."""
+    import time as _time
+    u = users.create("alex", "correct horse", "admin")
+    _login(client, "alex", "correct horse")
+    assert "set-cookie" not in client.get("/api/auth/me").headers, "a session from today is not renewed"
+    now = _time.time()
+    monkeypatch.setattr(users.time, "time", lambda: now - 20 * 86400)
+    old = users.make_token(u["id"])  # signed 20 days ago: 10 days left
+    monkeypatch.undo()
+    client.cookies.clear(); client.cookies.set(users.COOKIE, old)
+    r = client.get("/api/auth/me")
+    assert r.json()["user"]["name"] == "alex"
+    fresh_token = r.cookies.get(users.COOKIE)
+    assert fresh_token and int(fresh_token.split(".")[1]) > now + 29 * 86400, r.headers.get("set-cookie")
