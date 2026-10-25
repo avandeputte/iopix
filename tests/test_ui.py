@@ -2390,3 +2390,23 @@ def test_badges_change_at_once_on_every_thumbnail(page, server):
     finally:
         page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], false))")
     tile(plain).locator(".fbadge").wait_for(state="detached", **fast)
+
+
+def test_inside_the_app_the_web_navigation_steps_aside(browser, server):
+    """?app=1 (the iPhone, iPad and Mac apps): no sidebar, menu button or bottom bar, the page reaches the bottom
+    edge, the mode stays for the tab, and every change of page is posted to the app's iopixRoute handler."""
+    for vp in ({"width": 393, "height": 852}, {"width": 1280, "height": 860}):
+        ctx = browser.new_context(viewport=vp); page = ctx.new_page()
+        page.add_init_script("window.__routes = []; window.webkit = { messageHandlers: { iopixRoute: { postMessage: (h) => window.__routes.push(h) } } };")
+        try:
+            page.goto(server + "/?app=1#/photos"); page.wait_for_selector("#grid .tile", timeout=20000)
+            assert page.evaluate("document.documentElement.classList.contains('inapp')")
+            assert not page.locator("#nav").is_visible() and not page.locator("#menubtn").is_visible()
+            main = page.locator("#main").bounding_box()
+            assert main["x"] == 0 and abs(main["y"] + main["height"] - vp["height"]) < 1.5, main
+            page.evaluate("location.hash = '#/people'"); page.wait_for_function("window.__routes.includes('#/people')", timeout=5000)
+            assert "#/photos" in page.evaluate("window.__routes")
+            page.goto(server + "/#/explore"); page.wait_for_timeout(800)
+            assert page.evaluate("document.documentElement.classList.contains('inapp')"), "remembered for the tab"
+        finally:
+            ctx.close()

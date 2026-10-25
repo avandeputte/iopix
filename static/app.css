@@ -931,3 +931,9 @@ button.lnk:hover { text-decoration: underline; }
   .lb-strip { transform: translateY(calc(100% - 14px)); } .lb-strip .grip { height: 6px; top: 4px; }
   .chip button, .ichip .tx { min-width: 32px; min-height: 32px; } .tact, .seg button, .eseg button { min-width: 36px; min-height: 36px; } .frow, .trow { min-height: 40px; }
 }
+
+/* ==== inside the iopix app (html.inapp, ?app=1): the app's own tab bar replaces the sidebar and the bottom bar ==== */
+html.inapp #nav, html.inapp #sidebtn, html.inapp #menubtn, html.inapp #navscrim { display: none !important; }
+html.inapp body, html.inapp body.side-docked { --nav: 0px; }
+html.inapp #main, html.inapp #filters, html.inapp .cbulk { bottom: 0; }
+html.inapp #scrub { bottom: 8px; } html.inapp #toast, html.inapp #reloadnote { bottom: 16px; } html.inapp #banners { bottom: 16px; }

@@ -255,5 +255,9 @@ export async function boot() {
   await pollStatus();
   onRoute();
 }
+// Inside the iopix app (?app=1 on the first load, remembered for the tab): the app's own tab bar replaces the web
+// navigation (html.inapp), and every change of page is posted to the app (state.onRoute).
+try { if (new URLSearchParams(location.search).get('app') === '1') sessionStorage.setItem('iopix.app', '1'); } catch { /* private mode */ }
+if (new URLSearchParams(location.search).get('app') === '1' || (() => { try { return sessionStorage.getItem('iopix.app') === '1'; } catch { return false; } })()) document.documentElement.classList.add('inapp');
 healSoon();
 start();

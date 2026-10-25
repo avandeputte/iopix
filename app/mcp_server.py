@@ -810,6 +810,33 @@ def rename_folder(token: str, folder: str, new_name: str) -> dict:
     return r
 
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+def tag_op(token: str, op: Literal["person", "notperson", "merge", "rename", "move", "add"], tag_id: int = 0,
+           into: int = 0, name: str = "", parent: int = 0) -> dict:
+    """Change a tag exactly as the Tags page does (digiKam's database backed up first, sidecars rewritten after, an
+    Edit log entry per photo): person = mark a keyword tag as a person; notperson = undo that; merge = move everything
+    on tag_id (photos, face boxes) to the person or tag `into`, then remove tag_id; rename (name); move (parent, 0 = top
+    level); add (name inside parent). Ids are those of list_tags/list_people. digiKam must be closed unless the viewer
+    runs without it. Needs the admin token."""
+    _need_token(token, writes=True)
+    from app.core import _kick
+    from app.digikam.dbsync import SyncError
+    from app.photos import tagmanager
+    if not (config.DB_WRITE and edits.available()):
+        raise ToolError("Tag management is turned off (needs DB_WRITE and EDITING)")
+    body = {"op": op, "id": tag_id, "into": into, "name": name, "parent": parent or None}
+    import time
+    until = time.time() + 120  # the previous change's sidecars are still being written: wait for them, as a person would
+    while tagmanager.pending_jobs() and time.time() < until:
+        time.sleep(0.5)
+    try:
+        r = tagmanager.apply(body)
+    except (SyncError, ValueError) as e:
+        raise ToolError(str(e))
+    _kick.set()
+    return r
+
+
 @server.tool(annotations=READ_ONLY)
 def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
     """For the photos whose date does not match their folder (Maintenance > Metadata quality): every date stored in

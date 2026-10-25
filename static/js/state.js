@@ -189,6 +189,7 @@ export function onRoute() {
   if (S.RELOAD_PENDING && !LB.open && !G.sel.size) { location.reload(); return Promise.resolve(); }  // a new version waits: a change of page is a good moment
   S.route = parseHash();
   S.lastHash = location.hash;
+  try { window.webkit?.messageHandlers?.iopixRoute?.postMessage(location.hash); } catch { /* not in the app */ }
   let done = Promise.resolve();
   const fp = filterParams();
   const vp = new URLSearchParams(S.route.params); vp.delete('p');

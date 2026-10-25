@@ -169,6 +169,8 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
             con.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', ?)", (tid, tree.rows[tid]["name"]))
             photos = _photos_with(con, [tid], roots)  # their sidecars list it as a person now (a name-only face region)
             jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            from app.photos import history
+            history.record([{"photo_id": iid, "action": "tag", "summary": f"Marked as a person: {tree.full(tid)}", "path": path} for iid, path in photos.items()])
             summary.update(id=tid, path=tree.full(tid), photos=len(photos))
         elif kind == "notperson":
             # a keyword tag digiKam marked as a person (its "person" property, set when a face was once named with
@@ -185,6 +187,8 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
             # its photos' sidecars list it as a person (a name-only face region): rewritten as a plain keyword
             photos = _photos_with(con, [tid], roots)
             jobs = [(stamp, path, iid) for iid, path in photos.items()]
+            from app.photos import history
+            history.record([{"photo_id": iid, "action": "tag", "summary": f"No longer a person: {tree.full(tid)}", "path": path} for iid, path in photos.items()])
             summary.update(id=tid, path=tree.full(tid), photos=len(photos))
         elif kind == "merge":
             # one person (or tag) entered twice ("Cynthia Hwang" and "Cynthia Wang"): everything on `id` moves to
