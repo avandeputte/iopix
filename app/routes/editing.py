@@ -168,10 +168,12 @@ async def api_edit_revert(request: Request):
     """Undo the viewer's edits to these photos by restoring the sidecar backup."""
     body = await request.json()
     ids = [int(i) for i in body.get("ids", [])][:20000]
+    # edited in the index, or edited a moment ago and not in the index yet (an undo right after the edit)
+    fresh = [i for i in ids if edits.pending_one(i)] if len(ids) <= 200 else list(set(ids) & set(edits.pending()))
     con = db()
     try:
         photos = [dict(r) for r in con.execute(
-            f"SELECT id, path FROM photos WHERE edited = 1 AND id IN ({','.join(map(str, ids)) or 'NULL'})")]
+            f"SELECT id, path FROM photos WHERE (edited = 1 OR id IN ({','.join(map(str, fresh)) or 'NULL'})) AND id IN ({','.join(map(str, ids)) or 'NULL'})")]
     finally:
         con.close()
     result = await run_in_threadpool(edits.revert, photos)  # runs exiftool; keep the event loop free

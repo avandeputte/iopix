@@ -381,6 +381,36 @@ def api_map(request: Request):
                            "lon": [round(r[2], 5) for r in rows]})
 
 
+def _overlay_pending(con, d: dict):
+    """An edit just made (written to the sidecar, remembered until digiKam's database has it) shows in the answer at
+    once, as the index shows it after its next rebuild a moment later; so the answer (and its ETag) changes as soon as
+    the edit is accepted. Doing it again once the index has it changes nothing."""
+    from app.data.index import _parse_dt
+    e = edits.pending_one(d["id"])
+    if not e:
+        return
+    d["edited"] = 1
+    for k in ("rating", "pick", "color"):
+        if k in e:
+            d[k] = e[k]
+    for k in ("title", "caption"):
+        if k in e:
+            d[k] = e[k] or None
+    if e.get("taken"):
+        d["taken"] = e["taken"]
+        dt = _parse_dt(e["taken"])
+        if dt:
+            d["ts"] = dt[0]
+    if "gps" in e:
+        g = e["gps"]
+        d["lat"], d["lon"], d["alt"] = (g["lat"], g["lon"], g.get("alt")) if g else (None, None, None)
+    rem, add = set(e.get("remove_tags") or []), [t for t in e.get("add_tags") or [] if t not in {x["full"] for x in d["tags"]}]
+    d["tags"] = [t for t in d["tags"] if t["full"] not in rem]
+    if add:
+        d["tags"] += [dict(r) for r in con.execute(
+            f"SELECT id, name, full, person FROM tags WHERE full IN ({','.join('?' * len(add))})", add)]
+
+
 @router.get("/api/photo/{photo_id}")
 def api_photo(photo_id: int, request: Request):
     con = db()
@@ -407,6 +437,7 @@ def api_photo(photo_id: int, request: Request):
         d["faces_other"] = [dict(r) for r in con.execute(
             "SELECT f.tag_id AS tag, f.kind, f.x, f.y, f.w, f.h, (SELECT name FROM tags t WHERE t.id = f.tag_id) AS name "
             "FROM faces f WHERE f.photo_id = ? AND f.kind != 'confirmed' ORDER BY f.x", (photo_id,))]
+        _overlay_pending(con, d)
         d.pop("hash", None)
         if hide_path:
             d.pop("path", None)

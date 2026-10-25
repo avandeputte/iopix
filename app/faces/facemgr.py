@@ -50,6 +50,15 @@ def _is_person(con, tid: int) -> bool:
     return bool(con.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone())
 
 
+def _person_tag(con, tid: int, what: str = "Choose a person."):
+    """A face (or a person without a face box) takes a person: a tag marked as one, or any tag under People (marked
+    when used, as digiKam does). A keyword tag elsewhere ("Activity/Soccer") is refused."""
+    if not con.execute("SELECT 1 FROM Tags WHERE id = ?", (tid,)).fetchone():
+        raise SyncError(what)
+    if not _is_person(con, tid) and not (_full(con, tid) + "/").startswith("People/"):
+        raise SyncError(f"“{_full(con, tid)}” is a keyword tag, not a person: choose a person, or a tag under People.")
+
+
 def _full(con, tid: int) -> str:
     return dkdb.tag_path(dkdb.tag_tree(con), tid)
 
@@ -326,6 +335,7 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         return summary
     if kind_op == "suggest":  # a suggestion for person `tag` (digiKam's unconfirmed face), as undo puts one back
         new_tag = int(op.get("tag") or 0)
+        _person_tag(con, new_tag)
         if kind is not None:
             raise SyncError("There is already a face at exactly that rectangle.")
         _add_prop(con, image, new_tag, "autodetectedFace", rect)
@@ -334,8 +344,9 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         return summary
     if kind_op in ("untag", "tagonly"):
         person = int(op.get("tag") or 0)
-        if person in sp.values() or not con.execute("SELECT 1 FROM Tags WHERE id = ?", (person,)).fetchone():
+        if person in sp.values():
             raise SyncError("Choose a person.")
+        _person_tag(con, person)
         if kind_op == "tagonly":
             _ensure_person(con, person)  # picked as a person: marked as one, as naming a face with it would
         elif not _is_person(con, person):
@@ -352,8 +363,9 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         return summary
     if kind_op == "add":
         new_tag = int(op.get("tag") or 0)
-        if new_tag in sp.values() or not con.execute("SELECT 1 FROM Tags WHERE id = ?", (new_tag,)).fetchone():
+        if new_tag in sp.values():
             raise SyncError("Choose a person for the new face.")
+        _person_tag(con, new_tag, "Choose a person for the new face.")
         if kind is not None:
             raise SyncError("There is already a face at exactly that rectangle.")
         if _person_already_there(con, image, new_tag, op["rect"]):
@@ -365,8 +377,9 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         raise SyncError("No face was found at that rectangle; the photo may have changed in digiKam.")
     if kind_op == "name":
         new_tag = int(op.get("tag") or 0)
-        if new_tag in sp.values() or not con.execute("SELECT 1 FROM Tags WHERE id = ?", (new_tag,)).fetchone():
+        if new_tag in sp.values():
             raise SyncError("Choose a person.")
+        _person_tag(con, new_tag)
         if new_tag != tag and _person_already_there(con, image, new_tag, op["rect"]):
             raise SyncError("That person already has a face there; remove this region instead of naming it.")
         _remove_face(con, sp, image, tag, kind, rect, touch_tags=(tag != new_tag))

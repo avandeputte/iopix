@@ -113,6 +113,21 @@ def pending() -> dict:
         con.close()
 
 
+def pending_one(photo_id: int):
+    """The remembered edit of one photo, or None."""
+    from app.data import vdb
+    if not vdb.exists():
+        return None
+    con = appstate.connect()
+    try:
+        r = con.execute("SELECT data FROM pending_edits WHERE photo_id = ?", (photo_id,)).fetchone()
+        return json.loads(r[0]) if r else None
+    except Exception:
+        return None
+    finally:
+        con.close()
+
+
 def pending_count() -> int:
     """How many edits are remembered (what status polls show; cheaper than loading them all)."""
     from app.data import vdb

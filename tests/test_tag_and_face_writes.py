@@ -340,3 +340,23 @@ def test_the_tag_manager_marks_a_tag_as_a_person_and_back(lib, client):
         dk.close()
     finally:
         tagmanager.apply({"op": "delete", "id": tid}, check_running=False, queue=False)
+
+
+def test_a_face_refuses_a_keyword_tag_as_its_person(lib, client):
+    """Adding or naming a face, or putting a person on a photo, takes a person (or a tag under People); a keyword
+    tag elsewhere is refused and stays a keyword tag."""
+    import sqlite3
+    from app.digikam.dbsync import SyncError
+    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Activity-probe"}, check_running=False)["id"]
+    dk = sqlite3.connect(lib["db"])
+    try:
+        img = dk.execute("SELECT id FROM Images WHERE status = 1 AND category = 1 LIMIT 1").fetchone()[0]
+        for op in ({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": kw}, {"op": "tagonly", "image": img, "tag": kw}):
+            with pytest.raises(SyncError, match="keyword tag"):
+                facemgr.apply(op, check_running=False)
+        assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (kw,)).fetchone()
+        r = client.post("/api/faces/op", json={"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": kw})
+        assert r.status_code in (400, 409) and "keyword tag" in r.text, r.text
+    finally:
+        dk.close()
+        tagmanager.apply({"op": "delete", "id": kw}, check_running=False)

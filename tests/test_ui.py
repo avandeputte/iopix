@@ -1737,6 +1737,7 @@ def test_all_metadata_and_adjust_panels_open(page, server, lib):
     page.wait_for_selector(".mdmodal .mdgroup", timeout=15000)
     assert page.locator(".mdmodal .mdtable tr").count() > 5
     page.locator(".mdmodal button:has-text('Close')").click()
+    page.mouse.move(400, 300); page.mouse.move(420, 40)  # the toolbar hides 2.8 s after the last mouse move (the dialog may take longer)
     page.locator("#lightbox button[title^='Rotate, flip or crop']").click()
     page.locator(".facemenu .fmi:has-text('Adjust')").click()
     page.wait_for_selector(".adjbar input[type=range]", timeout=5000)

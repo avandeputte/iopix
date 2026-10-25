@@ -139,3 +139,33 @@ def test_edit_log_search_by_words_person_user_and_time(client, lib):
     other = next(i for i in lib["ids"] if i not in lib["with_faces"])
     history.record([{"photo_id": other, "action": "edit", "summary": "zebra on a photo without that person", "user": "tester-x"}])
     assert all(e["photo"] != other for e in client.get(f"/api/history?person={tag}&q=zebra").json()["entries"])
+
+
+def test_an_edit_shows_in_the_photo_answer_at_once(client, lib):
+    """Right after /api/edit, /api/photo has the new rating and title (and a new ETag), before the index rebuild."""
+    con = index.open_index()
+    pid = con.execute("SELECT id FROM photos WHERE video = 0 AND id IN (%s) LIMIT 1 OFFSET 1" % ",".join(map(str, lib["ids"][3:]))).fetchone()[0]
+    con.close()
+    before = client.get(f"/api/photo/{pid}")
+    try:
+        assert client.post("/api/edit", json={"ids": [pid], "changes": {"rating": 4, "title": "Fresh probe"}}).status_code == 200
+        after = client.get(f"/api/photo/{pid}", headers={"If-None-Match": before.headers["etag"]})
+        assert after.status_code == 200 and after.json()["rating"] == 4 and after.json()["title"] == "Fresh probe", after.text[:200]
+    finally:
+        client.post("/api/edit/revert", json={"ids": [pid]})
+
+
+def test_undo_right_after_an_edit_works_before_the_index_has_it(client, lib):
+    """Revert straight after an edit (the index not rebuilt yet) still puts the photo back."""
+    con = index.open_index()
+    pid, title = con.execute("SELECT id, title FROM photos WHERE video = 0 AND id IN (%s) LIMIT 1 OFFSET 2" % ",".join(map(str, lib["ids"][3:]))).fetchone()
+    con.close()
+    assert client.post("/api/edit", json={"ids": [pid], "changes": {"title": "Undo probe"}}).status_code == 200
+    r = client.post("/api/edit/revert", json={"ids": [pid]})
+    assert r.status_code == 200 and r.json()["reverted"] == 1, r.text
+    assert edits.pending_one(pid) is None, "the remembered edit is gone"
+    for _ in range(60):  # the index drops the edit on its next rebuild
+        if (client.get(f"/api/photo/{pid}").json()["title"] or "") == (title or ""):
+            break
+        time.sleep(0.25)
+    assert (client.get(f"/api/photo/{pid}").json()["title"] or "") == (title or "")
