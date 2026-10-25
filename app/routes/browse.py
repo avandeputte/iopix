@@ -85,14 +85,18 @@ def _photos_cached(version: str, key: str) -> bytes:
 
 @router.get("/api/random")
 def api_random(request: Request, n: int = 12):
-    """Explore › Rediscover: photos picked at random from the whole library (stills): {id, w, h, ts}."""
+    """Explore › Rediscover: photos picked at random from the whole library (stills): {id, w, h, ts} and the badges
+    {video, geo, faces} as /api/photos gives them (by position)."""
     where, params, _rank = resolve([("type", "photo")])
     con = db()
     try:
-        rows = con.execute(f"SELECT id, w, h, ts FROM photos WHERE {where} ORDER BY random() LIMIT ?", [*params, max(1, min(int(n), 60))]).fetchall()
+        rows = con.execute(f"SELECT id, w, h, ts, video, duration, lat IS NOT NULL, {HAS_PEOPLE} FROM photos WHERE {where} ORDER BY random() LIMIT ?",
+                           [*params, max(1, min(int(n), 60))]).fetchall()
     finally:
         con.close()
-    return {"id": [r[0] for r in rows], "w": [r[1] for r in rows], "h": [r[2] for r in rows], "ts": [r[3] for r in rows]}
+    return {"id": [r[0] for r in rows], "w": [r[1] for r in rows], "h": [r[2] for r in rows], "ts": [r[3] for r in rows],
+            "video": {str(i): (round(r[5]) if r[5] else 0) for i, r in enumerate(rows) if r[4]},
+            "geo": [i for i, r in enumerate(rows) if r[6]], "faces": [i for i, r in enumerate(rows) if r[7]]}
 
 
 @router.get("/api/badges")

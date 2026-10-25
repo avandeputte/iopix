@@ -103,6 +103,8 @@ def test_explore_in_one_request(client, lib):
     e = client.get(f"/api/explore?md={md}&n=5&pairs=2").json()
     assert set(e) == {"random", "thenAndNow", "events", "onThisDay", "peopleGroups"}
     assert len(e["random"]["id"]) <= 5 and "pairs" in e["thenAndNow"] and "groups" in e["peopleGroups"]
+    r = client.get("/api/random?n=60").json()  # Rediscover's badges, as /api/photos gives them by position
+    assert isinstance(r["video"], dict) and all(0 <= i < len(r["id"]) for i in r["geo"] + r["faces"]) and r["geo"] and r["faces"], r
     assert e["onThisDay"]["count"] == client.get(f"/api/photos?md={md}").json()["count"]
     assert e["events"] == client.get("/api/events").json()["events"]
     assert client.get("/api/explore").json()["onThisDay"] is None
