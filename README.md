@@ -14,7 +14,7 @@ A web front end for a digiKam library, for browsing, searching and managing phot
 | **Search** by what is in the photos | **Map** of every geotagged photo |
 | ![Places: countries, then regions and towns, worked out offline from each photo's GPS position](docs/screenshots/places.jpg) | ![Folders: digiKam's albums as they are on disk](docs/screenshots/folders.jpg) |
 | **Places** worked out offline from GPS positions | **Folders** as they are on disk |
-| ![The edit log: every change with its before and after values, undo and the backups](docs/screenshots/edit-log.jpg) | ![Maintenance: import, the file scanner, lossless edits, the trash and digiKam's database](docs/screenshots/maintenance.jpg) |
+| ![The edit log: every change with its before and after values, undo and the backups](docs/screenshots/edit-log.jpg) | ![Maintenance: import, the file scanner, lossless edits, the trash, the library copy and the metadata checks](docs/screenshots/maintenance.jpg) |
 | **Edit log** with undo for every change | **Maintenance** |
 
 <p>
