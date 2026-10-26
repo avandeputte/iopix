@@ -475,6 +475,10 @@ def api_photo(photo_id: int, request: Request):
         from app.photos import versions
         d["versions"] = versions.versions_of(photo_id)  # digiKam's version family (ImageRelations), when there is one
         d["quality"] = _quality(d)
+        if d.get("dprec") == 3 and users.can_write(request.state.user):  # a year suggestion from the people's ages (ages.py), editors only
+            from app.faces import ages
+            hit = ages.suggestions([photo_id])["items"] if ages.available() else []
+            d["dateSuggestion"] = hit[0] if hit else None
         if d.get("burst"):
             d["burst_size"] = con.execute("SELECT count(*) FROM photos WHERE burst = ?", (d["burst"],)).fetchone()[0]
             best = con.execute("SELECT id, name FROM photos WHERE burst = ? AND burst_best = 1", (d["burst"],)).fetchone()

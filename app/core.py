@@ -95,6 +95,8 @@ def _start_prewarm():
     analysis.start(rows)
     facevecs.start()
     semantic.start(rows)
+    from app.faces import ages
+    ages.start()
 
 
 def _run_analysis_soon():

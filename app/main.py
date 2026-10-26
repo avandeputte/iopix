@@ -70,13 +70,13 @@ WRITE_PATHS = ("/api/edit", "/api/edits/db", "/api/faces/detect", "/api/photos/d
 
 
 ADMIN_PATHS = ("/api/settings", "/api/maintenance", "/api/scan", "/api/quality", "/api/log", "/api/library/merge", "/api/consistency/scan", "/api/analysis/run", "/api/models/check", "/api/models/download", "/api/restart", "/api/users", "/api/update", "/api/neardups")
-SIGNED_IN_PATHS = ("/api/favorites", "/api/ualbums", "/api/searches", "/api/tags/recent", "/api/auth/settings", "/api/auth/password", "/api/auth/logout_all")
+SIGNED_IN_PATHS = ("/api/people/birth", "/api/favorites", "/api/ualbums", "/api/searches", "/api/tags/recent", "/api/auth/settings", "/api/auth/password", "/api/auth/logout_all")
 # reads that spend a shared resource (Nominatim's one request a second; the place-tag plan reads the whole index)
 SIGNED_IN_READ_PATHS = ("/api/geocode", "/api/placetags")
 # reads that are not for everyone, whatever the method: the server log and the merge plan (admins); the change log and
 # the elevation lookup, which spends Google credits (editors)
 ADMIN_READ_PATHS = ("/api/log", "/api/library/merge", "/api/quality")
-EDITOR_READ_PATHS = ("/api/history", "/api/elevation", "/api/import", "/api/metadata", "/api/consistency")  # (the report lists file paths)
+EDITOR_READ_PATHS = ("/api/datesuggest", "/api/history", "/api/elevation", "/api/import", "/api/metadata", "/api/consistency")  # (the report lists file paths)
 MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it is read (uploads are multipart and not bound here)
 
 

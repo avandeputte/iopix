@@ -2437,3 +2437,17 @@ def test_an_approximate_date_shows_only_what_is_known(page, server, lib):
     finally:
         req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [pid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
         urllib.request.urlopen(req).read()
+
+
+def test_date_suggestions_and_quality_pages_render(page, server, lib):
+    """Explore links to Date suggestions (editors), which renders without a model (a note says what to install);
+    the bursts page and the quality filters load without errors."""
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("a.pill[href='#/datesuggest']", timeout=10000)
+    page.click("a.pill[href='#/datesuggest']")
+    page.wait_for_selector("h1.ptitle:has-text('Date suggestions')", timeout=10000)
+    assert "Date unknown" in page.inner_text(".intro")
+    page.goto(server + "/#/bursts")
+    page.wait_for_selector("h1.ptitle:has-text('Bursts')", timeout=10000)
+    page.goto(server + "/#/photos?rejects=1")
+    page.wait_for_selector("#chips :text('Likely rejects')", timeout=10000)

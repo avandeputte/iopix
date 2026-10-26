@@ -96,6 +96,7 @@ export async function showExplore() {
       h('a', { class: 'pill', href: '#/duplicates' }, 'Duplicate files'), h('a', { class: 'pill', href: '#/bursts' }, 'Bursts & best shots'),
       h('a', { class: 'pill', href: '#/events' }, 'Events & trips'), pill('Contains text', null, { hastext: 1 }), pill('Blurry', null, { blurry: 1 }),
       pill('Best looking', null, { looks: 'top', sort: 'looks' }), pill('Likely rejects', null, { rejects: 1 }),
+      S.EDITING ? h('a', { class: 'pill', href: '#/datesuggest' }, 'Date suggestions') : null,
       S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
@@ -597,6 +598,59 @@ export async function showBursts(vp) {
     list, more));
   more.hidden = true;
   await load();
+}
+
+/** Explore › Date suggestions: a year for each photo marked "Date unknown", from how old its named people look (ages.py).
+ * Nothing is written until a year is used; birth years entered here help people with few dated photos. */
+export async function showDateSuggest() {
+  main.replaceChildren(loadingBox('Working out the years…'));
+  let d;
+  try { d = await api('/api/datesuggest?limit=500'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
+  if (S.route.view !== 'datesuggest') return;
+  const items = d.items;
+  const basis = (p) => p.basis === 'fit' ? `from ${nf.format(p.n)} photos with a date` : p.basis === 'dated' ? `from only ${p.n} photos with a date` : p.basis === 'entered' ? 'birth year you entered' : 'too few photos with a date: enter a birth year';
+  const birthBtn = (p) => S.EDITING ? h('button', { type: 'button', class: 'lnk', onclick: async () => {
+    const v = await promptDialog(`${p.name}’s year of birth (leave empty to work it out from photos with a date)`, { value: p.entered ? String(p.birth) : '', placeholder: 'e.g. 1942' });
+    if (v === null || v === undefined) return;
+    try { await post('/api/people/birth', { tag: p.tag, year: v || null }); } catch (e) { toastError(e); return; }
+    showDateSuggest();
+  } }, p.entered ? 'change' : 'enter birth year') : null;
+  const people = h('div', { class: 'hlist' }, d.people.map((p) => h('div', { class: 'hrow' },
+    h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
+    h('div', { class: 'hmain' }, h('b', null, p.name), ' · ', p.birth ? `born ${p.entered ? '' : 'about '}${p.birth}` : 'birth year unknown', h('span', { class: 'muted' }, ` (${basis(p)}) `), birthBtn(p)))));
+  const use = async (list, btn) => {
+    btn.disabled = true;
+    const byYear = new Map();
+    list.forEach((x) => { if (!byYear.has(x.year)) byYear.set(x.year, []); byYear.get(x.year).push(x.id); });
+    for (const [year, ids] of byYear) { if (!(await editPhotos(ids, { date_precision: 'year', taken: String(year) }))) { btn.disabled = false; return false; } }
+    return true;
+  };
+  const card = (x) => {
+    const el = h('div', { class: 'dupitem', style: 'width:220px' },
+      h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
+        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+      h('div', null, h('b', null, `About ${x.year}`), h('span', { class: 'muted' }, ` (${x.lo}–${x.hi})`)),
+      h('div', { class: 'sb' }, x.people.map((p) => `${p.name} looks ${p.age}`).join(' · ')),
+      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Save the date as the year ${x.year} only (undo from the edit log)`,
+        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Use ${x.year}`) : null);
+    return el;
+  };
+  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const close = items.filter((x) => x.hi - x.lo <= 4);
+  const useClose = S.EDITING && close.length ? h('button', { class: 'pillbtn', onclick: async (e) => {
+    if (!(await confirmDialog(`Use the suggested year for the ${nf.format(close.length)} ${close.length === 1 ? 'photo' : 'photos'} whose range is four years or less? Each is saved as a year-only date, with undo in the edit log.`, { ok: 'Use them' }))) return;
+    if (await use(close, e.currentTarget)) showDateSuggest();
+  } }, `Use the ${nf.format(close.length)} closest suggestions`) : null;
+  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” under Maintenance › AI analysis and models to get suggestions.')
+    : d.faces[0] < d.faces[1] ? h('div', { class: 'enote' }, `Estimating ages: ${nf.format(d.faces[0])} of ${nf.format(d.faces[1])} faces so far; more suggestions appear as it goes.`) : null;
+  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Date suggestions', null]]),
+    pageTitle('calendar', 'amber', 'Date suggestions ', h('span', { class: 'muted' }, nf.format(items.length))),
+    h('div', { class: 'muted intro' }, 'A year for each photo marked “Date unknown”, from how old the named people in it look. Each person’s photos with a known date teach the age model how that person ages; a birth year you enter helps someone with few dated photos. Ages from faces are rough, so every suggestion is a range. Nothing is saved until you use a year: it is then saved as a year-only date, with undo in the edit log.'),
+    waiting, d.people.length ? [h('h3', null, 'People'), people] : null,
+    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
+      : h('div', { class: 'empty' }, d.ready ? 'No suggestions: no photo marked “Date unknown” shows a named person with enough to go on.' : 'No suggestions yet.')));
+  badgeTiles(grid);
+  syncLightbox();
 }
 
 // ---- users: sign in / out, own password, first-admin setup, admin user management

@@ -22,6 +22,7 @@ from app import config
 from app.digikam import dbsync
 from app.ai import detector
 from app.ai import looks
+from app.faces import ages
 from app.digikam import dkdb
 from app.photos import edits
 from app.digikam import merge
@@ -270,11 +271,13 @@ def api_analysis(request: Request):
          + (" and closed eyes on faces seen from the front" if looks.eyes_available() else ", and closed eyes once the eye model and a face detection model are installed")
          + ". Picks the best frame of each burst and suggests likely rejects (Filters › Quality); nothing is marked until you do it. A model installed later fills in its part without redoing the rest.",
          "done": cov["looks"], "total": stills, "running": analysis.progress["looks"]["running"], "enabled": config.ANALYSIS, "rerun": True},
+        {"key": "ages", "label": "Ages for date suggestions", "detail": "How old the named people look (" + dlmodels.REGISTRY["mivolo"]["label"] + ") in photos marked “Date unknown”, and in a sample of the same people’s photos with a known date, which calibrate it for each of them. Explore › Date suggestions then proposes a year for each undated photo; nothing is written until you use one.",
+         "done": ages.coverage()[0], "total": ages.coverage()[1], "running": ages.progress["running"], "enabled": config.ANALYSIS and ages.available(), "rerun": True},
         {"key": "captions", "label": "Photo descriptions", "detail": f"A one-sentence description of each photo ({mname('caption_model')}), searchable from the search box and shown in the info panel. After switching to the other size, “Run again” redoes every photo with it; until then only new photos use it.",
          "done": cov["captions"], "total": stills, "running": analysis.progress["captions"]["running"],
          "enabled": config.ANALYSIS and caption.available(), "rerun": True},
     ]
-    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks"}
+    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages"}
     for j in jobs:
         j["queued"] = bgjobs.is_queued(queue_key[j["key"]])
     return {"jobs": jobs, "photos": total, "models": models if act is not None else [], "queue": bgjobs.status()}
@@ -834,6 +837,8 @@ async def api_analysis_run(request: Request):
             analysis.reset(job)
         elif job == "faces":
             facevecs.reset()
+        elif job == "ages":
+            ages.reset()
         elif job == "facedetect":
             facedetect.reset()
         else:

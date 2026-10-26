@@ -1,5 +1,7 @@
 """Faces: detection, naming and confirming, suggestions, grouping, near-duplicate regions."""
 
+import time
+
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
@@ -12,6 +14,7 @@ from app.photos import edits
 from app.faces import facedetect
 from app.faces import facemgr
 from app.faces import facevecs
+from app.faces import ages
 from app.ai import neardups
 from app import thumbs
 from app import users
@@ -287,3 +290,41 @@ def api_faces_summary():
                 for k in ("unknown", "suggested", "ignored")}  # [photos, faces]
     finally:
         con.close()
+
+
+
+# --------------------------------------------------------------------------
+# year suggestions for undated photos (ages.py)
+# --------------------------------------------------------------------------
+
+@router.get("/api/datesuggest")
+def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str = ""):
+    """Suggested years for the photos marked "Date unknown", from the ages of the named people in them:
+    {total, items: [{id, year, lo, hi, people: [{tag, name, age, year}]}], people: [{tag, name, birth, entered, basis, n}],
+    ready, faces: [done, wanted]}. Nothing is written; using a year is /api/edit {date_precision: "year", taken: "YYYY"}."""
+    want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
+    out = ages.suggestions(want)
+    items = out["items"]
+    return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 500))],
+                           "people": out["people"], "ready": ages.available(), "faces": list(ages.coverage())})
+
+
+@router.post("/api/people/birth")
+async def api_people_birth(request: Request):
+    """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.
+    Kept in the viewer's own database only."""
+    if not users.can_write(request.state.user):
+        raise HTTPException(403, "Editors only")
+    body = await request.json()
+    tag, year = int(body["tag"]), body.get("year")
+    year = int(year) if year not in (None, "") else None
+    if year is not None and not 1850 <= year <= time.localtime().tm_year:
+        raise HTTPException(400, "A birth year between 1850 and this year")
+    con = db()
+    try:
+        if not con.execute("SELECT 1 FROM tags WHERE id = ? AND person = 1", (tag,)).fetchone():
+            raise HTTPException(404, "No such person")
+    finally:
+        con.close()
+    await run_in_threadpool(ages.set_birth, tag, year)
+    return {"ok": True}

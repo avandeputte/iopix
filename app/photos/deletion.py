@@ -31,7 +31,7 @@ BACKUP_DIR = config.DATA_DIR / "deleted-photos"
 PHOTO_TABLES = ("ImageInformation", "ImageMetadata", "ImagePositions", "VideoMetadata", "ImageComments", "ImageCopyright",
                 "ImageProperties", "ImageTags", "ImageTagProperties")
 VIEWER_TABLES = (("favorite_photos", "photo_id"), ("viewer_album_photos", "photo_id"), ("pending_edits", "photo_id"), ("ai_scans", "photo_id"), ("ai_quality", "photo_id"),
-                 ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_looks", "photo_id"),
+                 ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_looks", "photo_id"), ("ai_face_ages", "photo_id"),
                  ("ai_face_embeddings", "photo_id"), ("ai_person_references", "photo_id"), ("metadata_check", "photo_id"), ("image_data_checksums", "photo_id"), ("quality_accepted", "photo_id"),
                  ("ai_similar_photos", "a"), ("ai_similar_photos", "b"))
 

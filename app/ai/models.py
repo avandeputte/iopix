@@ -101,6 +101,12 @@ REGISTRY = {
              "sha256": "4daa100034482525a26c9afb9297c16580a531189e66e3d2b2ac7d32becfd593",
              "page": "https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/open-closed-eye-0001", "what": "Photo quality: tells open from closed eyes on faces seen from the front, for the closed-eyes check and the best frame of a burst. Needs a face detection model to find the eyes. Squints and downward glances can look closed to it.",
              "size": "46 kB"},
+    # Year suggestions for undated photos (ages.py)
+    "mivolo": {"label": "MiVOLO v2 (age)", "kind": "url", "file": "mivolo_v2_age.onnx",
+               "url": "https://huggingface.co/Sam-Apostel/mivolo-v2-age-onnx/resolve/8eb4cd8f5dd4bd28df2c9a43b24bc54d6d139d36/mivolo_v2_age.onnx",
+               "sha256": "2db5e05be33b3f120518a86f29a4a65eb0a01c2967219b8787a7dead9b796951",
+               "page": "https://huggingface.co/iitolstykh/mivolo_v2", "what": "Year suggestions for photos whose date is unknown: estimates how old each named person looks (MiVOLO v2, one of the most accurate published age estimators; an ONNX export of its age output). Each person's photos with a known date calibrate it for that person. Ages from faces are rough, so a suggestion is a year with a range, and nothing is written until you use it.",
+               "size": "118 MB"},
     # Data
     "geonames": {"label": "GeoNames places", "kind": "data", "url": "https://download.geonames.org/export/dump/cities1000.zip",
                  "page": "https://download.geonames.org/export/dump/", "what": "Offline reverse geocoding: town, region and country for each GPS position. GeoNames regenerates this export daily.",
@@ -362,6 +368,9 @@ def download(key: str):
                 _recompute(key)
             elif key in ("aesthetic", "eyes", "yunet", "scrfd", "retinaface"):  # photo quality picks up what it could not do before
                 _recompute_looks()
+            elif key == "mivolo":
+                from app.faces import ages
+                ages.start()
         except Exception as e:
             progress["error"] = str(e)[:300]
         finally:
@@ -430,6 +439,9 @@ def _reset(key: str):
         elif key in ("aesthetic", "eyes"):
             from app.ai import looks
             looks.reset_sessions()
+        elif key == "mivolo":
+            from app.faces import ages
+            ages.reset_session()
         elif key == "geonames":
             from app.geo import places
             places._geo = None  # loaded again from the new files on the next lookup

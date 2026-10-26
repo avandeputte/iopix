@@ -3,7 +3,7 @@ import { $, api, fill, h, main, norm, store } from './core.js';
 import { crumbs, renderChips } from './search.js';
 import { G, keepPlace, removeScrubber, showPhotos } from './grid.js';
 import { clearSelection, showHistory, showImport, showQuality, showTrash } from './actions.js';
-import { MORE_VIEWS, currentNav, showAlbums, showAnalysis, showBursts, showDetected, showEvents, showExplore, showFolders, showPeople, showPlaces } from './pages.js';
+import { MORE_VIEWS, currentNav, showAlbums, showAnalysis, showBursts, showDateSuggest, showDetected, showEvents, showExplore, showFolders, showPeople, showPlaces } from './pages.js';
 import { showConsistency, showDuplicates, showFaces, showMaintenance, showSettings, showTags } from './admin.js';
 import { M, showMap } from './map.js';
 import { renderFilters, toggleFilters } from './filters.js';
@@ -81,7 +81,7 @@ export const NAV = [
 ];
 // hash S.route name -> page renderer (function declarations are hoisted, so this can sit above them)
 export const VIEW_FNS = { photos: showPhotos, explore: showExplore, people: showPeople, places: showPlaces, folders: showFolders, albums: showAlbums, tags: showTags, map: showMap, duplicates: showDuplicates,
-  detected: showDetected, bursts: showBursts, events: showEvents, history: showHistory, analysis: showAnalysis, settings: showSettings, maintenance: showMaintenance, consistency: showConsistency, quality: showQuality, trash: showTrash, import: showImport, faces: showFaces };
+  detected: showDetected, bursts: showBursts, events: showEvents, history: showHistory, analysis: showAnalysis, settings: showSettings, maintenance: showMaintenance, consistency: showConsistency, quality: showQuality, trash: showTrash, import: showImport, faces: showFaces, datesuggest: showDateSuggest };
 export const VIEWS = Object.keys(VIEW_FNS);
 export const PARAM_VIEWS = ['places', 'bursts', 'faces', 'history', 'import'];  // views whose own query parameters (not photo filters) pick what they show
 // favorites and app albums (stored by the app, not in digiKam)

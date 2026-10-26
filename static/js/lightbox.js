@@ -888,6 +888,17 @@ export function filterFromLightbox(obj) {
   LB.pushed = false;
   go('photos', photosWith(obj));
 }
+/** A year for a photo whose date is unknown, from the ages of the people in it (ages.py): shown, with the button that uses it. */
+function suggestRow(d) {
+  const g = d.dateSuggestion;
+  const who = g.people.map((p) => `${p.name} (looks about ${p.age})`).join(', ');
+  return h('div', { class: 'irow' }, icon('spark'), h('div', null,
+    h('div', { class: 'a' }, `Looks like about ${g.year}`, h('span', { class: 'muted' }, ` (${g.lo}–${g.hi})`)),
+    h('div', { class: 'b' }, `From how old ${g.people.length === 1 ? 'this person looks' : 'these people look'}: ${who}. `,
+      S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Save the date as the year ${g.year} only (undo from the edit log)`, onclick: () => editPhotos([d.id], { date_precision: 'year', taken: String(g.year) }) }, `Use ${g.year}`) : null,
+      ' · ', h('a', { class: 'lnk', href: '#/datesuggest' }, 'All suggestions'))));
+}
+
 /** The photo quality row of the info panel: focus and look as ranks in the library, closed eyes, and why it looks like a reject. */
 function qualityRow(d) {
   const q = d.quality, pct = (v) => Math.round(v * 100);
@@ -972,7 +983,7 @@ export function renderInfo() {
     LB.prefs ? infoPrefsEditor(renderInfo) : null,
     show('caption') && d.title ? h('div', { class: 'title' }, d.title) : null,
     show('caption') && d.caption ? h('div', { class: 'muted', style: 'margin:6px 0 10px;white-space:pre-wrap' }, d.caption) : null,
-    show('date') ? [dateRow(d),
+    show('date') ? [dateRow(d), d.dateSuggestion ? suggestRow(d) : null,
       S.EDITING ? h('div', { hidden: true, style: 'margin:0 0 8px 40px' }, dateEditor([d.id], d.taken, null, d.datePrecision)) : null] : null,
     show('file') ? [irow(d.video ? 'video' : 'photo', d.name, [d.video ? null : `${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`, `${d.w} × ${d.h}`, fmtBytes(d.size), d.fmt].filter(Boolean).join(' · ')),
       d.album ? irow('folder', lnk(d.album.path.replace(/^\//, '') || d.album.name, { album: d.album.id, sort: 'old' }), 'Folder') : null,
