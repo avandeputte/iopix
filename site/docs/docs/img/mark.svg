@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b4a8c"/><stop offset=".55" stop-color="#4a5aa0"/><stop offset="1" stop-color="#5f6fb4"/></linearGradient>
+<linearGradient id="far" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7f8fd0"/><stop offset="1" stop-color="#6372b8"/></linearGradient>
+<linearGradient id="near" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b4bfee"/><stop offset="1" stop-color="#8e9bdc"/></linearGradient>
+<radialGradient id="sun" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff3cf"/><stop offset="1" stop-color="#f3c96b"/></radialGradient>
+<clipPath id="c"><rect width="100" height="100" rx="22"/></clipPath>
+</defs>
+<g clip-path="url(#c)">
+<rect width="100" height="100" fill="url(#sky)"/>
+<circle cx="68" cy="31" r="19" fill="#f3c96b" opacity=".18"/>
+<circle cx="68" cy="31" r="11.5" fill="url(#sun)"/>
+<path d="M-2 84 L34 42 L52 62 L63 51 L102 86 L102 102 L-2 102 Z" fill="url(#far)"/>
+<path d="M-2 92 C 18 74 34 68 50 76 C 64 83 80 72 102 70 L102 102 L-2 102 Z" fill="url(#near)"/>
+</g></svg>
