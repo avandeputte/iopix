@@ -1,5 +1,5 @@
 /** The timeline grid: layout, virtual rendering, selection by click and keyboard. */
-import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
+import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtKnown, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
 import { S, ST, applyFilter, filterParams, loadState, onRoute, savedSearchFor, toast, toastError } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
@@ -14,6 +14,14 @@ export const G = { sel: new Set(), lastSel: -1, data: null, items: [], ar: null,
 export function groupKey(ts) {
   if (G.group === 'month') { const dt = date(ts); return dt.getUTCFullYear() * 12 + dt.getUTCMonth(); }
   return Math.floor(ts / 86400);
+}
+/** The section of the i-th photo of the grid: photos with an approximate date get their own, by what is known
+ *  (the month, the year, or nothing), so a placeholder day never heads them. */
+function sectionKey(d, i) {
+  const n = d.dp?.[i];
+  if (!n) return groupKey(d.ts[i]);
+  const dt = date(d.ts[i]);
+  return n === 3 ? 'unknown' : n === 2 ? `y${dt.getUTCFullYear()}` : `m${dt.getUTCFullYear() * 12 + dt.getUTCMonth()}`;
 }
 export const GAP = 4, BAR_H = 48, HEAD_H = 46;
 
@@ -88,9 +96,9 @@ export function layoutGrid() {
   const items = [], byDate = G.sort === 'new' || G.sort === 'old';
   const sections = [];
   if (byDate) {
-    let start = 0, day = groupKey(d.ts[0]);
+    let start = 0, day = sectionKey(d, 0);
     for (let i = 1; i <= d.count; i++) {
-      const dd = i < d.count ? groupKey(d.ts[i]) : null;
+      const dd = i < d.count ? sectionKey(d, i) : null;
       if (dd !== day) { sections.push([start, i]); start = i; day = dd; }
     }
   } else sections.push([0, d.count]);
@@ -237,7 +245,7 @@ export function renderGrid(force) {
     let el;
     if (it.head) {
       el = h('div', { class: 'ghead', style: `top:${it.y}px;height:${it.h}px` },
-        h('span', { class: 'hcheck', title: G.group === 'month' ? 'Select this month' : 'Select this day', 'data-s': it.s, 'data-e': it.e }, icon('check')), (G.group === 'month' ? dfMonth : dfDay).format(date(d.ts[it.s])),
+        h('span', { class: 'hcheck', title: G.group === 'month' ? 'Select this month' : 'Select this day', 'data-s': it.s, 'data-e': it.e }, icon('check')), d.dp?.[it.s] ? h('span', { title: 'An approximate date: only this much is known' }, fmtKnown(d.ts[it.s], d.dp[it.s])) : (G.group === 'month' ? dfMonth : dfDay).format(date(d.ts[it.s])),
         it.e - it.s > 12 ? h('span', { class: 'n' }, nf.format(it.e - it.s)) : null);
     } else {
       el = h('div', { class: 'grow', style: `top:${it.y}px;height:${it.h}px` });

@@ -97,6 +97,19 @@ export const dfTimeLocal = new Intl.DateTimeFormat(undefined, { hour: 'numeric',
 export const fmtWhen = (ts) => `${dfDayLocal.format(date(ts))} ${dfTimeLocal.format(date(ts))}`;
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const date = (ts) => new Date(ts * 1000);
+/** How well a photo's date is known: the index's dprec (1 month and year, 2 year only, 3 unknown) or the API's
+ *  datePrecision name; 0 = exact. */
+export const PREC = { exact: 0, month: 1, year: 2, unknown: 3 };
+export const precOf = (p) => (typeof p === 'number' ? p : PREC[p] || 0);
+const dfMonthLong = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', ...UTC });
+/** A date as much of it as is known: "May 1992", "1992", "Date unknown"; `exact` formats a date known to the day. */
+export const fmtKnown = (ts, p, exact = dfDay) => {
+  const n = precOf(p);
+  if (n === 3) return 'Date unknown';
+  if (n === 2) return String(date(ts).getUTCFullYear());
+  if (n === 1) return dfMonthLong.format(date(ts));
+  return exact.format(date(ts));
+};
 export const isoDay = (ts) => date(ts).toISOString().slice(0, 10);
 /** iOS installed app: WebKit can leave the viewport short by the status bar's height (62 points on an iPhone
  *  16 Pro) once the keyboard has opened, and keeps it so until the app is force-quit, even across reloads. Fixed

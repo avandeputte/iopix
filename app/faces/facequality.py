@@ -187,7 +187,8 @@ def _wrongfolder() -> list:
     con = index.open_index()
     try:
         albums = con.execute("SELECT id, path, n FROM albums").fetchall()
-        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != ''").fetchall()
+        # a date marked unknown (dateprecision.py) is a placeholder on purpose: nothing to report
+        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != '' AND (dprec IS NULL OR dprec < 3)").fetchall()
     finally:
         con.close()
     spans, by_date = {}, {}
@@ -236,7 +237,8 @@ def _baddate() -> list:
     con = index.open_index()
     try:
         albums = {aid: path for aid, path in con.execute("SELECT id, path FROM albums")}
-        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != ''").fetchall()
+        # a date marked unknown (dateprecision.py) is a placeholder on purpose: nothing to report
+        rows = con.execute("SELECT id, ts, name, taken, album_id FROM photos WHERE taken IS NOT NULL AND taken != '' AND (dprec IS NULL OR dprec < 3)").fetchall()
     finally:
         con.close()
     soon = (dt.datetime.now() + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")

@@ -65,7 +65,7 @@ def _photos_cached(version: str, key: str) -> bytes:
     con = db()
     try:
         rows = con.execute(
-            f"SELECT id, ts, w, h, video, duration, lat IS NOT NULL, {HAS_PEOPLE} FROM photos WHERE {where} ORDER BY {sort}", params).fetchall()
+            f"SELECT id, ts, w, h, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, dprec FROM photos WHERE {where} ORDER BY {sort}", params).fetchall()
     finally:
         con.close()
     if rank and "sort" not in d:
@@ -79,6 +79,8 @@ def _photos_cached(version: str, key: str) -> bytes:
         # positions of photos that carry GPS coordinates, for the badge on their tiles
         "geo": [i for i, r in enumerate(rows) if r[6]],
         "faces": [i for i, r in enumerate(rows) if r[7]],
+        # approximate dates, as {index: 1 month and year known, 2 year only, 3 unknown}
+        "dp": {str(i): r[8] for i, r in enumerate(rows) if r[8]},
     }
     return gzip.compress(orjson.dumps(data), compresslevel=3)
 
@@ -90,13 +92,14 @@ def api_random(request: Request, n: int = 12):
     where, params, _rank = resolve([("type", "photo")])
     con = db()
     try:
-        rows = con.execute(f"SELECT id, w, h, ts, video, duration, lat IS NOT NULL, {HAS_PEOPLE} FROM photos WHERE {where} ORDER BY random() LIMIT ?",
+        rows = con.execute(f"SELECT id, w, h, ts, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, dprec FROM photos WHERE {where} ORDER BY random() LIMIT ?",
                            [*params, max(1, min(int(n), 60))]).fetchall()
     finally:
         con.close()
     return {"id": [r[0] for r in rows], "w": [r[1] for r in rows], "h": [r[2] for r in rows], "ts": [r[3] for r in rows],
             "video": {str(i): (round(r[5]) if r[5] else 0) for i, r in enumerate(rows) if r[4]},
-            "geo": [i for i, r in enumerate(rows) if r[6]], "faces": [i for i, r in enumerate(rows) if r[7]]}
+            "geo": [i for i, r in enumerate(rows) if r[6]], "faces": [i for i, r in enumerate(rows) if r[7]],
+            "dp": {str(i): r[8] for i, r in enumerate(rows) if r[8]}}
 
 
 @router.get("/api/badges")
@@ -128,14 +131,15 @@ def api_then_and_now(request: Request, n: int = 3, person: int = None):
     try:
         rows = con.execute(
             "SELECT f.tag_id, t.name, min(p.ts), max(p.ts), count(*) FROM faces f JOIN photos p ON p.id = f.photo_id JOIN tags t ON t.id = f.tag_id "
-            "WHERE f.kind = 'confirmed' AND t.person = 1 AND p.video = 0 AND p.pick != 1 GROUP BY f.tag_id HAVING max(p.ts) - min(p.ts) >= ? "
+            "WHERE f.kind = 'confirmed' AND t.person = 1 AND p.video = 0 AND p.pick != 1 AND (p.dprec IS NULL OR p.dprec < 3) GROUP BY f.tag_id HAVING max(p.ts) - min(p.ts) >= ? "
             + ("AND f.tag_id = ? " if person else "") + "ORDER BY random() LIMIT ?", [3 * 365 * 86400] + ([int(person)] if person else []) + [max(1, min(int(n), 12))]).fetchall()
         pairs = []
         for tag, name, t0, t1, cnt in rows:
             ends = []
             for order in ("ASC", "DESC"):
                 r = con.execute("SELECT f.photo_id, p.ts, f.x, f.y, f.w, f.h FROM faces f JOIN photos p ON p.id = f.photo_id "
-                                f"WHERE f.tag_id = ? AND f.kind = 'confirmed' AND p.video = 0 AND p.pick != 1 ORDER BY p.ts {order}, f.w * f.h DESC LIMIT 1", (tag,)).fetchone()
+                                f"WHERE f.tag_id = ? AND f.kind = 'confirmed' AND p.video = 0 AND p.pick != 1 AND (p.dprec IS NULL OR p.dprec < 3) "
+                                f"ORDER BY p.ts {order}, f.w * f.h DESC LIMIT 1", (tag,)).fetchone()
                 ends.append({"photo": r[0], "ts": r[1], "rect": [r[2], r[3], r[4], r[5]]})
             pairs.append({"tag": tag, "name": name, "then": ends[0], "now": ends[1], "years": round((t1 - t0) / (365.25 * 86400), 1), "photos": cnt})
     finally:
@@ -441,6 +445,9 @@ def api_photo(photo_id: int, request: Request):
             "SELECT f.tag_id AS tag, f.kind, f.x, f.y, f.w, f.h, (SELECT name FROM tags t WHERE t.id = f.tag_id) AS name "
             "FROM faces f WHERE f.photo_id = ? AND f.kind != 'confirmed' ORDER BY f.x", (photo_id,))]
         _overlay_pending(con, d)
+        from app.photos import dateprecision
+        d["datePrecision"] = dateprecision.of_paths([t["full"] for t in d["tags"]])  # None: the date is exact
+        d["dprec"] = dateprecision.LEVELS.get(d["datePrecision"])
         d.pop("hash", None)
         if hide_path:
             d.pop("path", None)

@@ -92,7 +92,7 @@ def events_and_trips(con) -> list:
     """con: connection to the index. Returns [{kind, title, when, from, to, n, cover, places}], newest first."""
     rows = con.execute(
         "SELECT id, day, lat, lon, place, region, country, title, rating, pick, video FROM photos "
-        "WHERE year > 1971 ORDER BY ts").fetchall()
+        "WHERE year > 1971 AND dprec IS NULL ORDER BY ts").fetchall()  # an approximate date has no day to make an event of
     if not rows:
         return []
     geo = [r for r in rows if r["lat"] is not None]

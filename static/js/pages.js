@@ -1,5 +1,5 @@
 /** The pages: explore, people, places, folders, albums, tags, import and the trash. */
-import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, errorBox, fill, fmtBytes, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
+import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
 import { NAV, S, ST, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
@@ -39,7 +39,7 @@ export async function showExplore() {
   const shuffle = async () => {
     let r; try { r = await api('/api/random?n=36'); } catch { return; }
     if (!r.id.length || !rediscover.isConnected) return;
-    const tiles = r.id.map((id, i) => h('div', { class: 'tile', 'data-id': id, style: `--ar:${Math.max(0.5, Math.min(2.2, r.w[i] / (r.h[i] || 1))).toFixed(3)}`, title: dfDay.format(date(r.ts[i])),
+    const tiles = r.id.map((id, i) => h('div', { class: 'tile', 'data-id': id, style: `--ar:${Math.max(0.5, Math.min(2.2, r.w[i] / (r.h[i] || 1))).toFixed(3)}`, title: fmtKnown(r.ts[i], r.dp?.[i]),
       onclick: () => openLightbox({ id: r.id }, i, true) }, h('img', { src: `/thumb/${id}`, alt: '', loading: 'lazy' })));
     fill(rediscover, h('h2', { style: '--hue:var(--c-indigo)' }, h('span', { class: 'hic' }, icon('spark')), 'Rediscover', h('button', { type: 'button', class: 'lnk', onclick: shuffle }, 'Shuffle')), h('div', { class: 'jrows' }, tiles));
     rediscover.hidden = false;

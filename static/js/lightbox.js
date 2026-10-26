@@ -1,5 +1,5 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
-import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, h, icon, nf, norm, plural, post, store } from './core.js';
+import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, fmtKnown, precOf, h, icon, nf, norm, plural, post, store } from './core.js';
 import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, onRoute, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, renderGrid, scrollToIndex, setBadges } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
@@ -464,7 +464,7 @@ export function showItem() {
   if (src.w) LB.ar = src.w[i] / (src.h[i] || 1);
   else img.onload = () => { if (token === LB.token && !LB.detail) { LB.ar = img.naturalWidth / img.naturalHeight; sizeFrame(); } };
   sizeFrame();
-  el.ttl.textContent = src.ts ? dfDay.format(date(src.ts[i])) : '';
+  el.ttl.textContent = src.ts ? fmtKnown(src.ts[i], src.dp?.[i]) : '';
   // the strip's thumbnails come after the photo and its details, not in competition with them
   setTimeout(() => { if (token === LB.token) renderStrip(); }, LB.stripSrc === src ? 0 : 350);
   updateFavBtn();
@@ -897,6 +897,16 @@ export function renderInfo() {
   const saveOne = (ch) => editPhotos([d.id], ch);
   const irow = (ic, a, b) => h('div', { class: 'irow' }, icon(ic), h('div', null, h('div', { class: 'a' }, a), b ? h('div', { class: 'b' }, b) : null));
   const sub = (t) => h('div', { class: 'sub' }, t);
+  // an approximate date shows only what is known ("1992", "May 1992", "Date unknown"), never the placeholder day
+  const dateRow = (x) => {
+    const n = precOf(x.datePrecision), y = (x.day || '').slice(0, 4), ym = (x.day || '').slice(0, 7);
+    if (!n) return irow('calendar', lnk(dfLong.format(date(x.ts)), { from: x.day, to: x.day, sort: 'old' }), dfTime.format(date(x.ts)));
+    const span = n === 2 ? { from: `${y}-01-01`, to: `${y}-12-31`, sort: 'old' } : n === 1 ? { from: `${ym}-01`, to: `${ym}-${String(new Date(Date.UTC(+y, +ym.slice(5), 0)).getUTCDate()).padStart(2, '0')}`, sort: 'old' } : null;
+    const text = fmtKnown(x.ts, n);
+    return irow('calendar', span ? lnk(text, span) : text,
+      h('span', { class: 'approx', style: 'margin:4px 0 0', title: 'Saved with a placeholder date where a full date is required; the tag under “Date approximate” says how much is known' },
+        ['', 'Approximate date · the day is not known', 'Approximate date · only the year is known', `Sorted under ${dfDay.format(date(x.ts))}, a placeholder`][n]));
+  };
   const exposure = [d.aperture ? `ƒ/${+d.aperture.toFixed(1)}` : null,
     d.exposure ? (d.exposure < 1 ? `1/${Math.round(1 / d.exposure)} s` : `${+d.exposure.toFixed(1)} s`) : null,
     d.focal ? `${+d.focal.toFixed(1)} mm${d.focal35 && Math.round(d.focal35) !== Math.round(d.focal) ? ` (${Math.round(d.focal35)} mm eq.)` : ''}` : null,
@@ -945,8 +955,8 @@ export function renderInfo() {
     LB.prefs ? infoPrefsEditor(renderInfo) : null,
     show('caption') && d.title ? h('div', { class: 'title' }, d.title) : null,
     show('caption') && d.caption ? h('div', { class: 'muted', style: 'margin:6px 0 10px;white-space:pre-wrap' }, d.caption) : null,
-    show('date') ? [irow('calendar', lnk(dfLong.format(date(d.ts)), { from: d.day, to: d.day, sort: 'old' }), dfTime.format(date(d.ts))),
-      S.EDITING ? h('div', { hidden: true, style: 'margin:0 0 8px 40px' }, dateEditor([d.id], d.taken)) : null] : null,
+    show('date') ? [dateRow(d),
+      S.EDITING ? h('div', { hidden: true, style: 'margin:0 0 8px 40px' }, dateEditor([d.id], d.taken, null, d.datePrecision)) : null] : null,
     show('file') ? [irow(d.video ? 'video' : 'photo', d.name, [d.video ? null : `${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`, `${d.w} × ${d.h}`, fmtBytes(d.size), d.fmt].filter(Boolean).join(' · ')),
       d.album ? irow('folder', lnk(d.album.path.replace(/^\//, '') || d.album.name, { album: d.album.id, sort: 'old' }), 'Folder') : null,
       d.versions?.length ? irow('dup', h('span', null, d.versions.map((x, k) => [k ? ' · ' : '', x.id === d.id ? h('b', null, x.role === 'original' ? 'Original' : 'This version')

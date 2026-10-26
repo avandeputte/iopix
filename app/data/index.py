@@ -26,7 +26,7 @@ from urllib.parse import quote
 from app.ai import analysis, moments
 from app import config
 from app.digikam import dkdb, library
-from app.photos import edits
+from app.photos import dateprecision, edits
 from app.geo import places
 from app.data import vdb
 from app.data import state as appstate
@@ -51,7 +51,8 @@ CREATE TABLE photos (
     place TEXT, region TEXT, country TEXT,
     hash TEXT, modified TEXT, mts INTEGER, ntags INTEGER, extra TEXT, edited INTEGER,
     sharp REAL, sharpn REAL, bright REAL, clip_lo REAL, clip_hi REAL, faceq REAL,
-    npeople INTEGER, objects TEXT, ocr TEXT, burst INTEGER, burst_best INTEGER, caption_ai TEXT
+    npeople INTEGER, objects TEXT, ocr TEXT, burst INTEGER, burst_best INTEGER, caption_ai TEXT,
+    dprec INTEGER
 );
 CREATE INDEX photos_ts ON photos (ts);
 CREATE INDEX photos_day ON photos (day);
@@ -82,7 +83,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "11"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler
+SCHEMA_VERSION = "12"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates)
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -597,6 +598,8 @@ def _build(dst_path: Path, source: tuple) -> dict:
     phases["analysis"] = time.time() - t1
     burst_rows = []
     tag_by_full = {t["full"]: tid for tid, t in tags.items() if tid not in hidden}
+    # approximate dates (dateprecision.py): the tag that says how much of a photo's date is known
+    prec_tags = {tag_by_full[full]: dateprecision.LEVELS[k] for k, full in dateprecision.TAGS.items() if full in tag_by_full}
     tag_direct, tag_all = defaultdict(set), defaultdict(set)
     album_n = defaultdict(int)
     for (iid, album_id, name, size, uhash, mod, category, rating, created, orient, w, h, fmt,
@@ -661,6 +664,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
                 p_title = (e["title"] or None) if "title" in e else p_title
                 p_caption = (e["caption"] or None) if "caption" in e else p_caption
                 tids = [t for t in tids if t not in rem] + [t for t in add if t not in tids]
+        dprec = max((prec_tags[t] for t in tids if t in prec_tags), default=None)
         cr = dict(copyright_.get(iid, {}))
         if e0 and "template" in e0:
             for k, v in e0["template"].items():
@@ -684,10 +688,12 @@ def _build(dst_path: Path, source: tuple) -> dict:
                 extra[k] = v
         rel = album["rel"].rstrip("/") + "/" + name
         an = seen.get(iid, {})
-        burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video))
+        # a placeholder date is shared by many photos: no bursts among them (left out like videos)
+        burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video or dprec))
         photos.append((
             iid, album_id, name, root_path[album["root"]] + rel,
-            (created or mod or "")[:19], ts, f"{y:04d}-{mo:02d}-{d:02d}", y, mo, f"{mo:02d}-{d:02d}",
+            # an approximate date has no day of the year to show On this day
+            (created or mod or "")[:19], ts, f"{y:04d}-{mo:02d}-{d:02d}", y, mo, None if dprec else f"{mo:02d}-{d:02d}",
             w, h, fmt, video, dur, size, rating,
             p_pick, p_color, cam, (make or "").strip() or None, (model or "").strip() or None,
             lens, aperture, focal, focal35, exposure, iso, flash, lat, lon, alt,
@@ -696,7 +702,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
             uhash, (mod or "")[:19], mdt[0] if mdt else ts, len(tids), json.dumps(extra) if extra else None, edited,
             an.get("sharp"), None, an.get("bright"), an.get("clip_lo"), an.get("clip_hi"), an.get("faceq"),
             an.get("npeople"), ("," + ",".join(sorted(an["objects"])) + ",") if an.get("objects") else None,
-            an.get("ocr"), None, None, an.get("caption_ai"),
+            an.get("ocr"), None, None, an.get("caption_ai"), dprec,
         ))
         album_n[album_id] += 1
         people_names, tag_names = [], []
@@ -710,7 +716,8 @@ def _build(dst_path: Path, source: tuple) -> dict:
             (people_names if t["person"] else tag_names).append(t["full"].replace("/", " "))
         extra_words = " ".join(an["objects"]) if an.get("objects") else ""
         misc = extra_words + " " + " ".join(str(x) for x in (
-            y, MONTHS[mo], fmt, "video" if video else "photo", lens, cr.get("creator"),
+            # only the known part of the date is searchable
+            y if (dprec or 0) < 3 else None, MONTHS[mo] if (dprec or 0) < 2 else None, fmt, "video" if video else "photo", lens, cr.get("creator"),
             cr.get("copyrightNotice"), " ".join(iprops.get(iid, {}).values()), *(loc or ())) if x)
         fts_rows.append((iid, name, album["path"], p_title, p_caption,
                          " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai")))
@@ -725,7 +732,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
     dst = sqlite3.connect(tmp)
     try:
         dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
-        dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 57)})", photos)
+        dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 58)})", photos)
         dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
                         "VALUES (?,?,?,?,?,?,?,?,?,?,?)", fts_rows)
         # sharpness as a 0..1 rank across the library, so "blurry" means the same everywhere

@@ -8,7 +8,23 @@ import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
 import { LB, details, getDetail, hasPeople, renderInfo, renderTitle, showItem } from './lightbox.js';
 import { awaitReindex, pollStatus } from './main.js';
 
+/** How well the date is known, as the server saves it (dateprecision.py): the placeholder date and the tag. */
+const PREC_TAGS = { month: 'Date approximate/Month and year', year: 'Date approximate/Year only', unknown: 'Date approximate/Unknown' };
+function precisionLocal(d, ch) {
+  const k = ch.date_precision, known = ch.taken || '', own = d.taken || '';
+  const given = known ? known + own.slice(known.length) : own;
+  const t = k === 'year' ? `${given.slice(0, 4)}-01-01T00:00:00` : k === 'month' ? `${given.slice(0, 7)}-01T00:00:00` : given.length >= 19 ? given.slice(0, 19) : null;
+  const out = { ...ch };
+  delete out.date_precision;
+  if (t && /^\d{4}-\d{2}-\d{2}T/.test(t)) out.taken = t; else delete out.taken;
+  d.datePrecision = k === 'exact' ? null : k;
+  d.tags = (d.tags || []).filter((x) => !Object.values(PREC_TAGS).includes(x.full));
+  const tag = PREC_TAGS[k] && S.META?.tags.find((x) => x.full === PREC_TAGS[k]);
+  d.tags.push(...(PREC_TAGS[k] ? [tag ? { id: tag.id, name: tag.name, full: tag.full, person: 0 } : { id: 0, name: PREC_TAGS[k].split('/')[1], full: PREC_TAGS[k], person: 0 }] : []));
+  return out;
+}
 export function applyLocal(d, ch) {
+  if ('date_precision' in ch) ch = precisionLocal(d, ch);
   if ('rating' in ch) d.rating = ch.rating > 0 ? ch.rating : -1;
   for (const k of ['title', 'caption']) if (k in ch) d[k] = ch[k] || null;
   if ('taken' in ch) { d.taken = ch.taken; d.ts = Math.floor(Date.UTC(+ch.taken.slice(0, 4), +ch.taken.slice(5, 7) - 1, +ch.taken.slice(8, 10), +ch.taken.slice(11, 13), +ch.taken.slice(14, 16), +ch.taken.slice(17, 19)) / 1000); d.day = ch.taken.slice(0, 10); }
@@ -99,6 +115,11 @@ export async function editPhotos(ids, changes) {
   for (const id of ids) { if ('shift' in changes) details.delete(id); else details.get(id)?.then((d) => applyLocal(d, changes)); }
   // the location and face badges of their thumbnails change at once
   if ('gps' in changes) setBadges(ids, { geo: !!changes.gps });
+  if ('date_precision' in changes && G.data) {  // the grid's headers and titles say "1992" / "Date unknown" at once
+    const n = { exact: 0, month: 1, year: 2, unknown: 3 }[changes.date_precision], want = new Set(ids);
+    G.data.dp ||= {};
+    G.data.id.forEach((id, i) => { if (want.has(id)) { if (n) G.data.dp[i] = n; else delete G.data.dp[i]; } });
+  }
   const person = (list) => (list || []).some((t) => S.tagById.get(t)?.person);
   if (person(changes.add_tags)) setBadges(ids, { faces: true });
   else if (person(changes.remove_tags)) ids.forEach((id) => details.get(id)?.then((d) => setBadges([id], { faces: hasPeople(d) })).catch(() => {}));
@@ -219,17 +240,53 @@ export const TEMPLATE_LABEL = { creator: 'Creator', copyrightNotice: 'Copyright 
   'creatorContactInfo.address': 'Address', 'creatorContactInfo.city': 'City', 'creatorContactInfo.provinceState': 'State / province', 'creatorContactInfo.postalCode': 'Postal code', 'creatorContactInfo.country': 'Country', 'creatorContactInfo.phone': 'Phone', 'creatorContactInfo.email': 'Email', 'creatorContactInfo.webUrl': 'Web' };
 
 export async function loadTemplates() { if (!S.TEMPLATES) try { S.TEMPLATES = (await api('/api/maintenance')).templates || []; } catch { S.TEMPLATES = []; } return S.TEMPLATES; }
-export function dateEditor(ids, current, after) {
-  // current: "YYYY-MM-DDTHH:MM:SS" for one photo, or null for a batch
+export function dateEditor(ids, current, after, precision) {
+  // current: "YYYY-MM-DDTHH:MM:SS" for one photo, or null for a batch; precision: how well that date is known
+  // (exact, month, year, unknown). An approximate date is saved as a placeholder (1 January of the year, or the 1st of
+  // the month) plus a tag under "Date approximate", as dateprecision.py describes
+  const many = ids.length > 1;
   const inp = h('input', { class: 'einput', type: 'datetime-local', step: 1, value: (current || '').slice(0, 16), style: 'width:auto' });
-  const setBtn = h('button', { class: 'pillbtn', onclick: async () => { if (!inp.value) return; const t = inp.value.length === 16 ? inp.value + ':00' : inp.value; if (await editPhotos(ids, { taken: t })) after?.(); } }, 'Set date');
+  const monthIn = h('input', { class: 'einput', type: 'month', value: (current || '').slice(0, 7), style: 'width:auto', placeholder: 'YYYY-MM' });
+  const yearIn = h('input', { class: 'einput', type: 'number', min: 1800, max: 2200, step: 1, value: (current || '').slice(0, 4), style: 'width:90px', placeholder: many ? 'each’s own' : 'year' });
+  const known = h('select', { class: 'sharepick', title: 'How much of the date is known', onchange: () => setKind() },
+    [['exact', 'Exact date'], ['month', 'Month and year'], ['year', 'Year only'], ['unknown', 'Unknown']].map(([v, l]) => h('option', { value: v, selected: v === (precision || 'exact') }, l)));
+  const note = h('div', { class: 'muted smaller' });
+  const save = async () => {
+    const k = known.value;
+    let ch;
+    if (k === 'exact') {
+      if (!inp.value) { if (!precision || precision === 'exact') return; ch = { date_precision: 'exact' }; }  // only the mark comes off
+      else { const t = inp.value.length === 16 ? inp.value + ':00' : inp.value; ch = precision && precision !== 'exact' ? { date_precision: 'exact', taken: t } : { taken: t }; }
+    } else if (k === 'month') {
+      if (!/^\d{4}-\d{2}$/.test(monthIn.value) && !many) { toast('Choose the month and year.'); return; }
+      ch = { date_precision: 'month', ...(monthIn.value ? { taken: monthIn.value } : {}) };
+    } else if (k === 'year') {
+      if (yearIn.value && !/^\d{4}$/.test(yearIn.value)) { toast('The year has four digits.'); return; }
+      if (!yearIn.value && !many) { toast('Enter the year.'); return; }
+      ch = { date_precision: 'year', ...(yearIn.value ? { taken: yearIn.value } : {}) };
+    } else ch = { date_precision: 'unknown' };
+    if (await editPhotos(ids, ch)) after?.();
+  };
+  const setBtn = h('button', { class: 'pillbtn', onclick: save }, 'Set date');
+  const value = h('span', { style: 'display:contents' });
   const amount = h('input', { class: 'einput', type: 'number', value: 1, style: 'width:70px' });
   const unit = h('select', null, [['3600', 'hours'], ['60', 'minutes'], ['86400', 'days'], ['1', 'seconds']].map(([v, l]) => h('option', { value: v }, l)));
   const shift = (sign) => async () => { const s = sign * Math.round(+amount.value * +unit.value); if (!s) return; if (await editPhotos(ids, { shift: s })) after?.(); };
+  const shiftRow = h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Shift by'), amount, unit, h('button', { class: 'pillbtn', title: 'Move the date later', onclick: shift(1) }, '+ later'), h('button', { class: 'pillbtn', title: 'Move the date earlier', onclick: shift(-1) }, '− earlier'));
+  const shiftNote = h('div', { class: 'muted smaller' }, 'Shifting keeps each photo’s own time and moves it by the same amount, for a camera clock that was wrong.');
+  function setKind() {
+    const k = known.value;
+    fill(value, k === 'exact' ? inp : k === 'month' ? monthIn : k === 'year' ? yearIn : null);
+    setBtn.textContent = k === 'unknown' ? 'Mark as unknown' : 'Set date';
+    shiftRow.hidden = shiftNote.hidden = k !== 'exact';
+    fill(note, k === 'exact' ? '' : k === 'unknown'
+      ? `The ${many ? 'photos keep the dates they have' : 'photo keeps the date it has'}, so ${many ? 'they stay' : 'it stays'} where ${many ? 'they sort' : 'it sorts'} now, and ${many ? 'are' : 'is'} shown as “Date unknown”.`
+      : `Saved as ${k === 'year' ? '1 January of that year' : 'the 1st of that month'} where a full date is required (digiKam, EXIF), with the tag “Date approximate/${k === 'year' ? 'Year only' : 'Month and year'}”; shown as ${k === 'year' ? 'just the year' : 'the month and year'}.${many && k === 'year' ? ' Leave the year empty to keep each photo’s own year.' : many ? ' Leave it empty to keep each photo’s own month.' : ''}`);
+  }
+  setKind();
   return h('div', { class: 'dateedit' },
-    h('div', { class: 'erow' }, h('span', { class: 'el' }, ids.length > 1 ? 'Set all to' : 'Taken'), inp, setBtn),
-    h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Shift by'), amount, unit, h('button', { class: 'pillbtn', title: 'Move the date later', onclick: shift(1) }, '+ later'), h('button', { class: 'pillbtn', title: 'Move the date earlier', onclick: shift(-1) }, '− earlier')),
-    h('div', { class: 'muted smaller' }, 'Shifting keeps each photo’s own time and moves it by the same amount, for a camera clock that was wrong.'));
+    h('div', { class: 'erow' }, h('span', { class: 'el' }, many ? 'Set all to' : 'Taken'), known, value, setBtn),
+    note, shiftRow, shiftNote);
 }
 /** Face detection on request: a photo (answered at once) or a folder (in the background). Faces already
  *  marked, by digiKam or anything else, are kept; only faces nothing marked become new unnamed faces. */

@@ -58,6 +58,8 @@ with TestClient(app) as c:
     r = c.post("/api/faces/op", json={"op": "add", "image": beach, "rect": [20, 20, 60, 60], "tag": r.json().get("id")})
     out["face"] = r.status_code
     out["edit"] = c.post("/api/edit", json={"ids": [beach], "changes": {"rating": 4, "caption": "Low tide"}}).status_code
+    # only the year is known: its tag is created in the library, the date becomes 1 January
+    out["approx"] = c.post("/api/edit", json={"ids": [beach], "changes": {"date_precision": "year", "taken": "1992"}}).status_code
     out["apply"] = c.post("/api/edits/db", json={}).status_code
     for _ in range(50):  # the face's sidecar is rewritten in the background
         side = beach_file.with_name(beach_file.name + ".xmp")
@@ -71,6 +73,8 @@ with TestClient(app) as c:
         "caption": [r[0] for r in con.execute("SELECT comment FROM ImageComments WHERE imageid = ? AND type = 1", (beach,))],
         "faces": con.execute("SELECT count(*) FROM ImageTagProperties WHERE imageid = ? AND property = 'tagRegion'", (beach,)).fetchone()[0],
     }
+    out["approx_library"] = [str(con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (beach,)).fetchone()[0])[:10],
+                             [r[0] for r in con.execute("SELECT t.name FROM ImageTags it JOIN Tags t ON t.id = it.tagid WHERE it.imageid = ?", (beach,))]]
     con.close()
     out["pending"] = c.get("/api/edits/db").json()["pending"]
     out["faces_in_index"] = c.get("/api/photos").json()["faces"]

@@ -45,6 +45,12 @@ def test_people_faces_and_edits_work_without_digikam(run):
     assert run["sidecar"] == {"person": True, "caption": True, "keyword": True}
 
 
+def test_an_approximate_date_without_digikam(run):
+    assert run["approx"] == 200
+    day, tags = run["approx_library"]
+    assert day == "1992-01-01" and "Year only" in tags, run["approx_library"]
+
+
 def test_trash_and_restore_without_digikam(run):
     assert run["trash"] == [200, True]
     assert run["restore"] == [200, True, True]

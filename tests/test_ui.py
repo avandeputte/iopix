@@ -2411,3 +2411,29 @@ def test_inside_the_app_the_web_navigation_steps_aside(browser, server):
             assert page.evaluate("document.documentElement.classList.contains('inapp')"), "remembered for the tab"
         finally:
             ctx.close()
+
+
+def test_an_approximate_date_shows_only_what_is_known(page, server, lib):
+    """Year only / unknown (dateprecision.py): the info panel and the grid's section heading say "1992" or
+    "Date unknown", never the placeholder day, as soon as the edit is made; the date editor offers the choice."""
+    import json as _json
+    ids = _json.loads(urllib.request.urlopen(server + "/api/photos").read())["id"]
+    pid = ids[-1]
+    try:
+        _open_photo(page, server, pid)
+        if not page.locator("#lightbox .lb-info .irow").count():
+            page.keyboard.press("i")
+        page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{pid}], {{ date_precision: 'year', taken: '1992' }}))")
+        page.wait_for_function("document.querySelector('#lightbox .lb-info')?.textContent.includes('only the year is known')", timeout=10000)
+        info = page.locator("#lightbox .lb-info").inner_text()
+        assert "1992" in info and "January 1" not in info and "Jan 1" not in info, info
+        assert page.locator("#lightbox .dateedit select").first.input_value() == "year"
+        page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{pid}], {{ date_precision: 'unknown' }}))")
+        page.wait_for_function("document.querySelector('#lightbox .lb-info')?.textContent.includes('Date unknown')", timeout=10000)
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".ghead", timeout=10000)
+        assert _eventually(lambda: page.evaluate("[...document.querySelectorAll('.ghead')].some((h) => h.textContent.includes('Date unknown'))"), 15), \
+            "the grid heads the photo's section with what is known"
+    finally:
+        req = urllib.request.Request(server + "/api/edit/revert", data=_json.dumps({"ids": [pid]}).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req).read()

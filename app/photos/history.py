@@ -23,7 +23,9 @@ log = logging.getLogger("app.photos.history")
 SNAP_DIR = config.DATA_DIR / "history"
 user = contextvars.ContextVar("history_user", default=None)  # set per request by the server
 FIELD_LABEL = {"rating": "Rating", "pick": "Pick label", "color": "Colour label", "title": "Title", "caption": "Caption", "taken": "Date",
-               "gps": "Location", "template": "Metadata template", "add_tags": "Tags added", "remove_tags": "Tags removed"}
+               "gps": "Location", "template": "Metadata template", "add_tags": "Tags added", "remove_tags": "Tags removed",
+               "date_precision": "Date known"}
+PRECISION_TEXT = {"exact": "exactly", "month": "month and year", "year": "year only", "unknown": "unknown"}
 
 
 def _who() -> str:
@@ -89,6 +91,8 @@ def _fmt(field, v) -> str:
         return ", ".join(t.split("/")[-1] for t in v)
     if field == "template":
         return "applied"
+    if field == "date_precision":
+        return PRECISION_TEXT.get(v, str(v))
     s = str(v)
     return f"“{s[:80]}{'…' if len(s) > 80 else ''}”"
 

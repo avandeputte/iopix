@@ -480,12 +480,17 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
     if "taken" in ch:  # MetaEngine::setImageDateTime(dt, setDateTimeDigitized=False), as MetadataHub calls it
         t = ch["taken"]  # "YYYY-MM-DDTHH:MM:SS"
         x = t.replace("-", ":", 2).replace("T", " ")  # exiftool's form
-        a += (_set("XMP-exif:DateTimeOriginal", t) + _set("XMP-photoshop:DateCreated", t) + _set("XMP-tiff:DateTime", t)
+        a += (_set("XMP-exif:DateTimeOriginal", t) + ([] if "date_precision" in ch else _set("XMP-photoshop:DateCreated", t)) + _set("XMP-tiff:DateTime", t)
               + _set("XMP-xmp:CreateDate", t) + _set("XMP-xmp:ModifyDate", t) + _set("XMP-xmp:MetadataDate", t))
         # (digiKam's Exiv2 also writes Xmp.video dates; exiftool has no such namespace, and the dates above carry it)
         if in_file:
             a += (_set("IFD0:ModifyDate", x) + _set("ExifIFD:DateTimeOriginal", x)
                   + _set("IPTC:DateCreated", x[:10]) + _set("IPTC:TimeCreated", x[11:19] + "+00:00"))
+    if "date_precision" in ch:  # an approximate date: IPTC Core's Date Created holds only the known part (dateprecision.py)
+        from app.photos import dateprecision
+        v = dateprecision.xmp_date(ch["date_precision"], ch.get("taken"))
+        if v is not None:
+            a += _set("XMP-photoshop:DateCreated", v)
     if "gps" in ch:  # MetaEngine::setGPSInfo / removeGPSInfo
         g = ch["gps"]
         if g:
@@ -658,7 +663,7 @@ def can_write_file(path: str) -> bool:
 
 def _merge(old: dict, ch: dict) -> dict:
     out = dict(old)
-    for k in ("rating", "pick", "color", "title", "caption", "caption_date", "taken", "gps"):
+    for k in ("rating", "pick", "color", "title", "caption", "caption_date", "taken", "gps", "date_precision"):
         if k in ch:
             out[k] = ch[k]
     if "template" in ch:
@@ -747,7 +752,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
 
 
 def _current_values(ids: list) -> dict:
-    """{photo: {rating, title, caption, taken, gps, pick, color, tags}} as the viewer shows them now."""
+    """{photo: {rating, title, caption, taken, gps, pick, color, tags, date_precision}} as the viewer shows them now."""
     from app.data import index
     out = {}
     if not ids or not config.INDEX_DB.exists():
@@ -765,6 +770,9 @@ def _current_values(ids: list) -> dict:
                     out[pid]["tags"].append(full)
     finally:
         con.close()
+    from app.photos import dateprecision
+    for v in out.values():
+        v["date_precision"] = dateprecision.of_paths(v["tags"]) or "exact"
     return out
 
 
@@ -776,7 +784,7 @@ def _log_edits(ok: list, photos: list, mine: dict, before: dict, snaps: dict, in
         ch, b = mine[pid], before.get(pid, {})
         undo = {}
         for f, v in ch.items():
-            if f in ("rating", "pick", "color", "title", "caption", "taken", "gps") and f in b:
+            if f in ("rating", "pick", "color", "title", "caption", "taken", "gps", "date_precision") and f in b:
                 undo[f] = b[f]
         if ch.get("add_tags"):
             undo["remove_tags"] = [t for t in ch["add_tags"] if t not in b.get("tags", [])]

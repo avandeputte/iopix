@@ -109,11 +109,22 @@ async def api_edit(request: Request):
         if k in raw:
             ch[k] = str(raw[k] or "").strip()[:4000]
     per_photo = {}
-    if raw.get("taken"):
+    if raw.get("taken") and raw.get("date_precision") is None:
         t = str(raw["taken"])[:19]
         if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", t):
             raise HTTPException(400, "Date must be YYYY-MM-DDTHH:MM:SS")
         ch["taken"] = t
+    prec = raw.get("date_precision")
+    if prec is not None:
+        from app.photos import dateprecision
+        if prec not in dateprecision.CHOICES:
+            raise HTTPException(400, f"date_precision is one of {', '.join(dateprecision.CHOICES)}")
+        if raw.get("shift"):
+            raise HTTPException(400, "A date shift and a change of how well the date is known go in separate edits")
+        known = str(raw.get("taken") or "")[:19]  # "YYYY", "YYYY-MM" or a full date: the part that is known
+        if known and not re.match(r"^\d{4}(-\d{2}(-\d{2}T\d{2}:\d{2}:\d{2})?)?$", known):
+            raise HTTPException(400, "Date must be YYYY, YYYY-MM or YYYY-MM-DDTHH:MM:SS")
+        ch.pop("taken", None)
     if raw.get("shift"):  # seconds, applied to each photo's own latest date inside edits.apply (under its lock)
         try:
             ch["shift"] = int(raw["shift"])
@@ -156,11 +167,35 @@ async def api_edit(request: Request):
             f"SELECT id, path FROM photos WHERE id IN ({','.join(map(str, ids)) or 'NULL'})")]
     finally:
         con.close()
+    if prec is not None and photos:
+        # how well the date is known: its tag (created in digiKam first if need be), the known part in XMP, and a full
+        # placeholder date (1 January, or the 1st of the month) built from the date given or each photo's own
+        try:
+            await run_in_threadpool(dateprecision.ensure_tags, prec)
+            dateprecision.prepare(photos, prec, known, ch, per_photo, _current_dates([p["id"] for p in photos]) if len(known) < 19 else {})
+        except dbsync.SyncError as e:
+            raise HTTPException(409, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     if not (ch or per_photo) or not photos:
         raise HTTPException(400, "Nothing to change")
     result = await run_in_threadpool(edits.apply, photos, ch, per_photo)
     _kick.set()
     return result
+
+
+def _current_dates(ids: list) -> dict:
+    """{photo: "YYYY-MM-DDTHH:MM:SS"}: the date each photo has now, a pending edit's before the index's."""
+    con = db()
+    try:
+        out = {}
+        for i in range(0, len(ids), 500):
+            out.update({r[0]: r[1] for r in con.execute(f"SELECT id, taken FROM photos WHERE id IN ({','.join(str(int(x)) for x in ids[i:i + 500])})")})
+    finally:
+        con.close()
+    pend = edits.pending()
+    out.update({i: pend[i]["taken"] for i in ids if pend.get(i, {}).get("taken")})
+    return out
 
 
 @router.post("/api/edit/revert")

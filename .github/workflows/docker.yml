@@ -40,7 +40,7 @@ jobs:
         run: |
           python -m pip install -q numpy  # the search-model switch test builds vectors
           sudo apt-get install -y -qq --no-install-recommends libimage-exiftool-perl >/dev/null  # the no-digiKam test scans real files
-          python -m pytest -q -p no:cacheprovider tests/test_no_digikam.py tests/test_imports.py tests/test_jobs.py tests/test_models_registry.py tests/test_query.py tests/test_settings_state.py tests/test_auto_models.py tests/test_semantic_switch.py tests/test_review_fixes.py tests/test_caption_tidy.py
+          python -m pytest -q -p no:cacheprovider tests/test_no_digikam.py tests/test_imports.py tests/test_jobs.py tests/test_models_registry.py tests/test_query.py tests/test_settings_state.py tests/test_auto_models.py tests/test_semantic_switch.py tests/test_review_fixes.py tests/test_caption_tidy.py tests/test_approximate_dates.py
 
   image:
     needs: tests

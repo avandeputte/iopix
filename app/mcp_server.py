@@ -837,6 +837,67 @@ def tag_op(token: str, op: Literal["person", "notperson", "merge", "rename", "mo
     return r
 
 
+_precision_job = {"running": False, "done": 0, "total": 0, "error": None}
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def set_date_precision(token: str, precision: Literal["exact", "month", "year", "unknown"], years: list[int] = None,
+                       ids: list[int] = None, dry_run: bool = True) -> dict:
+    """Mark how well photos' dates are known, exactly as the date editor does (Edit > Date: exact, month and year,
+    year only, unknown): the tag under "Date approximate", a placeholder date where a full one is required (each
+    photo's own year/month kept; an unknown date stays as it is), an Edit log entry per photo (undoable). Photos are
+    chosen by `ids`, or by the year of their current date (`years`, e.g. [1970, 1974]). dry_run (default) only counts:
+    how many photos match, per year, and how many already have this precision; with dry_run=False the change runs in
+    the background (call again with dry_run=True to see progress). Needs the admin token."""
+    _need_token(token, writes=True)
+    from app.data import index
+    from app.photos import dateprecision
+    if not (ids or years):
+        raise ToolError("Give ids or years")
+    con = index.open_index()
+    try:
+        where = (f"id IN ({','.join(str(int(i)) for i in ids)})" if ids
+                 else f"substr(taken, 1, 4) IN ({','.join(repr(f'{int(y):04d}') for y in years)})")
+        rows = con.execute(f"SELECT id, path, substr(taken, 1, 4), dprec FROM photos WHERE {where}").fetchall()
+    finally:
+        con.close()
+    level = dateprecision.LEVELS.get(precision)
+    per_year = {}
+    for _, _, y, _ in rows:
+        per_year[y] = per_year.get(y, 0) + 1
+    out = {"photos": len(rows), "per_year": per_year, "already": sum(1 for r in rows if r[3] == level), "job": dict(_precision_job)}
+    if dry_run or not rows:
+        return out
+    if _precision_job["running"]:
+        raise ToolError("A previous run is still going")
+    if not edits.available():
+        raise ToolError("Editing is not available")
+    todo = [{"id": r[0], "path": r[1]} for r in rows if r[3] != level]
+    dateprecision.ensure_tags(precision)
+    _precision_job.update(running=True, done=0, total=len(todo), error=None)
+
+    def run():
+        from app.core import _kick
+        from app.routes.editing import _current_dates
+        try:
+            for i in range(0, len(todo), 100):
+                chunk = todo[i:i + 100]
+                ch, per = {}, {}
+                dateprecision.prepare(chunk, precision, "", ch, per, _current_dates([p["id"] for p in chunk]))
+                r = edits.apply(chunk, ch, per)
+                _precision_job["done"] += r["edited"]
+                if r["failed"]:
+                    _precision_job["error"] = f"{len(r['failed'])} failed, e.g. {r['failed'][0]['error']}"
+            _kick.set()
+        except Exception as e:
+            _precision_job["error"] = str(e)[:300]
+        finally:
+            _precision_job["running"] = False
+    import threading
+    threading.Thread(target=run, name="date-precision", daemon=True).start()
+    return {**out, "started": len(todo)}
+
+
 @server.tool(annotations=READ_ONLY)
 def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
     """For the photos whose date does not match their folder (Maintenance > Metadata quality): every date stored in
