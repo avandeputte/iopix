@@ -1,0 +1,3 @@
+## 2024-05-19 - Optimize multiple counts in SQLite
+**Learning:** To get counts of several independent boolean conditions over a common subset of rows in SQLite, it is significantly faster (around 50% faster in tests) to use a single `SELECT sum(condition1), sum(condition2), ...` statement rather than stringing multiple `SELECT count(*) FROM ... WHERE condition ... UNION ALL` queries together. The `sum(condition)` format evaluates each condition returning 1 (True) or 0 (False), resulting in only a single pass over the table.
+**Action:** When calculating multiple aggregate metrics (like conditional counts) for the same result set, always write a single query computing `sum()` or `count(CASE WHEN...)` instead of running multiple independent queries or `UNION ALL` subsets.

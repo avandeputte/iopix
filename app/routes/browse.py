@@ -269,6 +269,11 @@ def api_facets(request: Request):
                 "min(iso), max(iso), min(aperture), max(aperture), "
                 "min(coalesce(focal35, focal)), max(coalesce(focal35, focal)) "
                 "FROM photos WHERE id IN (SELECT id FROM sel)").fetchone()
+        # Performance optimization: Compute independent boolean counts in a single pass
+        # using sum() rather than executing multiple SELECT COUNT(*) UNION ALL queries.
+        ext_row = q("SELECT sum(sharpn < 0.1), sum(sharpn >= 0.8), sum(length(ocr) >= 3), "
+                    "sum(burst IS NOT NULL), sum(bright < 0.2 OR clip_lo > 0.5), sum(bright > 0.8 OR clip_hi > 0.3) "
+                    "FROM photos WHERE id IN (SELECT id FROM sel)").fetchone()
         return jresp(request, {
             "count": rng[0], "tsMin": rng[1], "tsMax": rng[2], "bytes": rng[3] or 0,
             "videos": rng[4] or 0, "geotagged": rng[5] or 0,
@@ -278,12 +283,14 @@ def api_facets(request: Request):
             "ratings": counts("rating"), "picks": counts("pick"), "colors": counts("color"),
             "albums": counts("album_id", 400), "creators": counts("creator"),
             "objects": _object_counts(q), "npeople": [c for c in counts("npeople") if c[0] is not None],
-            "extras": dict(q("SELECT 'blurry', count(*) FROM photos WHERE sharpn < 0.1 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'sharpest', count(*) FROM photos WHERE sharpn >= 0.8 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'hastext', count(*) FROM photos WHERE length(ocr) >= 3 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'bursts', count(*) FROM photos WHERE burst IS NOT NULL AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'dark', count(*) FROM photos WHERE (bright < 0.2 OR clip_lo > 0.5) AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'bright', count(*) FROM photos WHERE (bright > 0.8 OR clip_hi > 0.3) AND id IN (SELECT id FROM sel)").fetchall()),
+            "extras": {
+                "blurry": ext_row[0] or 0,
+                "sharpest": ext_row[1] or 0,
+                "hastext": ext_row[2] or 0,
+                "bursts": ext_row[3] or 0,
+                "dark": ext_row[4] or 0,
+                "bright": ext_row[5] or 0
+            },
             "places": [[r[0], r[1], r[2], r[3]] for r in q(
                 "SELECT place, region, country, count(*) FROM photos WHERE place IS NOT NULL AND id IN (SELECT id FROM sel) "
                 "GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 200")],
