@@ -261,6 +261,10 @@ def test_settings_and_maintenance_pages(page, server):
     assert page.locator(".mtable tr[data-job=objects] select.mpick option").count() == 4, "the four YOLOX sizes are offered in a menu"
     assert page.locator(".mtable tr[data-job=facedetect] select.mpick option").count() == 3, "YuNet, SCRFD and RetinaFace"
     assert page.locator(".mtable tr[data-model=geonames]").count() == 1, "models without a job have a row too"
+    assert page.locator(".mtable tr[data-job=ages][data-model=mivolo]").count() == 1, "the age model sits on its job's row"
+    assert page.locator(".mtable tr[data-job=looks][data-model='aesthetic eyes']").count() == 1, "both photo quality models on its row"
+    for key in ("mivolo", "aesthetic", "eyes"):
+        assert page.locator(f".mtable tr[data-model~={key}]").count() == 1, f"{key} is listed once"
     assert page.locator(".mtable thead th").all_inner_texts()[:3] == ["Feature", "Model", "Progress"]
     assert page.locator("b", has_text="Restart ").count() == 1  # "Restart <the app's name>"
     page.locator(".stabs button", has_text="Library").click()

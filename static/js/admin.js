@@ -22,8 +22,9 @@ export function aiSection(view) {
       h('button', { class: 'pillbtn on', onclick: async () => { try { await post('/api/analysis/run', { job: 'all' }); toast('Checking for new and changed photos…'); } catch (e) { toastError(e); } draw(); } }, icon('spark'), 'Check new and changed photos'), checkBtn),
     body);
   const fmtDate = (t) => (t ? dfDayLocal.format(new Date(t * 1000)) : '');  // when the model was installed: a real moment, in this browser's zone
-  // a job's model: fixed (vision: RapidOCR) or the one chosen for the feature (Maintenance offers the alternatives in a menu)
-  const JOB_MODEL = { vision: 'ocr' };
+  // a job's models: fixed ones (vision: RapidOCR; photo quality: the aesthetic and eye models; ages: MiVOLO) or the one
+  // chosen for the feature (Maintenance offers the alternatives in a menu)
+  const JOB_MODEL = { vision: ['ocr'], looks: ['aesthetic', 'eyes'], ages: ['mivolo'] };
   const JOB_CHOICE = { embeddings: 'search_model', objects: 'object_model', faces: 'face_vectors', facedetect: 'face_detector', captions: 'caption_model' };
   const modelState = (m, p) => {
     const c = m.check;
@@ -78,8 +79,11 @@ export function aiSection(view) {
               ' ', h('a', { class: 'lnk', href: o.page, target: '_blank', rel: 'noopener' }, 'About')),
             h('div', { class: 'muted' }, o.what)); })));
     };
-    const modelCell = (m, group) => {
-      if (!m) return h('td', { class: 'muted' }, 'built in');
+    const modelCell = (ms, group) => {
+      ms = ms.filter(Boolean);
+      if (!ms.length) return h('td', { class: 'muted' }, 'built in');
+      if (ms.length > 1) return h('td', null, ms.map((m) => { const td = modelCell([m]); return h('div', { class: 'mmulti' }, ...td.childNodes); }));
+      const m = ms[0];
       const [st, cls] = modelState(m, p);
       return h('td', null, h('div', null, group ? chooser(group) : h('a', { class: 'lnk', href: m.page, target: '_blank', rel: 'noopener', title: m.what }, m.label), h('span', { class: 'muted' }, ` · ${m.size}`)),
         h('div', { class: 'mst ' + cls, title: m.revision ? `revision ${m.revision}` : '' }, st, group ? [' · ', h('a', { class: 'lnk', href: m.page, target: '_blank', rel: 'noopener', title: m.what }, 'About')] : null),
@@ -87,6 +91,7 @@ export function aiSection(view) {
         group ? compare(group) : null);
     };
     const modelBtn = (m) => {
+      if (Array.isArray(m)) return m.map(modelBtn);
       if (!m) return null;
       const c = m.check, upd = c && (c.status === 'update' || c.status === 'newer' || c.status === 'missing');
       if (m.installed && !upd) return null;  // installed and current: nothing to offer
@@ -99,7 +104,7 @@ export function aiSection(view) {
     };
     const progressCell = (j, m, extra) => {
       if (!j) return h('td', { class: 'muted' }, '—');
-      const state = !j.enabled ? (m && !m.installed ? 'needs its model' : 'off') : j.running ? 'running…' : j.queued ? 'queued' : j.done >= j.total ? 'up to date' : j.key === 'facedetect' ? 'on request' : 'waiting';
+      const state = !j.enabled ? (m.some((x) => x && !x.installed) ? 'needs its model' : 'off') : j.running ? 'running…' : j.queued ? 'queued' : j.done >= j.total ? 'up to date' : j.key === 'facedetect' ? 'on request' : 'waiting';
       const now = Date.now() / 1000, idle = j.running && j.since ? (j.last ? now - j.last : now - j.since) : 0, stuck = idle > 300;
       return h('td', { class: 'mprog' },
         h('div', { class: 'ahead' }, h('span', { class: j.running ? 'mst on' : j.done >= j.total && j.enabled ? 'mst ok' : 'mst' }, state), h('span', { class: 'sp' }), h('span', { class: 'muted' }, `${nf.format(Math.min(j.done, j.total))} / ${nf.format(j.total)}`)),
@@ -119,20 +124,21 @@ export function aiSection(view) {
       try { await post('/api/analysis/run', { job: j.key, reset: true }); toast(`Re-running “${j.label}”.`); } catch (e) { toastError(e); }
       draw();
     } }, 'Run again') : null;
-    const row = (label, detail, j, m, group) => h('tr', { 'data-job': j?.key || '', 'data-model': m?.key || '' },
+    const row = (label, detail, j, m, group) => h('tr', { 'data-job': j?.key || '', 'data-model': m.filter(Boolean).map((x) => x.key).join(' ') },
       h('td', { class: 'mfeat' }, h('b', null, label), detail ? h('div', { class: 'muted mdet', title: detail }, detail) : null),
       modelCell(m, group), progressCell(j, m, [runNow(j), rerun(j)]), h('td', { class: 'macts' }, modelBtn(m)));
     const rows = a.jobs.map((j) => {
       const group = JOB_CHOICE[j.key];
-      const m = group ? models[choices[group]?.chosen] : models[JOB_MODEL[j.key]];
+      const m = group ? [models[choices[group]?.chosen]] : (JOB_MODEL[j.key] || []).map((k) => models[k]);
       return row(j.label, j.detail, j, m, group && choices[group] ? group : null);
     });
-    const inMenus = new Set(Object.values(choices).flatMap((c) => c.options));
+    // a model with a job of its own row is shown there; the rest (place names) get a row each
+    const inRows = new Set([...Object.values(choices).flatMap((c) => c.options), ...Object.values(JOB_MODEL).flat()]);
     for (const m of md.models) {
-      if (inMenus.has(m.key) || m.key === 'ocr') continue;
+      if (inRows.has(m.key)) continue;
       const label = m.key === 'geonames' ? 'Places from GPS positions' : m.label;
       const detail = m.key === 'geonames' ? 'Town, region and country for each GPS position, offline; looked up when the search index is built.' : m.what;
-      rows.push(row(label, detail, null, m));
+      rows.push(row(label, detail, null, [m]));
     }
     fill(body,
       h('div', { class: 'muted', style: 'font-size:13px;margin-bottom:8px' }, h('b', { style: 'color:var(--fg)' }, 'Background work: '), q.running ? `running ${(a.jobs.find((j) => (j.key === 'quality' && q.running === 'pixels') || j.key === q.running) || {}).label || q.running}` : 'idle',

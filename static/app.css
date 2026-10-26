@@ -693,6 +693,7 @@ body.nobadges .cbadges, body.nobadges .fbadge { display: none; }
 
 /* Maintenance › models: what the chosen model is, and how the others compare */
 .mtable .mwhat { font-size: var(--fs-s); margin-top: 4px; max-width: 360px; }
+.mtable .mmulti + .mmulti { margin-top: 8px; }
 .mcompare { margin-top: 6px; font-size: var(--fs-s); }
 .mcompare summary { cursor: pointer; color: var(--accent); }
 .mopts { display: grid; gap: 8px; margin-top: 8px; max-width: 420px; }
