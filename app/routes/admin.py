@@ -273,7 +273,7 @@ def api_analysis(request: Request):
          "done": cov["looks"], "total": stills, "running": analysis.progress["looks"]["running"], "enabled": config.ANALYSIS, "rerun": True},
         {"key": "ages", "label": "Ages for date suggestions", "detail": "How old the named people look (" + dlmodels.REGISTRY["mivolo"]["label"] + ") in photos marked “Date unknown”, and in a sample of the same people’s photos with a known date, which calibrate it for each of them. Explore › Date suggestions then proposes a year for each undated photo; nothing is written until you use one.",
          "done": ages.coverage()[0], "total": ages.coverage()[1], "running": ages.progress["running"], "enabled": config.ANALYSIS and ages.available(), "rerun": True},
-        {"key": "captions", "label": "Photo descriptions", "detail": f"A one-sentence description of each photo ({mname('caption_model')}), searchable from the search box and shown in the info panel. After switching to the other size, “Run again” redoes every photo with it; until then only new photos use it.",
+        {"key": "captions", "label": "Photo descriptions", "detail": f"A description of each photo ({mname('caption_model')}: one sentence with BLIP, a short paragraph with Florence-2), searchable from the search box and shown in the info panel. After switching to another model, “Run again” redoes every photo with it; until then only new photos use it.",
          "done": cov["captions"], "total": stills, "running": analysis.progress["captions"]["running"],
          "enabled": config.ANALYSIS and caption.available(), "rerun": True},
     ]

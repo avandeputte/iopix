@@ -58,6 +58,9 @@ REGISTRY = {
              "page": "https://huggingface.co/Salesforce/blip-image-captioning-base", "what": "Photo descriptions: short, plain sentences (\u201ca group of people standing on a beach\u201d). The fastest of the two.", "size": "~950 MB"},
     "blip_large": {"label": "BLIP large (captions)", "kind": "hf", "repos": ["Salesforce/blip-image-captioning-large"], "choice": "caption_model",
                    "page": "https://huggingface.co/Salesforce/blip-image-captioning-large", "what": "Photo descriptions: richer and more accurate sentences, about 3 times slower.", "size": "~1.9 GB"},
+    "florence2": {"label": "Florence-2 base (captions)", "kind": "hf", "repos": ["onnx-community/Florence-2-base-ft"], "choice": "caption_model",
+                  "page": "https://huggingface.co/microsoft/Florence-2-base-ft", "what": "Photo descriptions: Microsoft's Florence-2 writes a short paragraph about each photo (who is there, what they wear and do, the setting), so far more of it is searchable than with BLIP's single phrase. Runs on the CPU without PyTorch; several times slower than BLIP base, so a first run over a large library takes a long time. Like any captioning model it can get a small detail wrong.",
+                  "size": "~1.1 GB"},
     # Object detection (choice "object_model"): the same YOLOX network at four sizes
     "yolox": {"label": "YOLOX-S", "kind": "url", "file": "yolox_s.onnx", "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx", "choice": "object_model",
               "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
@@ -423,9 +426,10 @@ def _reset(key: str):
                 e._text_cache.clear()
                 e.check_revision()  # the same model downloaded again may be another revision: its embeddings are then dropped
         elif group == "caption_model":
-            from app.ai import caption
+            from app.ai import caption, florence
             with caption._lock:
                 caption._state.clear()
+            florence.reset()
         elif group == "object_model":
             from app.ai import detector
             with detector._lock:
@@ -491,6 +495,9 @@ def _download_here(key: str):
     if m.get("choice") == "search_model":
         from app.ai import semantic
         semantic.download_models(key)
+    elif key == "florence2":
+        from app.ai import florence
+        florence.download()
     elif m.get("choice") == "caption_model":
         from transformers import BlipForConditionalGeneration, BlipProcessor
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -524,8 +531,8 @@ def auto_download(keys: list, on_done=None):
     def work():
         got = []
         for key in todo:
-            if REGISTRY[key].get("choice") == "caption_model" and importlib.util.find_spec("torch") is None:
-                continue  # captions need the optional PyTorch install
+            if REGISTRY[key].get("choice") == "caption_model" and key != "florence2" and importlib.util.find_spec("torch") is None:
+                continue  # BLIP needs the optional PyTorch install (Florence-2 runs on onnxruntime)
             try:
                 download(key)
             except RuntimeError:

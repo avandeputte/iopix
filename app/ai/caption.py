@@ -1,7 +1,8 @@
-"""One-sentence descriptions of photos with BLIP (Salesforce; base by default, large as an
-option chosen in Maintenance, the setting caption_model), run locally through PyTorch (Apple
-GPU when available, else CPU). The model lives in data/models (downloaded from the AI analysis
-page or `python -m app.ai.models download blip|blip_large`) and is loaded offline; nothing leaves
+"""Descriptions of photos: one sentence with BLIP (Salesforce; base by default, large as an option),
+run locally through PyTorch (Apple GPU when available, else CPU), or a short paragraph with
+Florence-2 base (florence.py, onnxruntime on the CPU). The choice is the setting caption_model
+(Maintenance). The model lives in data/models (downloaded from the AI analysis page or
+`python -m app.ai.models download blip|blip_large|florence2`) and is loaded offline; nothing leaves
 the machine."""
 import logging
 import re
@@ -21,10 +22,17 @@ _lock = threading.Lock()
 _state = {}  # model, processor, device and the torch module once loaded; models.py clears it after a re-download
 
 
+def _florence() -> bool:
+    return models.chosen("caption_model") == "florence2"
+
+
 def available() -> bool:
     """Whether the model files are on disk (the hub cache layout: models--org--name/snapshots/<rev>/)."""
     if not config.CAPTIONS:
         return False
+    if _florence():
+        from app.ai import florence
+        return florence.available()
     try:
         return any(MODEL_DIR.glob(f"models--{repo().replace('/', '--')}/snapshots/*/config.json"))
     except OSError:
@@ -49,6 +57,9 @@ def _load():
 
 def describe(paths: list) -> list:
     """One caption per path (None where the file could not be read)."""
+    if _florence():
+        from app.ai import florence
+        return florence.describe(paths)
     st = _load()
     images, keep = [], []
     for i, p in enumerate(paths):
@@ -86,7 +97,7 @@ def tidy(text: str) -> str:
     """A shorter description: "there is a man that is taking a selfie in the mountains" ->
     "a man taking a selfie in the mountains". Leaves anything it does not recognise alone."""
     t = " ".join((text or "").split())
-    if not t:
+    if not t or re.search(r"[.!?]\s+[A-Z]", t):  # several sentences: Florence-2's paragraphs need none of this
         return t
     if _ARTEFACT.search(t):
         t = re.sub(r"^(?:an? )?" + _ARTEFACT.pattern + r"(?=\w+ing\b)", "someone ", t, flags=re.I)  # "araffe sitting on a bench"
