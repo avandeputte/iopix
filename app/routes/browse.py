@@ -265,10 +265,14 @@ def api_facets(request: Request):
         tag_counts = [[r[0], r[1]] for r in q(
             "SELECT pt.tag_id, count(*) FROM photo_tags pt WHERE pt.photo_id IN (SELECT id FROM sel) "
             "GROUP BY 1 ORDER BY 2 DESC")]
+        # the quick filters' counts ride along in the same pass (a photo not analysed yet matches none: NULL is not 1)
+        extras = (("blurry", "sharpn < 0.1"), ("sharpest", "sharpn >= 0.8"), ("hastext", "length(ocr) >= 3"), ("bursts", "burst IS NOT NULL"),
+                  ("dark", "(bright < 0.2 OR clip_lo > 0.5)"), ("bright", "(bright > 0.8 OR clip_hi > 0.3)"))
         rng = q("SELECT count(*), min(ts), max(ts), sum(size), sum(video), sum(lat IS NOT NULL), "
                 "min(iso), max(iso), min(aperture), max(aperture), "
-                "min(coalesce(focal35, focal)), max(coalesce(focal35, focal)) "
-                "FROM photos WHERE id IN (SELECT id FROM sel)").fetchone()
+                "min(coalesce(focal35, focal)), max(coalesce(focal35, focal)), "
+                + ", ".join(f"coalesce(sum(CASE WHEN {cond} THEN 1 ELSE 0 END), 0)" for _k, cond in extras) +
+                " FROM photos WHERE id IN (SELECT id FROM sel)").fetchone()
         return jresp(request, {
             "count": rng[0], "tsMin": rng[1], "tsMax": rng[2], "bytes": rng[3] or 0,
             "videos": rng[4] or 0, "geotagged": rng[5] or 0,
@@ -278,12 +282,7 @@ def api_facets(request: Request):
             "ratings": counts("rating"), "picks": counts("pick"), "colors": counts("color"),
             "albums": counts("album_id", 400), "creators": counts("creator"),
             "objects": _object_counts(q), "npeople": [c for c in counts("npeople") if c[0] is not None],
-            "extras": dict(q("SELECT 'blurry', count(*) FROM photos WHERE sharpn < 0.1 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'sharpest', count(*) FROM photos WHERE sharpn >= 0.8 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'hastext', count(*) FROM photos WHERE length(ocr) >= 3 AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'bursts', count(*) FROM photos WHERE burst IS NOT NULL AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'dark', count(*) FROM photos WHERE (bright < 0.2 OR clip_lo > 0.5) AND id IN (SELECT id FROM sel) UNION ALL "
-                             "SELECT 'bright', count(*) FROM photos WHERE (bright > 0.8 OR clip_hi > 0.3) AND id IN (SELECT id FROM sel)").fetchall()),
+            "extras": {k: rng[12 + i] for i, (k, _c) in enumerate(extras)},
             "places": [[r[0], r[1], r[2], r[3]] for r in q(
                 "SELECT place, region, country, count(*) FROM photos WHERE place IS NOT NULL AND id IN (SELECT id FROM sel) "
                 "GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 200")],

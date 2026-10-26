@@ -137,3 +137,35 @@ def test_then_and_now_pairs_people_years_apart(client, lib):
         assert p["years"] >= 3 and p["then"]["ts"] <= p["now"]["ts"] and len(p["then"]["rect"]) == 4
         one = client.get(f"/api/thenandnow?person={p['tag']}").json()["pairs"]
         assert one and one[0]["tag"] == p["tag"]
+
+
+def test_quick_filter_counts_match_the_filters(client):
+    """The filter panel's six counts (one pass over the selection) equal what each quick filter then shows, for the
+    whole library and within a narrower selection; photos not analysed yet count in none."""
+    import sqlite3
+    from app import config
+    con = sqlite3.connect(config.INDEX_DB)
+    ids = [r[0] for r in con.execute("SELECT id FROM photos ORDER BY id LIMIT 12")]
+    old = con.execute(f"SELECT id, sharpn, ocr, bright, clip_lo, clip_hi FROM photos WHERE id IN ({','.join(map(str, ids))})").fetchall()
+    # analysis results on some photos (the scratch library has none): each value on either side of the thresholds
+    for i, pid in enumerate(ids[:10]):
+        con.execute("UPDATE photos SET sharpn = ?, ocr = ?, bright = ?, clip_lo = ?, clip_hi = ? WHERE id = ?",
+                    ([0.05, 0.9, 0.5][i % 3], ["", "STOP", None][i % 3], [0.1, 0.9, 0.5, None][i % 4], [0.6, 0, None][i % 3], [0.4, 0, None][i % 3], pid))
+    con.commit()
+    try:
+        _quick_counts(client)
+    finally:
+        con.executemany("UPDATE photos SET sharpn = ?, ocr = ?, bright = ?, clip_lo = ?, clip_hi = ? WHERE id = ?", [(*r[1:], r[0]) for r in old])
+        con.commit(); con.close()
+
+
+def _quick_counts(client):
+    years = [y for y, _n in client.get("/api/facets").json()["years"]]
+    for base in ("", f"year={years[0]}"):
+        f = client.get(f"/api/facets?{base}").json()
+        want = {k: client.get(f"/api/photos?{base}&{q}").json()["count"] for k, q in (
+            ("blurry", "blurry=1"), ("sharpest", "sharpest=1"), ("hastext", "hastext=1"), ("bursts", "bursts=1"),
+            ("dark", "exposure=dark"), ("bright", "exposure=bright"))}
+        assert f["extras"] == want, (base, f["extras"], want)
+        if not base:
+            assert all(f["extras"][k] for k in ("blurry", "sharpest", "hastext", "dark", "bright")), f["extras"]
