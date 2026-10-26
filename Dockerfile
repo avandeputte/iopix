@@ -1,5 +1,5 @@
 # iopix in a container. Mount the digiKam database folder and the photo folder
-# read-only, and a writable volume at /data for everything the viewer writes (index,
+# read-only (or only the photo folder, with DIGIKAM_DB_TYPE=none, when you don't use digiKam), and a writable volume at /data for everything the viewer writes (index,
 # thumbnails, models, state, backups). See docker-compose.yml and README "Running in Docker".
 #
 # Build arguments:

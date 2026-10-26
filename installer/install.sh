@@ -2,11 +2,13 @@
 # iopix installer for Linux, version @VERSION@ (self-extracting; built by installer/make-installer.sh).
 #
 #   sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB [options]
+#   sh iopix-install.sh --photos /srv/photos --no-digikam [options]      (you don't use digiKam)
 #
 # Options
-#   --photos DIR        the photo folder digiKam manages (required)
-#   --digikam-db DIR    the folder containing digikam4.db (required unless --mysql)
+#   --photos DIR        the photo folder (required)
+#   --digikam-db DIR    the folder containing digikam4.db (required unless --mysql or --no-digikam)
 #   --mysql HOST:PORT/DB:USER:PASSWORD   digiKam on MySQL/MariaDB instead of SQLite
+#   --no-digikam        no digiKam at all: iopix keeps the library itself and finds the photos in the folder
 #   --prefix DIR        install location            (default /opt/iopix)
 #   --data DIR          the viewer's own data       (default PREFIX/data)
 #   --port N            listen port                 (default 8600)
@@ -32,17 +34,17 @@
 # Running it again upgrades the code and keeps DATA. The library is
 # only ever read unless you edit metadata from the viewer, which backs every file up first.
 set -e
-PREFIX=/opt/iopix; DATA=""; PHOTOS=""; DKDB=""; MYSQL=""; PORT=8600; HOST=0.0.0.0; USER_NAME=iopix
+PREFIX=/opt/iopix; DATA=""; PHOTOS=""; DKDB=""; MYSQL=""; NODK=0; PORT=8600; HOST=0.0.0.0; USER_NAME=iopix
 MODELS=""; FEATURES=""; ADMIN=""; CAPTIONS=0; READ_ONLY=0; SERVICE=1; SYSDEPS=1; YES=0
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --photos) PHOTOS="$2"; shift 2;; --digikam-db) DKDB="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --iopix-db) export IOPIX_VIEWER_DB="$2"; shift 2;;
+    --photos) PHOTOS="$2"; shift 2;; --digikam-db) DKDB="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --no-digikam) NODK=1; shift;; --iopix-db) export IOPIX_VIEWER_DB="$2"; shift 2;;
     --prefix) PREFIX="$2"; shift 2;; --data) DATA="$2"; shift 2;; --port) PORT="$2"; shift 2;; --host) HOST="$2"; shift 2;;
     --user) USER_NAME="$2"; shift 2;; --models) MODELS="$2"; shift 2;; --features) FEATURES="$2"; shift 2;; --admin) ADMIN="$2"; shift 2;; --captions) CAPTIONS=1; shift;;
     --read-only) READ_ONLY=1; shift;; --no-service) SERVICE=0; shift;; --no-system-deps) SYSDEPS=0; shift;; --yes) YES=1; shift;;
-    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
@@ -50,8 +52,8 @@ done
 [ -n "$MYSQL" ] || MYSQL="${IOPIX_MYSQL:-}"
 [ -n "$PHOTOS" ] || die "--photos DIR is required"
 [ -d "$PHOTOS" ] || die "photo folder not found: $PHOTOS"
-if [ -z "$MYSQL" ]; then
-  [ -n "$DKDB" ] || die "--digikam-db DIR is required (the folder with digikam4.db), or --mysql"
+if [ "$NODK" = 0 ] && [ -z "$MYSQL" ]; then
+  [ -n "$DKDB" ] || die "--digikam-db DIR is required (the folder with digikam4.db), or --mysql, or --no-digikam"
   [ -f "$DKDB/digikam4.db" ] || die "digikam4.db not found in $DKDB"
 fi
 [ -n "$DATA" ] || DATA="$PREFIX/data"
@@ -79,7 +81,7 @@ VERSION=$(cat "$PREFIX/app/VERSION")
 say "Running the setup"
 set -- --photos "$PHOTOS" --data "$DATA" --port "$PORT" $SD  # the arguments as a list: a folder with a space in its name stays one word
 # the passwords go to setup.sh in its environment, not on its command line (visible in the process list)
-if [ -n "$MYSQL" ]; then export IOPIX_MYSQL="$MYSQL"; else set -- "$@" --sqlite "$DKDB"; fi
+if [ "$NODK" = 1 ]; then set -- "$@" --no-digikam; elif [ -n "$MYSQL" ]; then export IOPIX_MYSQL="$MYSQL"; else set -- "$@" --sqlite "$DKDB"; fi
 [ -n "$ADMIN" ] && export IOPIX_ADMIN="$ADMIN"
 [ "$MODELS" = none ] && set -- "$@" --features none
 [ -n "$FEATURES" ] && set -- "$@" --features "$FEATURES"

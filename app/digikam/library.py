@@ -365,3 +365,57 @@ def discard_local_changes():
         con.commit()
     finally:
         con.close()
+
+
+# the tags digiKam itself creates in a new database (TagsCache, FaceTags): the internal pick and color labels,
+# and the three face tags under People that unnamed faces, suggestions and ignored faces hang on
+NEW_FACE_TAGS = (("Unknown", "unknownPerson"), ("Unconfirmed", "unconfirmedPerson"), ("Ignored", "ignoredPerson"))
+NEW_DB_VERSION = "16"  # digiKam 8 and 9's core database schema
+
+
+def start_new() -> bool:
+    """No digiKam at all (DIGIKAM_DB_TYPE=none): a fresh, empty library on PHOTOS_ROOT, laid out as digiKam
+    would lay out a new database, so every reader and writer works on it and the file scanner fills it. Only
+    when the library tables were never filled; an existing library (a copy of digiKam's, or one started here
+    earlier) is left as it is. Returns whether it started one."""
+    import os
+    from app import config
+    from app.digikam.dbsync import COLOR_TAGS, PICK_TAGS
+    if info().get("taken"):
+        return False
+    root = str(config.PHOTOS_ROOT)
+    con = connect(write=True)
+    try:
+        con.begin_write()
+        if con.execute("SELECT count(*) FROM AlbumRoots").fetchone()[0]:  # rows without the bookkeeping: left alone
+            con.rollback()
+            return False
+        cur = con.execute("INSERT INTO AlbumRoots (label, status, type, identifier, specificPath, caseSensitivity) VALUES (?,?,?,?,?,?)",
+                          (os.path.basename(root.rstrip("/")) or "Photos", 0, 1, "volumeid:?path=" + root, root, 2))
+        root_id = cur.lastrowid
+        con.execute("INSERT INTO Albums (albumRoot, relativePath, date, caption, collection) VALUES (?, '/', ?, NULL, NULL)",
+                    (root_id, time.strftime("%Y-%m-%d")))
+
+        def tag(name, pid, *props):
+            tid = con.execute("INSERT INTO Tags (pid, name, icon, iconkde) VALUES (?,?,NULL,NULL)", (pid, name)).lastrowid
+            for prop in props:
+                con.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?,?,NULL)", (tid, prop))
+            return tid
+        internal = tag("_Digikam_Internal_Tags_", 0, "internalTag")
+        for name in (*PICK_TAGS, *COLOR_TAGS):
+            tag(name, internal, "internalTag")
+        people = tag("People", 0)
+        for name, prop in NEW_FACE_TAGS:
+            tag(name, people, prop)
+        for k, v in (("DBVersion", NEW_DB_VERSION), ("uniqueHashVersion", "3")):
+            con.execute("INSERT INTO Settings (keyword, value) VALUES (?,?)", (k, v))
+        _set_info(con, {"source": "-", "taken": int(time.time()), "photos": 0, "base_source": "-"})
+        con.commit()  # counted as a change made here, so connecting a digiKam later merges instead of replacing it
+    except BaseException:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    import logging
+    logging.getLogger("app.digikam.library").info("no digiKam database: a new library was started on %s", root)
+    return True

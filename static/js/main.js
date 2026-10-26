@@ -50,7 +50,7 @@ export async function awaitReindex(until = () => true, tries = 20, ms = 400) {
 function banners() { return $('#banners') || document.body.appendChild(h('div', { id: 'banners' })); }
 export function dkBanner(d) {
   let b = $('#dkbanner');
-  const show = d && S.IS_ADMIN && (!d.sync || !d.reachable || d.conflict);
+  const show = d && S.IS_ADMIN && !d.none && (!d.sync || !d.reachable || d.conflict);  // no digiKam at all: nothing to warn about
   const key = !show ? null : d.conflict ? 'conflict:' + d.localChanges : d.sync ? 'offline:' + d.since : 'off';
   let dismissed = null; try { dismissed = sessionStorage.getItem('iopix.digikamBannerDismissed'); } catch { /* private mode */ }
   if (!show || dismissed === key) { b?.remove(); return; }
@@ -166,15 +166,15 @@ export async function pollStatus() {
       if (!S.RELOAD_PENDING) { S.RELOAD_PENDING = true; updateReadyNote(); }
     }
     if (s.app && !S.RELOAD_PENDING) S.APP_STAMP = s.app;
-    S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
-    S.AUTO_DB = !!(s.dbWrite && s.digikam && s.digikam.sync && s.digikam.reachable);  // edits go into digiKam's database by themselves, a minute later
+    S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.NO_DK = !!(s.digikam && s.digikam.none); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
+    S.AUTO_DB = !!(s.dbWrite && s.digikam && (s.digikam.none || s.digikam.sync && s.digikam.reachable));  // edits go into the database by themselves, a minute later
     S.IS_ADMIN = s.isAdmin; S.USERS_EXIST = s.usersExist; S.DIGIKAM_CHECK = s.digikamCheck || 'pgrep';
     if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
     updateBanner(s.updateAvailable);
     dkBanner(s.digikam);
     if (s.appName && s.appName !== S.APP_NAME) { S.APP_NAME = s.appName; applyAppName(); }
     document.body.classList.toggle('noadmin', !S.IS_ADMIN);
-    if (S.PENDING && s.dbWrite && !el.childNodes.length) el.replaceChildren(h('button', { type: 'button', class: 'lnk', style: 'cursor:pointer', title: 'Edits saved in sidecars that digiKam’s database does not have yet', onclick: dbDialog },
+    if (S.PENDING && s.dbWrite && !S.NO_DK && !el.childNodes.length) el.replaceChildren(h('button', { type: 'button', class: 'lnk', style: 'cursor:pointer', title: 'Edits saved in sidecars that digiKam’s database does not have yet', onclick: dbDialog },
       `${nf.format(S.PENDING)} ${S.PENDING === 1 ? 'edit' : 'edits'} not in digiKam yet`));
     if (s.rev !== ST.rev && ST.rev >= 0) { const mine = ST.rev; await loadState(); if (mine !== ST.rev && S.route.view === 'albums') showAlbums(); }
     if (S.META && s.version && s.version !== S.META.version) {

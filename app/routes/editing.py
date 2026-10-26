@@ -240,7 +240,7 @@ async def api_edits_db_apply():
     if not config.DB_WRITE:
         raise HTTPException(403, "Writing to the digiKam database is turned off (DB_WRITE=0)")
     log = logging.getLogger("app.sync")
-    if dkdb.standalone():
+    if dkdb.standalone() and not dkdb.no_digikam():
         raise HTTPException(409, "Sync with digiKam is off: the edits stay in the sidecars and in the viewer, and go into digiKam's database when sync is turned on again")
     try:
         result = await run_in_threadpool(dbsync.apply_pending)  # every pending edit, with a backup first: minutes on a large backlog

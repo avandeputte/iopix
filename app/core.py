@@ -185,7 +185,8 @@ def _auto_apply():
     """Sync with digiKam on, digiKam reachable and closed, edits waiting: write them into digiKam's
     database, what "Apply to digiKam database" does by hand. A minute after the last edit, so a run
     of edits goes in one transaction with one backup, and at most every five minutes."""
-    if not (config.DB_WRITE and index.sync_enabled() and index.last_source["kind"] == "digikam" and not appstate.read_only()):
+    # with no digiKam at all, the library tables are where the edits end up, the same way
+    if not (config.DB_WRITE and (dkdb.no_digikam() or index.sync_enabled() and index.last_source["kind"] == "digikam") and not appstate.read_only()):
         return
     if not edits.pending_count():
         return
@@ -329,7 +330,7 @@ def _face_detect_allowed():
         raise HTTPException(409, f"Face detection needs the {dlmodels.REGISTRY[dlmodels.chosen('face_detector')]['label']} model: download it in Maintenance › AI analysis and models")
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
-    if not index.sync_enabled() or index.offline["since"]:
+    if not dkdb.no_digikam() and (not index.sync_enabled() or index.offline["since"]):  # no digiKam: they live in the library tables
         raise HTTPException(409, "Face regions live in digiKam's database, which is unreachable (or Sync with digiKam is off)")
 
 

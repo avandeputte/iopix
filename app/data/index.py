@@ -131,8 +131,11 @@ conflict = {"digikam": None}  # digiKam's version while the library holds change
 def probe() -> tuple:
     """Where the next build reads from. ('digikam', its version): sync on, digiKam answers, and the library
     holds nothing digiKam lacks; the library tables are refreshed from it first. ('library', their version):
-    sync off, digiKam unreachable, or changes made with sync off that a copy would overwrite."""
+    sync off, digiKam unreachable, or changes made with sync off that a copy would overwrite. With no digiKam
+    at all, a library never filled is started fresh first."""
     m = mirror_info()
+    if not m and dkdb.no_digikam() and library.start_new():
+        m = mirror_info()
     if sync_enabled():
         try:
             v = dkdb.source_version()
@@ -153,7 +156,7 @@ def probe() -> tuple:
 def status() -> dict:
     """For /api/status and the banner."""
     m = mirror_info()
-    return {"sync": sync_enabled(), "reachable": offline["since"] is None, "since": offline["since"], "error": offline["error"],
+    return {"sync": sync_enabled(), "none": dkdb.no_digikam(), "reachable": offline["since"] is None, "since": offline["since"], "error": offline["error"],
             "source": last_source["kind"], "mirror": m, "localChanges": (m or {}).get("local_changes", 0),
             "conflict": bool(conflict["digikam"]) and sync_enabled()}
 

@@ -880,6 +880,8 @@ def api_backup(which: str, request: Request):
         return FileResponse(dst, media_type="application/zip", filename=f"iopix-backup-{stamp}.zip", content_disposition_type="attachment")
     if which != "digikam":
         raise HTTPException(404, "backup is 'digikam' or 'app'")
+    if dkdb.no_digikam():
+        raise HTTPException(404, "There is no digiKam database; the library is in the app backup")
     if dkdb.is_mysql():
         try:
             dst = dkdb.backup(force=True)

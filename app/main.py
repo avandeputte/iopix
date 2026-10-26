@@ -26,6 +26,7 @@ from app import users
 from app import proxyauth
 from app import mcp_server
 from app import updates
+from app.digikam import dkdb
 from app.ai import models as dlmodels
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +53,8 @@ async def lifespan(_app):
     from app.photos import scanner
     from app.core import _rebuild_after_write
     scanner.start(_rebuild_after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
+    if dkdb.no_digikam() and scanner.enabled():
+        scanner.run_soon()  # no digiKam to have found what was added while iopix was stopped: a pass right after start-up
     updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them
         dlmodels.auto_download(config.AUTO_MODELS, on_done=_models_arrived)

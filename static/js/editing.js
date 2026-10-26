@@ -108,7 +108,7 @@ export async function editPhotos(ids, changes) {
     flashEdit(changes);
   }
   if (r.failed.length) toast(`${r.failed.length} could not be changed: ${r.failed[0].error}`);
-  else if (ids.length > 1) toast(S.AUTO_DB ? `Saved for ${plural(r.edited, 'photo')}; digiKam’s database gets it within a minute.`
+  else if (ids.length > 1) toast(S.NO_DK ? `Saved for ${plural(r.edited, 'photo')}.` : S.AUTO_DB ? `Saved for ${plural(r.edited, 'photo')}; digiKam’s database gets it within a minute.`
     : `Saved to ${nf.format(r.edited)} sidecar files. digiKam shows it after “Reread Metadata From File”, or apply them to its database from Explore.`);
   S.keepView = true;
   pollSoon();
@@ -127,7 +127,7 @@ export async function createTagThenPick(full, onPick) {
   const name = parts.pop();
   let parent = 0;
   if (parts.length) { const p = S.META.tags.find((t) => !t.person && t.full.toLowerCase() === parts.join('/').toLowerCase()); if (!p) { toast(`Parent tag “${parts.join(' › ')}” does not exist.`); return; } parent = p.id; }
-  if (!await confirmDialog(`Create the tag “${full}” in digiKam’s database? digiKam must be closed; a backup is made first.`)) return;
+  if (!await confirmDialog(S.NO_DK ? `Create the tag “${full}”?` : `Create the tag “${full}” in digiKam’s database? digiKam must be closed; a backup is made first.`)) return;
   let r;
   try { r = await post('/api/tags/op', { op: 'add', parent, name }); } catch (e) { toastError(e); return; }
   await awaitReindex((m) => m.tags.some((t) => t.id === r.id));
@@ -170,7 +170,7 @@ export function tagDialog(ids) {
 export function editDialog(ids) {
   const save = (ch) => editPhotos(ids, ch);
   const back = modal(`Edit ${plural(ids.length, 'photo')}`,
-    h('p', null, 'Each change is saved straight away to the XMP sidecar files. digiKam’s database is not touched.'),
+    h('p', null, S.NO_DK ? 'Each change is saved straight away, and to the XMP sidecar files beside the photos.' : 'Each change is saved straight away to the XMP sidecar files. digiKam’s database is not touched.'),
     editControls({}, save),
     ...(() => {  // title and caption for every selected photo, applied on demand (not on each keystroke)
       const title = h('input', { class: 'einput', placeholder: 'Title for all', style: 'flex:1', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.nextSibling.click(); } });
@@ -234,7 +234,7 @@ export function dateEditor(ids, current, after) {
 /** Face detection on request: a photo (answered at once) or a folder (in the background). Faces already
  *  marked, by digiKam or anything else, are kept; only faces nothing marked become new unnamed faces. */
 export async function detectFaces(ids, folder) {
-  if (folder && !await confirmDialog(`Look for faces in the ${nf.format(folder.nAll)} photos of “${folder.path.replace(/^\//, '')}” (with its subfolders)? New faces are added to digiKam’s database as unnamed faces; faces already marked stay as they are.`)) return;
+  if (folder && !await confirmDialog(`Look for faces in the ${nf.format(folder.nAll)} photos of “${folder.path.replace(/^\//, '')}” (with its subfolders)? New faces are added ${S.NO_DK ? 'to the library' : 'to digiKam’s database'} as unnamed faces; faces already marked stay as they are.`)) return;
   if (!folder) toast('Looking for faces…', null, null, 30000);
   let r;
   try { r = await post('/api/faces/detect', folder ? { album: folder.id } : { ids }); } catch (e) { toastError(e); return; }

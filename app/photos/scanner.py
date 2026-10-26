@@ -65,7 +65,7 @@ _wake = threading.Event()
 # ---- settings
 def enabled() -> bool:
     from app.data import state
-    return state.get_setting("file_scanner", "0") == "1"
+    return state.get_setting("file_scanner", "1" if dkdb.no_digikam() else "0") == "1"  # with no digiKam, nothing else finds new photos
 
 
 def interval() -> int:

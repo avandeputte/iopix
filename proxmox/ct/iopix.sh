@@ -3,7 +3,7 @@
 # this is the ct/ script; proxmox/install/iopix-install.sh runs inside the container.
 #
 # After the framework's own questions (resources, network) it asks about the app: where the photos
-# and digiKam's database are on this host (or MariaDB details), where iopix keeps its own database
+# and digiKam's database are on this host (or MariaDB details, or no digiKam at all), where iopix keeps its own database
 # (SQLite in the container, or MariaDB), which features to install (each
 # downloads its model), and the admin account. It then creates the container, bind-mounts the
 # library into it and runs the app's own setup.sh inside with those answers, which installs the
@@ -40,10 +40,17 @@ for _v in PHOTOS DB VIEWER_DB FEATURES WRITE ADMIN; do eval "[[ -n \"\${IOPIX_$_
 # ---- the app's own questions (whiptail on the host; env vars IOPIX_* skip them for unattended runs)
 ask_app_settings() {
   local bt="iopix"
-  IOPIX_PHOTOS="${IOPIX_PHOTOS:-$(whiptail --backtitle "$bt" --inputbox "Folder on this Proxmox host with the photos digiKam manages (bind-mounted read-only into the container):" 10 72 "/mnt/photos" 3>&1 1>&2 2>&3)}" || exit 1
+  IOPIX_PHOTOS="${IOPIX_PHOTOS:-$(whiptail --backtitle "$bt" --inputbox "Folder on this Proxmox host with your photos (bind-mounted into the container):" 10 72 "/mnt/photos" 3>&1 1>&2 2>&3)}" || exit 1
   [[ -d "$IOPIX_PHOTOS" ]] || { msg_error "Folder not found on this host: $IOPIX_PHOTOS"; exit 1; }
-  if [[ -z "${IOPIX_DB:-}" ]]; then
-    if whiptail --backtitle "$bt" --yesno "Is digiKam's database on MySQL/MariaDB?\n\nNo: the SQLite file digikam4.db in a folder on this host." 11 72 3>&1 1>&2 2>&3; then
+  if [[ -z "${IOPIX_DB:-}" ]]; then  # IOPIX_DB: sqlite:DIR, mysql:HOST:PORT/DB:USER:PASS or none
+    local kind
+    kind=$(whiptail --backtitle "$bt" --menu "Where is digiKam's database?" 14 76 3 \
+      sqlite "The SQLite file digikam4.db, in a folder on this host" \
+      mysql "MySQL / MariaDB" \
+      none "I don't use digiKam: iopix keeps the library itself" 3>&1 1>&2 2>&3) || exit 1
+    if [[ "$kind" == none ]]; then
+      IOPIX_DB="none"
+    elif [[ "$kind" == mysql ]]; then
       local h p d u w
       h=$(whiptail --backtitle "$bt" --inputbox "MariaDB host or IP" 9 60 "192.168.1.2" 3>&1 1>&2 2>&3) || exit 1
       p=$(whiptail --backtitle "$bt" --inputbox "Port" 9 60 "3306" 3>&1 1>&2 2>&3) || exit 1
@@ -59,7 +66,9 @@ ask_app_settings() {
     fi
   fi
   if [[ -z "${IOPIX_VIEWER_DB:-}" ]]; then
-    if whiptail --backtitle "$bt" --defaultno --yesno "Keep iopix's own database on MySQL/MariaDB too?\n\nIt holds favorites, albums, users, face groups and AI results.\n\nNo: a SQLite file in the container's data folder (it can be moved to MariaDB later in Settings)." 14 76 3>&1 1>&2 2>&3; then
+    local holds="favorites, albums, users, face groups and AI results"
+    [[ "$IOPIX_DB" == none ]] && holds="the whole library (folders, tags, people and faces, captions, places) plus favorites, albums, users and AI results"
+    if whiptail --backtitle "$bt" --defaultno --yesno "Keep iopix's own database on MySQL/MariaDB?\n\nIt holds $holds.\n\nNo: a SQLite file in the container's data folder (it can be moved to MariaDB later in Settings)." 14 76 3>&1 1>&2 2>&3; then
       local vh vp vd vu vw dh="192.168.1.2" dp="3306" du="iopix"
       if [[ "$IOPIX_DB" == mysql:* ]]; then local r="${IOPIX_DB#mysql:}"; dh="${r%%:*}"; r="${r#*:}"; dp="${r%%/*}"; r="${r#*/}"; r="${r#*:}"; du="${r%%:*}"; fi
       vh=$(whiptail --backtitle "$bt" --inputbox "MariaDB host or IP for iopix's database" 9 60 "$dh" 3>&1 1>&2 2>&3) || exit 1
@@ -82,7 +91,7 @@ ask_app_settings() {
     IOPIX_FEATURES=$(echo "$IOPIX_FEATURES" | tr -d '"' | tr ' ' ',')
   fi
   if [[ -z "${IOPIX_WRITE:-}" ]]; then
-    if whiptail --backtitle "$bt" --yesno "May the viewer write into the library?\n\nYes: metadata edits go to XMP sidecar files next to the photos (and to digiKam's database on request). The library is mounted read/write and the container is created PRIVILEGED, because an unprivileged container cannot write files owned by a host user.\n\nNo: browsing only, read-only mounts, unprivileged container." 16 76 3>&1 1>&2 2>&3; then IOPIX_WRITE=1; else IOPIX_WRITE=0; fi
+    if whiptail --backtitle "$bt" --yesno "May iopix write into the photo folder?\n\nYes: metadata edits go to XMP sidecar files next to the photos (and to digiKam's database, if you use one). The library is mounted read/write and the container is created PRIVILEGED, because an unprivileged container cannot write files owned by a host user.\n\nNo: browsing only, read-only mounts, unprivileged container." 16 76 3>&1 1>&2 2>&3; then IOPIX_WRITE=1; else IOPIX_WRITE=0; fi
   fi
   if [[ -z "${IOPIX_ADMIN:-}" ]]; then
     local an aw
@@ -120,7 +129,9 @@ msg_info "Mounting the library into CT ${CTID}"
 RO=",ro=1"; [[ "${IOPIX_WRITE:-0}" = 1 ]] && RO=""
 pct set "$CTID" -mp0 "$IOPIX_PHOTOS,mp=/library/photos$RO"
 SECRETS=""  # setup.sh reads IOPIX_MYSQL and IOPIX_ADMIN from its environment: the passwords stay off every command line
-if [[ "$IOPIX_DB" == sqlite:* ]]; then
+if [[ "$IOPIX_DB" == none ]]; then
+  DBARG="--no-digikam"
+elif [[ "$IOPIX_DB" == sqlite:* ]]; then
   pct set "$CTID" -mp1 "${IOPIX_DB#sqlite:},mp=/library/digikamDB$RO"
   DBARG="--sqlite /library/digikamDB"
 else

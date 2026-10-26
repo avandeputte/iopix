@@ -5,7 +5,8 @@
 #                              write the settings, create the admin and start the service
 #   ./setup.sh --yes ...       no questions: defaults and the flags below
 #
-# Flags (each one skips its question): --photos DIR  --sqlite DIR | --mysql HOST:PORT/DB:USER:PASS
+# Flags (each one skips its question): --photos DIR  --sqlite DIR | --mysql HOST:PORT/DB:USER:PASS | --no-digikam
+#   (--no-digikam: you don't use digiKam; iopix keeps the library itself and finds the photos in the folder)
 #   --iopix-db sqlite | HOST:PORT/DB:USER:PASS   iopix's own database (favorites, albums, AI results...): a SQLite
 #   file in the data folder (the default) or MySQL/MariaDB; the database is created when the user may
 #   --features search,places,objects,ocr,captions  --search-model clip|siglip2  --port N
@@ -22,14 +23,14 @@ APP="$(pwd)"
 OS="$(uname -s)"
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
-YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; VIEWERDB=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""
+YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; NODK=0; VIEWERDB=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --yes) YES=1; shift;; --photos) PHOTOS="$2"; shift 2;; --sqlite) SQLITE="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --iopix-db) VIEWERDB="$2"; shift 2;;
+    --yes) YES=1; shift;; --photos) PHOTOS="$2"; shift 2;; --sqlite) SQLITE="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --no-digikam) NODK=1; shift;; --iopix-db) VIEWERDB="$2"; shift 2;;
     --features) FEATURES="$2"; shift 2;; --search-model) SEARCH_MODEL="$2"; shift 2;; --port) PORT="$2"; shift 2;;
     --admin) ADMIN="$2"; shift 2;; --no-admin) NO_ADMIN=1; shift;; --service) SERVICE=1; shift;; --no-service) SERVICE=0; shift;;
     --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
@@ -122,9 +123,13 @@ command -v ffmpeg >/dev/null 2>&1 || echo "note: ffmpeg is still not installed; 
 
 # --- the library ------------------------------------------------------------------------------------
 say "Your library"
-ask PHOTOS "Folder with the photos digiKam manages" "${PHOTOS:-$HOME/Pictures/photos}"
+ask PHOTOS "Folder with your photos" "${PHOTOS:-$HOME/Pictures/photos}"
 [ -d "$PHOTOS" ] || die "folder not found: $PHOTOS"
-if [ -z "$MYSQL" ] && [ -z "$SQLITE" ]; then
+if [ "$NODK" = 0 ] && [ -z "$MYSQL" ] && [ -z "$SQLITE" ] && [ "$YES" = 0 ] && [ -n "$TTY" ]; then
+  yesno "Do you use digiKam with these photos (no: iopix keeps the library itself and finds the photos in the folder)?" y || NODK=1
+fi
+[ "$NODK" = 0 ] || { MYSQL=""; SQLITE=""; echo "No digiKam: iopix starts its own library on $PHOTOS and its file scanner finds the photos (new ones too)."; }
+if [ "$NODK" = 0 ] && [ -z "$MYSQL" ] && [ -z "$SQLITE" ]; then
   if yesno "Is digiKam's database on MySQL/MariaDB (no: SQLite file digikam4.db)?" n; then
     ask MH "MySQL host" "127.0.0.1"; ask MP "port" "3306"; ask MD "database" "digikam"; ask MU "user" "digikam"; secret MW "password"
     MYSQL="$MH:$MP/$MD:$MU:$MW"
@@ -192,7 +197,10 @@ umask 077  # the settings file holds the database password: private from the fir
 {
   echo "# iopix settings, written by setup.sh (variable names as in the README). Edit and restart the service."
   echo "PHOTOS_ROOT=$PHOTOS"
-  if [ -n "$MYSQL" ]; then
+  if [ "$NODK" = 1 ]; then
+    echo "# no digiKam: the library lives in iopix's own database (Settings > digiKam database can point at one later)"
+    echo "DIGIKAM_DB_TYPE=none"
+  elif [ -n "$MYSQL" ]; then
     hp=${MYSQL%%/*}; rest=${MYSQL#*/}; db=${rest%%:*}; rest=${rest#*:}; us=${rest%%:*}; pw=${rest#*:}
     echo "DIGIKAM_DB_TYPE=mysql"; echo "DIGIKAM_DB_HOST=${hp%%:*}"; echo "DIGIKAM_DB_PORT=${hp##*:}"; echo "DIGIKAM_DB_NAME=$db"; echo "DIGIKAM_DB_USER=$us"; echo "DIGIKAM_DB_PASSWORD=$pw"
   else

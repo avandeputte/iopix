@@ -7,7 +7,8 @@ you take a backup. All of that lives here, so the rest of the app writes
 plain SQL with `?` markers and SQLite-style `INSERT OR IGNORE`.
 
 Settings (environment):
-  DIGIKAM_DB_TYPE      sqlite (default) or mysql
+  DIGIKAM_DB_TYPE      sqlite (default), mysql, or none (no digiKam at all: the library lives only in the
+                       viewer's own tables, started fresh on PHOTOS_ROOT, and the file scanner finds the photos)
   DIGIKAM_DB_DIR       folder with digikam4.db          (sqlite)
   DIGIKAM_DB_HOST/PORT/NAME/USER/PASSWORD                (mysql; NAME defaults to "digikam")
   DIGIKAM_DB_BACKUP    auto (default: a full copy before destructive operations only) or skip (never); daily, the old name, means auto
@@ -34,6 +35,7 @@ ENV = {"type": os.environ.get("DIGIKAM_DB_TYPE", "sqlite").lower(), "sqlite_dir"
        "database": os.environ.get("DIGIKAM_DB_NAME", "digikam"), "user": os.environ.get("DIGIKAM_DB_USER", "digikam"),
        "password": os.environ.get("DIGIKAM_DB_PASSWORD", ""), "backup": os.environ.get("DIGIKAM_DB_BACKUP", "auto")}
 KEYS = tuple(ENV)
+NO_DIGIKAM = ("none", "no", "off")
 BACKUP_DIR = config.DATA_DIR / "db-backups"
 KEEP_BACKUPS = 10
 
@@ -53,7 +55,8 @@ def settings() -> dict:
         v = state.get_setting("db_" + k, "")
         if v != "":
             out[k] = v
-    out["type"] = "mysql" if str(out["type"]).lower() in ("mysql", "mariadb") else "sqlite"
+    t = str(out["type"]).lower()
+    out["type"] = "mysql" if t in ("mysql", "mariadb") else "none" if t in NO_DIGIKAM else "sqlite"
     try:
         out["port"] = int(out["port"])
     except (TypeError, ValueError):
@@ -73,6 +76,8 @@ def _mysql_kwargs() -> dict:
 def test_connection(c: dict = None) -> dict:
     """Try the given (or current) settings without saving them: counts, DBVersion, album roots."""
     c = {**settings(), **{k: v for k, v in (c or {}).items() if v not in (None, "")}}
+    if str(c["type"]).lower() in NO_DIGIKAM:
+        raise SyncError("Nothing to test: no digiKam database is used")
     if str(c["type"]).lower() in ("mysql", "mariadb"):
         import pymysql
         raw = pymysql.connect(host=c["host"], port=int(c["port"]), database=c["database"], user=c["user"], password=c["password"], connect_timeout=5)
@@ -96,8 +101,16 @@ def is_mysql() -> bool:
     return settings()["type"] == "mysql"
 
 
+def no_digikam() -> bool:
+    """DIGIKAM_DB_TYPE=none (or Settings > digiKam database: none): there is no digiKam database at all."""
+    from app.data import state
+    return str(state.get_setting("db_type", "") or ENV["type"]).lower() in NO_DIGIKAM
+
+
 def describe() -> str:
     c = settings()
+    if c["type"] == "none":
+        return "none"
     return f"MySQL {c['user']}@{c['host']}:{c['port']}/{c['database']}" if is_mysql() else str(sqlite_path())
 
 
@@ -299,7 +312,7 @@ def sync_enabled() -> bool:
     """Settings > Sync with digiKam. Off: the viewer never opens digiKam's database; the library lives in
     the viewer's own tables (library.py) and every change is made there."""
     from app.data import state
-    return state.get_setting("digikam_sync", "1") != "0"
+    return not no_digikam() and state.get_setting("digikam_sync", "1") != "0"
 
 
 def standalone() -> bool:

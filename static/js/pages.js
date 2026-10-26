@@ -95,7 +95,7 @@ export async function showExplore() {
       pill('No location', S.META.total - S.META.geotagged, { geo: 0 }), pill('Favorites', ST.fav.size, { fav: 1 }),
       h('a', { class: 'pill', href: '#/duplicates' }, 'Duplicate files'), h('a', { class: 'pill', href: '#/bursts' }, 'Bursts & best shots'),
       h('a', { class: 'pill', href: '#/events' }, 'Events & trips'), pill('Contains text', null, { hastext: 1 }), pill('Blurry', null, { blurry: 1 }),
-      S.EDITING ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
+      S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
     group('blue', S.META.years.map(([y, n]) => pill(y, n, { year: y }))),
@@ -317,7 +317,7 @@ export async function showFolders() {
   const refresh = () => { S.viewKey = null; pollSoon(600); setTimeout(() => { if (S.route.view === 'folders') showFolders(); }, 900); };
   const newFolder = async (parent) => {
     const n = await promptDialog(`Name for the new folder in ${parent.path}`); if (!n || !n.trim()) return;
-    try { const r = await post('/api/folders', { parent: parent.id, name: n.trim() }); toast(`Created ${r.path}. digiKam sees it on its next start.`); } catch (e) { toastError(e); return; }
+    try { const r = await post('/api/folders', { parent: parent.id, name: n.trim() }); toast(`Created ${r.path}.${S.NO_DK ? '' : ' digiKam sees it on its next start.'}`); } catch (e) { toastError(e); return; }
     refresh();
   };
   const uploadTo = (folder) => {
@@ -335,7 +335,7 @@ export async function showFolders() {
       };
       try {
         const r = await send();
-        toast(`${plural(r.added.length, 'file')} added to ${folder.path}` + (r.skipped.length ? `; ${plural(r.skipped.length, 'file')} skipped (${r.skipped[0].reason})` : '') + '. digiKam reads the full metadata on its next run.', null, null, 9000);
+        toast(`${plural(r.added.length, 'file')} added to ${folder.path}` + (r.skipped.length ? `; ${plural(r.skipped.length, 'file')} skipped (${r.skipped[0].reason})` : '') + (S.NO_DK ? '.' : '. digiKam reads the full metadata on its next run.'), null, null, 9000);
       } catch (e) { toastError(e); }
       refresh();
     };
@@ -376,7 +376,7 @@ export async function showFolders() {
   };
   if (!openFolders.size) tops.forEach((t) => openFolders.add(t.id));  // first visit: the top level open, deeper levels folded
   main.replaceChildren(h('div', { class: 'page' }, pageTitle('folder', 'teal', 'Folders ', h('span', { class: 'muted' }, nf.format(all.length)), can ? [h('a', { class: 'lnk', href: '#/import', style: 'margin-left:14px;font-size:14px;font-weight:400' }, 'Import…'), h('a', { class: 'lnk', href: '#/trash', style: 'margin-left:12px;font-size:14px;font-weight:400' }, 'Trash')] : null),
-    h('div', { class: 'muted intro' }, 'digiKam’s folders, as they are on disk. Click a folder to see its photos (sub-folders included); the arrow opens its sub-folders.', can ? ' New folders and uploads go straight into the library; digiKam picks them up and reads their full metadata on its next start.' : ''),
+    h('div', { class: 'muted intro' }, `${S.NO_DK ? 'The library’s' : 'digiKam’s'} folders, as they are on disk. Click a folder to see its photos (sub-folders included); the arrow opens its sub-folders.`, can ? (S.NO_DK ? ' New folders and uploads go straight into the library.' : ' New folders and uploads go straight into the library; digiKam picks them up and reads their full metadata on its next start.') : ''),
     h('input', { class: 'pagefilter', placeholder: 'Find a folder…', oninput: (e) => draw(norm(e.target.value)) }), tree));
   draw('');
 }

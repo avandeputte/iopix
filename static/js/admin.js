@@ -523,7 +523,7 @@ function scannerRow(m, row, btn, again) {
   const every = h('select', { class: 'sharepick', onchange: async (e) => { try { await post('/api/settings', { scan_interval: +e.target.value }); } catch (err) { toastError(err); } } },
     [[5, 'every 5 minutes'], [15, 'every 15 minutes'], [60, 'every hour'], [360, 'every 6 hours'], [1440, 'once a day']].map(([v, l]) => h('option', { value: v, selected: v === sc.interval }, l)));
   return row('File scanner',
-    h('span', null, `Looks in the album folders for photos and videos added, changed or removed outside ${S.APP_NAME} (Finder, a sync tool, a phone backup), as digiKam’s scanner does, and records them the same way: camera, place, keywords, faces, digiKam’s file fingerprint. Leave it off if everything arrives through Upload or Import; those are always read in full. A disk that looks unmounted is left alone. `, h('span', { class: 'muted' }, sc.running ? 'Scanning now…' : said)),
+    h('span', null, `Looks in the album folders for photos and videos added, changed or removed outside ${S.APP_NAME} (Finder, a sync tool, a phone backup), as digiKam’s scanner does, and records them the same way: camera, place, keywords, faces, digiKam’s file fingerprint. ${S.NO_DK ? 'With no digiKam it is how photos copied into the folder get into the library, so it is on unless you turn it off.' : 'Leave it off if everything arrives through Upload or Import; those are always read in full.'} A disk that looks unmounted is left alone. `, h('span', { class: 'muted' }, sc.running ? 'Scanning now…' : said)),
     h('span', { class: 'toolbar',}, h('label', { class: 'chk',}, on, 'On'), every,
       btn('Scan now', async () => { try { await post('/api/scan', {}); toast('Scanning the album folders…'); setTimeout(again, 4000); } catch (e) { toastError(e); } })));
 }
@@ -576,7 +576,7 @@ export async function settingsPage(view) {
   const st = m.storage;
   main.replaceChildren(h('div', { class: 'page spage' },
     pageTitle(view === 'settings' ? 'gear' : 'wrench', 'slate', view === 'settings' ? 'Settings' : 'Maintenance', h('span', { class: 'muted' }, `${S.APP_NAME} v${S.APP_VERSION || '?'}`)),
-    h('div', { class: 'muted intro' }, m.paths ? `Library: ${m.paths.library} (${nf.format(m.photos)} photos and videos). digiKam database: ${m.paths.digikamDb}. Everything ${S.APP_NAME} writes lives in ${m.paths.data}.` : `${nf.format(m.photos)} photos in the library.`),
+    h('div', { class: 'muted intro' }, m.paths ? `Library: ${m.paths.library} (${nf.format(m.photos)} photos and videos). ${m.paths.digikamDb === 'none' ? `No digiKam: the library lives in ${S.APP_NAME}’s own database` : `digiKam database: ${m.paths.digikamDb}`}. Everything ${S.APP_NAME} writes lives in ${m.paths.data}.` : `${nf.format(m.photos)} photos in the library.`),
     !S.USERS_EXIST ? row('No users yet', `${S.APP_NAME} is open to anyone who can reach it. Create the admin account to switch on sign-in: visitors then browse read-only, and only editors and admins can change the library.`, btn('Create the admin account', setupDialog, true)) : null,
     ...(view === 'settings' ? [
     stab('display'),
@@ -612,19 +612,23 @@ export async function settingsPage(view) {
     S.IS_ADMIN ? (() => {
       const d = m.database || {};
       const inp = (k, ph, type = 'text', w = 160) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : (d[k] ?? ''), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
-      const type = h('select', null, h('option', { value: 'sqlite', selected: d.type !== 'mysql' }, 'SQLite (digikam4.db file)'), h('option', { value: 'mysql', selected: d.type === 'mysql' }, 'MySQL / MariaDB'));
+      const type = h('select', null, h('option', { value: 'sqlite', selected: d.type === 'sqlite' }, 'SQLite (digikam4.db file)'), h('option', { value: 'mysql', selected: d.type === 'mysql' }, 'MySQL / MariaDB'), h('option', { value: 'none', selected: d.type === 'none' }, 'None: I don’t use digiKam'));
       const f = { sqlite_dir: inp('sqlite_dir', 'folder with digikam4.db', 'text', 320), host: inp('host', 'host'), port: inp('port', 'port', 'text', 70), database: inp('database', 'database'), user: inp('user', 'user'),
         password: inp('password', d.password_set ? 'password (stored; leave empty to keep)' : 'password', 'password', 220) };
       const backup = h('select', null, [['auto', 'full backup only before deleting photos or a tag, or a merge'], ['skip', 'never (the server is backed up elsewhere)']].map(([v, l]) => h('option', { value: v, selected: (d.backup === 'skip' ? 'skip' : 'auto') === v }, l)));
       const sq = h('div', { class: 'toolbar tight mt6',}, f.sqlite_dir), my = h('div', { class: 'toolbar tight mt6',}, f.host, f.port, f.database, f.user, f.password);
-      const show = () => { sq.hidden = type.value !== 'sqlite'; my.hidden = type.value !== 'mysql'; }; type.onchange = show; show();
+      const show = () => { sq.hidden = type.value !== 'sqlite'; my.hidden = type.value !== 'mysql'; backup.hidden = test.hidden = type.value === 'none'; }; type.onchange = show;
       const payload = () => ({ type: type.value, sqlite_dir: f.sqlite_dir.value, host: f.host.value, port: f.port.value, database: f.database.value, user: f.user.value, password: f.password.value, backup: backup.value });
       const result = h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' });
-      return row('digiKam database', `Where digiKam keeps its database. Currently ${d.type === 'mysql' ? `MySQL ${d.user}@${d.host}:${d.port}/${d.database}` : `SQLite in ${d.sqlite_dir}`}. Changing it rebuilds the index from the other database within seconds; ${S.APP_NAME}'s own data (favorites, albums, users, analysis) stays. Test first.`,
+      const test = btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/db/test', payload()); fill(result, `OK: ${nf.format(r.images)} photos, ${nf.format(r.tags)} tags, DBVersion ${r.dbVersion}, album root ${r.roots.join(', ')}`); } catch (e) { fill(result, e.message); } });
+      show();
+      return row('digiKam database', d.type === 'none'
+        ? `None: ${S.APP_NAME} keeps the library itself, in its own database, and the file scanner finds the photos in the photo folder. Tags, people and faces, captions, places and dates are saved there and in XMP sidecars beside the photos, which digiKam can read if you ever start using it. If you start using digiKam later, let it read the folder first (it picks up the sidecars), then choose its database here: ${S.APP_NAME} asks before it replaces its own library with digiKam’s.`
+        : `Where digiKam keeps its database. Currently ${d.type === 'mysql' ? `MySQL ${d.user}@${d.host}:${d.port}/${d.database}` : `SQLite in ${d.sqlite_dir}`}. Changing it rebuilds the index from the other database within seconds; ${S.APP_NAME}'s own data (favorites, albums, users, analysis) stays. Test first.`,
         h('div', null, h('div', { class: 'toolbar tight',}, type, backup), sq, my,
           h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
-            btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/db/test', payload()); fill(result, `OK: ${nf.format(r.images)} photos, ${nf.format(r.tags)} tags, DBVersion ${r.dbVersion}, album root ${r.roots.join(', ')}`); } catch (e) { fill(result, e.message); } }),
-            btn('Save and switch', async () => { if (!await confirmDialog(`Switch ${S.APP_NAME} to this digiKam database now?`)) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toastError(e); return; } setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 2500); }, true)),
+            test,
+            btn('Save and switch', async () => { if (!await confirmDialog(type.value === 'none' ? `Stop using digiKam’s database? ${S.APP_NAME} keeps working from its own copy of the library.` : `Switch ${S.APP_NAME} to this digiKam database now?`)) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toastError(e); return; } setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 2500); }, true)),
           result));
     })() : null,
     S.IS_ADMIN ? (() => {
@@ -682,7 +686,9 @@ export async function settingsPage(view) {
       : `${m.readOnly ? 'On' : 'Off'}. When on, ${S.APP_NAME} only browses: editing, tagging, face naming, place tags, GPS tracks, metadata sync and database updates are switched off and refused by the server. Favorites and viewer albums keep working; they never touch the library.`,
       m.readOnlyLocked ? null : btn(m.readOnly ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { read_only: !m.readOnly }); const s = await api('/api/status'); S.EDITING = s.editing; S.CAN_MANAGE = s.editing && s.dbWrite; } catch (e) { toastError(e); } settingsPage(view); })) : null,
     S.IS_ADMIN ? (() => {
-      const d = m.digikam || {}, copy = d.mirror ? `${nf.format(d.mirror.photos)} photos as of ${fmtWhen(d.mirror.taken)}` : 'not taken yet';
+      const d = m.digikam || {};
+      if (d.none) return null;  // no digiKam at all: nothing to sync with
+      const copy = d.mirror ? `${nf.format(d.mirror.photos)} photos as of ${fmtWhen(d.mirror.taken)}` : 'not taken yet';
       if (d.conflict) {
         const planEl = h('div', { class: 'muted note mt6' }, 'Working out what changed…');
         api('/api/library/merge').then((p) => fill(planEl, p.total ? 'To merge: ' + p.summary.join(', ') + '.' : 'Nothing to merge.')).catch((e) => fill(planEl, e.message));
@@ -772,8 +778,8 @@ export async function settingsPage(view) {
         item('Deleted photos', st.deletedPhotos, 'copies of deleted photos and their sidecars, kept until you remove them (data/deleted-photos)')));
     })(),
     h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:8px;max-width:820px' }, 'Backups are never deleted automatically (apart from keeping the last ten database copies); remove them by hand once you are happy with the corresponding changes.'),
-    row('Download a backup', `digiKam’s database as it is right now (a consistent copy of digikam4.db, or a mysqldump for MariaDB), and ${S.APP_NAME}’s data as a zip (its database plus the content-search index). Keep them somewhere else.`,
-      h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('a', { class: 'pillbtn', href: '/api/backup/digikam', download: '' }, icon('download'), h('span', null, 'digiKam database')),
+    row('Download a backup', S.NO_DK ? `${S.APP_NAME}’s data as a zip: its database, which holds the whole library (folders, tags, people and faces, captions, places), plus the content-search index. Keep it somewhere else.` : `digiKam’s database as it is right now (a consistent copy of digikam4.db, or a mysqldump for MariaDB), and ${S.APP_NAME}’s data as a zip (its database plus the content-search index). Keep them somewhere else.`,
+      h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, S.NO_DK ? null : h('a', { class: 'pillbtn', href: '/api/backup/digikam', download: '' }, icon('download'), h('span', null, 'digiKam database')),
         h('a', { class: 'pillbtn', href: '/api/backup/app', download: '' }, icon('download'), h('span', null, `${S.APP_NAME} data (zip)`)))),
     // 4. The viewer itself
     stab('viewer'),

@@ -39,6 +39,7 @@ export const S = {
   CAN_MANAGE: false,
   FACE_DETECT: false,
   SYNC_OFF: false,
+  NO_DK: false,  // no digiKam database at all: the library lives only in iopix's own database
   manageTags: false,
   PENDING: 0,
   pollTimer: 0,

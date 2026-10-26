@@ -1,6 +1,6 @@
 # iopix with Docker: `docker compose up -d` pulls the published image; `docker compose up -d --build`
 # builds it from this checkout instead (build arguments AI / CAPTIONS, see the Dockerfile). Works as a stack in Dockge / Portainer.
-# Edit the three "CHANGE ME" spots (photos path, database, admin password). Everything the viewer
+# Edit the three "CHANGE ME" spots (photos path, database or none, admin password). Everything the viewer
 # writes (index, thumbnails, models, users, backups) lives in the named volume `dkv-data` (its name from before the rename, kept so existing stacks keep their data); the
 # library mounts are read-only. On the first start the container downloads the AI models named
 # in AUTO_MODELS (about 1.6 GB) into the volume while the library is already browsable.
@@ -23,6 +23,9 @@ services:
       # - /path/to/digikamDB:/library/digikamDB:ro
     environment:
       TZ: America/New_York
+      # No digiKam? Set DIGIKAM_DB_TYPE to none and delete the five DIGIKAM_DB_* lines under it: iopix then keeps
+      # the library itself (in the dkv-data volume) and finds the photos in the folder by itself. Drop :ro from the
+      # photos mount above so tags, faces and captions can be saved in sidecar files beside the photos.
       # digiKam's database on MariaDB (the viewer only reads it unless an editor changes metadata,
       # and then it takes a mysqldump into the volume first)
       DIGIKAM_DB_TYPE: mysql
