@@ -52,7 +52,7 @@ CREATE TABLE photos (
     hash TEXT, modified TEXT, mts INTEGER, ntags INTEGER, extra TEXT, edited INTEGER,
     sharp REAL, sharpn REAL, bright REAL, clip_lo REAL, clip_hi REAL, faceq REAL,
     npeople INTEGER, objects TEXT, ocr TEXT, burst INTEGER, burst_best INTEGER, caption_ai TEXT,
-    dprec INTEGER
+    dprec INTEGER, aesth REAL, aesthn REAL, focusn REAL, eyes_checked INTEGER, eyes_closed INTEGER, reject TEXT
 );
 CREATE INDEX photos_ts ON photos (ts);
 CREATE INDEX photos_day ON photos (day);
@@ -83,7 +83,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "12"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates)
+SCHEMA_VERSION = "13"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects)
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -262,9 +262,36 @@ def mirror_tag_paths(image_ids: list) -> dict:
 
 # ---- photo_ids: the viewer's identity for a photo, and viewer data following a renumbered photo
 REKEY = [("favorite_photos", "photo_id"), ("viewer_album_photos", "photo_id"), ("pending_edits", "photo_id"), ("ai_scans", "photo_id"), ("ai_quality", "photo_id"),
-         ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_face_embeddings", "photo_id"),
+         ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_looks", "photo_id"), ("ai_face_embeddings", "photo_id"),
          ("ai_person_references", "photo_id"), ("metadata_check", "photo_id"), ("image_data_checksums", "photo_id"), ("photo_history", "photo_id"), ("quality_accepted", "photo_id"),
          ("ai_similar_photos", "a"), ("ai_similar_photos", "b")]
+
+
+REJECT_REASONS = {"blur": "Blurry all over", "eyes": "Eyes closed", "burst": "A better frame of the same burst exists", "exposure": "Nearly black or blown out"}
+
+
+def likely_rejects(con, bursts: dict) -> list:
+    """[(reasons, photo id)] for the photos that look like rejects, from the measures already in the index
+    (con: the index being built). Reasons, comma-separated (REJECT_REASONS): blurry all over (in the
+    least sharp twentieth by focus, or by overall sharpness when focus is not measured yet, and no
+    sharp face), closed eyes on most of the faces judged, a clearly worse frame of a burst, or nearly
+    black or mostly blown out. Only a suggestion: nothing is marked until the user does it."""
+    out = []
+    for pid, focusn, sharpn, faceq, judged, closed, bright, clip_lo, clip_hi in con.execute(
+            "SELECT id, focusn, sharpn, faceq, eyes_checked, eyes_closed, bright, clip_lo, clip_hi FROM photos WHERE video = 0"):
+        why = []
+        soft = focusn if focusn is not None else sharpn
+        if soft is not None and soft < 0.05 and (faceq is None or faceq < 0.35):
+            why.append("blur")
+        if judged and closed and closed * 2 > judged:
+            why.append("eyes")
+        if pid in bursts and bursts[pid][2]:
+            why.append("burst")
+        if bright is not None and (bright < 0.06 or (clip_lo or 0) > 0.75 or (clip_hi or 0) > 0.5):
+            why.append("exposure")
+        if why:
+            out.append((",".join(why), pid))
+    return out
 
 
 def sync_photo_ids(images: list, paths: dict) -> dict:
@@ -689,7 +716,8 @@ def _build(dst_path: Path, source: tuple) -> dict:
         rel = album["rel"].rstrip("/") + "/" + name
         an = seen.get(iid, {})
         # a placeholder date is shared by many photos: no bursts among them (left out like videos)
-        burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video or dprec))
+        burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video or dprec,
+                           an.get("focus"), an.get("aesth"), an.get("eyes_checked"), an.get("eyes_closed")))
         photos.append((
             iid, album_id, name, root_path[album["root"]] + rel,
             # an approximate date has no day of the year to show On this day
@@ -703,6 +731,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
             an.get("sharp"), None, an.get("bright"), an.get("clip_lo"), an.get("clip_hi"), an.get("faceq"),
             an.get("npeople"), ("," + ",".join(sorted(an["objects"])) + ",") if an.get("objects") else None,
             an.get("ocr"), None, None, an.get("caption_ai"), dprec,
+            an.get("aesth"), None, None, an.get("eyes_checked"), an.get("eyes_closed"), None,
         ))
         album_n[album_id] += 1
         people_names, tag_names = [], []
@@ -732,7 +761,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
     dst = sqlite3.connect(tmp)
     try:
         dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
-        dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 58)})", photos)
+        dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 64)})", photos)
         dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
                         "VALUES (?,?,?,?,?,?,?,?,?,?,?)", fts_rows)
         # sharpness as a 0..1 rank across the library, so "blurry" means the same everywhere
@@ -740,12 +769,19 @@ def _build(dst_path: Path, source: tuple) -> dict:
         if ranked:
             dst.executemany("UPDATE photos SET sharpn = ? WHERE id = ?",
                             [(round(i / max(1, len(ranked) - 1), 4), pid) for i, (_, pid) in enumerate(ranked)])
+        # the same for focus and the aesthetic score
+        for col, k in (("focusn", 7), ("aesthn", 8)):
+            ranked = sorted((r[k], r[0]) for r in burst_rows if r[k] is not None)
+            if ranked:
+                dst.executemany(f"UPDATE photos SET {col} = ? WHERE id = ?",
+                                [(round(i / max(1, len(ranked) - 1), 4), pid) for i, (_, pid) in enumerate(ranked)])
         try:
             bursts = moments.find_bursts(burst_rows)
         except Exception:
             bursts = {}
-        dst.executemany("UPDATE photos SET burst = ?, burst_best = ? WHERE id = ?", [(b, best, pid) for pid, (b, best) in bursts.items()])
+        dst.executemany("UPDATE photos SET burst = ?, burst_best = ? WHERE id = ?", [(b, best, pid) for pid, (b, best, _w) in bursts.items()])
         dst.execute("CREATE INDEX photos_burst ON photos (burst)")
+        dst.executemany("UPDATE photos SET reject = ? WHERE id = ?", likely_rejects(dst, bursts))
         dst.executemany("INSERT OR IGNORE INTO photo_tags VALUES (?,?)", photo_tag_rows)
         present = {r[0] for r in photos}
         dst.executemany("INSERT INTO faces VALUES (?,?,?,?,?,?,?)", [f for f in faces if f[0] in present])

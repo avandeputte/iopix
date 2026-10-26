@@ -2,7 +2,7 @@
 import { $, MONTHS, h, icon, nf, norm } from './core.js';
 import { S, ST, applyFilter, faceUrl, filterParams, go, hashFor, loadConcepts, photosWith, savedSearchFor, ualbumById } from './state.js';
 import { people } from './pages.js';
-import { toggleFilters } from './filters.js';
+import { REJECTS, toggleFilters } from './filters.js';
 
 export function chipList(p) {
   const out = [];
@@ -38,6 +38,10 @@ export function chipList(p) {
     else if (k === 'sharpest') add(k, v, 'Sharpest', { ic: 'spark' });
     else if (k === 'exposure') add(k, v, v === 'dark' ? 'Very dark' : 'Very bright', { ic: 'spark' });
     else if (k === 'hastext') add(k, v, 'Contains text', { ic: 'text' });
+    else if (k === 'rejects') add(k, v, 'Likely rejects', { ic: 'spark' });
+    else if (k === 'reject') add(k, v, `Likely reject: ${(REJECTS.find((r) => r[0] === v) || [v, v])[1].toLowerCase()}`, { ic: 'spark' });
+    else if (k === 'looks') add(k, v, 'Best looking', { ic: 'spark' });
+    else if (k === 'eyes') add(k, v, 'Eyes closed', { ic: 'face' });
     else if (k === 'bursts') add(k, v, 'In a burst', { ic: 'dup' });
     else if (k === 'bestonly') add(k, v, 'Best frame of each burst', { ic: 'dup' });
     else if (k === 'burst') add(k, v, 'One burst', { ic: 'dup' });

@@ -97,6 +97,18 @@ def _start_prewarm():
     semantic.start(rows)
 
 
+def _run_analysis_soon():
+    """Queue the analysis jobs again in the background (a model they use was just downloaded)."""
+    def work():
+        con = db()
+        try:
+            rows = [dict(r) for r in con.execute(f"SELECT {THUMB_COLS} FROM photos ORDER BY ts DESC")]
+        finally:
+            con.close()
+        analysis.start(rows)
+    threading.Thread(target=work, name="analysis-restart", daemon=True).start()
+
+
 _kick = threading.Event()  # set after an edit so the index is rebuilt right away
 
 

@@ -165,7 +165,8 @@ def _quick_counts(client):
         f = client.get(f"/api/facets?{base}").json()
         want = {k: client.get(f"/api/photos?{base}&{q}").json()["count"] for k, q in (
             ("blurry", "blurry=1"), ("sharpest", "sharpest=1"), ("hastext", "hastext=1"), ("bursts", "bursts=1"),
-            ("dark", "exposure=dark"), ("bright", "exposure=bright"))}
+            ("dark", "exposure=dark"), ("bright", "exposure=bright"), ("rejects", "rejects=1"), ("looks", "looks=top"), ("eyes", "eyes=closed"),
+            *((f"reject_{w}", f"reject={w}") for w in ("blur", "eyes", "burst", "exposure")))}
         assert f["extras"] == want, (base, f["extras"], want)
         if not base:
             assert all(f["extras"][k] for k in ("blurry", "sharpest", "hastext", "dark", "bright")), f["extras"]

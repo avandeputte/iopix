@@ -88,6 +88,19 @@ REGISTRY = {
     "arcface": {"label": "ArcFace ResNet-50", "kind": "zip", "file": "arcface_w600k_r50.onnx", "url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip", "member": "w600k_r50.onnx", "choice": "face_vectors",
                 "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
                 "page": "https://github.com/deepinsight/insightface/tree/master/model_zoo", "what": "Face grouping: InsightFace's recognition model (trained on WebFace600K), much better at telling people apart; each face is aligned on its eyes, nose and mouth first, with the chosen face detector. About 5 times slower. Comes in a 289 MB pack of which this file is kept.", "size": "174 MB (289 MB download)"},
+    # Photo quality (looks.py): an aesthetic score, and open or closed eyes on faces
+    "aesthetic": {"label": "LAION aesthetic predictor (CLIP ViT-L/14)", "kind": "url", "file": "clip_vit_l14_vision.onnx",
+                  "url": "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/c307790166907339eed5a9a53a249af534102536/onnx/vision_model.onnx",
+                  "sha256": "ff49f8aa57c7abfd26e382eb083e4dbf988505223a9bd3767dbfd4e729206709",
+                  "extra": [{"file": "laion_aesthetic_l14.pth", "sha256": "21dd590f3ccdc646f0d53120778b296013b096a035a2718c9cb0d511bff0f1e0",
+                             "url": "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/6934dd81792f086e613a121dbce43082cb8be85e/sac%2Blogos%2Bava1-l14-linearMSE.pth"}],
+                  "page": "https://github.com/christophschuhmann/improved-aesthetic-predictor", "what": "Photo quality: a 1–10 score of how appealing a photo looks (light, colour, composition, clarity), from LAION's predictor trained on human ratings, on top of OpenAI's CLIP ViT-L/14 image model. Used to sort by look and to pick the best frame of a burst. It rates pictures, not memories: a dull snapshot of a moment you love can score low. A heavy model: expect a long first run.",
+                  "size": "1.2 GB"},
+    "eyes": {"label": "Open or closed eyes", "kind": "url", "file": "open_closed_eye.onnx",
+             "url": "https://storage.openvinotoolkit.org/repositories/open_model_zoo/public/2022.1/open-closed-eye-0001/open_closed_eye.onnx",
+             "sha256": "4daa100034482525a26c9afb9297c16580a531189e66e3d2b2ac7d32becfd593",
+             "page": "https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/open-closed-eye-0001", "what": "Photo quality: tells open from closed eyes on faces seen from the front, for the closed-eyes check and the best frame of a burst. Needs a face detection model to find the eyes. Squints and downward glances can look closed to it.",
+             "size": "46 kB"},
     # Data
     "geonames": {"label": "GeoNames places", "kind": "data", "url": "https://download.geonames.org/export/dump/cities1000.zip",
                  "page": "https://download.geonames.org/export/dump/", "what": "Offline reverse geocoding: town, region and country for each GPS position. GeoNames regenerates this export daily.",
@@ -125,6 +138,11 @@ def chosen(group: str) -> str:
 def path(key: str):
     """Where a single-file model (kinds url and zip) lives."""
     return MODEL_DIR / REGISTRY[key]["file"]
+
+
+def files(key: str) -> list:
+    """Every file a url or zip model keeps: its main file, then the extra ones it comes with (a head on top of a backbone, say)."""
+    return [path(key)] + [MODEL_DIR / x["file"] for x in REGISTRY[key].get("extra", [])]
 
 
 def path_for(group: str):
@@ -183,7 +201,7 @@ def local(key: str) -> dict:
             from app.geo import places
             paths = [places.DIR / f for f in places.FILES]
         else:
-            paths = [path(key)]
+            paths = files(key)
         if not all(p.exists() for p in paths):
             return {"installed": False}
         at = int(max(p.stat().st_mtime for p in paths))
@@ -238,7 +256,7 @@ def installed_revision(key: str):
         return "+".join(shas)
     if m["kind"] in ("url", "zip"):
         try:
-            return file_sha256(path(key))
+            return "+".join(file_sha256(p) for p in files(key))
         except OSError:
             return None
     return None
@@ -342,6 +360,8 @@ def download(key: str):
                 _checked.pop(key, None)
             if REGISTRY[key].get("choice") in ("search_model", "face_vectors"):
                 _recompute(key)
+            elif key in ("aesthetic", "eyes", "yunet", "scrfd", "retinaface"):  # photo quality picks up what it could not do before
+                _recompute_looks()
         except Exception as e:
             progress["error"] = str(e)[:300]
         finally:
@@ -372,6 +392,15 @@ def _recompute(key: str):
         logging.getLogger(__name__).warning("models: the %s job was not restarted after the download: %s", group, e)
 
 
+def _recompute_looks():
+    """A photo quality model arrived: queue the analysis, which fills in the scores it could not compute before."""
+    try:
+        from app import core
+        core._run_analysis_soon()
+    except Exception as e:
+        logging.getLogger(__name__).warning("models: photo quality was not restarted after the download: %s", e)
+
+
 def _reset(key: str):
     """Drop the loaded model objects so the next use reads the new files (after a download or a switch)."""
     group = REGISTRY.get(key, {}).get("choice")
@@ -398,6 +427,9 @@ def _reset(key: str):
         elif group == "face_detector":
             from app.faces import facedetect
             facedetect.reset_session()
+        elif key in ("aesthetic", "eyes"):
+            from app.ai import looks
+            looks.reset_sessions()
         elif key == "geonames":
             from app.geo import places
             places._geo = None  # loaded again from the new files on the next lookup
@@ -454,6 +486,8 @@ def _download_here(key: str):
         BlipForConditionalGeneration.from_pretrained(m["repos"][0], cache_dir=str(MODEL_DIR))
     elif m["kind"] in ("url", "zip"):
         fetch_file(m["url"], path(key), m.get("member"), m.get("sha256"))
+        for x in m.get("extra", []):
+            fetch_file(x["url"], MODEL_DIR / x["file"], None, x["sha256"])
     elif key == "geonames":
         from app.geo import places
         places.fetch()

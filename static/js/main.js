@@ -152,7 +152,7 @@ export async function pollStatus() {
     if (s.thumbs.running && s.thumbs.total) progress('Preparing thumbnails', s.thumbs, 3000);
     else if (s.semantic.running && s.semantic.total) progress('Learning photo content', s.semantic, 4000);
     const an = s.analysis || {};
-    for (const [key, label] of [['quality', 'Scoring sharpness'], ['vision', 'Reading text in photos'], ['objects', 'Finding objects'], ['captions', 'Describing photos']]) {
+    for (const [key, label] of [['quality', 'Scoring sharpness'], ['vision', 'Reading text in photos'], ['objects', 'Finding objects'], ['captions', 'Describing photos'], ['looks', 'Scoring photo quality']]) {
       if (an[key]?.running && an[key].total && !el.childNodes.length) progress(label, an[key], 5000);
     }
     if (s.tagJobs.pending) {

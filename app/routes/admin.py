@@ -21,6 +21,7 @@ from app import proxyauth
 from app import config
 from app.digikam import dbsync
 from app.ai import detector
+from app.ai import looks
 from app.digikam import dkdb
 from app.photos import edits
 from app.digikam import merge
@@ -264,11 +265,16 @@ def api_analysis(request: Request):
         {"key": "facedetect", "label": "Face detection", "detail": f"Finds faces nothing has marked yet ({mname('face_detector')}) and adds them as unnamed faces, ready for grouping and naming. Existing face regions, from digiKam or any other tool, are kept: a face that overlaps one is not added again, even when the two rectangles differ. Runs only when you start it (here for the library, or from a folder or a photo); writes to digiKam's database, backed up first."
          + (f" Last run: {nf(facedetect.progress['added'])} new faces in {nf(facedetect.progress['photos_with_new'])} photos." if facedetect.progress.get("started") else ""),
          "done": facedetect.coverage(), "total": stills, "running": facedetect.progress["running"], "enabled": facedetect.available() and config.DB_WRITE, "rerun": True},
+        {"key": "looks", "label": "Photo quality", "detail": "How sharp the sharpest part of each photo is (so a soft background is fine), "
+         + ("an aesthetic score (" + dlmodels.REGISTRY["aesthetic"]["label"] + ")" if looks.aesthetic_available() else "an aesthetic score once its model is installed")
+         + (" and closed eyes on faces seen from the front" if looks.eyes_available() else ", and closed eyes once the eye model and a face detection model are installed")
+         + ". Picks the best frame of each burst and suggests likely rejects (Filters › Quality); nothing is marked until you do it. A model installed later fills in its part without redoing the rest.",
+         "done": cov["looks"], "total": stills, "running": analysis.progress["looks"]["running"], "enabled": config.ANALYSIS, "rerun": True},
         {"key": "captions", "label": "Photo descriptions", "detail": f"A one-sentence description of each photo ({mname('caption_model')}), searchable from the search box and shown in the info panel. After switching to the other size, “Run again” redoes every photo with it; until then only new photos use it.",
          "done": cov["captions"], "total": stills, "running": analysis.progress["captions"]["running"],
          "enabled": config.ANALYSIS and caption.available(), "rerun": True},
     ]
-    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect"}
+    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks"}
     for j in jobs:
         j["queued"] = bgjobs.is_queued(queue_key[j["key"]])
     return {"jobs": jobs, "photos": total, "models": models if act is not None else [], "queue": bgjobs.status()}
@@ -824,7 +830,7 @@ async def api_analysis_run(request: Request):
     if reset:
         if job == "embeddings" and semantic_enabled():
             (semantic.upgrade or semantic.active).reset()
-        elif job in ("quality", "vision", "objects", "captions"):
+        elif job in ("quality", "vision", "objects", "captions", "looks"):
             analysis.reset(job)
         elif job == "faces":
             facevecs.reset()

@@ -6,6 +6,7 @@ SORTS = {
     "new": "ts DESC, id DESC", "old": "ts ASC, id ASC", "added": "mts DESC, id DESC",
     "name": "name COLLATE NOCASE, id", "size": "size DESC, id", "rating": "rating DESC, ts DESC, id DESC",
     "sharp": "sharpn DESC, id", "blur": "sharpn IS NULL, sharpn ASC, id", "burst": "burst, burst_best DESC, ts, name",
+    "looks": "aesth IS NULL, aesth DESC, id",
 }
 WORD_RE = re.compile(r"\w+")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -75,6 +76,16 @@ def build_where(items) -> tuple[str, list]:
         where.append("(bright < 0.2 OR clip_lo > 0.5)")
     elif one("exposure") == "bright":
         where.append("(bright > 0.8 OR clip_hi > 0.3)")
+    if one("rejects") == "1":  # photo quality: suggested rejects (index.likely_rejects), any reason or one
+        where.append("reject IS NOT NULL")
+    for why in multi.get("reject", []):
+        if why in ("blur", "eyes", "burst", "exposure"):
+            where.append("(',' || reject || ',') LIKE ?")
+            params.append(f"%,{why},%")
+    if one("looks") == "top":  # the best-looking tenth by the aesthetic score
+        where.append("aesthn >= 0.9")
+    if one("eyes") == "closed":  # someone's eyes closed (even when most faces are fine)
+        where.append("eyes_closed > 0")
     if one("hastext") == "1":
         where.append("ocr IS NOT NULL AND length(ocr) >= 3")
     if one("bursts") == "1":

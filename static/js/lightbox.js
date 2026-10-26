@@ -888,6 +888,25 @@ export function filterFromLightbox(obj) {
   LB.pushed = false;
   go('photos', photosWith(obj));
 }
+/** The photo quality row of the info panel: focus and look as ranks in the library, closed eyes, and why it looks like a reject. */
+function qualityRow(d) {
+  const q = d.quality, pct = (v) => Math.round(v * 100);
+  const lines = [
+    q.focusRank != null ? `${d.focusn != null ? 'In focus more than' : 'Sharper than'} ${pct(q.focusRank)}% of your photos` : null,
+    q.aestheticRank != null ? `Looks better than ${pct(q.aestheticRank)}% of them (aesthetic score ${q.aesthetic.toFixed(1)} / 10)` : null,
+  ].filter(Boolean);
+  const small = [
+    q.eyesChecked ? (q.eyesClosed ? `Eyes closed on ${q.eyesClosed} of ${q.eyesChecked} ${q.eyesChecked === 1 ? 'face' : 'faces'} checked` : `Eyes open on ${q.eyesChecked === 1 ? 'the face' : `all ${q.eyesChecked} faces`} checked`) : null,
+    d.faceq != null ? `Face sharpness ${pct(d.faceq)} / 100` : null,
+    d.bright != null && (d.bright < 0.2 || d.clip_lo > 0.5) ? 'Very dark' : null,
+    d.bright != null && (d.bright > 0.8 || d.clip_hi > 0.3) ? 'Very bright' : null,
+  ].filter(Boolean);
+  const reject = q.reject.length ? h('div', { class: 'b' }, h('b', { style: 'font-weight:500' }, 'Likely reject: '), q.rejectLabels.join(', ').toLowerCase(),
+    S.EDITING && d.pick !== 1 ? [' · ', h('button', { type: 'button', class: 'lnk', title: 'Set the “Rejected” pick label (undo from the edit log)', onclick: () => editPhotos([d.id], { pick: 1 }) }, 'Mark as rejected')] : null,
+    d.pick === 1 ? ' · marked rejected' : null) : null;
+  return h('div', { class: 'irow' }, icon('spark'), h('div', null, lines.map((t) => h('div', { class: 'a' }, t)), small.length ? h('div', { class: 'b' }, small.join(' · ')) : null, reject));
+}
+
 export function renderInfo() {
   const d = LB.detail, el = LB.el.info;
   if (!d) return;
@@ -941,9 +960,7 @@ export function renderInfo() {
     d.boxes?.length ? [sub('Objects'), h('div', { class: 'ichips' }, [...new Set(d.boxes.map((b) => b.cls))].map((c) => h('span', { class: 'ichip', onclick: () => filterFromLightbox({ obj: c }) },
       c, h('b', { style: 'font-weight:400;color:var(--fg2)' }, d.boxes.filter((b) => b.cls === c).length > 1 ? ` ×${d.boxes.filter((b) => b.cls === c).length}` : ''))))] : null,
     d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a small' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
-    d.sharpn != null ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, `Sharper than ${Math.round(d.sharpn * 100)}% of your photos`),
-      h('div', { class: 'b' }, [d.faceq != null ? `Face quality ${Math.round(d.faceq * 100)} / 100` : null, d.bright != null && (d.bright < 0.2 || d.clip_lo > 0.5) ? 'Very dark' : null,
-        d.bright != null && (d.bright > 0.8 || d.clip_hi > 0.3) ? 'Very bright' : null].filter(Boolean).join(' · ')))) : null,
+    d.quality ? qualityRow(d) : null,
     d.burst ? h('div', { class: 'irow' }, icon('dup'), h('div', null, h('div', { class: 'a' }, lnk(`Part of a burst of ${d.burst_size} frames`, { burst: d.burst, sort: 'old' })),
       h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('button', { type: 'button', class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,
     d.similar && !d.video ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, lnk('More photos like this', { like: d.id })))) : null,

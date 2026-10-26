@@ -38,8 +38,12 @@ def _similarity():
 
 
 def find_bursts(rows: list) -> dict:
-    """rows: [(id, ts, name, device key, sharp, faceq, video)].
-    Returns {photo id: (burst number, 1 if it is the best frame else 0)}."""
+    """rows: [(id, ts, name, device key, sharp, faceq, video[, focus, aesthetic, eyes judged, eyes closed])].
+    Returns {photo id: (burst number, 1 if it is the best frame else 0, 1 if it is clearly worse than the best)}.
+
+    The best frame is the one in focus (focus, else overall sharpness, relative to the burst's sharpest), with
+    the best-looking faces, nobody's eyes closed, and a small say for the aesthetic score. A frame is clearly
+    worse when it scores well below the best, or has closed eyes where the best has none."""
     vec_of = _similarity()
     photos = sorted((r for r in rows if not r[6]), key=lambda r: (r[3], r[1], r[2]))
     groups, cur = [], []
@@ -58,17 +62,36 @@ def find_bursts(rows: list) -> dict:
     if len(cur) > 1:
         groups.append(cur)
 
+    def at(r, i):
+        return r[i] if len(r) > i else None
+
     out = {}
     for n, g in enumerate(groups, 1):
-        sharps = [r[4] for r in g if r[4] is not None]
-        top = max(sharps) if sharps else None
+        use_focus = all(at(r, 7) is not None for r in g)  # one measure for the whole burst, so frames compare
+        sharp = {r[0]: (at(r, 7) if use_focus else r[4]) for r in g}
+        known = [v for v in sharp.values() if v is not None]
+        top = max(known) if known else None
+        aes = [at(r, 8) for r in g if at(r, 8) is not None]
+        mean_a = sum(aes) / len(aes) if aes else 0.0
+
+        def closed(r):
+            return (at(r, 10) or 0) / at(r, 9) if at(r, 9) else 0.0
 
         def score(r):
-            s = (r[4] / top) if (top and r[4] is not None) else 0.0   # sharpest frame in the burst = 1
-            return s + 0.6 * (r[5] or 0.0)                           # faces looking good count too
-        best = max(g, key=score)[0] if sharps else g[0][0]
+            s = (sharp[r[0]] / top) if (top and sharp[r[0]] is not None) else 0.0   # sharpest frame in the burst = 1
+            s += 0.6 * (r[5] or 0.0)                                                  # faces looking good count too
+            s -= 0.8 * closed(r)                                                      # closed eyes count against
+            if at(r, 8) is not None:
+                s += 0.3 * (at(r, 8) - mean_a)
+            return s
+        if not known:
+            best = g[0]
+        else:
+            best = max(g, key=score)
+        bs, bc = score(best), closed(best)
         for r in g:
-            out[r[0]] = (n, 1 if r[0] == best else 0)
+            worse = r is not best and bool(known) and (score(r) <= bs - 0.35 or (closed(r) > 0.5 and bc == 0))
+            out[r[0]] = (n, 1 if r is best else 0, 1 if worse else 0)
     return out
 
 

@@ -7,6 +7,8 @@
   objects   everyday objects with boxes (see detector.py), when that model is installed
   captions  a one-sentence description of each photo from a local captioning model
             (BLIP base, see caption.py), so "boy holding a soccer ball" is searchable
+  looks     photo quality (see looks.py): an aesthetic score, focus on the sharpest part of the
+            frame, and closed eyes on faces; each part only when its model is installed
 
 Everything is computed from the original files, which are only read, and is
 keyed by a stamp of the file so a changed photo is analysed again. The index
@@ -33,7 +35,7 @@ except ImportError:  # numpy comes with the optional AI features; without it the
     np = None
 
 log = logging.getLogger(__name__)
-JOBS = ("quality", "vision", "objects", "captions")
+JOBS = ("quality", "vision", "objects", "captions", "looks")
 progress = {key: {"running": False, "done": 0, "total": 0} for key in JOBS}
 _write_lock = threading.Lock()  # also taken by consistency.py, which shares this database
 _run = {"gen": 0}
@@ -405,6 +407,152 @@ def _caption_job(photos: list, gen: int):
         _finish("captions")
 
 
+# --------------------------------------------------------------------------
+# photo quality: aesthetic score, focus, closed eyes (looks.py)
+# --------------------------------------------------------------------------
+
+def _looks_parts() -> dict:
+    """Which parts of the photo quality job can run here: focus always, the others with their models."""
+    from app.ai import looks
+    return {"f": looks.VERSION, "a": looks.aesthetic_available(), "e": looks.eyes_available()}
+
+
+def _looks_todo(photos: list, parts: dict, con=None) -> list:
+    """[(photo, {parts it still needs})]: a changed file needs them all; otherwise only a part whose model
+    arrived since (or whose measure changed) is filled in, and the rest is kept."""
+    import json
+    own = con is None
+    con = con or connect()
+    try:
+        have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks'")}
+    finally:
+        if own:
+            con.close()
+    out = []
+    for p in photos:
+        if p["video"]:
+            continue
+        st, detail = have.get(p["id"], (None, None))
+        if st != _stamp(p):
+            need = {k for k, v in parts.items() if v}
+        else:
+            try:
+                done = json.loads(detail or "{}")
+            except ValueError:
+                done = {}
+            need = {k for k, v in parts.items() if v and done.get(k) != (v if k == "f" else 1)}
+        if need:
+            out.append((p, need))
+    return out
+
+
+def _looks_faces(ids: list) -> dict:
+    """{photo id: [(x, y, w, h)]}: the faces worth judging for closed eyes (named, unnamed or suggested; not
+    the ones marked ignored, which are usually strangers in the background)."""
+    out = {}
+    if not ids or not config.INDEX_DB.exists():
+        return out
+    con = sqlite3.connect(f"file:{quote(str(config.INDEX_DB))}?mode=ro", uri=True)
+    try:
+        for i in range(0, len(ids), 500):
+            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+            for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE kind != 'ignored' AND photo_id IN ({chunk})"):
+                out.setdefault(pid, []).append((x, y, w, h))
+    finally:
+        con.close()
+    return out
+
+
+def _looks_job(photos: list, gen: int):
+    import json
+    from app.ai import looks
+    if np is None:
+        return
+    parts = _looks_parts()
+    todo = _looks_todo(photos, parts)
+    progress["looks"].update(running=bool(todo), done=0, total=len(todo))
+    if not todo:
+        return
+    n = jobs.threads()
+    try:
+        last = time.time()
+        with ThreadPoolExecutor(n, thread_name_prefix="looks") as pool:
+            for i in range(0, len(todo), 16):
+                if gen != _run["gen"]:
+                    return
+                batch = todo[i:i + 16]
+                faces = _looks_faces([p["id"] for p, need in batch if "e" in need])
+
+                def prepare(item):
+                    p, need = item
+                    try:
+                        im, _ = thumbs._open_oriented(p["path"], 1600, 1600)
+                    except OSError as e:  # unreadable right now (a dropped mount): tried again on the next pass
+                        log.warning("photo quality: cannot read %s (%s)", p["path"], e)
+                        return None
+                    except Exception as e:  # cannot be decoded: recorded so it is not tried forever
+                        log.warning("photo quality: cannot decode %s (%s)", p["path"], e)
+                        return p, need, {}, None
+                    out = {}
+                    try:
+                        if "f" in need:
+                            out["focus"] = looks.focus(im)
+                        if "e" in need:
+                            big = [f for f in faces.get(p["id"], []) if min(f[2], f[3]) >= 0.05 * min(p.get("w") or im.width, p.get("h") or im.height)]
+                            out["eyes"] = looks.eyes(im, big, p.get("w"), p.get("h")) if big else (0, 0)
+                        clip = looks.clip_input(im) if "a" in need else None
+                    except Exception as e:
+                        log.warning("photo quality: cannot analyse %s (%s)", p["path"], e)
+                        return p, need, {}, None
+                    return p, need, out, clip
+
+                ready = [r for r in pool.map(prepare, batch) if r]
+                with_clip = [r for r in ready if r[3] is not None]
+                if with_clip:
+                    try:
+                        for r, score in zip(with_clip, looks.aesthetic([r[3] for r in with_clip], n)):
+                            r[2]["aesthetic"] = score
+                    except Exception as e:
+                        log.warning("photo quality: the aesthetic model failed on a batch (%s)", e)
+                if gen != _run["gen"]:
+                    return
+                with _writer() as con:
+                    old = {r[0]: r for r in con.execute(
+                        f"SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks WHERE photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
+                    have = {r[0]: (r[1], r[2]) for r in con.execute(
+                        f"SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks' AND photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
+                    rows, scans = [], []
+                    for p, need, out, _clip in ready:
+                        st = _stamp(p)
+                        prev = old.get(p["id"])
+                        was, detail = have.get(p["id"], (None, None))
+                        try:
+                            done = json.loads(detail or "{}") if was == st else {}
+                        except ValueError:
+                            done = {}
+                        if was != st:  # a new or changed file: nothing measured before is kept
+                            prev = None
+                        a = out.get("aesthetic", prev[1] if prev else None)
+                        f = out.get("focus", prev[2] if prev else None)
+                        ec, ex = out["eyes"] if "eyes" in out else ((prev[3], prev[4]) if prev else (None, None))
+                        rows.append((p["id"], a, f, ec, ex))
+                        if "f" in need:
+                            done["f"] = parts["f"]
+                        if "a" in need and "aesthetic" in out:
+                            done["a"] = 1
+                        if "e" in need and "eyes" in out:
+                            done["e"] = 1
+                        if not out:  # undecodable: marked done so it is not tried again until the file changes
+                            done.update({k: (parts["f"] if k == "f" else 1) for k in need})
+                        scans.append((p["id"], st, json.dumps(done, sort_keys=True)))
+                    con.executemany("INSERT OR REPLACE INTO ai_looks VALUES (?,?,?,?,?)", rows)
+                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'looks',?,?)", scans)
+                progress["looks"]["done"] += len(batch)
+                last = _notify(last, 120)
+    finally:
+        _finish("looks")
+
+
 def start(photos: list):
     """Analyse whatever is new or changed, newest first. photos: rows with id, path, video, hash, size, modified."""
     if not config.ANALYSIS:
@@ -417,6 +565,7 @@ def start(photos: list):
     jobs.submit("vision", lambda: _vision_job(photos, gen))
     if config.CAPTIONS:
         jobs.submit("captions", lambda: _caption_job(photos, gen))
+    jobs.submit("looks", lambda: _looks_job(photos, gen))
 
 
 def results() -> dict:
@@ -435,6 +584,8 @@ def results() -> dict:
             out.setdefault(r[0], {}).update(vfaces=r[1], faceq=r[2])
         for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'"):
             out.setdefault(r[0], {}).update(objects={}, npeople=0)
+        for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks"):
+            out.setdefault(r[0], {}).update(aesth=r[1], focus=r[2], eyes_checked=r[3], eyes_closed=r[4])
         from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
         for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
             out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
@@ -467,7 +618,7 @@ def boxes(photo_id: int) -> list:
 
 def reset(job: str):
     """Throw away one analysis so it is computed again from scratch."""
-    tables = {"quality": ["ai_quality"], "vision": ["ai_text", "ai_face_count"], "objects": ["ai_objects"], "captions": ["ai_descriptions"]}.get(job, [])
+    tables = {"quality": ["ai_quality"], "vision": ["ai_text", "ai_face_count"], "objects": ["ai_objects"], "captions": ["ai_descriptions"], "looks": ["ai_looks"]}.get(job, [])
     _run["gen"] += 1  # stop the running jobs; the caller restarts them
     with _writer() as con:
         for t in tables:

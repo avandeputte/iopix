@@ -3,7 +3,7 @@ import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, errorBox, fill, fmtBytes
 import { NAV, S, ST, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
-import { detectFaces } from './editing.js';
+import { detectFaces, editPhotos } from './editing.js';
 import { downloadDialog } from './download.js';
 import { openLightbox, personPicker, popMenu, syncLightbox } from './lightbox.js';
 import { badgeTiles, tileBadges } from './grid.js';
@@ -95,6 +95,7 @@ export async function showExplore() {
       pill('No location', S.META.total - S.META.geotagged, { geo: 0 }), pill('Favorites', ST.fav.size, { fav: 1 }),
       h('a', { class: 'pill', href: '#/duplicates' }, 'Duplicate files'), h('a', { class: 'pill', href: '#/bursts' }, 'Bursts & best shots'),
       h('a', { class: 'pill', href: '#/events' }, 'Events & trips'), pill('Contains text', null, { hastext: 1 }), pill('Blurry', null, { blurry: 1 }),
+      pill('Best looking', null, { looks: 'top', sort: 'looks' }), pill('Likely rejects', null, { rejects: 1 }),
       S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
@@ -565,10 +566,15 @@ export async function showBursts(vp) {
     const row = h('div', { class: 'duprow' }, g.items.map((x, k) => h('div', { class: 'dupitem burstitem' + (x.best ? ' best' : '') + '' },
       h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, start + k, true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' }), x.best ? h('span', { class: 'bestbadge' }, icon('star'), 'Best') : null),
-      h('div', { class: 'sb' }, [x.sharpn != null ? `sharpness ${pct(x.sharpn)}` : null, x.faceq != null ? `faces ${pct(x.faceq)}` : null].filter(Boolean).join(' · ') || ' '),)));
+      h('div', { class: 'sb' }, [x.focusn != null ? `focus ${pct(x.focusn)}` : x.sharpn != null ? `sharpness ${pct(x.sharpn)}` : null, x.faceq != null ? `faces ${pct(x.faceq)}` : null,
+        x.aesthetic != null ? `looks ${x.aesthetic.toFixed(1)}` : null, x.eyesClosed ? 'eyes closed' : null, x.pick === 1 ? 'rejected' : null].filter(Boolean).join(' · ') || ' '),)));
+    const rest = g.items.filter((x) => !x.best && x.pick !== 1).map((x) => x.id);
+    const rejectRest = S.EDITING && rest.length ? h('button', { type: 'button', class: 'lnk', title: 'Set the “Rejected” pick label on every frame but the best (undo from the edit log)',
+      onclick: async (e) => { e.target.disabled = true; if (await editPhotos(rest, { pick: 1 })) { g.items.forEach((x) => { if (!x.best) x.pick = 1; }); e.target.replaceWith(h('span', { class: 'muted' }, 'Others marked rejected')); } else e.target.disabled = false; } },
+      `Mark the other ${rest.length === 1 ? 'frame' : rest.length + ' frames'} as rejected`) : null;
     return h('div', { class: 'dupgroup' }, h('div', { style: 'display:flex;gap:14px;align-items:baseline;flex-wrap:wrap' },
       h('span', null, dfDay.format(date(g.items[0].ts)), ' ', h('span', { class: 'muted' }, `${dfTime.format(date(g.items[0].ts))} · ${g.items.length} frames`)),
-      h('a', { class: 'lnk', href: hashFor('photos', photosWith({ burst: g.burst, sort: 'old' })) }, 'Open in grid')), row);
+      h('a', { class: 'lnk', href: hashFor('photos', photosWith({ burst: g.burst, sort: 'old' })) }, 'Open in grid'), rejectRest), row);
   };
   const load = async () => {
     qs.set('offset', offset);
@@ -576,7 +582,7 @@ export async function showBursts(vp) {
     try { d = await api('/api/bursts?' + qs.toString()); } catch { list.append(h('div', { class: 'empty' }, 'Could not load bursts.')); return; }
     if (S.route.view !== 'bursts') return;
     total = d.bursts;
-    if (!offset) head.textContent = d.bursts ? `${nf.format(d.bursts)} bursts covering ${nf.format(d.photos)} photos. The best frame is picked by sharpness and how good the faces look; check it before rejecting the rest.` : 'No bursts found here.';
+    if (!offset) head.textContent = d.bursts ? `${nf.format(d.bursts)} bursts covering ${nf.format(d.photos)} photos. The best frame is picked by focus, how sharp the faces are, closed eyes and, when the photo quality model is installed, how good it looks; check it before rejecting the rest.` : 'No bursts found here.';
     list.append(...d.groups.map(group));
     badgeTiles(list);
     offset += d.groups.length;

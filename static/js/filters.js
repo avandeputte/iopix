@@ -2,6 +2,9 @@
 import { $, api, fill, h, icon, isoDay, nf, store } from './core.js';
 import { FILTER_VIEWS, S, applyFilter, faceUrl, filterParams, go, setOne, toggle } from './state.js';
 
+// photo quality: why a photo looks like a reject (index.REJECT_REASONS)
+export const REJECTS = [['blur', 'Blurry all over'], ['eyes', 'Eyes closed'], ['burst', 'Worse frame of a burst'], ['exposure', 'Nearly black or blown out']];
+
 export const expanded = new Set();
 export function toggleFilters(force, remember = true) {
   const el = $('#filters');
@@ -81,6 +84,10 @@ function drawFilters(el, f, p) {
       f.extras.dark ? frow('Very dark', f.extras.dark, p.get('exposure') === 'dark', () => applyFilter((q) => setOne(q, 'exposure', 'dark'))) : null,
       f.extras.bright ? frow('Very bright', f.extras.bright, p.get('exposure') === 'bright', () => applyFilter((q) => setOne(q, 'exposure', 'bright'))) : null,
       f.extras.hastext ? frow('Contains text', f.extras.hastext, p.get('hastext') === '1', () => applyFilter((q) => setOne(q, 'hastext', '1'))) : null,
+      f.extras.looks ? frow('Best looking tenth', f.extras.looks, p.get('looks') === 'top', () => applyFilter((q) => setOne(q, 'looks', 'top'))) : null,
+      f.extras.eyes ? frow('Someone’s eyes closed', f.extras.eyes, p.get('eyes') === 'closed', () => applyFilter((q) => setOne(q, 'eyes', 'closed'))) : null,
+      f.extras.rejects ? frow('Likely rejects', f.extras.rejects, p.get('rejects') === '1', () => applyFilter((q) => setOne(q, 'rejects', '1'))) : null,
+      ...(f.extras.rejects ? REJECTS.map(([k, l]) => f.extras['reject_' + k] ? frow('↳ ' + l, f.extras['reject_' + k], p.getAll('reject').includes(k), () => applyFilter((q) => toggle(q, 'reject', k))) : null) : []),
     ].filter(Boolean), 9),
     section('Bursts', f.extras.bursts ? [
       frow('In a burst', f.extras.bursts, p.get('bursts') === '1', () => applyFilter((q) => setOne(q, 'bursts', '1'))),

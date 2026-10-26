@@ -271,7 +271,9 @@ def api_facets(request: Request):
             "GROUP BY 1 ORDER BY 2 DESC")]
         # the quick filters' counts ride along in the same pass (a photo not analysed yet matches none: NULL is not 1)
         extras = (("blurry", "sharpn < 0.1"), ("sharpest", "sharpn >= 0.8"), ("hastext", "length(ocr) >= 3"), ("bursts", "burst IS NOT NULL"),
-                  ("dark", "(bright < 0.2 OR clip_lo > 0.5)"), ("bright", "(bright > 0.8 OR clip_hi > 0.3)"))
+                  ("dark", "(bright < 0.2 OR clip_lo > 0.5)"), ("bright", "(bright > 0.8 OR clip_hi > 0.3)"),
+                  ("rejects", "reject IS NOT NULL"), ("looks", "aesthn >= 0.9"), ("eyes", "eyes_closed > 0"),
+                  *((f"reject_{k}", f"(',' || reject || ',') LIKE '%,{k},%'") for k in ("blur", "eyes", "burst", "exposure")))
         rng = q("SELECT count(*), min(ts), max(ts), sum(size), sum(video), sum(lat IS NOT NULL), "
                 "min(iso), max(iso), min(aperture), max(aperture), "
                 "min(coalesce(focal35, focal)), max(coalesce(focal35, focal)), "
@@ -344,7 +346,7 @@ def api_bursts(request: Request, offset: int = 0, limit: int = 40):
             f"SELECT burst FROM photos WHERE burst IS NOT NULL AND {where} GROUP BY burst ORDER BY max(ts) DESC", params)]
         page = ids[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
         rows = con.execute(
-            f"SELECT id, burst, burst_best, w, h, ts, sharpn, faceq, pick, rating FROM photos "
+            f"SELECT id, burst, burst_best, w, h, ts, sharpn, faceq, pick, rating, aesth, focusn, eyes_checked, eyes_closed, reject FROM photos "
             f"WHERE burst IN ({','.join(map(str, page)) or 'NULL'}) ORDER BY ts, name").fetchall()
         total_photos = con.execute(f"SELECT count(*) FROM photos WHERE burst IS NOT NULL AND {where}", params).fetchone()[0]
     except sqlite3.OperationalError as e:
@@ -354,7 +356,9 @@ def api_bursts(request: Request, offset: int = 0, limit: int = 40):
     groups = {b: [] for b in page}
     for r in rows:
         groups[r["burst"]].append({"id": r["id"], "best": r["burst_best"], "w": r["w"], "h": r["h"], "ts": r["ts"],
-                                   "sharpn": r["sharpn"], "faceq": r["faceq"], "pick": r["pick"], "rating": r["rating"]})
+                                   "sharpn": r["sharpn"], "faceq": r["faceq"], "pick": r["pick"], "rating": r["rating"],
+                                   "aesthetic": r["aesth"], "focusn": r["focusn"], "eyesChecked": r["eyes_checked"], "eyesClosed": r["eyes_closed"],
+                                   "reject": [w for w in (r["reject"] or "").split(",") if w]})
     return jresp(request, {"bursts": len(ids), "photos": total_photos, "offset": offset,
                            "groups": [{"burst": b, "items": groups[b]} for b in page]})
 
@@ -418,6 +422,19 @@ def _overlay_pending(con, d: dict):
             f"SELECT id, name, full, person FROM tags WHERE full IN ({','.join('?' * len(add))})", add)]
 
 
+def _quality(d: dict):
+    """The photo quality summary of one photo for the info panel and the apps (None before it is measured):
+    aesthetic 1-10 and its rank among the library's photos, focus rank, faces judged for closed eyes and how
+    many had them, and the reasons it looks like a reject ([] when it does not)."""
+    if d.get("video") or all(d.get(k) is None for k in ("aesth", "focusn", "eyes_checked", "sharpn")):
+        return None
+    from app.data.index import REJECT_REASONS
+    why = [w for w in (d.get("reject") or "").split(",") if w]
+    return {"aesthetic": d.get("aesth"), "aestheticRank": d.get("aesthn"), "focusRank": d.get("focusn") if d.get("focusn") is not None else d.get("sharpn"),
+            "eyesChecked": d.get("eyes_checked"), "eyesClosed": d.get("eyes_closed"),
+            "reject": why, "rejectLabels": [REJECT_REASONS[w] for w in why if w in REJECT_REASONS]}
+
+
 @router.get("/api/photo/{photo_id}")
 def api_photo(photo_id: int, request: Request):
     con = db()
@@ -457,6 +474,7 @@ def api_photo(photo_id: int, request: Request):
         d["boxes"] = analysis.boxes(photo_id)
         from app.photos import versions
         d["versions"] = versions.versions_of(photo_id)  # digiKam's version family (ImageRelations), when there is one
+        d["quality"] = _quality(d)
         if d.get("burst"):
             d["burst_size"] = con.execute("SELECT count(*) FROM photos WHERE burst = ?", (d["burst"],)).fetchone()[0]
             best = con.execute("SELECT id, name FROM photos WHERE burst = ? AND burst_best = 1", (d["burst"],)).fetchone()
