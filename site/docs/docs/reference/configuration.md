@@ -15,7 +15,7 @@ Every setting is an environment variable. `setup.sh` and the installers write th
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DIGIKAM_DB_TYPE` | `sqlite` | `sqlite` or `mysql` |
+| `DIGIKAM_DB_TYPE` | `sqlite` | `sqlite` or `mysql`, or `none` when you don't use digiKam |
 | `DIGIKAM_DB_HOST` / `DIGIKAM_DB_PORT` | `127.0.0.1` / `3306` | server |
 | `DIGIKAM_DB_NAME` / `DIGIKAM_DB_USER` / `DIGIKAM_DB_PASSWORD` | `digikam` / `digikam` / empty | database and account |
 | `DIGIKAM_DB_BACKUP` | `auto` | `auto`: back up before destructive operations; `skip`: never |

@@ -15,10 +15,11 @@ There are four ways to install iopix. They all run the same app; they differ in 
 - **Already using Proxmox?** The Proxmox script is the quickest way to a tidy, separate container.
 - **Everything on one Mac?** `setup.sh` on that Mac, with "start at login" on.
 - **A plain Linux box?** The Linux installer.
+- **No digiKam at all?** Any of them: each one asks, and iopix then keeps the library itself. See [Using iopix without digiKam](../connect/no-digikam.md).
 
 ## Things that are the same everywhere
 
 - iopix listens on **port 8600**.
-- It needs **read access** to the photo folders and digiKam's database, and **write access** only if you want to edit.
+- It needs **read access** to the photo folders and digiKam's database (if you use digiKam), and **write access** only if you want to edit.
 - Its own data goes in a separate data folder (`/data` in Docker, `/opt/iopix/data` with the installers, `data/` in a checkout).
 - The admin account can be created during install, or later from Settings.

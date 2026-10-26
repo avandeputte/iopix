@@ -10,7 +10,7 @@ git clone https://github.com/avandeputte/iopix && cd iopix
 ## What it asks
 
 - Where the **photos** are.
-- Whether digiKam's database is the **SQLite file** or **MariaDB/MySQL**, and it tests the connection.
+- Whether you **use digiKam** with those photos and, if so, whether its database is the **SQLite file** or **MariaDB/MySQL** (it tests the connection). Without digiKam, iopix keeps the library itself: see [Using iopix without digiKam](../connect/no-digikam.md).
 - Where iopix keeps **its own database**: a SQLite file, or MariaDB/MySQL (it creates the database if the account may).
 - Which **features** you want: content search, places, objects, text recognition, photo descriptions. Each downloads its model.
 - The **port**, the **admin account**, and whether to **start at login** (launchd on macOS, systemd on Linux).
@@ -32,6 +32,8 @@ Flags skip the questions. `./setup.sh --help` lists them all. For example:
   --features search,places \
   --admin admin:secret
 ```
+
+Without digiKam: `./setup.sh --yes --photos /srv/photos --no-digikam --admin admin:secret`.
 
 ## Running in the foreground
 

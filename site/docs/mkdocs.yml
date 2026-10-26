@@ -69,6 +69,7 @@ nav:
       - Updating: install/updating.md
   - Connect:
       - Connecting to digiKam: connect/digikam.md
+      - Using iopix without digiKam: connect/no-digikam.md
       - digiKam on MariaDB or MySQL: connect/mariadb.md
       - Album roots and folders: connect/album-roots.md
       - iopix's own database: connect/iopix-database.md

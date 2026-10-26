@@ -15,7 +15,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/iopix/main/p
 First about iopix:
 
 1. **Photo folder** on the host.
-2. **digiKam's database**: the folder with `digikam4.db`, or a MariaDB host, port, database, user and password.
+2. **digiKam's database**: the folder with `digikam4.db`, a MariaDB host, port, database, user and password, or **I don't use digiKam** (see [Using iopix without digiKam](../connect/no-digikam.md)).
 3. **iopix's own database**: a SQLite file in the container, or MariaDB (the digiKam answers are offered as defaults; use a separate database name).
 4. **Writing**: whether iopix may write into the library. Yes mounts the folders read/write and creates a privileged container, because an unprivileged one cannot write files owned by a host user.
 5. **Features**: which AI features to install (each downloads its model).
@@ -23,7 +23,7 @@ First about iopix:
 
 Then the usual framework questions: CPU, memory, disk and network. The defaults are 4 CPU, 4 GB memory and a 16 GB disk.
 
-The library is mounted at `/library/photos` and `/library/digikamDB` inside the container, and iopix listens on port 8600.
+The library is mounted at `/library/photos` and `/library/digikamDB` (only the photos, without digiKam) inside the container, and iopix listens on port 8600.
 
 ## Unattended install
 
@@ -32,7 +32,7 @@ Set these in the environment to skip the questions:
 | Variable | Example |
 | --- | --- |
 | `IOPIX_PHOTOS` | `/tank/photos` |
-| `IOPIX_DB` | `sqlite:/tank/digikamDB` or `mysql:host:3306/digikam:digikam:password` |
+| `IOPIX_DB` | `sqlite:/tank/digikamDB`, `mysql:host:3306/digikam:digikam:password` or `none` |
 | `IOPIX_VIEWER_DB` | `sqlite` or `host:3306/iopix:iopix:password` |
 | `IOPIX_WRITE` | `1` or `0` |
 | `IOPIX_FEATURES` | `search,places,objects` |

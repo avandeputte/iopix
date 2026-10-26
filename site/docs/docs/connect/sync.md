@@ -1,6 +1,6 @@
 # Sync and working without digiKam
 
-iopix keeps a copy of the library's records (photos, folders, tags, faces, places) in its own database, in exactly the shape digiKam uses. That copy lets it keep working when digiKam's database is not there.
+iopix keeps a copy of the library's records (photos, folders, tags, faces, places) in its own database, in exactly the shape digiKam uses. That copy lets it keep working when digiKam's database is not there. If you don't use digiKam at all, see [Using iopix without digiKam](no-digikam.md).
 
 ## Sync with digiKam on (the default)
 

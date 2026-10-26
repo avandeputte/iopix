@@ -5,6 +5,9 @@
 **Does iopix replace digiKam?**
 It works alongside it. iopix covers browsing, searching and the everyday editing (ratings, captions, tags, faces, dates, places, files) from any device. Everything it writes is in digiKam's format, so you can keep using both.
 
+**Do I need digiKam?**
+No. With just a folder of photos, iopix keeps the library itself and finds new photos on its own. See [Using iopix without digiKam](../connect/no-digikam.md).
+
 **Does it copy or move my photos?**
 No. It reads them where they are. It only writes when someone with editor rights changes something, and then as digiKam would.
 

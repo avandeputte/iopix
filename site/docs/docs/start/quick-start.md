@@ -7,7 +7,8 @@ This page gets iopix running against your digiKam library with the fewest decisi
 You need:
 
 - A **digiKam library**: the folder with your photos and digiKam's database. The database is either a file called `digikam4.db` (SQLite, digiKam's default) or a MariaDB/MySQL server.
-- A **computer that can see both**, which stays on: a home server, a NAS that runs Docker, a Proxmox host, or the Mac or Linux PC digiKam runs on.
+- Or, if you don't use digiKam, just the **folder with your photos**: see [Using iopix without digiKam](../connect/no-digikam.md).
+- A **computer that can see them**, which stays on: a home server, a NAS that runs Docker, a Proxmox host, or the Mac or Linux PC digiKam runs on.
 
 See [What you need](requirements.md) for the details.
 
@@ -41,6 +42,8 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
 
     ```sh
     sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB
+    # or, without digiKam:
+    sh iopix-install.sh --photos /srv/photos --no-digikam
     ```
 
     Full guide: [Linux installer](../install/linux.md).
@@ -54,7 +57,7 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
 
     Full guide: [setup.sh](../install/setup-script.md).
 
-Each of these asks for (or lets you set) the photo folder, digiKam's database, and an admin account.
+Each of these asks for (or lets you set) the photo folder, digiKam's database (or that you don't use digiKam), and an admin account.
 
 ## 3. Open it
 

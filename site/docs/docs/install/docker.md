@@ -41,6 +41,9 @@ volumes:
   iopix-data:
 ```
 
+!!! note "No digiKam"
+    Set `DIGIKAM_DB_TYPE: none` and remove the other `DIGIKAM_DB_*` lines. iopix then keeps the library itself, in the data volume. Remove `:ro` from the photos line so edits can be saved next to the photos. See [Using iopix without digiKam](../connect/no-digikam.md).
+
 !!! note "digiKam on SQLite instead of MariaDB"
     Remove the `DIGIKAM_DB_*` lines and mount the folder that holds `digikam4.db`:
 

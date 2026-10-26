@@ -1,6 +1,9 @@
 # What you need
 
-## A digiKam library
+## A digiKam library, or just your photos
+
+!!! tip "No digiKam?"
+    A folder of photos is enough: iopix then keeps the library itself. See [Using iopix without digiKam](../connect/no-digikam.md).
 
 iopix is built around digiKam's own database and does not need digiKam itself to be running. It has been checked against **digiKam 9.1**.
 

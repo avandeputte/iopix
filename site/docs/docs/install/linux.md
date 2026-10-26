@@ -10,6 +10,8 @@ As root on the target machine:
 sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB
 ```
 
+If you don't use digiKam, give `--no-digikam` instead of `--digikam-db` (see [Using iopix without digiKam](../connect/no-digikam.md)).
+
 It then:
 
 1. unpacks the app into `/opt/iopix/app`,
@@ -29,6 +31,7 @@ A sudoers rule lets the service user run exactly `systemctl restart iopix`, so *
 | `--photos PATH` | the photo folder |
 | `--digikam-db PATH` | the folder with `digikam4.db` |
 | `--mysql HOST:PORT/DB:USER:PASSWORD` | digiKam on MariaDB/MySQL instead |
+| `--no-digikam` | no digiKam: iopix keeps the library itself |
 | `--iopix-db sqlite` or `HOST:PORT/DB:USER:PASSWORD` | where iopix keeps its own database |
 | `--features search,places,objects,ocr,captions` | the AI features; `none` for browsing only |
 | `--captions` | all features, including photo descriptions |
