@@ -8,8 +8,8 @@ Three measures, each on its own so a missing model only leaves its own column em
              of a Laplacian in each cell of a 6x6 grid, and the second-best cell kept. A portrait with
              a soft background is in focus; a photo blurred all over is not. No model needed.
   eyes       for each face seen from the front and large enough, the eyes are found with the chosen
-             face detector's landmarks and each eye is classified open or closed by OpenVINO's
-             open-closed-eye-0001. A face counts as closed only when both eyes are, clearly.
+             face detector's landmarks and each eye is classified open or closed by a ViT-base eye-state
+             model (dima806). A face counts as closed only when both eyes are.
 
 Everything runs on the CPU with onnxruntime. The models are downloaded from Maintenance (models.py,
 keys "aesthetic" and "eyes"); analysis.py runs this as the "looks" job and stores the numbers in the
@@ -35,9 +35,10 @@ _sessions = {}  # "clip" / "eyes" -> onnxruntime session; "head" -> the MLP's la
 SIDE = 224      # CLIP ViT-L/14 input
 MEAN = (0.48145466, 0.4578275, 0.40821073)
 STD = (0.26862954, 0.26130258, 0.27577711)
-EYE_CLOSED = 0.01   # both eyes below this "open" probability: closed (the model is very sure of open eyes)
+EYE_CLOSED = 0.5    # both eyes below this "open" probability: closed
 MIN_IOD = 16        # pixels between the eyes in the decoded image: smaller faces are not judged
-VERSION = 1         # bump when a measure changes meaning, so stored values are computed again
+VERSION = 1         # bump when the focus measure changes meaning, so stored values are computed again
+EYES_VERSION = 2    # the same for the closed-eyes check (2: the ViT eye model)
 
 
 def _ort_ok() -> bool:
@@ -53,7 +54,7 @@ def aesthetic_available() -> bool:
 
 def eyes_available() -> bool:
     from app.faces import facedetect
-    return _ort_ok() and models.path("eyes").exists() and facedetect.available()
+    return np is not None and models.path("eyes").exists() and facedetect.available()
 
 
 def reset_sessions():
@@ -168,17 +169,83 @@ def focus(im) -> float:
     return round(float(cells[1] if len(cells) > 1 else cells[0]), 2)
 
 
-# ---- eyes
+# ---- eyes: a ViT-base eye-state classifier (dima806/closed_eyes_image_detection), run in numpy from its
+# safetensors weights so neither PyTorch nor an ONNX export is needed. Compared on hand-labelled face crops
+# from real photos, it found about twice as many closed eyes as OpenVINO's open-closed-eye-0001 (used before
+# EYES_VERSION 2), with fewer false alarms.
 
-def _eye_open(crop, pt, iod: float, sess) -> float:
-    """Probability the eye at pt (in crop's pixels) is open."""
+def read_safetensors(path) -> dict:
+    """{name: float32 array} from a .safetensors file (a JSON header, then raw little-endian tensors)."""
+    import json
+    import struct
+    with open(path, "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        head = json.loads(f.read(n))
+        data = f.read()
+    kinds = {"F32": "<f4", "F16": "<f2", "BF16": None}
+    out = {}
+    for name, t in head.items():
+        if name == "__metadata__":
+            continue
+        a, b = t["data_offsets"]
+        if kinds.get(t["dtype"]) is None:
+            raise ValueError(f"{name}: unsupported dtype {t['dtype']}")
+        out[name] = np.frombuffer(data[a:b], dtype=kinds[t["dtype"]]).astype(np.float32).reshape(t["shape"])
+    return out
+
+
+def _vit():
+    with _lock:
+        w = _sessions.get("eyevit")
+        if w is None:
+            w = read_safetensors(models.path("eyes"))
+            w["_patch"] = w["vit.embeddings.patch_embeddings.projection.weight"].reshape(768, -1).T.copy()
+            _sessions["eyevit"] = w
+        return w
+
+
+def _ln(x, g, b, eps=1e-12):
+    m = x.mean(-1, keepdims=True)
+    v = ((x - m) ** 2).mean(-1, keepdims=True)
+    return (x - m) / np.sqrt(v + eps) * g + b
+
+
+def _gelu(x):
+    """Exact GELU, 0.5 x (1 + erf(x / sqrt 2)), with erf from Abramowitz and Stegun 7.1.26 (error below 2e-7)."""
+    z = np.abs(x) * 0.70710678
+    t = 1.0 / (1.0 + 0.3275911 * z)
+    y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * np.exp(-z * z)
+    return 0.5 * x * (1.0 + np.sign(x) * y)
+
+
+def eye_open(patches: list) -> list:
+    """P(open) for each eye patch (PIL images), from the ViT eye-state model: 224 px, normalised to [-1, 1]."""
     from PIL import Image
-    r = iod * 0.3
-    patch = crop.crop((int(pt[0] - r), int(pt[1] - r), int(pt[0] + r), int(pt[1] + r))).resize((32, 32), Image.Resampling.BILINEAR)
-    a = np.asarray(patch.convert("RGB"), dtype=np.float32)[:, :, ::-1]  # the model was trained on BGR
-    a = ((a - 127.0) / 255.0).transpose(2, 0, 1)[None]
-    out = sess.run(None, {sess.get_inputs()[0].name: np.ascontiguousarray(a)})[0].reshape(-1)
-    return float(out[1])  # outputs are already probabilities: [closed, open]
+    w = _vit()
+    x = np.stack([(np.asarray(p.convert("RGB").resize((224, 224), Image.Resampling.BILINEAR), dtype=np.float32) / 127.5 - 1.0) for p in patches])
+    n = len(patches)
+    # 16x16 patches, flattened channel-first as the conv weight is laid out
+    t = x.reshape(n, 14, 16, 14, 16, 3).transpose(0, 1, 3, 5, 2, 4).reshape(n, 196, 768)
+    with np.errstate(all="ignore"):  # macOS's Accelerate BLAS raises spurious matmul warnings
+        t = t @ w["_patch"] + w["vit.embeddings.patch_embeddings.projection.bias"]
+        t = np.concatenate([np.repeat(w["vit.embeddings.cls_token"], n, 0), t], 1) + w["vit.embeddings.position_embeddings"]
+        for i in range(12):
+            L = f"vit.encoder.layer.{i}."
+            hdn = _ln(t, w[L + "layernorm_before.weight"], w[L + "layernorm_before.bias"])
+            q, k, v = (hdn @ w[L + f"attention.attention.{m}.weight"].T + w[L + f"attention.attention.{m}.bias"] for m in ("query", "key", "value"))
+            q, k, v = (a.reshape(n, 197, 12, 64).transpose(0, 2, 1, 3) for a in (q, k, v))
+            att = q @ k.transpose(0, 1, 3, 2) / 8.0
+            att = np.exp(att - att.max(-1, keepdims=True))
+            att /= att.sum(-1, keepdims=True)
+            ctx = (att @ v).transpose(0, 2, 1, 3).reshape(n, 197, 768)
+            t = t + ctx @ w[L + "attention.output.dense.weight"].T + w[L + "attention.output.dense.bias"]
+            hdn = _ln(t, w[L + "layernorm_after.weight"], w[L + "layernorm_after.bias"])
+            hdn = _gelu(hdn @ w[L + "intermediate.dense.weight"].T + w[L + "intermediate.dense.bias"])
+            t = t + hdn @ w[L + "output.dense.weight"].T + w[L + "output.dense.bias"]
+        cls = _ln(t[:, 0], w["vit.layernorm.weight"], w["vit.layernorm.bias"])
+        logits = cls @ w["classifier.weight"].T + w["classifier.bias"]
+    e = np.exp(logits - logits.max(-1, keepdims=True))
+    return [float(p) for p in (e / e.sum(-1, keepdims=True))[:, 1]]  # labels: 0 closeEye, 1 openEye
 
 
 def eyes(im, faces: list, full_w: int, full_h: int) -> tuple:
@@ -186,7 +253,6 @@ def eyes(im, faces: list, full_w: int, full_h: int) -> tuple:
     A face is judged only when the detector finds it again, seen from the front, with the eyes far enough
     apart to see; the others are left out of both counts."""
     from app.faces import facedetect
-    sess = _session("eyes", models.path("eyes"), 1)
     sx, sy = im.width / max(full_w or im.width, 1), im.height / max(full_h or im.height, 1)
     judged = closed = 0
     for x, y, w, h in faces:
@@ -208,6 +274,8 @@ def eyes(im, faces: list, full_w: int, full_h: int) -> tuple:
         if iod < MIN_IOD or iod < 0.33 * f[2] or not (min(lx, rx) + 0.2 * iod < nx < max(lx, rx) - 0.2 * iod):
             continue
         judged += 1
-        if max(_eye_open(crop, (lx, ly), iod, sess), _eye_open(crop, (rx, ry), iod, sess)) < EYE_CLOSED:
+        r = iod * 0.3
+        both = [crop.crop((int(ex - r), int(ey - r), int(ex + r), int(ey + r))) for ex, ey in ((lx, ly), (rx, ry))]
+        if max(eye_open(both)) < EYE_CLOSED:
             closed += 1
     return judged, closed

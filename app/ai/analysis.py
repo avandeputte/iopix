@@ -414,7 +414,8 @@ def _caption_job(photos: list, gen: int):
 def _looks_parts() -> dict:
     """Which parts of the photo quality job can run here: focus always, the others with their models."""
     from app.ai import looks
-    return {"f": looks.VERSION, "a": looks.aesthetic_available(), "e": looks.eyes_available()}
+    # each part's value is the version of its measure recorded with the results, or False when it cannot run here
+    return {"f": looks.VERSION, "a": 1 if looks.aesthetic_available() else False, "e": looks.EYES_VERSION if looks.eyes_available() else False}
 
 
 def _looks_todo(photos: list, parts: dict, con=None) -> list:
@@ -440,7 +441,7 @@ def _looks_todo(photos: list, parts: dict, con=None) -> list:
                 done = json.loads(detail or "{}")
             except ValueError:
                 done = {}
-            need = {k for k, v in parts.items() if v and done.get(k) != (v if k == "f" else 1)}
+            need = {k for k, v in parts.items() if v and done.get(k) != v}
         if need:
             out.append((p, need))
     return out
@@ -536,14 +537,9 @@ def _looks_job(photos: list, gen: int):
                         f = out.get("focus", prev[2] if prev else None)
                         ec, ex = out["eyes"] if "eyes" in out else ((prev[3], prev[4]) if prev else (None, None))
                         rows.append((p["id"], a, f, ec, ex))
-                        if "f" in need:
-                            done["f"] = parts["f"]
-                        if "a" in need and "aesthetic" in out:
-                            done["a"] = 1
-                        if "e" in need and "eyes" in out:
-                            done["e"] = 1
-                        if not out:  # undecodable: marked done so it is not tried again until the file changes
-                            done.update({k: (parts["f"] if k == "f" else 1) for k in need})
+                        for k, field in (("f", "focus"), ("a", "aesthetic"), ("e", "eyes")):
+                            if k in need and (field in out or not out):  # undecodable (no out): marked done until the file changes
+                                done[k] = parts[k]
                         scans.append((p["id"], st, json.dumps(done, sort_keys=True)))
                     con.executemany("INSERT OR REPLACE INTO ai_looks VALUES (?,?,?,?,?)", rows)
                     con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'looks',?,?)", scans)

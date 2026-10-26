@@ -110,7 +110,7 @@ def test_a_model_installed_later_fills_in_only_its_part(client, lib, monkeypatch
         assert not analysis._looks_todo(photos, analysis._looks_parts())  # nothing left to do
         # the model arrives: only the aesthetic score is computed, focus is kept as it was
         monkeypatch.setattr(looks, "aesthetic_available", lambda: True)
-        eyes = all((MODELS / f).exists() for f in ("open_closed_eye.onnx", "face_detection_yunet_2023mar.onnx"))
+        eyes = all((MODELS / f).exists() for f in ("eye_state_vit.safetensors", "face_detection_yunet_2023mar.onnx"))
         if eyes:
             from app.faces import facedetect
             facedetect.reset_session()
@@ -164,3 +164,40 @@ def test_the_aesthetic_model_downloads_and_counts_both_its_files(tmp_path, monke
     assert models.local("aesthetic")["installed"]
     (tmp_path / "laion_aesthetic_l14.pth").unlink()
     assert not models.local("aesthetic")["installed"]  # half a model is not installed
+
+
+
+def test_safetensors_reader_and_gelu(tmp_path):
+    import json
+    import struct
+    a = np.arange(6, dtype="<f4").reshape(2, 3)
+    head = json.dumps({"x": {"dtype": "F32", "shape": [2, 3], "data_offsets": [0, 24]}, "__metadata__": {}}).encode()
+    p = tmp_path / "t.safetensors"
+    p.write_bytes(struct.pack("<Q", len(head)) + head + a.tobytes())
+    assert (looks.read_safetensors(p)["x"] == a).all()
+    import math
+    xs = np.linspace(-6, 6, 101).astype(np.float32)
+    exact = np.array([0.5 * x * (1 + math.erf(x / math.sqrt(2))) for x in xs])
+    assert np.abs(looks._gelu(xs) - exact).max() < 1e-5
+
+
+def test_the_eye_model_tells_open_from_closed(monkeypatch):
+    if not (MODELS / "eye_state_vit.safetensors").exists():
+        pytest.skip("eye model not available here")
+    from PIL import Image, ImageDraw
+    monkeypatch.setattr(models, "MODEL_DIR", MODELS)
+    looks.reset_sessions()
+
+    def eye(open_):  # a drawn eye: an iris in an almond, or a lid line with lashes
+        im = Image.new("RGB", (64, 64), (225, 185, 160))
+        d = ImageDraw.Draw(im)
+        if open_:
+            d.ellipse((8, 20, 56, 44), fill=(245, 245, 245), outline=(60, 40, 30), width=2)
+            d.ellipse((24, 22, 40, 42), fill=(70, 45, 25))
+            d.ellipse((29, 28, 35, 36), fill=(5, 5, 5))
+        else:
+            d.arc((8, 14, 56, 40), 20, 160, fill=(60, 40, 30), width=3)
+        return im
+    p_open, p_closed = looks.eye_open([eye(True), eye(False)])
+    assert p_open > p_closed
+    looks.reset_sessions()
