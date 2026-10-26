@@ -17,6 +17,10 @@ def _tags(con):
 
 @pytest.fixture
 def dk():
+    from conftest import SRC_DB
+    import os
+    if not os.path.exists(SRC_DB):
+        pytest.skip("No source database")
     con = dkdb.connect()
     yield con
     con.close()

@@ -50,6 +50,9 @@ def _forget(lib, ids, files=()):
 def test_unique_hash_is_digikams():
     """Against the source library the fixture is cut from (read only): files digiKam hashed and nobody changed since."""
     from conftest import SRC_DB, SRC_ROOT
+    import os
+    if not os.path.exists(SRC_DB):
+        pytest.skip(f"No source database at {SRC_DB}")
     con = sqlite3.connect(f"file:{SRC_DB}?mode=ro", uri=True)
     try:
         version = int((con.execute("SELECT value FROM Settings WHERE keyword = 'uniqueHashVersion'").fetchone() or ["1"])[0])

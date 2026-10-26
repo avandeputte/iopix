@@ -57,6 +57,8 @@ EXIFTOOL = _find_exiftool()
 def exiftool_cmd() -> list:
     """How to start exiftool: directly, or through perl when the script is not executable
     (pip's and some bundled copies)."""
+    if not EXIFTOOL:
+        return ["exiftool"]
     return [EXIFTOOL] if os.access(EXIFTOOL, os.X_OK) else ["perl", EXIFTOOL]
 
 
