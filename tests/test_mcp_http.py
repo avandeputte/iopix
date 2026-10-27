@@ -173,3 +173,15 @@ def test_tag_op_marks_a_person_and_merges_with_the_token(client, lib):
             while tagmanager.pending_jobs():
                 time.sleep(0.2)
             tagmanager.apply(op, check_running=False)
+
+
+def test_the_first_setting_keeps_existing_installs_on_and_is_kept_after(client):
+    from app import main
+    from app.data import state
+    for upgraded, want in ((True, "1"), (False, "0")):
+        state.set_setting("mcp_enabled", "")  # never set: the first start with the switch
+        main._mcp_first_setting(upgraded)
+        assert state.get_setting("mcp_enabled", "") == want
+    state.set_setting("mcp_enabled", "1")  # chosen once: later starts (updates) keep it
+    main._mcp_first_setting(False)
+    assert state.get_setting("mcp_enabled", "") == "1"

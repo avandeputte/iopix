@@ -39,7 +39,9 @@ __all__ = ["app", "state", "_kick", "_refresh", "_auto", "_watch", "resolve", "p
 @asynccontextmanager
 async def lifespan(_app):
     _setup_file_log()
+    upgraded = config.INDEX_DB.exists()  # an install that has run before (a fresh one has no index yet)
     appstate.init()
+    _mcp_first_setting(upgraded)
     users.init()
     edits.init()
     tagmanager.init()
@@ -95,6 +97,14 @@ def _open_to_visitors(path: str) -> bool:
         tail = path[6:].split("/")[0]
         return tail.isdigit() and int(tail) in users.linked_persons()
     return path in OPEN_PATHS or path.startswith(OPEN_PREFIXES)
+
+
+def _mcp_first_setting(upgraded: bool):
+    """The MCP switch is stored once and then kept across updates: off on a fresh install, on for an install
+    from before the switch existed (v1.85), whose /mcp answered until then."""
+    if appstate.get_setting("mcp_enabled", "") == "":
+        appstate.set_setting("mcp_enabled", "1" if upgraded else "0")
+        logging.getLogger("app").info("MCP server %s (first start with the MCP switch)", "kept on: an existing install" if upgraded else "off: a fresh install")
 
 
 def mcp_enabled() -> bool:
