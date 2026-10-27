@@ -248,6 +248,9 @@ def restore(entry_id: int, kind: str) -> dict:
     if kind == "undo" and e["action"] == "lossless":
         from app.photos import lossless
         return lossless.undo(e)
+    if kind == "undo" and e["action"] == "filerepair":
+        from app.photos import filecheck
+        return filecheck.undo(e)
     photo = _photo(pid)
     if not photo:
         raise LookupError("That photo is not in the library any more")

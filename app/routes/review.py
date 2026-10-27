@@ -100,6 +100,37 @@ async def api_quality_fix(request: Request):
     return {"photos": n}
 
 
+@router.get("/api/filecheck")
+def api_filecheck():
+    """Maintenance › Damaged files: what the file check found so far, and its progress."""
+    from app.photos import filecheck
+    return filecheck.report()
+
+
+@router.post("/api/filecheck/run")
+async def api_filecheck_run(request: Request):
+    """Body {redo: false}: check the files not checked yet (or changed since); redo: every file again. In the background."""
+    from app.photos import filecheck
+    body = await request.json() if (await request.body()) else {}
+    return {"queued": await run_in_threadpool(filecheck.start, bool(body.get("redo")))}
+
+
+@router.post("/api/filecheck/repair")
+async def api_filecheck_repair(request: Request):
+    """Body {ids: [...]}: add the missing end marker to those JPEGs (backed up first, undoable from the edit log)."""
+    from app.photos import filecheck
+    if not config.DB_WRITE or appstate.read_only():
+        raise HTTPException(403, "Writing to the library is turned off")
+    body = await request.json()
+    try:
+        r = await run_in_threadpool(filecheck.repair, [int(i) for i in body.get("ids") or []])
+    except dbsync.SyncError as e:
+        raise HTTPException(409, str(e))
+    if r["repaired"]:
+        await run_in_threadpool(_rebuild_after_write)
+    return r
+
+
 @router.get("/api/history")
 def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
                 user: str = None, since: int = None, until: int = None):

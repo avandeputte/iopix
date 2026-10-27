@@ -70,7 +70,7 @@ export function updateSelBar() {
     S.CAN_MANAGE ? btn('trash', 'Move to trash (Delete key)', () => trashPhotos(ids())) : null);
 }
 // ---- the edit log: entries for one photo (info panel) or the whole library (#/history)
-export const HIST_ACTION = { edit: 'Edit', face: 'Face', tag: 'Tag', deleted: 'Deleted', trashed: 'Trashed', moved: 'Moved', restore: 'Restore', sync: 'Sync', database: 'digiKam', revert: 'Undo', added: 'Added', guard: 'Protected', lossless: 'File' };
+export const HIST_ACTION = { edit: 'Edit', face: 'Face', tag: 'Tag', deleted: 'Deleted', trashed: 'Trashed', moved: 'Moved', restore: 'Restore', sync: 'Sync', database: 'digiKam', revert: 'Undo', added: 'Added', guard: 'Protected', lossless: 'File', filerepair: 'Repair' };
 export const HIST_RESTORE = { undo: ['Undo', 'Put back the values from before this change'], trash: ['Restore from trash', 'Put the photo back where it was'], sidecar: ['Restore sidecar', 'Put the sidecar back as it was just before this change'],
   original: ['Restore original file', 'Put the image file back as it was before the first write into it'], deleted: ['Restore photo', 'Put the files back and add the photo to the library again'] };
 export function histEntry(e, onDone, withPhoto) {
@@ -271,6 +271,50 @@ export function promptDialog(message, opts = {}) {
 /** Maintenance › Metadata quality: photos without a location, and faces stored twice, the same person in two places, boxes outside the photo or empty.
  *  The check runs every time the page is opened, and again with "Check again". */
 let qualityTimer = 0;  // the one pending redraw of the quality page; a new one replaces it
+let damagedTimer = 0;
+/** Maintenance › Damaged files: the file check's findings, with the safe repair (an end marker added, backed up, undoable). */
+export async function showDamaged() {
+  clearTimeout(damagedTimer);
+  const body = h('div', null, h('div', { class: 'muted' }, 'Loading…'));
+  main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Damaged files', null]]),
+    pageTitle('photo', 'rose', 'Damaged files'),
+    h('p', { class: 'muted intro mt0' }, `Every photo’s file is read and checked: JPEGs that stop early or lack their end marker, PNGs with damaged data, and pictures that cannot be decoded. Files are only read. One kind of damage can be repaired safely: a JPEG whose picture is complete but whose end marker is missing (some phones’ burst photos). The repair adds the marker after keeping a copy of the file, and every repair is in the edit log with undo. A file that was cut off cannot be repaired here; a backup or the original device may still have it whole.`),
+    body));
+  let d;
+  try { d = await api('/api/filecheck'); } catch (e) { fill(body, errorBox(e)); return; }
+  if (S.route.view !== 'damaged') return;
+  const p = d.progress || {};
+  const run = (redo) => async () => {
+    if (redo && !await confirmDialog(`Check all ${nf.format(d.total)} photos again from the start? Every file is read once more.`)) return;
+    try { const r = await post('/api/filecheck/run', { redo }); toast(r.queued ? `Checking ${plural(r.queued, 'file')} in the background.` : 'Every file is checked already.'); } catch (e) { toastError(e); }
+    damagedTimer = setTimeout(() => { if (S.route.view === 'damaged') showDamaged(); }, 1500);
+  };
+  const status = p.running ? `Checking… ${nf.format(p.done)} / ${nf.format(p.total)} files, ${plural(p.found, 'problem')} so far.`
+    : `${nf.format(d.checked)} of ${nf.format(d.total)} photos checked${p.finished ? ` (last run ${fmtWhen(p.finished)})` : ''}. ${d.found.length ? plural(d.found.length, 'damaged file') + ' found.' : d.checked ? 'Nothing damaged found.' : ''}`;
+  const fixable = d.found.filter((x) => x.fixable);
+  const repair = async (ids, btn) => {
+    if (!await confirmDialog(`Add the missing end marker to ${plural(ids.length, 'file')}? Each file is copied first and the change can be undone from the edit log.`, { ok: 'Repair' })) return;
+    btn.disabled = true;
+    let r;
+    try { r = await post('/api/filecheck/repair', { ids }); } catch (e) { btn.disabled = false; toastError(e); return; }
+    toast(`${plural(r.repaired.length, 'file')} repaired${r.failed.length ? `; ${nf.format(r.failed.length)} not: ${r.failed[0].error}` : ''}.`);
+    showDamaged();
+  };
+  const all = d.found.map((x) => x.photo);
+  const row = (x, k) => h('div', { class: 'hrow' },
+    h('img', { src: `/thumb/${x.photo}`, alt: '', loading: 'lazy', onclick: () => openLightbox({ id: all }, k, true) }),
+    h('div', { class: 'hmain' }, h('b', null, x.name), h('div', { class: 'muted' }, x.folder), h('div', { class: x.fixable ? '' : 'warn' }, x.detail)),
+    x.fixable && S.EDITING ? h('button', { class: 'pillbtn small', onclick: (e) => repair([x.photo], e.currentTarget) }, 'Repair') : null);
+  fill(body,
+    h('div', { class: 'toolbar', style: 'margin:6px 0 14px;flex-wrap:wrap;gap:8px' }, h('span', null, status),
+      p.running ? null : h('button', { class: 'pillbtn on', onclick: run(false) }, icon('spark'), d.checked < d.total ? 'Check the files' : 'Check new files'),
+      p.running ? null : h('button', { class: 'pillbtn', onclick: run(true) }, 'Check everything again'),
+      fixable.length > 1 && S.EDITING ? h('button', { class: 'pillbtn', onclick: (e) => repair(fixable.map((x) => x.photo), e.currentTarget) }, `Repair all ${nf.format(fixable.length)}`) : null),
+    !d.jpegtran ? h('div', { class: 'enote' }, 'jpegtran is not installed on the server, so a JPEG missing its end marker cannot be checked for completeness or repaired (see Maintenance › Lossless JPEG edits).') : null,
+    d.found.length ? h('div', { class: 'hlist' }, d.found.map(row)) : null);
+  if (p.running) damagedTimer = setTimeout(() => { if (S.route.view === 'damaged' && body.isConnected) showDamaged(); }, 4000);
+}
+
 export async function showQuality() {
   clearTimeout(qualityTimer);
   document.body.classList.remove('cbulk-open');  // the ticked photos' bar of a report drawn before

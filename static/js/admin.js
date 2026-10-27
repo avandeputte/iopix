@@ -761,6 +761,13 @@ export async function settingsPage(view) {
         + (q.invalid.count ? `${plural(q.invalid.count, 'box is', 'boxes are')} outside the photo or empty.` : ''))).catch(() => fill(line, ''));
       return row('Metadata quality', h('span', null, line, ' Photos without a location, with an implausible date or in a folder for another date; duplicate faces, the same person twice, and boxes outside the photo.'), h('a', { class: 'pillbtn on', href: '#/quality' }, 'Open'));
     })(),
+    (() => {  // damaged files, summarized in one line; the page has the list and the repair
+      const line = h('span', null, '');
+      api('/api/filecheck').then((d) => fill(line, d.progress.running ? `Checking… ${nf.format(d.progress.done)} / ${nf.format(d.progress.total)} files. `
+        : !d.checked ? 'Not checked yet. ' : d.found.length ? `${plural(d.found.length, 'damaged file')} found (${nf.format(d.found.filter((x) => x.fixable).length)} repairable). ` : 'Nothing damaged found. ')).catch(() => fill(line, ''));
+      return row('Damaged files', h('span', null, line, 'Every file read and checked: JPEGs that stop early or lack their end marker, damaged PNGs, pictures that cannot be decoded; a safe repair where there is one.'),
+        h('a', { class: 'pillbtn on', href: '#/damaged' }, 'Open'));
+    })(),
     S.EDITING ? row('Edits waiting for digiKam', m.pendingEdits ? `${plural(m.pendingEdits, 'photo has', 'photos have')} edits saved in sidecars that digiKam’s database does not have yet. digiKam is ${m.digikamRunning ? 'running, so they cannot be applied right now' : 'closed, so they can be applied now'}.` : 'None. digiKam’s database and the sidecars agree.',
       m.pendingEdits ? btn('Apply to digiKam database…', dbDialog, !m.digikamRunning) : null) : null,
     row('Tag cover photos', 'The photo shown for each tag is chosen by the content model. Pick them again after big tagging changes.', btn('Pick again', () => act('covers', 'Choosing tag covers in the background.'))),

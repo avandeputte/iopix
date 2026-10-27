@@ -2453,5 +2453,8 @@ def test_date_suggestions_and_quality_pages_render(page, server, lib):
     assert "Date unknown" in page.inner_text(".intro")
     page.goto(server + "/#/bursts")
     page.wait_for_selector("h1.ptitle:has-text('Bursts')", timeout=10000)
+    page.goto(server + "/#/damaged")
+    page.wait_for_selector("h1.ptitle:has-text('Damaged files')", timeout=10000)
+    page.wait_for_selector("button:has-text('Check')", timeout=10000)
     page.goto(server + "/#/photos?rejects=1")
     page.wait_for_selector("#chips :text('Likely rejects')", timeout=10000)
