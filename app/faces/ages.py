@@ -262,26 +262,34 @@ def calibrate(points: list, birth=None) -> dict:
             res = ys - (c0 + c1 * xs)
             sd = max(1.0, 1.4826 * float(np.median(np.abs(res - np.median(res)))))
             return {"c0": c0, "c1": c1, "sd": sd, "n": n, "basis": "fit", "birth": birth if birth else round(float(np.median(ys - xs))),
-                    "amin": float(xs.min()), "amax": float(xs.max())}
+                    "entered": bool(birth), "amin": float(xs.min()), "amax": float(xs.max())}
     if n >= 3 and not birth:
         off = [y - a for y, a in points]
         c0 = float(np.median(off))
         sd = max(1.5, 1.4826 * float(np.median([abs(o - c0) for o in off])))
-        return {"c0": c0, "c1": 1.0, "sd": sd, "n": n, "basis": "dated", "birth": round(c0)}
+        return {"c0": c0, "c1": 1.0, "sd": sd, "n": n, "basis": "dated", "birth": round(c0), "entered": False}
     if birth:
-        return {"c0": float(birth), "c1": 1.0, "sd": 4.0, "n": n, "basis": "entered", "birth": birth}
+        return {"c0": float(birth), "c1": 1.0, "sd": 4.0, "n": n, "basis": "entered", "birth": birth, "entered": True}
     return None
 
 
 def year_for(c: dict, age: float) -> tuple:
     """(year, uncertainty) for one face of a calibrated person. Beyond the ages the line was fitted on (a
-    childhood scan of someone photographed only as an adult) the line's slope is not trusted: a year per
-    year of age from the nearest end, and the uncertainty grows with the distance."""
+    childhood scan of someone photographed only as an adult) the line's slope is not trusted: younger than
+    that, an entered birth year anchors it (birth + age); otherwise a year per year of age from the nearest
+    end, and the uncertainty grows with the distance. Never before the person was born: an entered birth
+    year is a hard floor, the birth year the photos imply a soft one (two years of slack)."""
     lo, hi = c.get("amin"), c.get("amax")
     if lo is None or lo <= age <= hi:
-        return c["c0"] + c["c1"] * age, c["sd"]
-    edge = lo if age < lo else hi
-    return c["c0"] + c["c1"] * edge + (age - edge), c["sd"] + 0.2 * abs(age - edge)
+        year, sd = c["c0"] + c["c1"] * age, c["sd"]
+    elif age < lo and c.get("entered") and c["basis"] == "fit":
+        year, sd = c["birth"] + age, max(c["sd"], 2.0) + 0.1 * (lo - age)
+    else:
+        edge = lo if age < lo else hi
+        year, sd = c["c0"] + c["c1"] * edge + (age - edge), c["sd"] + 0.2 * abs(age - edge)
+    if c.get("birth") is not None:
+        year = max(year, c["birth"] if c.get("entered") else c["birth"] - 2)
+    return year, sd
 
 
 def suggestions(ids: list = None) -> dict:
@@ -317,7 +325,8 @@ def suggestions(ids: list = None) -> dict:
         if c is None or age is None:
             continue
         yr, sd = year_for(c, age)
-        per_photo.setdefault(pid, []).append({"tag": tag, "name": names.get(tag, ""), "age": round(age), "year": yr, "sd": sd})
+        per_photo.setdefault(pid, []).append({"tag": tag, "name": names.get(tag, ""), "age": round(age), "year": yr, "sd": sd,
+                                              "floor": c["birth"] if c.get("entered") else None})
     items = []
     for pid, est in per_photo.items():
         w = [1 / (e["sd"] ** 2) for e in est]
@@ -325,8 +334,13 @@ def suggestions(ids: list = None) -> dict:
         sd = max(1.0, 1 / math.sqrt(sum(w)))
         spread = max(e["year"] for e in est) - min(e["year"] for e in est)
         half = max(1, round(max(1.5 * sd, spread / 2)))
+        floor = max([e["floor"] for e in est if e["floor"] is not None], default=None)  # nobody before their entered birth year
         year = min(this_year, round(mean))
-        items.append({"id": pid, "year": year, "lo": year - half, "hi": min(this_year, year + half),
+        lo = year - half
+        hi = min(this_year, year + half)
+        if floor is not None and lo < floor:  # pushed up by a birth year: the range moves up with it, as wide as before
+            year, lo, hi = max(year, floor), floor, min(this_year, floor + (hi - lo))
+        items.append({"id": pid, "year": year, "lo": lo, "hi": max(year, hi),
                       "people": [{"tag": e["tag"], "name": e["name"], "age": e["age"], "year": round(e["year"])} for e in sorted(est, key=lambda e: e["name"])]})
     items.sort(key=lambda i: (i["hi"] - i["lo"], -len(i["people"]), i["id"]))
     people = [{"tag": t, "name": names.get(t, ""), "birth": c["birth"] if c else entered.get(t), "entered": t in entered,

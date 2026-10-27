@@ -23,7 +23,7 @@ def test_calibration_per_person():
     few = ages.calibrate([(2000, 30), (2001, 31.5), (2003, 32)])
     assert few["basis"] == "dated" and few["c1"] == 1.0 and abs(few["c0"] - 1970) <= 1
     assert ages.calibrate([(2000, 30), (2001, 31.5), (2003, 32)], birth=1968)["basis"] == "entered"  # an entered year beats three photos
-    assert ages.calibrate([(2000, 30)], birth=1968) == {"c0": 1968.0, "c1": 1.0, "sd": 4.0, "n": 1, "basis": "entered", "birth": 1968}
+    assert ages.calibrate([(2000, 30)], birth=1968) == {"c0": 1968.0, "c1": 1.0, "sd": 4.0, "n": 1, "basis": "entered", "birth": 1968, "entered": True}
     assert ages.calibrate([(2000, 30)]) is None
     assert ages.calibrate(pts, birth=2003)["basis"] == "fit"
     # beyond the fitted ages: a year per year from the nearest end, and a wider range
@@ -99,3 +99,33 @@ def test_birth_years_and_the_suggestions_endpoint(client, lib):
     assert {"total", "items", "people", "ready", "faces"} <= set(d)
     assert client.post("/api/people/birth", json={"tag": tag, "year": None}).json()["ok"]
     assert tag not in ages.births()
+
+
+
+def test_an_entered_birth_year_bounds_and_anchors_the_suggestion():
+    """Someone photographed (with dates) only as an adult, whose model ages run young: a childhood scan must
+    not come out before they were born once their birth year is entered, and is anchored on it."""
+    born = 1971
+    pts = [(y, (y - born) * 0.7 + 2) for y in np.linspace(1995, 2025, 30)]  # adult photos, slope steeper than 1
+    free = ages.calibrate(pts)
+    assert free["basis"] == "fit" and free["amin"] > 10
+    known = ages.calibrate(pts, birth=born)
+    assert known["entered"] and known["birth"] == born
+    year, _ = ages.year_for(known, 4.0)  # looks four in an undated scan
+    assert year == born + 4
+    for age in (0.0, 1.0, 2.0):
+        assert ages.year_for(known, age)[0] >= born
+    # without the entered year the line's own birth estimate is a soft floor (two years of slack)
+    assert ages.year_for(free, 0.0)[0] >= free["birth"] - 2
+    # in the fitted range the photos decide, still never before the entered birth year
+    assert ages.year_for(known, 20.0)[0] >= born
+
+
+def test_the_photo_range_never_starts_before_an_entered_birth(tmp_path, monkeypatch):
+    p = _index(tmp_path)
+    monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
+    stored = {(2, 100, 100, 200, 200): 1.0}  # Cy looks one year old
+    monkeypatch.setattr(ages, "_ages", lambda: stored)
+    monkeypatch.setattr(ages, "births", lambda: {12: 1960})
+    item = {i["id"]: i for i in ages.suggestions()["items"]}[2]
+    assert item["lo"] >= 1960 and item["year"] >= 1960 and item["hi"] - item["lo"] >= 4  # moved up, not narrowed
