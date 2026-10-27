@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 
 try:
     import pillow_heif
@@ -25,6 +25,9 @@ except Exception:  # HEIC files will fall back to a placeholder
 
 from app import config
 
+# a JPEG that ends early (some phones' burst frames lack the closing FFD9 marker, an interrupted copy) decodes as far as
+# its data goes instead of failing: everything that reads pictures (thumbnails, previews, analysis) imports this module
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = 400_000_000  # a 400 MP panorama decodes; twice that is refused rather than eating the server's memory
 FFMPEG = shutil.which("ffmpeg")
 # camera raw files (folders.IMAGE_EXT): Pillow cannot decode them, the JPEG preview they carry is shown instead
