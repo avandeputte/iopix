@@ -199,12 +199,15 @@ def test_require_login_locks_everything_but_the_sign_in(client, fresh, lib):
         assert client.get(f"/face/{people[0]['id']}").status_code != 401
         assert client.get(f"/face/{people[1]['id']}").status_code == 401
     client.cookies.clear()
+    from app.data import state as _st
+    _st.set_setting("mcp_enabled", "1")  # the endpoint itself is off by default
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers={"accept": "application/json, text/event-stream"})
     assert r.status_code == 401, "MCP needs the admin token as a bearer header"
     from app import updates
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
                     headers={"accept": "application/json, text/event-stream", "authorization": "Bearer " + updates.admin_token()})
     assert r.status_code == 200
+    _st.set_setting("mcp_enabled", "0")
     # signed in again: everything is back
     _login(client, "alex", "correct horse")
     assert client.get("/api/meta").status_code == 200

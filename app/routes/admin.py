@@ -64,7 +64,7 @@ router = APIRouter()
 # --------------------------------------------------------------------------
 
 def _settings_public() -> dict:
-    return {"write_files": edits.writes_files(), "search_model": semantic.chosen(), **{g: dlmodels.chosen(g) for g in ("face_detector", "object_model", "caption_model", "face_vectors")}, "bg_threads": bgjobs.threads(), "read_only": appstate.read_only(), "require_login": users.require_login(), "update_check": updates.auto_check_enabled(), "update_check_locked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "digikam_sync": index.sync_enabled(), "app_name": appstate.get_setting("app_name", ""), "database": _db_settings_public(), "album_roots": dkdb.root_overrides(), "map_provider": appstate.get_setting("map_provider", "osm"), "google_maps_key_set": bool(maps.key()), "templates": json.loads(appstate.get_setting("templates", "[]"))}
+    return {"write_files": edits.writes_files(), "search_model": semantic.chosen(), **{g: dlmodels.chosen(g) for g in ("face_detector", "object_model", "caption_model", "face_vectors")}, "bg_threads": bgjobs.threads(), "read_only": appstate.read_only(), "require_login": users.require_login(), "mcp_enabled": appstate.get_setting("mcp_enabled", "0") == "1", "update_check": updates.auto_check_enabled(), "update_check_locked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "digikam_sync": index.sync_enabled(), "app_name": appstate.get_setting("app_name", ""), "database": _db_settings_public(), "album_roots": dkdb.root_overrides(), "map_provider": appstate.get_setting("map_provider", "osm"), "google_maps_key_set": bool(maps.key()), "templates": json.loads(appstate.get_setting("templates", "[]"))}
 
 
 @router.get("/api/settings")
@@ -144,6 +144,8 @@ async def api_settings(request: Request):
         if body["digikam_sync"]:
             index.offline.update(since=None, error=None)
         _kick.set()
+    if "mcp_enabled" in body:  # the MCP endpoint at /mcp (off by default)
+        appstate.set_setting("mcp_enabled", "1" if body["mcp_enabled"] else "0")
     if "require_login" in body:  # visitors get the sign-in screen and nothing else
         if body["require_login"] and not users.any_users():
             raise HTTPException(400, "Create an account first, or nobody could sign in")
@@ -684,7 +686,8 @@ async def api_update_run(request: Request):
             raise HTTPException(409, str(e))
         return {"ok": True}
     if action == "token":  # admin: the MCP update token (shown once here, never in /api/update)
-        return {"token": updates.admin_token(), "fromEnv": bool(os.environ.get("MCP_ADMIN_TOKEN"))}
+        from app.main import mcp_enabled
+        return {"token": updates.admin_token(), "fromEnv": bool(os.environ.get("MCP_ADMIN_TOKEN")), "mcpEnabled": mcp_enabled()}
     if action == "regenerate_token":
         if os.environ.get("MCP_ADMIN_TOKEN"):
             raise HTTPException(400, "The token comes from MCP_ADMIN_TOKEN in the environment; change it there")
@@ -737,6 +740,7 @@ def api_maintenance(request: Request):
             "embeddings": sum(e.file.stat().st_size for e in semantic.engines.values() if e.file.exists()),
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
+        "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": os.environ.get("MCP", "").strip() == "1",
         "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": _db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "")), "sidecarCompat": edits.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),

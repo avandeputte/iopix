@@ -7,6 +7,7 @@ writes."""
 import json
 import logging
 import threading
+import os
 import time
 from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
@@ -96,6 +97,13 @@ def _open_to_visitors(path: str) -> bool:
     return path in OPEN_PATHS or path.startswith(OPEN_PREFIXES)
 
 
+def mcp_enabled() -> bool:
+    """Settings › Viewer › MCP server: off unless an admin turns it on (or MCP=1 in the environment)."""
+    if os.environ.get("MCP", "").strip() == "1":
+        return True
+    return appstate.get_setting("mcp_enabled", "0") == "1"
+
+
 def _mcp_token_ok(request: Request) -> bool:
     """With sign-in required, the MCP endpoint needs the admin token as a bearer header."""
     auth = request.headers.get("authorization", "")
@@ -142,6 +150,8 @@ async def _auth_guard(request: Request, call_next):
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner
     if request.url.path.startswith("/mcp"):
+        if not mcp_enabled():  # switched off (the default): as if there were no such endpoint
+            return JSONResponse({"detail": "The MCP server is switched off (Settings › Viewer › MCP server)."}, status_code=404)
         mcp_server.token_given.set(_mcp_token_ok(request))  # answers with file paths only for the token holder
     if user is None and users.require_login():
         path = request.url.path

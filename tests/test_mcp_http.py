@@ -2,7 +2,29 @@
 (initialize, tools/list, a tool call) on the viewer's own port, read-only, without sign-in."""
 import json
 
+import pytest
+
 HEADERS = {"content-type": "application/json", "accept": "application/json, text/event-stream"}
+
+
+@pytest.fixture(autouse=True)
+def _mcp_on():
+    """The endpoint is off by default (Settings › MCP server); these tests switch it on."""
+    from app.data import state
+    state.set_setting("mcp_enabled", "1")
+    yield
+    state.set_setting("mcp_enabled", "0")
+
+
+def test_the_endpoint_is_off_until_switched_on(client):
+    from app.data import state
+    state.set_setting("mcp_enabled", "0")
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=HEADERS)
+    assert r.status_code == 404 and "switched off" in r.json()["detail"]
+    assert client.get("/api/settings").json()["mcp_enabled"] is False
+    assert client.post("/api/settings", json={"mcp_enabled": True}).status_code == 200
+    assert client.get("/api/settings").json()["mcp_enabled"] is True
+    assert _rpc(client, "tools/list")["result"]["tools"]
 
 
 def _rpc(client, method, params=None, id=1):
