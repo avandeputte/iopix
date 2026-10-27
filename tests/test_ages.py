@@ -129,3 +129,37 @@ def test_the_photo_range_never_starts_before_an_entered_birth(tmp_path, monkeypa
     monkeypatch.setattr(ages, "births", lambda: {12: 1960})
     item = {i["id"]: i for i in ages.suggestions()["items"]}[2]
     assert item["lo"] >= 1960 and item["year"] >= 1960 and item["hi"] - item["lo"] >= 4  # moved up, not narrowed
+
+
+def test_used_suggestions_feed_back_but_exact_dates_dominate():
+    exact = [(y, y - 1980.0) for y in range(1990, 2010, 2)]           # ten exact photos: born 1980
+    approx = [(y + 0.5, y - 1990.0, ages.APPROX_WEIGHT) for y in range(2000, 2005)]  # five year-only ones saying 1990
+    c = ages.calibrate(exact + approx)
+    assert c["n"] == 15 and abs(c["birth"] - 1980) <= 1  # the exact dates decide
+    # approximately dated photos alone count for little: three of them are not enough to say anything
+    assert ages.calibrate([(y + 0.5, y - 1990.0, ages.APPROX_WEIGHT) for y in range(2000, 2003)]) is None
+    few = ages.calibrate([(y + 0.5, y - 1990.0, ages.APPROX_WEIGHT) for y in range(2000, 2010)])
+    assert few["basis"] == "dated" and abs(few["birth"] - 1990) <= 1
+
+
+def test_a_year_only_photo_counts_in_the_calibration(tmp_path, monkeypatch):
+    p = _index(tmp_path)
+    con = sqlite3.connect(p)  # Cy (no exactly dated photos) on ten photos dated to the year only, 1980-1989
+    for k, year in enumerate(range(1980, 1990)):
+        pid = 500 + k
+        con.execute("INSERT INTO photos VALUES (?,?,?,?,?,?,?,?)", (pid, f"/p/{pid}.jpg", 4000, 3000, int((year - 1970) * 31557600), year, 2, 0))
+        con.execute("INSERT INTO faces VALUES (?,?,?,?,?,?,?)", (pid, 12, 100, 100, 200, 200, "confirmed"))
+    con.commit()
+    con.close()
+    monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
+    stored = {(500 + k, 100, 100, 200, 200): year + 0.5 - 1960 for k, year in enumerate(range(1980, 1990))}
+    stored[(2, 100, 100, 200, 200)] = 25.0  # Cy looks 25 in the undated photo: about 1985
+    monkeypatch.setattr(ages, "_ages", lambda: stored)
+    monkeypatch.setattr(ages, "births", lambda: {})
+    out = ages.suggestions()
+    cy = {x["name"]: x for x in out["people"]}["Cy"]
+    assert cy["basis"] == "dated" and abs(cy["birth"] - 1960) <= 1
+    assert {i["id"]: i for i in out["items"]}[2]["year"] == 1985
+    con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+    assert any(r[0] == 505 for r in ages._wanted(con))  # their faces get ages estimated too
+    con.close()

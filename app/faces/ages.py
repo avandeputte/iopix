@@ -34,6 +34,8 @@ STD = (0.229, 0.224, 0.225)
 MIN_FACE = 48          # pixels (full size): smaller faces say too little about age
 PER_PERSON = 60        # dated faces sampled per person, spread over the years
 FIRST_REAL_YEAR = 1972  # 1970/1974 hold placeholder dates in many libraries; older dated photos are rarely dated right
+APPROX_WEIGHT = 0.3     # a photo dated to the year or month (often from a suggestion that was used) counts this much
+                        # next to an exactly dated one, so used suggestions refine later ones without confirming themselves
 progress = {"running": False, "done": 0, "total": 0}
 _run = {"gen": 0}
 _lock = threading.Lock()
@@ -96,7 +98,8 @@ def estimate(face_crops: list) -> list:
 
 def _wanted(con) -> list:
     """[(photo id, path, w, h, x, y, fw, fh)]: every named face in a photo whose date is unknown, and for each
-    person among them up to PER_PERSON of their faces in dated photos, spread evenly over the years."""
+    person among them up to PER_PERSON of their faces in exactly dated photos, spread evenly over the years,
+    plus all their faces in photos dated to the year or month (approximate dates count in the calibration)."""
     undated = con.execute(
         "SELECT f.photo_id, p.path, p.w, p.h, f.x, f.y, f.w, f.h, f.tag_id FROM faces f JOIN photos p ON p.id = f.photo_id "
         "WHERE f.kind = 'confirmed' AND p.dprec = 3 AND p.video = 0 AND f.w >= ? AND f.h >= ?", (MIN_FACE, MIN_FACE)).fetchall()
@@ -110,6 +113,10 @@ def _wanted(con) -> list:
             step = len(dated) / PER_PERSON
             dated = [dated[int(i * step)] for i in range(PER_PERSON)]
         out += dated
+        out += con.execute(
+            "SELECT f.photo_id, p.path, p.w, p.h, f.x, f.y, f.w, f.h FROM faces f JOIN photos p ON p.id = f.photo_id "
+            "WHERE f.kind = 'confirmed' AND f.tag_id = ? AND p.dprec IN (1, 2) AND p.video = 0 AND f.w >= ? AND f.h >= ?",
+            (tag, MIN_FACE, MIN_FACE)).fetchall()
     seen, uniq = set(), []
     for r in out:
         k = (r[0], r[4], r[5], r[6], r[7])
@@ -246,27 +253,39 @@ def _ages() -> dict:
         con.close()
 
 
+def _wmedian(values, weights) -> float:
+    order = np.argsort(values)
+    v, w = np.asarray(values, float)[order], np.asarray(weights, float)[order]
+    c = np.cumsum(w)
+    return float(v[np.searchsorted(c, c[-1] / 2)])
+
+
 def calibrate(points: list, birth=None) -> dict:
-    """points: [(year the photo was taken, estimated age)] of one person's dated faces. Returns
-    {c0, c1, sd, n, basis, birth} with year = c0 + c1 * estimated age, or None when nothing can be said:
+    """points: [(year the photo was taken, estimated age[, weight])] of one person's dated faces (weight 1 for an
+    exact date, APPROX_WEIGHT for a year or month). Returns {c0, c1, sd, n, basis, birth, entered} with
+    year = c0 + c1 * estimated age, or None when nothing can be said; counts are weighted, so a handful of
+    approximately dated photos cannot make a line on their own:
       fit     eight or more photos over at least four years: a straight line, its slope kept within 0.6-1.8
       dated   three or more: slope 1, the median offset (their birth year as the model sees them)
       entered the birth year the user gave, when there are too few dated photos for a line (it beats an offset
               from a handful of photos)."""
+    points = [(p[0], p[1], p[2] if len(p) > 2 else 1.0) for p in points]
     n = len(points)
-    if n >= 8 and max(p[0] for p in points) - min(p[0] for p in points) >= 4:
-        ys, xs = np.array([p[0] for p in points], float), np.array([p[1] for p in points], float)
+    weight = sum(p[2] for p in points) + 1e-9  # (ten photos at 0.3 must reach 3)
+    if weight >= 8 and max(p[0] for p in points) - min(p[0] for p in points) >= 4:
+        ys, xs, ws = (np.array([p[i] for p in points], float) for i in range(3))
         if xs.std() > 1e-6:
-            c1 = float(np.clip(np.polyfit(xs, ys, 1)[0], 0.6, 1.8))
-            c0 = float(np.median(ys - c1 * xs))
+            c1 = float(np.clip(np.polyfit(xs, ys, 1, w=np.sqrt(ws))[0], 0.6, 1.8))
+            c0 = _wmedian(ys - c1 * xs, ws)
             res = ys - (c0 + c1 * xs)
-            sd = max(1.0, 1.4826 * float(np.median(np.abs(res - np.median(res)))))
-            return {"c0": c0, "c1": c1, "sd": sd, "n": n, "basis": "fit", "birth": birth if birth else round(float(np.median(ys - xs))),
+            sd = max(1.0, 1.4826 * _wmedian(np.abs(res - _wmedian(res, ws)), ws))
+            return {"c0": c0, "c1": c1, "sd": sd, "n": n, "basis": "fit", "birth": birth if birth else round(_wmedian(ys - xs, ws)),
                     "entered": bool(birth), "amin": float(xs.min()), "amax": float(xs.max())}
-    if n >= 3 and not birth:
-        off = [y - a for y, a in points]
-        c0 = float(np.median(off))
-        sd = max(1.5, 1.4826 * float(np.median([abs(o - c0) for o in off])))
+    if weight >= 3 and not birth:
+        off = [y - a for y, a, _w in points]
+        ws = [w for _y, _a, w in points]
+        c0 = _wmedian(off, ws)
+        sd = max(1.5, 1.4826 * _wmedian([abs(o - c0) for o in off], ws))
         return {"c0": c0, "c1": 1.0, "sd": sd, "n": n, "basis": "dated", "birth": round(c0), "entered": False}
     if birth:
         return {"c0": float(birth), "c1": 1.0, "sd": 4.0, "n": n, "basis": "entered", "birth": birth, "entered": True}
@@ -311,9 +330,11 @@ def suggestions(ids: list = None) -> dict:
         tags = sorted({r[1] for r in undated})
         cal = {}
         for tag in tags:
-            pts = [(ts / 31557600 + 1970, ages[(pid, x, y, w, h)]) for pid, x, y, w, h, ts in con.execute(
-                "SELECT f.photo_id, f.x, f.y, f.w, f.h, p.ts FROM faces f JOIN photos p ON p.id = f.photo_id "
-                "WHERE f.kind = 'confirmed' AND f.tag_id = ? AND p.dprec IS NULL AND p.year >= ?", (tag, FIRST_REAL_YEAR))
+            # exact dates, and (weighted down) dates known to the month (placed mid-month) or year (mid-year)
+            pts = [(ts / 31557600 + 1970 + {1: 15 / 365.25, 2: 0.5}.get(dprec, 0.0), ages[(pid, x, y, w, h)], APPROX_WEIGHT if dprec else 1.0)
+                   for pid, x, y, w, h, ts, dprec in con.execute(
+                "SELECT f.photo_id, f.x, f.y, f.w, f.h, p.ts, p.dprec FROM faces f JOIN photos p ON p.id = f.photo_id "
+                "WHERE f.kind = 'confirmed' AND f.tag_id = ? AND ((p.dprec IS NULL AND p.year >= ?) OR p.dprec IN (1, 2))", (tag, FIRST_REAL_YEAR))
                 if (pid, x, y, w, h) in ages]
             cal[tag] = calibrate(pts, entered.get(tag))
     finally:
