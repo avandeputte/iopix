@@ -425,7 +425,6 @@ def _layout_or_pattern(layout: str, pattern: str):
     """What an import request asks for: a layout key, or (for apps) a folder pattern of its own; ValueError when the
     pattern is not usable."""
     if pattern:
-        from app.photos import importer
         return importer.check_pattern(pattern)
     return layout if layout in importer.LAYOUTS else None
 

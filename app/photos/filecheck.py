@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 from app import core, jobs, thumbs
 from app.data import vdb
@@ -272,7 +273,7 @@ def _done() -> dict:
 def _job(gen: int, photos: list):
     have = _done()
     todo = [p for p in photos if have.get(p["id"], (None,))[0] != _stamp(p)]
-    progress.start(len(todo), found=0)
+    progress.update(running=True, done=0, total=len(todo), found=0, started=int(time.time()), finished=None)  # the generation was taken at submit time
     try:
         for todo_batch in chunked(todo, 50):
             if progress.cancelled(gen):
@@ -289,7 +290,7 @@ def _job(gen: int, photos: list):
                 con.executemany(f"INSERT OR REPLACE INTO ai_scans VALUES (?,'{JOB}',?,?)", rows)
             progress.step(len(todo_batch))
     finally:
-        progress.finish()
+        progress.finish(gen)
 
 
 def start(redo: bool = False) -> int:
