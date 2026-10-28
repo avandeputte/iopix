@@ -39,11 +39,10 @@ KINDS = ("unknown", "suggested")
 THRESHOLDS = {"sface": (0.45, 0.40), "arcface": (0.40, 0.35)}
 DIMS = {"sface": 128, "arcface": 512}
 PROTOS_PER_PERSON = 12  # the most recent confirmed faces of each person become their prototypes
-progress = {"running": False, "done": 0, "total": 0}
+progress = jobs.Progress("faces")
 _lock = threading.Lock()
 _session = None
 _session_path = None
-_run = {"gen": 0}
 
 
 def chosen() -> str:
@@ -216,8 +215,7 @@ def start():
     """Embed the undecided faces that have no vector yet, and drop vectors of faces since decided."""
     if not config.ANALYSIS or not available():
         return
-    _run["gen"] += 1
-    gen = _run["gen"]
+    gen = progress.cancel()
     jobs.submit("faces", lambda: _job(gen))
 
 
@@ -226,7 +224,7 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
     tagged = table == "ai_person_references"
     done = 0
     for todo_batch in chunked(todo, 32):
-        if gen != _run["gen"]:
+        if progress.cancelled(gen):
             return False
         batch, paths = [], []
         for row in todo_batch:
@@ -244,7 +242,7 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
             except Exception as e:
                 log.warning("faces: embedding failed (%s)", e)
                 continue
-            if gen != _run["gen"]:  # a switch or reset happened while this batch was computed: its vectors are not kept
+            if progress.cancelled(gen):  # a switch or reset happened while this batch was computed: its vectors are not kept
                 return False
             with vdb.writer() as con:
                 if tagged:
@@ -287,7 +285,7 @@ def _job(gen: int):
     have, have_p = _have(), _have_protos()
     todo = [f for f in faces if (f[0], f[1], f[2], f[3], f[4]) not in have]
     todo_p = [f for f in protos if (f[1], f[2], f[3], f[4], f[5]) not in have_p or have_p[(f[1], f[2], f[3], f[4], f[5])] != f[0]]
-    progress.update(running=True, done=0, total=len(todo) + len(todo_p))
+    progress.update(running=True, done=0, total=len(todo) + len(todo_p))  # the generation was taken at submit time
     try:
         if not _embed_into(gen, todo_p, "ai_person_references", 0, kind, sess):  # the prototypes first: they make the suggestions possible
             return
@@ -305,11 +303,11 @@ def _job(gen: int):
                 if stale_p:
                     con.executemany("DELETE FROM ai_person_references WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale_p)
     finally:
-        progress["running"] = False
+        progress.finish()
 
 
 def reset():
-    _run["gen"] += 1
+    progress.cancel()
     with vdb.writer() as con:
         con.execute("DELETE FROM ai_face_embeddings")
         con.execute("DELETE FROM ai_person_references")

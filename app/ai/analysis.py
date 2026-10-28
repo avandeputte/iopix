@@ -39,7 +39,7 @@ except ImportError:  # numpy comes with the optional AI features; without it the
 
 log = logging.getLogger(__name__)
 JOBS = ("quality", "vision", "objects", "captions", "looks")
-progress = {key: {"running": False, "done": 0, "total": 0} for key in JOBS}
+progress = {key: jobs.Progress(f"analysis:{key}") for key in JOBS}
 _run = {"gen": 0}
 _ocr = None  # the OCR engine once loaded, False when none could be loaded
 on_progress = None  # set by the web app: called now and then so the index picks up new results

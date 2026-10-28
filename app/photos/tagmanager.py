@@ -20,6 +20,7 @@ import threading
 import time
 from pathlib import Path
 
+from app import jobs
 from app.digikam import dbsync, dkdb
 from app.photos import edits
 from app.data import state as appstate
@@ -29,7 +30,7 @@ from app.faces import facemgr
 OPS_BACKUP_DIR = edits.BACKUP_DIR / "tag-ops"
 KEEP_OPS = 8
 SPECIAL_PROPS = {"internalTag", "unknownPerson", "ignoredPerson", "unconfirmedPerson"}
-progress = {"running": False, "done": 0, "total": 0}
+progress = jobs.Progress("tagjobs")
 _worker_lock = threading.Lock()
 
 
@@ -416,9 +417,8 @@ def start_worker():
 
     def run():
         try:
-            progress.pop("error", None)  # the outcome of the previous run, not this one
-            progress.pop("failed", None)
-            progress.update(running=True, done=0, total=pending_jobs())
+            progress.pop("failed", None)  # the outcome of the previous run, not this one
+            progress.start(pending_jobs())
             while True:
                 con = appstate.connect()
                 try:
@@ -432,15 +432,15 @@ def start_worker():
                 try:
                     _run_group(first[0], [(r[2], r[1]) for r in rows])
                 except Exception as e:  # leave the rows queued; they are retried on the next start
-                    progress["error"] = str(e)
+                    progress.fail(e)
                     break
                 appstate.write(lambda c: c.executemany("DELETE FROM tag_rewrite_queue WHERE id = ?", [(r[0],) for r in rows]))
-                progress["done"] += len(rows)
+                progress.step(len(rows))
             if OPS_BACKUP_DIR.exists():
                 for old in sorted(p for p in OPS_BACKUP_DIR.iterdir() if p.is_dir())[:-KEEP_OPS]:
                     shutil.rmtree(old, ignore_errors=True)
         finally:
-            progress["running"] = False
+            progress.finish()
             _worker_lock.release()
 
     threading.Thread(target=run, name="tag-sidecars", daemon=True).start()

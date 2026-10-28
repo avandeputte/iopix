@@ -28,6 +28,60 @@ _started = None      # when it started
 _thread = None
 _last_submit = 0.0  # jobs submitted close together (a start, a library change) are picked in ORDER, not arrival order
 GRACE = 3.0
+_progress = {}       # name -> Progress, every background job that reports one
+
+
+class Progress(dict):
+    """What one background job reports: running, done, total, error and the job's own fields (added, found...).
+    A dict, so the status endpoints serialise it as before; the methods keep the bookkeeping in one place.
+
+    A run is `gen = progress.start(total, ...)`, `progress.step(n)` per batch, `progress.fail(e)` on an error and
+    `progress.finish(gen)` at the end. `start()` and `cancel()` move the generation on, and a job checks
+    `progress.cancelled(gen)` between batches, so a reset or a newer run stops the old one at its next batch.
+    When the job keeps `started` or `finished` times, start() and finish() set them."""
+
+    def __init__(self, name: str, **fields):
+        super().__init__({"running": False, "done": 0, "total": 0, "error": None, **fields})
+        self.name, self.gen = name, 0
+        self._times = {k for k in ("started", "finished") if k in self}
+        _progress[name] = self
+
+    def start(self, total: int = 0, **fields) -> int:
+        self.gen += 1
+        self.update(running=True, done=0, total=total, error=None)
+        if "started" in self._times:
+            self["started"] = int(time.time())
+        if "finished" in self._times:
+            self["finished"] = None
+        self.update(fields)
+        return self.gen
+
+    def step(self, n: int = 1):
+        self["done"] += n
+
+    def fail(self, e):
+        self["error"] = (e if isinstance(e, str) else str(e))[:300]
+
+    def finish(self, gen: int = None):
+        """The run is over; with `gen`, only if no newer run has replaced it (that one reports its own end)."""
+        if gen is not None and gen != self.gen:
+            return
+        self["running"] = False
+        if "finished" in self._times:
+            self["finished"] = int(time.time())
+
+    def cancel(self) -> int:
+        """Stop the running job at its next batch (a reset, a model switch). Returns the new generation."""
+        self.gen += 1
+        return self.gen
+
+    def cancelled(self, gen: int) -> bool:
+        return gen != self.gen
+
+
+def progress_all() -> dict:
+    """Every job's progress, by name: one shape for a status page to render."""
+    return {name: dict(p) for name, p in _progress.items()}
 
 
 def threads() -> int:

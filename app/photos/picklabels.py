@@ -13,15 +13,15 @@ this removes the chosen ones, on request (Maintenance › Library), in one go:
 import logging
 import re
 import threading
-import time
 
+from app import jobs
 from app.digikam import dbsync, dkdb
 from app.data import index
 from app.photos import edits, history
 
 log = logging.getLogger("app.photos.picklabels")
 LEVELS = {1: "Rejected", 2: "Pending", 3: "Accepted"}
-progress = {"running": False, "done": 0, "total": 0, "cleared": 0, "sidecars": 0, "finished": None, "error": None}
+progress = jobs.Progress("picklabels", cleared=0, sidecars=0, finished=None)
 _SIDECAR_PICK = re.compile(r'(?:digiKam:PickLabel|xmpDM:Pick|xmpDM:Good)\s*=\s*"[^"]+"|<(?:digiKam:PickLabel|xmpDM:Pick|xmpDM:Good)>')
 
 
@@ -61,7 +61,7 @@ def clear(levels: list, check_running: bool = True, after=None) -> int:
     paths = dict(dbsync.photo_paths([i for i, _lv in photos]))
     history.record([{"photo_id": i, "action": "edit", "summary": f"Pick label {LEVELS[lv]} cleared (Maintenance › Clear pick labels)",
                      "path": paths.get(i), "undo": {"pick": lv}} for i, lv in photos])
-    progress.update(running=True, done=0, total=len(photos), cleared=len(photos), sidecars=0, finished=None, error=None)
+    progress.start(len(photos), cleared=len(photos), sidecars=0)
     threading.Thread(target=_sidecars, args=([paths[i] for i, _lv in photos if i in paths], after), name="picklabels", daemon=True).start()
     return len(photos)
 
@@ -69,9 +69,9 @@ def clear(levels: list, check_running: bool = True, after=None) -> int:
 def _sidecars(paths: list, after):
     """Remove the label from the sidecars that carry it (most do not: digiKam writes it there only when told to)."""
     try:
-        jobs = []
+        todo = []
         for path in paths:
-            progress["done"] += 1
+            progress.step()
             side = edits.sidecar_path(path)
             try:
                 with open(side, encoding="utf-8", errors="replace") as f:
@@ -79,19 +79,19 @@ def _sidecars(paths: list, after):
                         continue
             except OSError:
                 continue
-            jobs.append((side, edits.write_args({"pick": 0}, None, False)))
-            if len(jobs) >= 200:
-                edits.run_exiftool(jobs)
-                progress["sidecars"] += len(jobs)
-                jobs = []
-        if jobs:
-            edits.run_exiftool(jobs)
-            progress["sidecars"] += len(jobs)
+            todo.append((side, edits.write_args({"pick": 0}, None, False)))
+            if len(todo) >= 200:
+                edits.run_exiftool(todo)
+                progress["sidecars"] += len(todo)
+                todo = []
+        if todo:
+            edits.run_exiftool(todo)
+            progress["sidecars"] += len(todo)
     except Exception as e:
         log.warning("pick labels: sidecars not all cleared: %s", e)
-        progress["error"] = str(e)[:300]
+        progress.fail(e)
     finally:
-        progress.update(running=False, finished=int(time.time()))
+        progress.finish()
         if after:
             try:
                 after()

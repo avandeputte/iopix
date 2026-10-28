@@ -519,16 +519,17 @@ export async function showSettings() { return settingsPage('settings'); }
 export async function showMaintenance() { if (!S.IS_ADMIN) { main.replaceChildren(h('div', { class: 'empty' }, 'Maintenance is for admins. Sign in as an admin to see it.')); return; } return settingsPage('maintenance'); }
 // Settings: preferences. Maintenance: library actions, job progress, models, storage. One loader, two layouts.
 /** Maintenance › File scanner: on or off, how often, Scan now, and what the last pass found. */
-function scannerRow(m, row, btn, again) {
+function scannerRow(c) {
+  const { m, row, btn, again, switchField } = c;
   const sc = m.scanner || {};
   const last = sc.last;
   const said = last ? `Last pass ${fmtWhen(last.finished)}: ${[last.added && plural(last.added, 'new file'), last.modified && plural(last.modified, 'changed file'), last.removed && plural(last.removed, 'file') + ' gone', last.folders && plural(last.folders, 'new folder')].filter(Boolean).join(', ') || 'nothing new'}.${last.skipped?.length ? ' ' + last.skipped.join(' ') : ''}${last.error ? ' Error: ' + last.error : ''}` : 'No pass yet.';
-  const on = h('input', { type: 'checkbox', checked: !!sc.enabled, onchange: async (e) => { try { await post('/api/settings', { file_scanner: e.target.checked }); toast(e.target.checked ? 'File scanner on: a first pass starts now.' : 'File scanner off.'); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } });
+  const on = switchField('file_scanner', !!sc.enabled, { on: 'File scanner on: a first pass starts now.', off: 'File scanner off.', cls: 'chk' });
   const every = h('select', { class: 'sharepick', onchange: async (e) => { try { await post('/api/settings', { scan_interval: +e.target.value }); } catch (err) { toastError(err); } } },
     [[5, 'every 5 minutes'], [15, 'every 15 minutes'], [60, 'every hour'], [360, 'every 6 hours'], [1440, 'once a day']].map(([v, l]) => h('option', { value: v, selected: v === sc.interval }, l)));
   return row('File scanner',
     h('span', null, `Looks in the album folders for photos and videos added, changed or removed outside ${S.APP_NAME} (Finder, a sync tool, a phone backup), as digiKam’s scanner does, and records them the same way: camera, place, keywords, faces, digiKam’s file fingerprint. ${S.NO_DK ? 'With no digiKam it is how photos copied into the folder get into the library, so it is on unless you turn it off.' : 'Leave it off if everything arrives through Upload or Import; those are always read in full.'} A disk that looks unmounted is left alone. `, h('span', { class: 'muted' }, sc.running ? 'Scanning now…' : said)),
-    h('span', { class: 'toolbar',}, h('label', { class: 'chk',}, on, 'On'), every,
+    h('span', { class: 'toolbar',}, on, every,
       btn('Scan now', async () => { try { await post('/api/scan', {}); toast('Scanning the album folders…'); setTimeout(again, 4000); } catch (e) { toastError(e); } })));
 }
 export const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
@@ -564,25 +565,30 @@ function settingsTabs(page, view) {
   page.querySelector('.stab-mark').before(bar);
   show(pick);
 }
-export async function settingsPage(view) {
-  let m;
-  if (!main.querySelector('.spage')) main.replaceChildren(h('div', { class: 'page spage' }, loadingBox(view === 'settings' ? 'Loading the settings…' : 'Loading…')));
-  try { m = await api('/api/maintenance'); } catch (e) { if (S.route.view === view) main.replaceChildren(h('div', { class: 'empty' }, 'Could not load settings: ' + e.message)); return; }
-  if (S.route.view !== view) return;
+/** What every settings row is built from: the maintenance data `m`, the page being drawn and the shared helpers
+ * (row and button builders, the maintenance action runner, and the two field kinds that save one setting each). */
+function settingsContext(m, view) {
+  const again = () => { if (S.route.view === view) settingsPage(view); };
   const when = (t) => (t ? fmtWhen(t) : 'never');
   const act = async (action, msg, confirmText) => {
     if (confirmText && !await confirmDialog(confirmText)) return;
     try { await post('/api/maintenance', { action }); toast(msg); } catch (e) { toastError(e); }
-    setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 1500);
+    setTimeout(again, 1500);
   };
   const row = (label, detail, btn) => h('div', { class: 'srow' }, h('div', null, h('b', null, label), h('div', { class: 'muted note' }, detail)), btn);
   const btn = (label, fn, primary) => h('button', { class: 'pillbtn' + (primary ? ' on' : ''), onclick: fn }, label);
-  const st = m.storage;
-  main.replaceChildren(h('div', { class: 'page spage' },
-    pageTitle(view === 'settings' ? 'gear' : 'wrench', 'slate', view === 'settings' ? 'Settings' : 'Maintenance', h('span', { class: 'muted' }, `${S.APP_NAME} v${S.APP_VERSION || '?'}`)),
-    h('div', { class: 'muted intro' }, m.paths ? `Library: ${m.paths.library} (${nf.format(m.photos)} photos and videos). ${m.paths.digikamDb === 'none' ? `No digiKam: the library lives in ${S.APP_NAME}’s own database` : `digiKam database: ${m.paths.digikamDb}`}. Everything ${S.APP_NAME} writes lives in ${m.paths.data}.` : `${nf.format(m.photos)} photos in the library.`),
-    !S.USERS_EXIST ? row('No users yet', `${S.APP_NAME} is open to anyone who can reach it. Create the admin account to switch on sign-in: visitors then browse read-only, and only editors and admins can change the library.`, btn('Create the admin account', setupDialog, true)) : null,
-    ...(view === 'settings' ? [
+  /** A checkbox that saves one on/off setting the moment it is clicked, says what it did, and springs back if the save failed. */
+  const switchField = (key, checked, { label = 'On', on, off, disabled = false, after, cls } = {}) => h('label', { class: cls, style: cls ? null : 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' },
+    h('input', { type: 'checkbox', checked, disabled, onchange: async (e) => {
+      try { await post('/api/settings', { [key]: e.target.checked }); toast(e.target.checked ? on : off); if (after) after(); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), label);
+  /** A Turn on / Turn off button for one setting; the page is drawn again with the new value. */
+  const toggleButton = (key, on, after) => btn(on ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { [key]: !on }); if (after) await after(); } catch (e) { toastError(e); } settingsPage(view); });
+  return { m, view, again, when, act, row, btn, switchField, toggleButton };
+}
+/** Settings › Display: the name, appearance, units, badges, the info panel sections and the map provider. */
+function displayTab(c) {
+  const { m, view, row, btn } = c;
+  return [
     stab('display'),
     h('h2', null, 'Display'),
     S.IS_ADMIN ? (() => {
@@ -612,6 +618,13 @@ export async function settingsPage(view) {
           settingsPage(view);
         })));
     })() : null,
+  ];
+}
+
+/** Settings › digiKam and server: the two databases, album roots, the update check, the MCP server, read-only mode and sync. */
+function serverTab(c) {
+  const { m, view, row, btn, again, switchField, toggleButton } = c;
+  return [
     S.IS_ADMIN ? stab('server') : null,
     S.IS_ADMIN ? (() => {
       const d = m.database || {};
@@ -632,7 +645,7 @@ export async function settingsPage(view) {
         h('div', null, h('div', { class: 'toolbar tight',}, type, backup), sq, my,
           h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
             test,
-            btn('Save and switch', async () => { if (!await confirmDialog(type.value === 'none' ? `Stop using digiKam’s database? ${S.APP_NAME} keeps working from its own copy of the library.` : `Switch ${S.APP_NAME} to this digiKam database now?`)) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toastError(e); return; } setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 2500); }, true)),
+            btn('Save and switch', async () => { if (!await confirmDialog(type.value === 'none' ? `Stop using digiKam’s database? ${S.APP_NAME} keeps working from its own copy of the library.` : `Switch ${S.APP_NAME} to this digiKam database now?`)) return; try { await post('/api/settings', { database: payload() }); toast('Database settings saved; the index is rebuilding.'); } catch (e) { toastError(e); return; } setTimeout(again, 2500); }, true)),
           result));
     })() : null,
     S.IS_ADMIN ? (() => {
@@ -684,15 +697,13 @@ export async function settingsPage(view) {
     })() : null,
     S.IS_ADMIN ? row('Check for updates daily', m.updateCheckLocked ? `Switched off by UPDATE_CHECK=0 in the environment: ${S.APP_NAME} never contacts GitHub on its own.`
       : `Once a day ${S.APP_NAME} asks GitHub whether a newer version of ${S.APP_NAME} exists and, if so, shows admins a banner. Only the public list of changes is fetched; nothing about this install or its photos is sent. Off: it never contacts GitHub on its own (Maintenance › ${S.APP_NAME} can still check on request).`,
-      h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' }, h('input', { type: 'checkbox', checked: !!m.updateCheck, disabled: !!m.updateCheckLocked, onchange: async (e) => {
-        try { await post('/api/settings', { update_check: e.target.checked }); toast(e.target.checked ? `${S.APP_NAME} will check for updates once a day.` : `${S.APP_NAME} will not contact GitHub on its own.`); pollSoon(2000); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), 'Check daily')) : null,
+      switchField('update_check', !!m.updateCheck, { label: 'Check daily', disabled: !!m.updateCheckLocked, on: `${S.APP_NAME} will check for updates once a day.`, off: `${S.APP_NAME} will not contact GitHub on its own.`, after: () => pollSoon(2000) })) : null,
     S.IS_ADMIN ? row('MCP server', m.mcpLocked ? 'Switched on by MCP=1 in the environment.'
       : `The endpoint at /mcp that lets an AI assistant (Claude, for example) search and read this library. Off: /mcp does not answer at all. With Require sign-in on, an assistant must also send the admin token.`,
-      m.mcpLocked ? null : h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' }, h('input', { type: 'checkbox', checked: !!m.mcpEnabled, onchange: async (e) => {
-        try { await post('/api/settings', { mcp_enabled: e.target.checked }); toast(e.target.checked ? 'The MCP server at /mcp is on.' : 'The MCP server is off: /mcp does not answer.'); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), 'On')) : null,
+      m.mcpLocked ? null : switchField('mcp_enabled', !!m.mcpEnabled, { on: 'The MCP server at /mcp is on.', off: 'The MCP server is off: /mcp does not answer.' })) : null,
     S.IS_ADMIN ? row('Read-only mode', m.readOnlyLocked ? `Locked on by READ_ONLY=1 in the environment: nothing in the library can be changed from ${S.APP_NAME}.`
       : `${m.readOnly ? 'On' : 'Off'}. When on, ${S.APP_NAME} only browses: editing, tagging, face naming, place tags, GPS tracks, metadata sync and database updates are switched off and refused by the server. Favorites and viewer albums keep working; they never touch the library.`,
-      m.readOnlyLocked ? null : btn(m.readOnly ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { read_only: !m.readOnly }); const s = await api('/api/status'); S.EDITING = s.editing; S.CAN_MANAGE = s.editing && s.dbWrite; } catch (e) { toastError(e); } settingsPage(view); })) : null,
+      m.readOnlyLocked ? null : toggleButton('read_only', m.readOnly, async () => { const s = await api('/api/status'); S.EDITING = s.editing; S.CAN_MANAGE = s.editing && s.dbWrite; })) : null,
     S.IS_ADMIN ? (() => {
       const d = m.digikam || {};
       if (d.none) return null;  // no digiKam at all: nothing to sync with
@@ -702,36 +713,44 @@ export async function settingsPage(view) {
         api('/api/library/merge').then((p) => fill(planEl, p.total ? 'To merge: ' + p.summary.join(', ') + '.' : 'Nothing to merge.')).catch((e) => fill(planEl, e.message));
         const wrap = row('Sync with digiKam', `On, but ${plural(d.localChanges, 'change')} made while it was off ${d.localChanges === 1 ? 'is' : 'are'} not in digiKam’s database yet, so ${S.APP_NAME} keeps using its own library. Merge writes those changes into digiKam (new tags, folders and uploads get digiKam ids; renames, assignments, faces, ratings, captions and locations are applied; deleted photos are removed), after a backup of digiKam’s database. Replace drops them and copies the library from digiKam again. Sidecar edits are kept either way.`,
           h('span', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
-            btn('Merge into digiKam', async () => { if (!await confirmDialog('Write the changes made while sync was off into digiKam’s database? digiKam must be closed; its database is backed up first.')) return; try { const r = await post('/api/library/merge', {}); toast(`Merged: ${Object.entries(r.applied).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing to do'}${r.conflicts ? `; ${r.conflicts} rows digiKam had also changed (the viewer’s values won)` : ''}.`, null, null, 12000); } catch (e) { toastError(e, 10000); } setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 2500); }, true),
-            btn('Replace with digiKam’s', async () => { if (!await confirmDialog(`Drop the ${plural(d.localChanges, 'change')} made while sync was off and copy the library from digiKam again? Edits in sidecars are kept.`)) return; try { await post('/api/settings', { library_replace: true }); toast('Copying the library from digiKam…'); } catch (e) { toastError(e); } setTimeout(() => { if (S.route.view === view) settingsPage(view); }, 2500); }),
+            btn('Merge into digiKam', async () => { if (!await confirmDialog('Write the changes made while sync was off into digiKam’s database? digiKam must be closed; its database is backed up first.')) return; try { const r = await post('/api/library/merge', {}); toast(`Merged: ${Object.entries(r.applied).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing to do'}${r.conflicts ? `; ${r.conflicts} rows digiKam had also changed (the viewer’s values won)` : ''}.`, null, null, 12000); } catch (e) { toastError(e, 10000); } setTimeout(again, 2500); }, true),
+            btn('Replace with digiKam’s', async () => { if (!await confirmDialog(`Drop the ${plural(d.localChanges, 'change')} made while sync was off and copy the library from digiKam again? Edits in sidecars are kept.`)) return; try { await post('/api/settings', { library_replace: true }); toast('Copying the library from digiKam…'); } catch (e) { toastError(e); } setTimeout(again, 2500); }),
             btn('Turn sync off', async () => { try { await post('/api/settings', { digikam_sync: false }); } catch (e) { toastError(e); } settingsPage(view); })));
         wrap.firstChild.append(planEl);
         return wrap;
       }
       return row('Sync with digiKam', `Currently ${d.sync ? 'on' : 'off'}. On: ${S.APP_NAME} re-reads digiKam’s database whenever digiKam saves, and writes the edits made here into it whenever digiKam is closed (edits always go to the sidecars first). Off: ${S.APP_NAME} never opens digiKam’s database; the library lives in ${S.APP_NAME}’s own tables (${copy}) and everything works there: edits, tags, folders, uploads, faces and place tags. Turning sync on again does not overwrite what was changed meanwhile; you choose what happens.${d.sync && !d.reachable ? ' digiKam’s database is unreachable right now; the copy is in use.' : ''}`,
-        btn(d.sync ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { digikam_sync: !d.sync }); } catch (e) { toastError(e); } settingsPage(view); }));
+        toggleButton('digikam_sync', d.sync));
     })() : null,
-    S.IS_ADMIN ? stab('ai') : null,
-    S.IS_ADMIN ? analysisSection(view, 'prefs') : null,
-    S.IS_ADMIN && S.USERS_EXIST ? stab('users') : null,
-    S.IS_ADMIN && S.USERS_EXIST ? usersSection() : null,
-    S.IS_ADMIN && S.EDITING ? [ stab('editing'),
+  ];
+}
+
+/** Settings › Editing: where metadata is written, sidecar names, place tags and the metadata templates. */
+function editingTab(c) {
+  const { m, row, btn, toggleButton } = c;
+  return [
+    stab('editing'),
     h('h2', null, 'Editing'),
     row('Write metadata into image files', `Off: edits go to XMP sidecars only. On: also into JPEG, PNG, TIFF and WebP files, like digiKam’s “sidecar and file” mode. Currently ${m.writeFiles ? 'on' : 'off'}.`,
-      btn(m.writeFiles ? 'Turn off' : 'Turn on', async () => { try { await post('/api/settings', { write_files: !m.writeFiles }); } catch (e) { toastError(e); } settingsPage(view); })),
+      toggleButton('write_files', m.writeFiles)),
     row('Sidecar file names', `New sidecars are written as ${m.sidecarCompat ? 'photo.xmp (digiKam’s “compatible file name” option)' : 'photo.jpg.xmp (digiKam’s default)'}. Existing sidecars are read either way; pick what your digiKam is set to.`,
       btn(m.sidecarCompat ? 'Use photo.jpg.xmp' : 'Use photo.xmp', async () => { try { await post('/api/settings', { sidecar_compat: !m.sidecarCompat }); } catch (e) { toastError(e); } settingsPage(view); })),
     h('h2', null, 'Place tags'),
     row('Tags from GPS positions', 'Turns each geotagged photo’s town into real digiKam tags under “Places/Country/Region/Town”, so places are searchable in digiKam as well. Missing tags are created in digiKam’s database (digiKam closed); assignments go to sidecars like any edit.',
       h('button', { class: 'pillbtn', onclick: placeTagsDialog }, icon('place'), 'Review and run')),
     templatesSection(m),
-    ] : null,
-    ] : [
+  ];
+}
+
+/** Maintenance › Library: import, the scanner, the trash, the library copy, rescans, and the checks summarised in one line each. */
+function libraryTab(c) {
+  const { m, row, btn, act, when, again } = c;
+  return [
     // 1. Library: everything about digiKam's data as the viewer sees it
     stab('library'),
     h('h2', null, 'Library'),
     row('Import', 'Photos and videos from a phone, a card or a computer, into folders by date, duplicates left out, a sidecar for each. The installed app is a share target on Android.', h('a', { class: 'pillbtn', href: '#/import' }, 'Open Import')),
-    scannerRow(m, row, btn, () => { if (S.route.view === view) settingsPage(view); }),
+    scannerRow(c),
     row('Lossless JPEG edits', S.LOSSLESS?.jpegtran ? 'jpegtran (libjpeg-turbo) is installed: JPEGs are rotated, flipped and cropped without re-encoding; other files by their orientation flag.'
       : 'jpegtran (libjpeg-turbo) is not installed on the server, so JPEGs are turned by their orientation flag only and cannot be cropped. Install it there, as root: apt-get install -y libjpeg-turbo-progs (Debian, Ubuntu, Proxmox LXC); dnf install libjpeg-turbo-utils; brew install jpeg-turbo. Nothing needs restarting.',
       h('span', { class: 'mst ' + (S.LOSSLESS?.jpegtran ? 'ok' : 'warn') }, S.LOSSLESS?.jpegtran ? 'installed' : S.LOSSLESS ? 'missing' : 'editing off')),
@@ -779,7 +798,7 @@ export async function settingsPage(view) {
           if (!ks.length || !n) { toast('No photo carries the chosen labels.'); return; }
           if (!await confirmDialog(`Take the ${ks.map((k) => names[k]).join(', ')} pick label off ${plural(n, 'photo')}? digiKam’s database is backed up first, sidecars that carry the label are cleaned too (each backed up), and every photo’s change is in the edit log with undo.`, { ok: 'Clear', danger: true })) return;
           try { const r = await post('/api/picklabels/clear', { levels: ks }); toast(`Pick label cleared from ${plural(r.cleared, 'photo')}.`); } catch (e) { toastError(e); }
-          if (S.route.view === view) settingsPage(view);
+          again();
         }, true));
       }).catch(() => fill(line, ''));
       return row('Pick labels', h('span', null, line, `digiKam’s pick labels. ${S.APP_NAME} does not use them and never sets them; clear the ones an older tool left behind.`), wrap);
@@ -787,9 +806,14 @@ export async function settingsPage(view) {
     S.EDITING ? row('Edits waiting for digiKam', m.pendingEdits ? `${plural(m.pendingEdits, 'photo has', 'photos have')} edits saved in sidecars that digiKam’s database does not have yet. digiKam is ${m.digikamRunning ? 'running, so they cannot be applied right now' : 'closed, so they can be applied now'}.` : 'None. digiKam’s database and the sidecars agree.',
       m.pendingEdits ? btn('Apply to digiKam database…', dbDialog, !m.digikamRunning) : null) : null,
     row('Tag cover photos', 'The photo shown for each tag is chosen by the content model. Pick them again after big tagging changes.', btn('Pick again', () => act('covers', 'Choosing tag covers in the background.'))),
-    // 2. AI analysis and models
-    stab('models'),
-    aiSection(view),
+  ];
+}
+
+/** Maintenance › Storage and backups: what each cache and backup takes on disk, and the backup downloads. */
+function storageTab(c) {
+  const { m, row, act } = c;
+  const st = m.storage;
+  return [
     // 3. Storage and backups: each item's size with what can be done about it on the same row
     stab('storage'),
     h('h2', null, 'Storage and backups', h('span', { class: 'muted' }, `${fmtBytes(st.free)} free on the disk`)),
@@ -814,6 +838,13 @@ export async function settingsPage(view) {
     row('Download a backup', S.NO_DK ? `${S.APP_NAME}’s data as a zip: its database, which holds the whole library (folders, tags, people and faces, captions, places), plus the content-search index. Keep it somewhere else.` : `digiKam’s database as it is right now (a consistent copy of digikam4.db, or a mysqldump for MariaDB), and ${S.APP_NAME}’s data as a zip (its database plus the content-search index). Keep them somewhere else.`,
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, S.NO_DK ? null : h('a', { class: 'pillbtn', href: '/api/backup/digikam', download: '' }, icon('download'), h('span', null, 'digiKam database')),
         h('a', { class: 'pillbtn', href: '/api/backup/app', download: '' }, icon('download'), h('span', null, `${S.APP_NAME} data (zip)`)))),
+  ];
+}
+
+/** Maintenance › the app itself: the edit log, the server log, the version and updates, and restart. */
+function viewerTab(c) {
+  const { view, row, btn } = c;
+  return [
     // 4. The viewer itself
     stab('viewer'),
     h('h2', null, S.APP_NAME),
@@ -845,6 +876,34 @@ export async function settingsPage(view) {
     })(),
     row(`Restart ${S.APP_NAME}`, 'Stops the server; launchd, Docker or systemd starts it again within seconds. Needed after an update of the RapidOCR package (offered in the models table above when “Check models for updates” finds a newer one), and handy when a background job looks stuck.',
       btn('Restart', async () => { if (!await confirmDialog(`Restart ${S.APP_NAME} now?`)) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toastError(e); } })),
+  ];
+}
+export async function settingsPage(view) {
+  let m;
+  if (!main.querySelector('.spage')) main.replaceChildren(h('div', { class: 'page spage' }, loadingBox(view === 'settings' ? 'Loading the settings…' : 'Loading…')));
+  try { m = await api('/api/maintenance'); } catch (e) { if (S.route.view === view) main.replaceChildren(h('div', { class: 'empty' }, 'Could not load settings: ' + e.message)); return; }
+  if (S.route.view !== view) return;
+  const c = settingsContext(m, view);
+  const { row, btn } = c;
+  main.replaceChildren(h('div', { class: 'page spage' },
+    pageTitle(view === 'settings' ? 'gear' : 'wrench', 'slate', view === 'settings' ? 'Settings' : 'Maintenance', h('span', { class: 'muted' }, `${S.APP_NAME} v${S.APP_VERSION || '?'}`)),
+    h('div', { class: 'muted intro' }, m.paths ? `Library: ${m.paths.library} (${nf.format(m.photos)} photos and videos). ${m.paths.digikamDb === 'none' ? `No digiKam: the library lives in ${S.APP_NAME}’s own database` : `digiKam database: ${m.paths.digikamDb}`}. Everything ${S.APP_NAME} writes lives in ${m.paths.data}.` : `${nf.format(m.photos)} photos in the library.`),
+    !S.USERS_EXIST ? row('No users yet', `${S.APP_NAME} is open to anyone who can reach it. Create the admin account to switch on sign-in: visitors then browse read-only, and only editors and admins can change the library.`, btn('Create the admin account', setupDialog, true)) : null,
+    ...(view === 'settings' ? [
+    displayTab(c),
+    S.IS_ADMIN ? serverTab(c) : null,
+    S.IS_ADMIN ? stab('ai') : null,
+    S.IS_ADMIN ? analysisSection(view, 'prefs') : null,
+    S.IS_ADMIN && S.USERS_EXIST ? stab('users') : null,
+    S.IS_ADMIN && S.USERS_EXIST ? usersSection() : null,
+    S.IS_ADMIN && S.EDITING ? editingTab(c) : null,
+    ] : [
+    libraryTab(c),
+    // 2. AI analysis and models
+    stab('models'),
+    aiSection(view),
+    storageTab(c),
+    viewerTab(c),
     ])));
   settingsTabs(main.querySelector('.spage'), view);
 }

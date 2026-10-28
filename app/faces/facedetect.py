@@ -42,11 +42,10 @@ SCORES = {"yunet": 0.85, "scrfd": 0.5, "retinaface": 0.6}  # YuNet's own default
 NMS_IOU = 0.3
 MIN_FACE = 28        # pixels at full resolution: smaller detections are mostly noise
 OVERLAP = 0.3        # a detection covering this much of an existing region (or the other way round) is that face
-progress = {"running": False, "done": 0, "total": 0, "added": 0, "photos_with_new": 0, "errors": 0, "started": None, "scope": None}
+progress = jobs.Progress("facedetect", added=0, photos_with_new=0, errors=0, started=None, scope=None)
 _lock = threading.Lock()
 _session = None
 _session_path = None
-_run = {"gen": 0}
 
 
 def chosen() -> str:
@@ -296,7 +295,7 @@ def coverage() -> int:
 
 def reset():
     """Forget which photos were looked at, so the next library run looks at all of them again."""
-    _run["gen"] += 1
+    progress.cancel()
     with vdb.writer() as con:
         con.execute("DELETE FROM ai_scans WHERE job = 'facedetect'")
 
@@ -331,7 +330,7 @@ def detect(photos: list, gen: int = None, on_batch=None) -> dict:
     total = {"checked": 0, "found": 0, "added": 0, "photos_with_new": 0, "errors": 0}
     n = max(1, jobs.threads() // 2)
     for chunk in chunked(photos, 48):
-        if gen is not None and gen != _run["gen"]:
+        if gen is not None and progress.cancelled(gen):
             break
         batch = chunk
         existing = _existing([p["id"] for p in batch])
@@ -373,15 +372,13 @@ def start(ids: list = None, album: int = None, redo: bool = False, after=None) -
     if ids is None and album is None and not redo:
         seen = _scanned()
         photos = [p for p in photos if seen.get(p["id"]) != analysis.stamp(p)]
-    _run["gen"] += 1
-    gen = _run["gen"]
     scope = "photos" if ids is not None else "folder" if album is not None else "library"
-    progress.update(running=bool(photos), done=0, total=len(photos), added=0, photos_with_new=0, errors=0, started=int(time.time()), scope=scope, error=None)
+    gen = progress.start(len(photos), running=bool(photos), added=0, photos_with_new=0, errors=0, scope=scope)
     if not photos:
         return 0
 
     def on_batch(n, added, with_new, errors):
-        progress["done"] += n
+        progress.step(n)
         progress["added"] += added
         progress["photos_with_new"] += with_new
         progress["errors"] = errors
@@ -391,10 +388,9 @@ def start(ids: list = None, album: int = None, redo: bool = False, after=None) -
             detect(photos, gen, on_batch)
         except Exception as e:
             log.warning("face detection stopped: %s", e, exc_info=True)
-            progress["error"] = str(e)[:300]
+            progress.fail(e)
         finally:
-            if gen == _run["gen"]:
-                progress["running"] = False
+            progress.finish(gen)
             if after:
                 after()
     jobs.submit("facedetect", job)

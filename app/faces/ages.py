@@ -36,8 +36,7 @@ PER_PERSON = 60        # dated faces sampled per person, spread over the years
 FIRST_REAL_YEAR = 1972  # 1970/1974 hold placeholder dates in many libraries; older dated photos are rarely dated right
 APPROX_WEIGHT = 0.3     # a photo dated to the year or month (often from a suggestion that was used) counts this much
                         # next to an exactly dated one, so used suggestions refine later ones without confirming themselves
-progress = {"running": False, "done": 0, "total": 0}
-_run = {"gen": 0}
+progress = jobs.Progress("ages")
 _lock = threading.Lock()
 _session = {}
 
@@ -152,7 +151,7 @@ def _job(gen: int):
         con.close()
     have = _have()
     todo = [r for r in want if (r[0], r[4], r[5], r[6], r[7]) not in have]
-    progress.update(running=bool(todo), done=0, total=len(todo))
+    progress.update(running=bool(todo), done=0, total=len(todo))  # the generation was taken at submit time
     if not todo:
         return
     by_photo = {}
@@ -160,14 +159,14 @@ def _job(gen: int):
         by_photo.setdefault(r[0], []).append(r)
     try:
         for pid, faces in by_photo.items():
-            if gen != _run["gen"]:
+            if progress.cancelled(gen):
                 return
             _, path, pw, ph = faces[0][:4]
             try:
                 im, _ = thumbs.open_oriented(path, 2400, 2400)
             except OSError as e:
                 log.warning("ages: cannot read %s (%s)", path, e)
-                progress["done"] += len(faces)
+                progress.step(len(faces))
                 continue
             except Exception as e:  # undecodable: recorded as no age, so it is not tried again
                 log.warning("ages: cannot decode %s (%s)", path, e)
@@ -179,9 +178,9 @@ def _job(gen: int):
                     ages = estimate(crops)
                 except Exception as e:
                     log.warning("ages: estimate failed on %s (%s)", path, e)
-                    progress["done"] += len(faces)
+                    progress.step(len(faces))
                     continue
-            if gen != _run["gen"]:
+            if progress.cancelled(gen):
                 return
             db = vdb.connect()
             try:
@@ -190,22 +189,21 @@ def _job(gen: int):
                 db.commit()
             finally:
                 db.close()
-            progress["done"] += len(faces)
+            progress.step(len(faces))
     finally:
-        progress["running"] = False
+        progress.finish()
 
 
 def start():
     """Estimate the ages still missing (new undated photos, newly named faces)."""
     if not config.ANALYSIS or not available():
         return
-    _run["gen"] += 1
-    gen = _run["gen"]
+    gen = progress.cancel()
     jobs.submit("ages", lambda: _job(gen))
 
 
 def reset():
-    _run["gen"] += 1
+    progress.cancel()
     with vdb.writer() as con:
         con.execute("DELETE FROM ai_face_ages")
 

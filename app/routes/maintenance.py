@@ -84,7 +84,7 @@ def api_analysis(request: Request):
     models = [{"key": k, "label": names[k], "installed": semantic_ready(k), "chosen": semantic.chosen() == k,
                "active": act is not None and act.name == k} for k in ENGINES]
     jobs = jobs_meta.rows(total, stills, signed_in=users.is_signed_in(request.state.user))
-    return {"jobs": jobs, "photos": total, "models": models if act is not None else [], "queue": bgjobs.status()}
+    return {"jobs": jobs, "photos": total, "models": models if act is not None else [], "queue": bgjobs.status(), "progress": bgjobs.progress_all()}
 
 
 @router.get("/api/models", dependencies=[access.public])

@@ -21,8 +21,7 @@ from app.digikam.dkdb import chunked
 log = logging.getLogger("app.ai.neardups")
 LEVELS = {"strict": 0.97, "normal": 0.94, "loose": 0.90}  # cosine similarity of the search embeddings
 PER_PHOTO = 20
-progress = {"running": False, "done": 0, "total": 0, "error": None}
-_run = {"gen": 0}
+progress = jobs.Progress("neardups")
 _lock = threading.Lock()
 
 
@@ -46,8 +45,7 @@ def start(level: str = "normal"):
         raise ValueError("level must be strict, normal or loose")
     if not _enabled():
         raise RuntimeError("Content search is not installed; near-duplicates need its embeddings")
-    _run["gen"] += 1
-    gen = _run["gen"]
+    gen = progress.cancel()
     jobs.submit("neardups", lambda: _job(gen, level))
 
 
@@ -58,7 +56,7 @@ def _job(gen: int, level: str):
     with eng.lock:
         ids, vecs = eng.ids, eng.vecs  # no copy: the engine replaces these arrays, it never writes into them
     n = len(ids)
-    progress.update(running=True, done=0, total=n, error=None)
+    progress.update(running=True, done=0, total=n, error=None)  # the generation was taken at submit time
     total = 0
     try:
         state.set_setting("near_dups_gen", "")  # not current until every block is in
@@ -68,7 +66,7 @@ def _job(gen: int, level: str):
             con.commit()
             block = 256
             for s in range(0, n, block):
-                if gen != _run["gen"]:
+                if progress.cancelled(gen):
                     return
                 with np.errstate(all="ignore"):  # Accelerate emits spurious float warnings on matmul
                     sims = vecs[s:s + block] @ vecs.T  # [block, n]
@@ -93,10 +91,10 @@ def _job(gen: int, level: str):
         state.set_setting("near_dups_level", level)
         log.info("near-duplicates: %d pairs above %.2f among %d photos", total, threshold, n)
     except Exception as e:
-        progress["error"] = str(e)[:200]
+        progress.fail(e)
         log.warning("near-duplicates failed: %s", e)
     finally:
-        progress["running"] = False
+        progress.finish()
 
 
 def groups(limit: int = 300) -> list:
