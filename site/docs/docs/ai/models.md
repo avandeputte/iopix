@@ -9,7 +9,10 @@ Each AI feature runs on a model that is downloaded once into the data folder. Wh
 | Text in photos | RapidOCR | | about 60 MB |
 | Face grouping | SFace | ArcFace ResNet-50 (much better at telling people apart, slower) | 37 to 174 MB |
 | Face detection | YuNet | SCRFD 10G, RetinaFace ResNet-50 (find more faces, slower) | 0.2 to 104 MB |
-| Photo descriptions | BLIP base | BLIP large (richer sentences, slower) | about 1 to 2 GB, plus PyTorch |
+| Photo descriptions | BLIP base | BLIP large (richer sentences, slower), Florence-2 base (a short paragraph per photo, no PyTorch needed, several times slower) | about 1 to 2 GB |
+| Photo quality | LAION aesthetic predictor on CLIP ViT-L/14 | | about 1.2 GB |
+| Closed eyes | a ViT eye-state classifier | | about 340 MB, plus a face detection model |
+| Date suggestions | MiVOLO v2 (age) | | about 120 MB |
 | Places | GeoNames | | about 30 MB |
 
 ## Switching models
@@ -21,7 +24,7 @@ Each AI feature runs on a model that is downloaded once into the data folder. Wh
 
 ## Downloading from the command line
 
-The model keys are: `clip`, `siglip2`, `jinaclip`, `blip`, `blip_large`, `yolox`, `yolox_m`, `yolox_l`, `yolox_x`, `yunet`, `scrfd`, `retinaface`, `sface`, `arcface`, `geonames`, `ocr`.
+The model keys are: `clip`, `siglip2`, `jinaclip`, `blip`, `blip_large`, `yolox`, `yolox_m`, `yolox_l`, `yolox_x`, `yunet`, `scrfd`, `retinaface`, `sface`, `arcface`, `florence2`, `aesthetic`, `eyes`, `mivolo`, `geonames`, `ocr`.
 
 ```sh
 # checkout or installer
@@ -34,4 +37,4 @@ docker compose exec -e HF_HUB_OFFLINE=0 iopix python -m app.ai.models download s
 
 ## Speed
 
-Everything runs on the CPU with ONNX, one job at a time. Photo descriptions are the slowest, about half a second per photo on a modern CPU, and use the GPU on a Mac with Apple silicon. A first full pass over a large library can take a day or more; the library is fully usable meanwhile.
+Everything runs on the CPU with ONNX, one job at a time. Photo descriptions and the aesthetic score are the slowest; BLIP uses the GPU on a Mac with Apple silicon, Florence-2 runs on the CPU only. A first full pass over a large library can take a day or more; the library is fully usable meanwhile.

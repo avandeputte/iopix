@@ -2,6 +2,8 @@
 
 iopix is also an [MCP](https://modelcontextprotocol.io) server, so an AI assistant such as Claude can search and look at your library through the running app. It is at `/mcp` on the same port. Nothing extra is installed.
 
+It is **off on a fresh install**: turn it on in **Settings › MCP server** (or set `MCP=1`). While it is off, `/mcp` does not answer. An install updated from a version before the switch existed keeps it on, and whatever you choose is kept across updates.
+
 ## Library tools (read-only)
 
 These show only what an anonymous visitor sees in the web app:

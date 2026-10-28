@@ -13,7 +13,7 @@
 - **Places, People, Trips and events**: cards for the places you photograph most, the people in your library, and the trips and events iopix found (see [What AI analysis gives you](../ai/results.md)).
 - **Detected content**: photos grouped by what they show, such as beaches, food or buildings, when content search is installed.
 - **Things**: your most used tags.
-- **Quick filters, years, cameras, photographers and file types** as pills with counts.
+- **Quick filters, years, cameras, photographers and file types** as pills with counts, including **Best looking** and **Likely rejects** once photo quality has run.
 
 Sections with nothing to show are left out.
 
@@ -23,4 +23,4 @@ Explore has one setting: the size of the photos in its rows, **S**, **M** or **L
 
 ## For admins
 
-Admins also see pills for **Duplicate files** (byte-identical copies, from digiKam's own fingerprints) and **Edited here, not yet in digiKam**.
+Admins also see pills for **Duplicate files** (byte-identical copies, from digiKam's own fingerprints) and **Edited here, not yet in digiKam**. Editors also see **Date suggestions**.

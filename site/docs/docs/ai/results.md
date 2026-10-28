@@ -6,7 +6,7 @@
 
 ## Bursts and best shots
 
-Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the sharpest, nudged by how sharp the faces are. **Show only the best frame of each burst** is a filter.
+Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the one in focus, with the sharpest faces and nobody's eyes closed, with a small say for the aesthetic score. **Show only the best frame of each burst** is a filter, and **Explore › Bursts & best shots** can mark every other frame of a burst as Rejected in one click.
 
 ## Events and trips
 
@@ -26,6 +26,18 @@ iopix never deletes anything here by itself.
 
 Sharpness and exposure are measured for every photo: **Sharpest**, **Blurry**, **Very dark** and **Very bright** filters, a **Sharpest first** sort, and sharpness shown as a rank within your own library.
 
+The **Photo quality** job adds:
+
+- **focus** measured on the sharpest part of the frame, so a portrait with a soft background still counts as sharp,
+- an **aesthetic score** from about 1 to 10 for light, colour, composition and clarity (it rates the picture, not the moment: a dull snapshot of a moment you love can score low), with a **Best looking first** sort and a **Best looking tenth** filter,
+- **closed eyes** on faces seen from the front, with a **Someone's eyes closed** filter.
+
+**Filters › Quality › Likely rejects** lists photos that are blurred all over, have most eyes closed, are clearly worse frames of a burst, or are nearly black or blown out, each with its reason. It is only a suggestion: **Mark as rejected** in the info panel sets the Rejected label, with undo in the edit log.
+
+## Date suggestions
+
+For photos marked **Date unknown**, **Explore › Date suggestions** (for editors) proposes a year from how old the named people in them look. Each person's photos with a known date teach the age model how that person ages; photos dated only to the year or month count too, with less weight. A birth year you enter on the page helps someone with few dated photos, and no suggestion is ever earlier than an entered birth year. Every suggestion is a range with the people and ages behind it, and **Use** saves it as a year-only date, with undo in the edit log. The info panel of an undated photo shows its suggestion too.
+
 ## In the info panel
 
-Everything the models produced is gathered at the end of the info panel under **AI analysis**: the description, detected content, objects, text found in the picture, sharpness and similar photos.
+Everything the models produced is gathered at the end of the info panel under **AI analysis**: the description, detected content, objects, text found in the picture, photo quality (focus, aesthetic score, closed eyes, and why it may be a reject) and similar photos.
