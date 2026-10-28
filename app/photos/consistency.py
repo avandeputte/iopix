@@ -14,14 +14,17 @@ backup first).
 import json
 import logging
 import os
+import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 
+from app import config
 from app.ai import analysis
 from app.digikam import dbsync, dkdb
 from app.photos import edits
-from app.data import index
+from app.data import index, vdb
 
 CHECK_VERSION = 2  # bumped when the check compares more: every photo is looked at again by "Check new and changed photos"
 FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
@@ -176,8 +179,16 @@ def _exif_read(paths: list) -> dict:
     """{path: {field: value}} for every readable path; a path with no XMP block gives {}."""
     if not paths:
         return {}
-    res = subprocess.run([*edits.exiftool_cmd(), "-j", "-m", "-q", "-charset", "utf8", "-n", *READ_TAGS, "--", *paths],
-                         capture_output=True, text=True, timeout=1800)
+    # the paths go in an argument file (one per line), as every exiftool run here does: a sync of thousands of
+    # photos would otherwise exceed the command line's length
+    with tempfile.NamedTemporaryFile("w", suffix=".args", dir=config.DATA_DIR, delete=False, encoding="utf-8") as f:
+        f.write("\n".join(READ_TAGS) + "\n--\n" + "\n".join(paths) + "\n")
+        argfile = f.name
+    try:
+        res = subprocess.run([*edits.exiftool_cmd(), "-j", "-m", "-q", "-charset", "utf8", "-charset", "filename=utf8", "-n", "-@", argfile],
+                             capture_output=True, text=True, timeout=1800)
+    finally:
+        os.unlink(argfile)
     out = {}
     try:
         rows = json.loads(res.stdout or "[]")
@@ -283,13 +294,8 @@ def scan(photos: list, rescan_all: bool = True):
                 now = int(time.time())
                 rows = [(r["id"], _cstamp(p), _report(r), len(r["mismatch"]), r["has_sidecar"], r["file_xmp"], now)
                         for p, r in zip(batch, recs)]
-                with analysis._write_lock:
-                    con = analysis.connect()
-                    try:
-                        con.executemany("INSERT OR REPLACE INTO metadata_check VALUES (?,?,?,?,?,?,?)", rows)
-                        con.commit()
-                    finally:
-                        con.close()
+                with vdb.writer() as con:
+                    con.executemany("INSERT OR REPLACE INTO metadata_check VALUES (?,?,?,?,?,?,?)", rows)
                 progress["done"] += len(batch)
             progress["scanned_at"] = int(time.time())
         except Exception as e:
@@ -307,7 +313,6 @@ def scan(photos: list, rescan_all: bool = True):
 
 def summary() -> dict:
     empty = {"scanned": 0, "mismatched": 0, "by_field": {}, "no_sidecar": 0, "scanned_at": None}
-    from app.data import vdb
     if not vdb.exists():
         return empty
     con = analysis.connect()
@@ -363,10 +368,9 @@ def recheck(photo_ids: list):
         con.close()
     if not known:
         return
-    from app.data import index
     icon = index.open_index()
     try:
-        icon.row_factory = __import__("sqlite3").Row
+        icon.row_factory = sqlite3.Row
         photos = [dict(r) for r in icon.execute(f"SELECT id, path, name, hash, size, modified, video FROM photos WHERE id IN ({','.join(map(str, known))})")]
     finally:
         icon.close()
@@ -377,13 +381,8 @@ def recheck(photo_ids: list):
             recs = compare(photos)
             now = int(time.time())
             rows = [(r["id"], _cstamp(p), _report(r), len(r["mismatch"]), r["has_sidecar"], r["file_xmp"], now) for p, r in zip(photos, recs)]
-            with analysis._write_lock:
-                c = analysis.connect()
-                try:
-                    c.executemany("INSERT OR REPLACE INTO metadata_check VALUES (?,?,?,?,?,?,?)", rows)
-                    c.commit()
-                finally:
-                    c.close()
+            with vdb.writer() as c:
+                c.executemany("INSERT OR REPLACE INTO metadata_check VALUES (?,?,?,?,?,?,?)", rows)
         except Exception:
             log.warning("consistency: re-checking %d edited photos failed", len(photos), exc_info=True)
     threading.Thread(target=work, name="consistency-recheck", daemon=True).start()
@@ -392,13 +391,8 @@ def recheck(photo_ids: list):
 def forget(photo_ids: list):
     """Drop stored results so those photos are compared again on the next scan."""
     if photo_ids:
-        with analysis._write_lock:
-            con = analysis.connect()
-            try:
-                con.executemany("DELETE FROM metadata_check WHERE photo_id = ?", [(int(i),) for i in photo_ids])
-                con.commit()
-            finally:
-                con.close()
+        with vdb.writer() as con:
+            con.executemany("DELETE FROM metadata_check WHERE photo_id = ?", [(int(i),) for i in photo_ids])
 
 
 # --------------------------------------------------------------------------

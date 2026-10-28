@@ -114,6 +114,25 @@ def peer_of(request) -> str:
     return request.scope.get("iopix.peer") or (request.client.host if request.client else "")
 
 
+def visitor_of(request) -> str:
+    """The address the sign-in throttle counts by: the visitor's own, as a trusted proxy (the Cloudflare tunnel, a
+    reverse proxy in AUTH_PROXY_TRUSTED) reports it, otherwise the connection's. Behind the tunnel every outside
+    visitor reaches the viewer from the tunnel's address, so counting by that would let one person's failed tries
+    lock everyone outside out; a header from anyone else is ignored, so nobody can escape the count by forging one."""
+    peer = peer_of(request)
+    if peer and _from_trusted(peer):
+        h = request.headers
+        fwd = h.get("cf-connecting-ip") or (h.get("x-forwarded-for") or "").split(",")[0].strip()
+        if fwd:
+            return f"{fwd} via {peer}"
+    return peer
+
+
+def forget_identities():
+    """Drop the remembered proxy identities, so an account change (role, deletion) applies at the next request."""
+    _cache.clear()
+
+
 authlog = logging.getLogger("app.auth")  # sign-ins, failed attempts and sign-outs, for Maintenance › Server log
 _logged = {}  # identity -> when its proxy sign-in was last logged (a page load makes dozens of requests)
 

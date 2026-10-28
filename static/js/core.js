@@ -194,30 +194,33 @@ export function netWait(ms) {
     window.addEventListener('online', done); document.addEventListener('visibilitychange', vis);
   });
 }
-export async function api(path) {
-  for (const wait of [1000, 3000, 6000, 0]) {
+/** Every call to the server goes through here. opts: {method, body (a plain object is sent as JSON; a FormData or a
+ *  URLSearchParams as it is), retry (reads: try again when the connection drops)}. A failed request becomes an Error
+ *  carrying the server's message (its JSON `detail`) or the status. */
+export async function request(path, { method = 'GET', body, retry = method === 'GET' } = {}) {
+  const init = { method };
+  if (body instanceof FormData || body instanceof URLSearchParams) init.body = body;
+  else if (body !== undefined) { init.headers = { 'content-type': 'application/json' }; init.body = JSON.stringify(body); }
+  for (const wait of retry ? [1000, 3000, 6000, 0] : [0]) {
     let r;
-    try { r = await fetch(path); } catch (e) {
+    try { r = await fetch(path, init); } catch (e) {
       if (!isNetErr(e)) throw e;
-      if (!wait) { NET.lost = true; throw netError(' Trying again…'); }
-      await netWait(wait); continue;
+      NET.lost = true;
+      if (!wait) throw netError(retry ? ' Trying again…' : ' Try again in a moment.');  // a change is not sent again by itself
+      await netWait(wait); NET.lost = false; continue;
     }
-    if (!r.ok) throw new Error(`${r.status} ${path}`);
-    return r.json();
+    if (!r.ok) {
+      let msg = `${r.status} ${path}`; try { msg = (await r.json()).detail || msg; } catch { /* not json */ }
+      throw new Error(msg);
+    }
+    return r.status === 204 ? null : r.json();
   }
 }
-export async function post(path, body) {
-  let r;
-  try { r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) {
-    if (isNetErr(e)) { NET.lost = true; throw netError(' Try again in a moment.'); }  // not sent again by itself: it changes something
-    throw e;
-  }
-  if (!r.ok) {
-    let msg = `${r.status} ${path}`; try { msg = (await r.json()).detail || msg; } catch { /* not json */ }
-    throw new Error(msg);
-  }
-  return r.json();
-}
+export const api = (path) => request(path);
+export const post = (path, body) => request(path, { method: 'POST', body });
+/** A form (FormData or URLSearchParams) sent as it is: uploads, the form-encoded endpoints. */
+export const send = (path, form) => request(path, { method: 'POST', body: form });
+export const del = (path) => request(path, { method: 'DELETE' });
 // Display preferences. Anonymous: the browser's localStorage. Signed in: the user's settings on the
 // server (loaded with the session, written through, so they follow the user to another device).
 

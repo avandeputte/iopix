@@ -24,7 +24,6 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from urllib.parse import quote
 
 from app import config, jobs, thumbs
@@ -37,7 +36,6 @@ except ImportError:  # numpy comes with the optional AI features; without it the
 log = logging.getLogger(__name__)
 JOBS = ("quality", "vision", "objects", "captions", "looks")
 progress = {key: {"running": False, "done": 0, "total": 0} for key in JOBS}
-_write_lock = threading.Lock()  # also taken by consistency.py, which shares this database
 _run = {"gen": 0}
 _ocr = None  # the OCR engine once loaded, False when none could be loaded
 on_progress = None  # set by the web app: called now and then so the index picks up new results
@@ -48,16 +46,10 @@ def connect():
     return vdb.connect(timeout=30)
 
 
-@contextmanager
 def _writer():
-    """One serialised write transaction: committed on success, always closed."""
-    with _write_lock:
-        con = connect()
-        try:
-            yield con
-            con.commit()
-        finally:
-            con.close()
+    """One serialised write transaction on the viewer database (vdb.writer)."""
+    from app.data import vdb
+    return vdb.writer()
 
 
 def init():

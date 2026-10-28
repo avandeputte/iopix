@@ -357,15 +357,12 @@ def _organize_allowed():
 
 
 def _run_organize(fn, *args):
-    from app.photos import organize
     try:
         return fn(*args)
     except dbsync.SyncError as e:
         raise HTTPException(409, str(e))
     except DB_ERRORS as e:
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
-    finally:
-        _ = organize
 
 
 

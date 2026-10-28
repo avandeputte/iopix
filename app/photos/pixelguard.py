@@ -129,12 +129,8 @@ def _store(rows: list):
     try:
         from app.data import vdb
         ids = _photo_ids([p for p, _h, _t in rows])
-        con = vdb.connect()
-        try:
+        with vdb.writer() as con:
             con.executemany("INSERT OR REPLACE INTO image_data_checksums (photo_id, hash, algorithm, verified) VALUES (?,?,?,?)",
                             [(ids[p], h, "SHA-256", t) for p, h, t in rows if p in ids])
-            con.commit()
-        finally:
-            con.close()
     except Exception as e:  # bookkeeping only
         log.warning("image data checksums were not stored: %s", e)

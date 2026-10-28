@@ -1,5 +1,5 @@
 /** Settings, maintenance, the model table, consistency, face quality, the history page and faces. */
-import { $, UNITS, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, regionUsesMiles, store } from './core.js';
+import { $, UNITS, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, regionUsesMiles, send, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, faceUrl, filterParams, go, hashFor, infoPrefsEditor, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs } from './search.js';
 import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
@@ -339,9 +339,7 @@ export async function showConsistency() {
     const q = subset ? filterParams() : new URLSearchParams();
     q.set('rescan_all', rescanAll ? '1' : '0');
     try {
-      const res = await fetch('/api/consistency/scan', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: q.toString() });
-      const r = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(r.detail || `${res.status}`);
+      const r = await send('/api/consistency/scan', q);
       toast(`Checking ${nf.format(r.queued)} photos in the background.`);
     } catch (e) { toast('Could not start the check: ' + e.message, null, null, 8000); return; }
     wasRunning = true;

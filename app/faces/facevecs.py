@@ -15,6 +15,7 @@ decided, and are all recomputed when the model (or the downloaded revision of it
 different models do not compare.
 """
 import logging
+import sqlite3
 import threading
 
 try:
@@ -249,17 +250,13 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
                 continue
             if gen != _run["gen"]:  # a switch or reset happened while this batch was computed: its vectors are not kept
                 return False
-            con = vdb.connect()
-            try:
+            with vdb.writer() as con:
                 if tagged:
                     con.executemany("INSERT OR REPLACE INTO ai_person_references (tag_id, photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?,?)",
                                     [(*key, vecs[k].astype(np.float32).tobytes()) for k, key in enumerate(batch)])
                 else:
                     con.executemany("INSERT OR REPLACE INTO ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?)",
                                     [(*key, vecs[k].astype(np.float32).tobytes()) for k, key in enumerate(batch)])
-                con.commit()
-            finally:
-                con.close()
         progress["done"] = offset + min(len(todo), i + 32)
     return True
 
@@ -280,13 +277,9 @@ def _same_model():
     if have == want:
         return
     if have != kind:  # the bare name is what versions before revisions wrote: those vectors came from the file installed then, adopted as is
-        con = vdb.connect()
-        try:
+        with vdb.writer() as con:
             con.execute("DELETE FROM ai_face_embeddings")
             con.execute("DELETE FROM ai_person_references")
-            con.commit()
-        finally:
-            con.close()
         log.info("faces: embeddings recomputed with %s", want)
     state.set_setting("face_vectors_built", want)
 
@@ -310,28 +303,20 @@ def _job(gen: int):
         current_p = {(f[1], f[2], f[3], f[4], f[5]) for f in protos}
         stale_p = [k for k in have_p if k not in current_p]
         if stale or stale_p:
-            con = vdb.connect()
-            try:
+            with vdb.writer() as con:
                 if stale:
                     con.executemany("DELETE FROM ai_face_embeddings WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale)
                 if stale_p:
                     con.executemany("DELETE FROM ai_person_references WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale_p)
-                con.commit()
-            finally:
-                con.close()
     finally:
         progress["running"] = False
 
 
 def reset():
     _run["gen"] += 1
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         con.execute("DELETE FROM ai_face_embeddings")
         con.execute("DELETE FROM ai_person_references")
-        con.commit()
-    finally:
-        con.close()
 
 
 def _prototypes() -> tuple:
@@ -401,7 +386,7 @@ def groups(kind: str = "unknown", threshold: float = None, tag: int = None) -> d
     missing: faces without a vector yet}. Groups are connected components of pairs above the threshold; each group
     and each face carries the viewer's own "looks like" suggestion when a named person's prototypes match."""
     con = index.open_index()
-    con.row_factory = __import__("sqlite3").Row
+    con.row_factory = sqlite3.Row
     try:
         where, params = "f.kind = ? AND p.video = 0", [kind]
         if tag:

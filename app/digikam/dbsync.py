@@ -183,8 +183,7 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
     preflight(db_path, check_running)
     if not dkdb.is_mysql() and not dkdb.standalone() and not os.access(db_path, os.W_OK):
         raise SyncError("The digiKam database file is not writable.")
-    backup = None  # ordinary edits: no full database copy (each is in the change log, and the sidecars have their own backups)
-
+    # ordinary edits take no full database copy: each is in the change log, and the sidecars have their own backups
     applied, skipped = [], []
     with write_transaction(db_path, check_running) as con:
         tags = dkdb.tag_tree(con)
@@ -241,4 +240,4 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
     from app.photos import history
     history.record([{"photo_id": pid, "action": "database", "summary": "Edits written into " + ("the library" if dkdb.standalone() else "digiKam's database"),
                      "details": {k: v for k, v in pending.get(pid, pending.get(str(pid), {})).items() if k != "caption_date"}} for pid in applied])
-    return {"applied": len(applied), "skipped": skipped, "backup": str(backup) if backup else None}
+    return {"applied": len(applied), "skipped": skipped, "backup": None}  # (no full database copy for ordinary edits)

@@ -119,13 +119,7 @@ def delete(photos: list, check_running: bool = True) -> dict:
     # 2. the database rows, in one transaction
     ids = [int(p["id"]) for p in ok]
     with dbsync.write_transaction(db_path, check_running) as con:
-        for i in range(0, len(ids), 300):
-            chunk = ",".join(map(str, ids[i:i + 300]))
-            for t in PHOTO_TABLES:
-                con.execute(f"DELETE FROM {t} WHERE imageid IN ({chunk})")
-            con.execute(f"UPDATE Tags SET icon = NULL WHERE icon IN ({chunk})")
-            con.execute(f"UPDATE Albums SET icon = NULL WHERE icon IN ({chunk})")
-            con.execute(f"DELETE FROM Images WHERE id IN ({chunk})")
+        drop_rows(con, ids)
     # 3. the files
     done = []
     for p in ok:
@@ -147,22 +141,30 @@ def delete(photos: list, check_running: bool = True) -> dict:
     return {"deleted": len(done), "failed": failed, "backup": str(dest), "database_backup": str(db_backup) if db_backup else None}
 
 
+def drop_rows(con, ids: list):
+    """Every row of these photos in digiKam's database, inside the caller's transaction: the Images row and its
+    child rows (digiKam's SQLite schema has triggers that cascade; MariaDB and the viewer's own library tables do
+    not, so the children are deleted here for every database)."""
+    ids = [int(i) for i in ids]
+    for i in range(0, len(ids), 300):
+        chunk = ",".join(map(str, ids[i:i + 300]))
+        for t in PHOTO_TABLES:
+            con.execute(f"DELETE FROM {t} WHERE imageid IN ({chunk})")
+        con.execute(f"UPDATE Tags SET icon = NULL WHERE icon IN ({chunk})")
+        con.execute(f"UPDATE Albums SET icon = NULL WHERE icon IN ({chunk})")
+        con.execute(f"DELETE FROM Images WHERE id IN ({chunk})")
+
+
 def forget(ids: list):
     """Everything the viewer keeps about these photos."""
     if not ids:
         return
-    from app.ai import analysis, semantic
-    from app import thumbs
-    with analysis._write_lock:
-        con = vdb.connect()
-        try:
-            for i in range(0, len(ids), 300):
-                chunk = ",".join(str(int(x)) for x in ids[i:i + 300])
-                for table, col in VIEWER_TABLES:
-                    con.execute(f"DELETE FROM {table} WHERE {col} IN ({chunk})")
-            con.commit()
-        finally:
-            con.close()
+    from app.ai import semantic
+    with vdb.writer() as con:
+        for i in range(0, len(ids), 300):
+            chunk = ",".join(str(int(x)) for x in ids[i:i + 300])
+            for table, col in VIEWER_TABLES:
+                con.execute(f"DELETE FROM {table} WHERE {col} IN ({chunk})")
     try:
         semantic.remove_ids(ids)
     except Exception as e:
@@ -175,4 +177,3 @@ def forget(ids: list):
                     f.unlink()
                 except OSError:
                     pass
-    _ = thumbs

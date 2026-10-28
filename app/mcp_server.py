@@ -20,8 +20,8 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from app import config, thumbs, updates
-from app.photos import edits
+from app import config, proxyauth, thumbs, updates
+from app.photos import consistency, edits
 from app.data import index
 from app.data import state as appstate
 from app.data.query import DATE_RE, SORTS, build_where
@@ -477,11 +477,11 @@ def diagnostics(token: str) -> dict:
         "disk_free_gb": round(free / 1e9, 1) if free is not None else None,
         "jobs": {**q, "running_for_min": round((time.time() - q["since"]) / 60, 1) if q.get("since") else None},
         "analysis_progress": {k: {"running": v["running"], "done": v["done"], "total": v["total"]} for k, v in analysis_progress.items()},
-        "consistency": {"progress": dict(__import__("app.photos.consistency", fromlist=["progress"]).progress), "summary": __import__("app.photos.consistency", fromlist=["summary"]).summary()},
+        "consistency": {"progress": dict(consistency.progress), "summary": consistency.summary()},
         "models": [{"key": m["key"], "installed": m["installed"], "revision": m.get("revision")} for m in models.listing()["models"]],
         "search": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done, "total": semantic.total, "model": semantic.chosen()},
         "users": {"exist": users.any_users(), "count": len(users.list_users())},
-        "proxySignIn": __import__("app.proxyauth", fromlist=["status"]).status(),
+        "proxySignIn": proxyauth.status(),
         "read_only": appstate.read_only(),
         "settings": _public_settings(),
         "log_file": str(config.LOG_FILE), "log_file_exists": config.LOG_FILE.exists(),

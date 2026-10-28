@@ -211,6 +211,7 @@ def update(user_id: int, role: str = None, password: str = None, name: str = Non
         con.commit()
     finally:
         con.close()
+    _forget_proxy_identities()
 
 
 def delete(user_id: int):
@@ -223,6 +224,13 @@ def delete(user_id: int):
         con.commit()
     finally:
         con.close()
+    _forget_proxy_identities()
+
+
+def _forget_proxy_identities():
+    """A sign-in through the proxy is remembered for half a minute (proxyauth); a change here must not outlive that."""
+    from app import proxyauth  # (proxyauth imports this module)
+    proxyauth.forget_identities()
 
 
 def authenticate(name: str, password: str):

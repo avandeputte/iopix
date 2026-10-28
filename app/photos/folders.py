@@ -243,19 +243,26 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     return {"added": added, "skipped": skipped}
 
 
-def register(album_id: int, staged: list, check_running: bool = True) -> list:
+def register(album_id: int, staged: list, check_running: bool = True, con=None) -> list:
     """Files already in the folder on disk -> their Images and ImageInformation rows, as an upload makes them.
-    staged: [(file name, category, extension, path, probe info)]."""
+    staged: [(file name, category, extension, path, probe info)]. With `con`, the rows go into the caller's own
+    write transaction (which took the backup) instead of one of their own."""
+    if con is not None:
+        return register_rows(con, album_id, staged)
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
-    added = []
     with dbsync.write_transaction(db_path, check_running) as con:
-        for final, cat, ext, path, info in staged:
-            cur = con.execute("INSERT INTO Images (album, name, status, category, modificationDate, fileSize, uniqueHash) "
-                              "VALUES (?, ?, 1, ?, NULL, ?, NULL)", (album_id, final, cat, path.stat().st_size))
-            iid = cur.lastrowid
-            fmt = FORMATS.get(ext, ("RAW-" + ext.upper()) if ext in IMAGE_EXT else ext.upper())
-            con.execute("INSERT INTO ImageInformation (imageid, rating, creationDate, digitizationDate, orientation, width, height, format, colorDepth, colorModel) "
-                        "VALUES (?, -1, ?, ?, ?, ?, ?, ?, 8, 1)", (iid, info["when"], info["when"], info["orientation"], info["w"], info["h"], fmt))
-            added.append({"id": iid, "name": final})
+        return register_rows(con, album_id, staged)
+
+
+def register_rows(con, album_id: int, staged: list) -> list:
+    added = []
+    for final, cat, ext, path, info in staged:
+        cur = con.execute("INSERT INTO Images (album, name, status, category, modificationDate, fileSize, uniqueHash) "
+                          "VALUES (?, ?, 1, ?, NULL, ?, NULL)", (album_id, final, cat, path.stat().st_size))
+        iid = cur.lastrowid
+        fmt = FORMATS.get(ext, ("RAW-" + ext.upper()) if ext in IMAGE_EXT else ext.upper())
+        con.execute("INSERT INTO ImageInformation (imageid, rating, creationDate, digitizationDate, orientation, width, height, format, colorDepth, colorModel) "
+                    "VALUES (?, -1, ?, ?, ?, ?, ?, ?, 8, 1)", (iid, info["when"], info["when"], info["orientation"], info["w"], info["h"], fmt))
+        added.append({"id": iid, "name": final})
     return added

@@ -198,7 +198,7 @@ async def _auth_guard(request: Request, call_next):
     if request.state.via_proxy and user and cookie_uid != user["id"] and path != "/api/auth/logout":
         # signed in at the proxy (Cloudflare Access): a session here too, so the same browser stays signed in on the
         # home network, where requests reach the viewer directly without Cloudflare
-        users.set_session(response, user["id"], "cloudflare" if proxyauth.mode() == "cloudflare" else "proxy")
+        users.set_session(response, user["id"], "cloudflare" if proxyauth.mode() == "cloudflare" else "proxy", users.over_https(request))
     return response
 
 
@@ -212,6 +212,8 @@ async def static_revalidate(request: Request, call_next):
                 return JSONResponse({"detail": "That request is too large"}, status_code=413)
         except ValueError:
             return JSONResponse({"detail": "Bad Content-Length"}, status_code=400)
+        if "content-length" not in request.headers and "chunked" in (request.headers.get("transfer-encoding") or "").lower():
+            return JSONResponse({"detail": "Send the request with a Content-Length"}, status_code=411)  # a chunked body has no length to check
     response = await call_next(request)
     if "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-cache"

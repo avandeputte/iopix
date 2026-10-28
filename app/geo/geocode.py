@@ -18,7 +18,8 @@ from app.geo import maps, places
 URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "iopix/1.0 (https://github.com/avandeputte/iopix)"
 _cache = OrderedDict()
-_lock = threading.Lock()
+_lock = threading.Lock()       # the cache
+_net_lock = threading.Lock()   # the rate limit and the request itself, so a cached answer never waits behind a slow one
 _last = [0.0]
 _offline_until = [0.0]
 log = logging.getLogger("app.geo.geocode")
@@ -26,7 +27,7 @@ log = logging.getLogger("app.geo.geocode")
 
 def _fetch(q: str) -> list:
     """Raw Nominatim rows for a query (network)."""
-    with _lock:  # Nominatim's policy: one request per second, from one client at a time
+    with _net_lock:  # Nominatim's policy: one request per second, from one client at a time
         wait = _last[0] + 1.05 - time.time()
         if wait > 0:
             time.sleep(wait)

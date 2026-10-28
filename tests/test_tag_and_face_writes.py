@@ -16,7 +16,7 @@ def _tags(con):
 
 
 @pytest.fixture
-def dk():
+def dk(lib):
     con = dkdb.connect()
     yield con
     con.close()

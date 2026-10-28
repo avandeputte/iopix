@@ -14,6 +14,7 @@ import math
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageOps
 
@@ -142,27 +143,36 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
         shutil.copy2(edits.sidecar_path(src), edits.sidecar_path(dst))
         subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-XMP-tiff:Orientation#=1",
                         *(["-XMP-mwg-rs:RegionInfo=", "-XMP-MP:RegionInfoMP="] if p["angle"] else []), edits.sidecar_path(dst)], capture_output=True, text=True, timeout=120)
-    regs = folders.register(album, [folders.staged_entry(__import__("pathlib").Path(dst))], check_running)
-    vid = regs[0]["id"]
     w, h = im.size
     version = scanner.hash_version()
-    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-        scanner._copy_attributes(con, int(pid), vid)
-        con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = 1, format = 'JPG', colorDepth = 8, colorModel = 5 WHERE imageid = ?", (w, h, vid))
-        if p["angle"]:
-            con.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (vid,))
-        st = dkdb.file_stamp(dst)
-        con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?", (scanner.unique_hash(dst, version), st[1], st[0], vid))
-        if not dkdb.standalone():  # the viewer's own library keeps no version links
-            con.execute("INSERT INTO ImageRelations (subject, object, type) VALUES (?, ?, ?)", (vid, int(pid), DERIVED_FROM))
-    if not dkdb.standalone():
-        with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-            current, original, inter = (_internal_tag(con, n) for n in ("Current Version", "Original Version", "Intermediate Version"))
-            derived = con.execute("SELECT 1 FROM ImageRelations WHERE subject = ? AND type = ?", (int(pid), DERIVED_FROM)).fetchone()
-            con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid IN (?, ?, ?)", (vid, current, original, inter))
-            con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (int(pid), current))
-            con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (int(pid), inter if derived else original))
-            con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (vid, current))
+    # one transaction registers the file, copies the original's attributes and links the two as versions: if any of
+    # it is refused, nothing is in the database and the new file goes again
+    db_path = dkdb.sqlite_path()
+    dkdb.backup(db_path)
+    try:
+        with dbsync.write_transaction(db_path, check_running) as con:
+            vid = folders.register(album, [folders.staged_entry(Path(dst))], check_running, con=con)[0]["id"]
+            scanner._copy_attributes(con, int(pid), vid)
+            con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = 1, format = 'JPG', colorDepth = 8, colorModel = 5 WHERE imageid = ?", (w, h, vid))
+            if p["angle"]:
+                con.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (vid,))
+            st = dkdb.file_stamp(dst)
+            con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?", (scanner.unique_hash(dst, version), st[1], st[0], vid))
+            if not dkdb.standalone():  # the viewer's own library keeps no version links or version tags
+                con.execute("INSERT INTO ImageRelations (subject, object, type) VALUES (?, ?, ?)", (vid, int(pid), DERIVED_FROM))
+                current, original, inter = (_internal_tag(con, n) for n in ("Current Version", "Original Version", "Intermediate Version"))
+                derived = con.execute("SELECT 1 FROM ImageRelations WHERE subject = ? AND type = ?", (int(pid), DERIVED_FROM)).fetchone()
+                con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid IN (?, ?, ?)", (vid, current, original, inter))
+                con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (int(pid), current))
+                con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (int(pid), inter if derived else original))
+                con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?, ?)", (vid, current))
+    except BaseException:
+        for f in (dst, edits.sidecar_path(dst)):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        raise
     # the original's edits not yet in digiKam's database are the version's too (its sidecar is a copy of the
     # original's); then its sidecar regions and tag list are written from its own rows: upright, at its own size
     from app.faces import facemgr

@@ -1,5 +1,5 @@
 /** Selection bar actions and app-side state: favorites, albums, trash, move, rename, the edit log entries. */
-import { $, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, store } from './core.js';
+import { $, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, send, store } from './core.js';
 import { S, ST, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError, ualbumById } from './state.js';
 import { crumbs } from './search.js';
 import { G, dropPhotos, renderGrid, setBadges } from './grid.js';
@@ -597,9 +597,7 @@ export async function showImport(params) {
       let done = 0;
       for (let i = 0; i < files.length; i += 20) {  // in batches, so a phone upload does not hold one request for minutes
         const fd = new FormData(); files.slice(i, i + 20).forEach((f) => fd.append('files', f)); if (token) fd.append('token', token); fd.append('layout', layoutSel.value);
-        const res = await fetch('/api/import/stage', { method: 'POST', body: fd });
-        const r = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(r.detail || `${res.status}`);
+        const r = await send('/api/import/stage', fd);
         token = r.token; plan = r; done += Math.min(20, files.length - i);
         fill(status, `Uploaded ${nf.format(done)} of ${nf.format(files.length)}…`);
       }

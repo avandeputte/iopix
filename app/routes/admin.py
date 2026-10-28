@@ -230,6 +230,44 @@ def _dir_size(path) -> int:
     return total
 
 
+_sizes = {"at": 0.0, "values": None, "computing": False}  # the storage figures: a walk of the cache folders (100k+ files) is not done per page open
+_sizes_lock = threading.Lock()
+SIZES_TTL = 300
+STORAGE_DIRS = (("thumbnails", "cache/t"), ("previews", "cache/p"), ("faces", "cache/f"), ("models", "models"),
+                ("backups", "sidecar-backups"), ("fileBackups", "file-backups"), ("dbBackups", "db-backups"), ("deletedPhotos", "deleted-photos"))
+
+
+def _storage_sizes(refresh: bool = False) -> dict:
+    """The size of each part of the data folder, remembered for a few minutes. The first call measures; later ones
+    answer at once and start a fresh measurement in the background when the figures are older than SIZES_TTL
+    (or when asked to refresh), so the page shows the last known figures while it runs."""
+    def measure():
+        values = {k: _dir_size(config.DATA_DIR / v) for k, v in STORAGE_DIRS}
+        with _sizes_lock:
+            _sizes.update(at=time.time(), values=values, computing=False)
+        return values
+    with _sizes_lock:
+        values, stale = _sizes["values"], time.time() - _sizes["at"] > SIZES_TTL
+        if values is not None and (stale or refresh) and not _sizes["computing"]:
+            _sizes["computing"] = True
+            threading.Thread(target=measure, name="storage-sizes", daemon=True).start()
+    if values is None:
+        values = measure()
+    return {**values, "measuredAt": int(_sizes["at"])}
+
+
+def _without_token(db_file):
+    """The MCP admin token is left out of a backup copy: it can be generated again and need not travel with the data."""
+    con = sqlite3.connect(str(db_file))
+    try:
+        con.execute("DELETE FROM app_settings WHERE key = 'mcp_admin_token'")
+        con.commit()
+    except sqlite3.Error:
+        pass
+    finally:
+        con.close()
+
+
 @router.get("/api/analysis")
 def api_analysis(request: Request):
     """Status of every background analysis, for the AI analysis page."""
@@ -289,7 +327,7 @@ def api_analysis(request: Request):
 async def api_login(request: Request):
     body = await request.json()
     name, src = str(body.get("name", ""))[:64], proxyauth.source(request)
-    key = f"{proxyauth.peer_of(request)}|{name.strip().lower()}"  # the real connection address, not a header anyone can set
+    key = f"{proxyauth.visitor_of(request)}|{name.strip().lower()}"  # the visitor's address (a header only from a trusted proxy)
     nkey = f"name|{name.strip().lower()}"
     wait = max(users.login_wait(key), users.login_wait(nkey))
     if wait:
@@ -731,9 +769,7 @@ def api_maintenance(request: Request):
         "photos": n, "indexBuilt": int(built[0]) if built else None, "digikamSaved": dk_mtime,
         "digikamRunning": dbsync.digikam_running(), "pendingEdits": edits.pending_count(),
         "paths": {"library": str(config.PHOTOS_ROOT), "digikamDb": dkdb.describe(), "data": str(config.DATA_DIR)},
-        "storage": {k: _dir_size(config.DATA_DIR / v) for k, v in (
-            ("thumbnails", "cache/t"), ("previews", "cache/p"), ("faces", "cache/f"), ("models", "models"),
-            ("backups", "sidecar-backups"), ("fileBackups", "file-backups"), ("dbBackups", "db-backups"), ("deletedPhotos", "deleted-photos"))} | {
+        "storage": _storage_sizes(request.query_params.get("refresh") == "1") | {
             "index": config.INDEX_DB.stat().st_size if config.INDEX_DB.exists() else 0,
             "viewerDb": vdb.SQLITE_FILE.stat().st_size if not vdb.is_mysql() and vdb.SQLITE_FILE.exists() else 0,
             "viewerDbError": vdb.error,  # MySQL configured but unusable at start: the SQLite file is in use instead
@@ -855,10 +891,10 @@ async def api_analysis_run(request: Request):
 
 @router.get("/api/backup/{which}")
 def api_backup(which: str, request: Request):
-    if request.headers.get("sec-fetch-site") == "cross-site":  # a link on another site must not start a multi-hundred-MB dump
-        raise HTTPException(403, "Open this from the viewer itself")
     """A download of digiKam's database (a consistent copy of the SQLite file, or a fresh mysqldump)
     or of the viewer's own state database. Admins only; the copy is also kept in db-backups."""
+    if request.headers.get("sec-fetch-site") == "cross-site":  # a link on another site must not start a multi-hundred-MB dump
+        raise HTTPException(403, "Open this from the viewer itself")
     if not users.is_admin(request.state.user):
         raise HTTPException(403 if request.state.user else 401, "Admins only")
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -883,6 +919,7 @@ def api_backup(which: str, request: Request):
         try:
             with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
                 vdb.snapshot_sqlite(tmp / "viewer.db")  # a SQLite copy even when the viewer runs on MySQL
+                _without_token(tmp / "viewer.db")
                 z.write(tmp / "viewer.db", "viewer.db")
                 for f in sorted(config.DATA_DIR.glob("embeddings*.npz")) + sorted(config.DATA_DIR.glob("embeddings*.npz.complete")):
                     z.write(f, f.name)
