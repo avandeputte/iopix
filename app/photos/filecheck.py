@@ -23,7 +23,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import time
 
 from app import core, jobs, thumbs
 from app.data import vdb
@@ -34,8 +33,7 @@ from app.digikam import dbsync, dkdb
 log = logging.getLogger("app.photos.filecheck")
 JOB = "filecheck"
 JPEG_EXT = (".jpg", ".jpeg", ".jpe", ".jfif")
-progress = {"running": False, "done": 0, "total": 0, "found": 0, "started": None, "finished": None}
-_run = {"gen": 0}
+progress = jobs.Progress(JOB, found=0, started=None, finished=None)
 _lock = threading.Lock()
 LABELS = {"end_marker": "The end-of-image marker is missing; the picture itself is complete",
           "truncated": "The file stops early: the bottom of the picture is missing",
@@ -274,10 +272,10 @@ def _done() -> dict:
 def _job(gen: int, photos: list):
     have = _done()
     todo = [p for p in photos if have.get(p["id"], (None,))[0] != _stamp(p)]
-    progress.update(running=True, done=0, total=len(todo), found=0, started=int(time.time()), finished=None)
+    progress.start(len(todo), found=0)
     try:
         for todo_batch in chunked(todo, 50):
-            if gen != _run["gen"]:
+            if progress.cancelled(gen):
                 return
             rows = []
             for p in todo_batch:
@@ -289,9 +287,9 @@ def _job(gen: int, photos: list):
                 rows.append((p["id"], _stamp(p), json.dumps(r) if r else None))
             with vdb.writer() as con:
                 con.executemany(f"INSERT OR REPLACE INTO ai_scans VALUES (?,'{JOB}',?,?)", rows)
-            progress["done"] += len(todo_batch)
+            progress.step(len(todo_batch))
     finally:
-        progress.update(running=False, finished=int(time.time()))
+        progress.finish()
 
 
 def start(redo: bool = False) -> int:
@@ -302,8 +300,7 @@ def start(redo: bool = False) -> int:
     photos = _photos()
     have = _done()
     n = sum(1 for p in photos if have.get(p["id"], (None,))[0] != _stamp(p))
-    _run["gen"] += 1
-    gen = _run["gen"]
+    gen = progress.cancel()
     jobs.submit(JOB, lambda: _job(gen, photos))
     return n
 

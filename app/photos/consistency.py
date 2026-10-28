@@ -20,7 +20,7 @@ import tempfile
 import threading
 import time
 
-from app import config
+from app import config, jobs
 from app.ai import analysis
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history
@@ -31,8 +31,7 @@ CHECK_VERSION = 2  # bumped when the check compares more: every photo is looked 
 FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
 SOURCES = ["db", "sidecar", "file"]
 log = logging.getLogger("app.photos.consistency")
-progress = {"running": False, "done": 0, "total": 0, "mismatched": 0, "scanned_at": None, "error": None}
-_run = {"gen": 0}
+progress = jobs.Progress("consistency", mismatched=0, scanned_at=None)
 TAGS_XMP = ["XMP-digiKam:TagsList", "XMP-microsoft:LastKeywordXMP", "XMP-lr:HierarchicalSubject", "XMP-mediapro:CatalogSets"]
 READ_TAGS = ["-XMP-xmp:Rating", "-XMP-digiKam:PickLabel", "-XMP-digiKam:ColorLabel", "-XMP-dc:Title", "-XMP-dc:Description",
              *["-" + t for t in TAGS_XMP], "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude", "-GPSAltitude"]
@@ -265,8 +264,6 @@ def _cstamp(p: dict) -> str:
 def scan(photos: list, rescan_all: bool = True):
     """Compare every given photo (rows with id, path, name, hash, size, modified) in the background."""
     init()
-    _run["gen"] += 1
-    gen = _run["gen"]
     todo = list(photos)  # videos too: their sidecar against digiKam (the file itself is not read)
     if not rescan_all:
         con = analysis.connect()
@@ -275,36 +272,36 @@ def scan(photos: list, rescan_all: bool = True):
         finally:
             con.close()
         todo = [p for p in todo if have.get(p["id"]) != _cstamp(p)]
-    progress.update(running=True, done=0, total=len(todo), error=None, failed=0, started=int(time.time()), rescan_all=bool(rescan_all))
+    gen = progress.start(len(todo), failed=0, started=int(time.time()), rescan_all=bool(rescan_all))
     log.info("consistency: checking %d photos (%s)", len(todo), "all" if rescan_all else "new and changed only")
 
     def work():
         try:
             for chunk in chunked(todo, 200):
-                if gen != _run["gen"]:
+                if progress.cancelled(gen):
                     return
                 batch = chunk
                 try:
                     recs = compare(batch)
                 except Exception as e:  # one bad batch must not end the scan, but it must be visible
-                    progress["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+                    progress.fail(f"{type(e).__name__}: {str(e)[:200]}")
                     progress["failed"] = progress.get("failed", 0) + len(batch)
                     log.warning("consistency: a batch of %d photos could not be compared", len(batch), exc_info=True)
-                    progress["done"] += len(batch)
+                    progress.step(len(batch))
                     continue
                 now = int(time.time())
                 rows = [(r["id"], _cstamp(p), _report(r), len(r["mismatch"]), r["has_sidecar"], r["file_xmp"], now)
                         for p, r in zip(batch, recs)]
                 with vdb.writer() as con:
                     con.executemany("INSERT OR REPLACE INTO metadata_check VALUES (?,?,?,?,?,?,?)", rows)
-                progress["done"] += len(batch)
+                progress.step(len(batch))
             progress["scanned_at"] = int(time.time())
         except Exception as e:
-            progress["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            progress.fail(f"{type(e).__name__}: {str(e)[:200]}")
             log.warning("consistency: the scan stopped", exc_info=True)
         finally:
-            if gen == _run["gen"]:
-                progress["running"] = False
+            if not progress.cancelled(gen):
+                progress.finish()
                 progress["mismatched"] = summary()["mismatched"]
                 log.info("consistency: done, %d of %d photos checked, %d disagree%s", progress["done"] - progress.get("failed", 0),
                          progress["total"], progress["mismatched"], f", {progress['failed']} failed ({progress['error']})" if progress.get("failed") else "")

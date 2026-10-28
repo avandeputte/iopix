@@ -76,7 +76,7 @@ def test_run_repair_and_undo_on_the_scratch_library(client, lib):
         f.write(damaged)
     try:
         assert filecheck.check_file(path)["problem"] == "end_marker"
-        filecheck._job(filecheck._run["gen"], [p for p in filecheck._photos() if p["id"] == pid])
+        filecheck._job(filecheck.progress.gen, [p for p in filecheck._photos() if p["id"] == pid])
         found = {x["photo"]: x for x in client.get("/api/filecheck").json()["found"]}
         assert found[pid]["fixable"]
         r = client.post("/api/filecheck/repair", json={"ids": [pid]}).json()

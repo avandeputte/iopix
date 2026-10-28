@@ -9,13 +9,14 @@ sidecars (and files, if enabled) are written and the assignment waits for
 """
 import threading
 
+from app import jobs
 from app.digikam import dbsync
 from app.photos import edits, tagmanager
 from app.data import index
 from app.digikam.dbsync import SyncError
 
 ROOT = "Places"
-progress = {"running": False, "done": 0, "total": 0, "created": 0, "error": None}
+progress = jobs.Progress("placetags", created=0)
 
 
 def _part(name: str) -> str:
@@ -60,7 +61,7 @@ def plan(photo_ids: list = None) -> dict:
 def run(photo_ids: list = None):
     """Create the missing tags, then assign each photo its place tag (background)."""
     p = plan(photo_ids)
-    progress.update(running=True, done=0, total=p["to_tag"], created=0, error=None)
+    progress.start(p["to_tag"], created=0)
 
     def work():
         try:
@@ -84,7 +85,7 @@ def run(photo_ids: list = None):
                     groups.setdefault(full, []).append({"id": pid, "path": paths[pid]})
             for full, photos in groups.items():
                 edits.apply(photos, {"add_tags": [full]})
-                progress["done"] += len(photos)
+                progress.step(len(photos))
             stale = {}
             for pid, tags in p["_untag"]:
                 stale.setdefault(tuple(tags), []).append(pid)
@@ -99,8 +100,8 @@ def run(photo_ids: list = None):
                     if photos:
                         edits.apply(photos, {"remove_tags": list(tags)})
         except Exception as e:
-            progress["error"] = str(e)[:300]
+            progress.fail(e)
         finally:
-            progress["running"] = False
+            progress.finish()
 
     threading.Thread(target=work, name="placetags", daemon=True).start()

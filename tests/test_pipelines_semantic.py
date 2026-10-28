@@ -211,9 +211,9 @@ def test_near_duplicate_pairs_in_blocks_match_the_full_comparison(monkeypatch):
         active = eng
         key = "stub:7"
     monkeypatch.setattr(neardups, "semantic", Sem())
-    neardups._run["gen"] += 1
+    gen = neardups.progress.cancel()
     try:
-        neardups._job(neardups._run["gen"], "loose")
+        neardups._job(gen, "loose")
         assert neardups.progress["error"] is None
         con = vdb.connect()
         try:

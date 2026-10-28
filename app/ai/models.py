@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
 
-from app import config
+from app import config, jobs
 
 MODEL_DIR = config.DATA_DIR / "models"
 RECORD = MODEL_DIR / "downloads.json"
@@ -159,7 +159,7 @@ def path_for(group: str):
     return path(chosen(group))
 
 
-progress = {"running": None, "error": None, "finished": None, "log": ""}
+progress = jobs.Progress("models", running=None, finished=None, log="")  # running: the key being downloaded
 _checked = {}
 _lock = threading.Lock()
 
@@ -375,7 +375,7 @@ def download(key: str):
                 from app.faces import ages
                 ages.start()
         except Exception as e:
-            progress["error"] = str(e)[:300]
+            progress.fail(e)
         finally:
             progress.update(running=None, finished=key)
 

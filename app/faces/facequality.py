@@ -28,13 +28,13 @@ from app.digikam import dbsync, dkdb
 from app.data import index, vdb
 from app.digikam.dkdb import chunked
 from app.photos import edits, history
-from app import config
+from app import config, jobs
 
 log = logging.getLogger("app.faces.facequality")
 NEAR = 3          # pixels: regions of one person this close on every coordinate are the same face
 MARGIN = 5        # pixels a rectangle may stick out of the image before it counts as outside
 FILE_DONE = "Duplicate face regions removed from the image file"
-progress = {"running": False, "files": False, "done": 0, "total": 0, "removed": 0, "photos": 0, "errors": 0, "started": None, "finished": None, "error": None, "backup": None}
+progress = jobs.Progress("facequality", files=False, removed=0, photos=0, errors=0, started=None, finished=None, backup=None)
 _lock = threading.Lock()
 
 
@@ -398,16 +398,16 @@ def fix_files(after=None) -> int:
     need = sum(os.path.getsize(p) for _i, p in todo if os.path.exists(p)) * 1.1 + 200 * 1024 ** 2
     if shutil.disk_usage(str(config.DATA_DIR)).free < need:
         raise dbsync.SyncError(f"Not enough free space for the backups of the original files ({need / 1e9:.1f} GB needed).")
-    progress.update(running=True, files=True, done=0, total=len(todo), removed=0, photos=0, errors=0, started=int(time.time()), finished=None, error=None)
+    progress.start(len(todo), files=True, removed=0, photos=0, errors=0)
 
     def job():
         try:
             _run_files(todo)
         except Exception as e:
             log.warning("face clean-up of the image files stopped: %s", e, exc_info=True)
-            progress["error"] = str(e)[:300]
+            progress.fail(e)
         finally:
-            progress.update(running=False, finished=int(time.time()))
+            progress.finish()
             if after:
                 after()
     threading.Thread(target=job, name="face-cleanup-files", daemon=True).start()
@@ -475,16 +475,16 @@ def fix_near_duplicates(after=None, check_running: bool = True) -> int:
         return 0
     db_path = Path(dkdb.sqlite_path())
     dbsync.preflight(db_path, check_running, "faces")
-    progress.update(running=True, files=False, done=0, total=len(todo), removed=0, photos=0, errors=0, started=int(time.time()), finished=None, error=None, backup=None)
+    progress.start(len(todo), files=False, removed=0, photos=0, errors=0, backup=None)
 
     def job():
         try:
             _run(todo, db_path, check_running)
         except Exception as e:
             log.warning("face clean-up stopped: %s", e, exc_info=True)
-            progress["error"] = str(e)[:300]
+            progress.fail(e)
         finally:
-            progress.update(running=False, finished=int(time.time()))
+            progress.finish()
             if after:
                 after()
     threading.Thread(target=job, name="face-cleanup", daemon=True).start()

@@ -916,15 +916,24 @@ function qualityRow(d) {
   return h('div', { class: 'irow' }, icon('spark'), h('div', null, lines.map((t) => h('div', { class: 'a' }, t)), small.length ? h('div', { class: 'b' }, small.join(' · ')) : null, reject));
 }
 
-export function renderInfo() {
-  const d = LB.detail, el = LB.el.info;
-  if (!d) return;
-  LB.mini?.remove(); LB.mini = null;
-  const hid = infoHidden(), show = (k) => !hid.has(k);
+/** What every section of the info pane is built from: the photo's details `d`, which sections are shown, and the
+ * small builders (a link that filters the grid, a one-field save, a row with an icon, a tag chip). */
+function infoContext(d, show) {
   const lnk = (text, obj) => h('button', { type: 'button', class: 'lnk', onclick: () => filterFromLightbox(obj) }, text);
   const saveOne = (ch) => editPhotos([d.id], ch);
   const irow = (ic, a, b) => h('div', { class: 'irow' }, icon(ic), h('div', null, h('div', { class: 'a' }, a), b ? h('div', { class: 'b' }, b) : null));
   const sub = (t) => h('div', { class: 'sub' }, t);
+  const peopleTags = d.tags.filter((t) => t.person), tags = d.tags.filter((t) => !t.person);
+  const chip = (t) => h('span', { class: 'ichip', title: t.full.replaceAll('/', ' › '), onclick: () => filterFromLightbox({ tag: t.id }) },
+    t.person ? h('img', { src: faceUrl(t.id), alt: '' }) : null, t.name,
+    S.CAN_MANAGE && d.id !== S.tagById.get(t.id)?.icon ? h('button', { class: 'tx', title: t.person ? `Use this photo as ${t.name}’s badge picture (digiKam must be closed)` : `Use this photo as the thumbnail for “${t.name}” (digiKam must be closed)`,
+      onclick: (e) => { e.stopPropagation(); setTagIcon(t, d.id); } }, icon('photo')) : null);
+  const ex = d.extra || {}, cr = ex.copyright || {}, vid = ex.video || {};
+  return { d, show, lnk, saveOne, irow, sub, chip, ex, cr, vid, tags, peopleTags };
+}
+/** When the photo was taken, with the suggestion and the date editor when there is one. */
+function infoDate(c) {
+  const { d, show, lnk, irow } = c;
   // an approximate date shows only what is known ("1992", "May 1992", "Date unknown"), never the placeholder day
   const dateRow = (x) => {
     const n = precOf(x.datePrecision), y = (x.day || '').slice(0, 4), ym = (x.day || '').slice(0, 7);
@@ -935,68 +944,38 @@ export function renderInfo() {
       h('span', { class: 'approx', style: 'margin:4px 0 0', title: 'Saved with a placeholder date where a full date is required; the tag under “Date approximate” says how much is known' },
         ['', 'Approximate date · the day is not known', 'Approximate date · only the year is known', `Sorted under ${dfDay.format(date(x.ts))}, a placeholder`][n]));
   };
-  const exposure = [d.aperture ? `ƒ/${+d.aperture.toFixed(1)}` : null,
-    d.exposure ? (d.exposure < 1 ? `1/${Math.round(1 / d.exposure)} s` : `${+d.exposure.toFixed(1)} s`) : null,
-    d.focal ? `${+d.focal.toFixed(1)} mm${d.focal35 && Math.round(d.focal35) !== Math.round(d.focal) ? ` (${Math.round(d.focal35)} mm eq.)` : ''}` : null,
-    d.iso ? `ISO ${d.iso}` : null, d.flash != null && (d.flash & 1) ? 'Flash' : null].filter(Boolean).join(' · ');
+  return show('date') ? [dateRow(d), d.dateSuggestion ? suggestRow(d) : null,
+      S.EDITING ? h('div', { hidden: true, style: 'margin:0 0 8px 40px' }, dateEditor([d.id], d.taken, null, d.datePrecision)) : null] : null;
+}
+
+/** The file: name, size and format, its folder, and its other versions. */
+function infoFile(c) {
+  const { d, show, lnk, irow } = c;
   const mp = d.w * d.h / 1e6;
-  const peopleTags = d.tags.filter((t) => t.person), tags = d.tags.filter((t) => !t.person);
-  const chip = (t) => h('span', { class: 'ichip', title: t.full.replaceAll('/', ' › '), onclick: () => filterFromLightbox({ tag: t.id }) },
-    t.person ? h('img', { src: faceUrl(t.id), alt: '' }) : null, t.name,
-    S.CAN_MANAGE && d.id !== S.tagById.get(t.id)?.icon ? h('button', { class: 'tx', title: t.person ? `Use this photo as ${t.name}’s badge picture (digiKam must be closed)` : `Use this photo as the thumbnail for “${t.name}” (digiKam must be closed)`,
-      onclick: (e) => { e.stopPropagation(); setTagIcon(t, d.id); } }, icon('photo')) : null);
-  const stars = d.rating > 0 ? '★'.repeat(d.rating) + '☆'.repeat(5 - d.rating) : null;
-  const ex = d.extra || {}, cr = ex.copyright || {}, vid = ex.video || {};
-  const kv = [];
-  const addKv = (k, v) => { if (v != null && v !== '') kv.push(h('span', null, k), h('span', null, v)); };
-  if (!S.EDITING) addKv('Rating', stars);
-  if (d.creator) kv.push(h('span', null, 'Creator'), h('span', null, lnk(d.creator, { creator: d.creator })));
-  addKv('Copyright', d.copyright);
-  for (const [k, v] of Object.entries(cr)) if (!['creator', 'copyrightNotice'].includes(k)) addKv(k.replace('creatorContactInfo.', '').replace(/([A-Z])/g, ' $1').toLowerCase(), v);
-  for (const [k, v] of Object.entries(ex.properties || {})) addKv(k, v);
-  if (d.video) { addKv('Duration', d.duration ? fmtDur(d.duration) : null); addKv('Video codec', vid.codec); addKv('Frame rate', vid.fps ? `${+(+vid.fps).toFixed(2)} fps` : null); addKv('Audio', vid.audio); }
-  addKv('File modified', d.modified?.replace('T', ' '));
-  // the camera sits low in the panel, in the same small type as the details: most people never look at it
-  const ckv = [];
-  if (d.camera || exposure) ckv.push(h('span', null, 'Camera'), h('span', null, d.camera ? lnk(d.camera, { camera: d.camera }) : 'Unknown camera'));
-  if (d.lens) ckv.push(h('span', null, 'Lens'), h('span', null, lnk(d.lens, { lens: d.lens })));
-  if (exposure) ckv.push(h('span', null, 'Exposure'), h('span', null, exposure));
-  const mapEl = d.lat != null && show('location') ? h('div', { class: 'imap' }) : null;
-  // everything a model produced, together at the end: description, detected content, objects, text, sharpness, bursts, look-alikes
-  const ai = show('ai') ? [
-    d.caption_ai ? h('div', { class: 'muted', style: 'margin:2px 0 6px;font-style:italic' }, d.caption_ai.charAt(0).toUpperCase() + d.caption_ai.slice(1)) : null,
-    d.concepts?.length ? [sub('Detected'), h('div', { class: 'ichips' }, d.concepts.map((c) => h('span', { class: 'ichip', title: `The model’s guess (${Math.round(c.p * 100)}% of its vote)`, onclick: () => filterFromLightbox({ concept: c.name }) }, icon('spark'), c.name)))] : null,
-    d.boxes?.length ? [sub('Objects'), h('div', { class: 'ichips' }, [...new Set(d.boxes.map((b) => b.cls))].map((c) => h('span', { class: 'ichip', onclick: () => filterFromLightbox({ obj: c }) },
-      c, h('b', { style: 'font-weight:400;color:var(--fg2)' }, d.boxes.filter((b) => b.cls === c).length > 1 ? ` ×${d.boxes.filter((b) => b.cls === c).length}` : ''))))] : null,
-    d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a small' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
-    d.quality ? qualityRow(d) : null,
-    d.burst ? h('div', { class: 'irow' }, icon('dup'), h('div', null, h('div', { class: 'a' }, lnk(`Part of a burst of ${d.burst_size} frames`, { burst: d.burst, sort: 'old' })),
-      h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('button', { type: 'button', class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,
-    d.similar && !d.video ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, lnk('More photos like this', { like: d.id })))) : null,
-  ].flat().filter(Boolean) : [];
-  fill(el,
-    h('div', { class: 'ihead' }, h('button', { class: 'iconbtn', title: 'Close info', onclick: toggleInfo }, icon('close')), 'Info',
-      h('button', { class: 'pillbtn iactions', style: 'margin-left:auto', title: 'Everything you can do with this photo', onclick: (e) => photoActions(e.currentTarget, d) }, icon('more'), 'Actions'),
-      h('button', { class: 'iconbtn' + (LB.prefs ? ' on' : ''), title: 'Choose what this panel shows', onclick: () => { LB.prefs = !LB.prefs; renderInfo(); } }, icon('gear'))),
-    LB.prefs ? infoPrefsEditor(renderInfo) : null,
-    show('caption') && d.title ? h('div', { class: 'title' }, d.title) : null,
-    show('caption') && d.caption ? h('div', { class: 'muted', style: 'margin:6px 0 10px;white-space:pre-wrap' }, d.caption) : null,
-    show('date') ? [dateRow(d), d.dateSuggestion ? suggestRow(d) : null,
-      S.EDITING ? h('div', { hidden: true, style: 'margin:0 0 8px 40px' }, dateEditor([d.id], d.taken, null, d.datePrecision)) : null] : null,
-    show('file') ? [irow(d.video ? 'video' : 'photo', d.name, [d.video ? null : `${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`, `${d.w} × ${d.h}`, fmtBytes(d.size), d.fmt].filter(Boolean).join(' · ')),
+  return show('file') ? [irow(d.video ? 'video' : 'photo', d.name, [d.video ? null : `${mp >= 1 ? mp.toFixed(1) : mp.toFixed(2)} MP`, `${d.w} × ${d.h}`, fmtBytes(d.size), d.fmt].filter(Boolean).join(' · ')),
       d.album ? irow('folder', lnk(d.album.path.replace(/^\//, '') || d.album.name, { album: d.album.id, sort: 'old' }), 'Folder') : null,
       d.versions?.length ? irow('dup', h('span', null, d.versions.map((x, k) => [k ? ' · ' : '', x.id === d.id ? h('b', null, x.role === 'original' ? 'Original' : 'This version')
-        : h('button', { type: 'button', class: 'lnk', onclick: () => openLightbox({ id: d.versions.map((y) => y.id) }, k, true) }, x.role === 'original' ? 'Original' : `Version ${k}`)])), 'Versions') : null] : null,
-    S.EDITING ? [h('div', { style: 'height:10px' }),  // the rating, title and caption controls follow; they need no heading
+        : h('button', { type: 'button', class: 'lnk', onclick: () => openLightbox({ id: d.versions.map((y) => y.id) }, k, true) }, x.role === 'original' ? 'Original' : `Version ${k}`)])), 'Versions') : null] : null;
+}
+
+/** The rating, title and caption controls, and the note on where an edit went (with Undo). */
+function infoEditor(c) {
+  const { d, saveOne } = c;
+  if (!S.EDITING) return null;
+  return [h('div', { style: 'height:10px' }),  // the rating, title and caption controls follow; they need no heading
       editControls({ rating: Math.max(d.rating, 0) }, saveOne),
       h('input', { class: 'einput', placeholder: 'Title', value: d.title || '', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.blur(); },
         onchange: (e) => saveOne({ title: e.target.value }) }),
       h('textarea', { class: 'einput', placeholder: 'Caption', rows: 2, onkeydown: (e) => e.stopPropagation(), onchange: (e) => saveOne({ caption: e.target.value }) }, d.caption || ''),
       d.edited ? h('div', { class: 'enote' }, S.WRITE_FILES ? 'Changed here and saved to the sidecar and the image file. ' : 'Changed here and saved to the sidecar. ',
         S.NO_DK ? '' : S.AUTO_DB ? 'It goes into digiKam’s database by itself within a minute (once digiKam is closed). ' : 'digiKam shows it after “Reread Metadata From File”, or apply it to digiKam’s database from Explore. ',
-        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toastError(e); return; } details.delete(d.id); toast('Edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null] : null,
-    // one row per face (named, suggested, unknown); a person tag without a face region gets a row with the badge picture
-    show('people') ? (() => {
+        h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/edit/revert', { ids: [d.id] }); } catch (e) { toastError(e); return; } details.delete(d.id); toast('Edits undone; sidecar restored.'); S.keepView = true; clearTimeout(S.pollTimer); S.pollTimer = setTimeout(async () => { await pollStatus(); if (LB.open && LB.src.id[LB.i] === d.id) showItem(); }, 1500); } }, 'Undo')) : null];
+}
+
+/** One row per face (named, suggested, unknown); a person tag without a face region gets a row with the badge picture. */
+function infoPeople(c) {
+  const { d, show, peopleTags } = c;
+  if (!show('people')) return null;
       const faced = new Set(d.faces.map((f) => f.tag));
       const rows = [...faceRegions(d),
         ...peopleTags.filter((t) => !faced.has(t.id)).map((t) => ({ kind: 'tagonly', tag: t.id, name: t.name }))];
@@ -1013,10 +992,20 @@ export function renderInfo() {
         h('img', { src: f.kind === 'tagonly' ? faceUrl(f.tag) : `/facecrop/${d.id}/${f.x}/${f.y}/${f.w}/${f.h}.jpg`, alt: '' }),
         h('span', { class: 'nm' }, f.kind === 'confirmed' || f.kind === 'tagonly' ? f.name : f.kind === 'suggested' ? [h('i', null, 'Suggestion: '), f.name] : h('i', null, 'Unknown face')),
         S.CAN_MANAGE ? h('span', { class: 'muted smaller' }, f.kind === 'tagonly' ? 'no face box ▾' : 'options ▾') : null)))];
-    })() : null,
-    show('tags') && (tags.length || S.EDITING) ? [h('h4', null, 'Tags'), h('div', { class: 'ichips' }, tags.map((t) => { const c = chip(t);
+}
+
+/** The keyword tags as chips, with the picker to add one. */
+function infoTags(c) {
+  const { show, saveOne, chip, tags } = c;
+  return show('tags') && (tags.length || S.EDITING) ? [h('h4', null, 'Tags'), h('div', { class: 'ichips' }, tags.map((t) => { const c = chip(t);
       if (S.EDITING) c.append(h('button', { class: 'tx', title: 'Remove this tag', onclick: (e) => { e.stopPropagation(); saveOne({ remove_tags: [t.id] }); } }, icon('close'))); return c; })),
-      S.EDITING ? h('div', { class: 'mt8',}, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null,
+      S.EDITING ? h('div', { class: 'mt8',}, tagPicker((t) => saveOne({ add_tags: [t.id] }))) : null] : null;
+}
+
+/** Where the photo was taken: the place names, the small map, the coordinates and the links out. */
+function infoLocation(c, mapEl) {
+  const { d, show, lnk, ex } = c;
+  return [
     show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('button', { type: 'button', class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
     show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('button', { type: 'button', class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'Change') : null),
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
@@ -1027,12 +1016,59 @@ export function renderInfo() {
       h('div', { class: 'irow' }, icon('place'), h('div', null, h('div', { class: 'a' }, `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`),
         h('div', { class: 'b' }, d.alt != null && d.alt !== 0 ? `${fmtHeight(d.alt)} altitude · ` : null, ex.orientationGps != null ? `facing ${Math.round(ex.orientationGps)}° · ` : null,
           h('a', { href: mapLink(d.lat, d.lon), target: '_blank', rel: 'noopener' }, S.MAPS.linkLabel), ' · ', h('button', { type: 'button', class: 'lnk', onclick: () => streetView(d.lat, d.lon, d.name) }, 'Street View'))))] : null,
+  ];
+}
+
+/** The Details and Camera lists: rating, creator and copyright, the file's other properties, video facts; the camera, lens and exposure. */
+function infoDetails(c) {
+  const { d, show, lnk, ex, cr, vid } = c;
+  const exposure = [d.aperture ? `ƒ/${+d.aperture.toFixed(1)}` : null,
+    d.exposure ? (d.exposure < 1 ? `1/${Math.round(1 / d.exposure)} s` : `${+d.exposure.toFixed(1)} s`) : null,
+    d.focal ? `${+d.focal.toFixed(1)} mm${d.focal35 && Math.round(d.focal35) !== Math.round(d.focal) ? ` (${Math.round(d.focal35)} mm eq.)` : ''}` : null,
+    d.iso ? `ISO ${d.iso}` : null, d.flash != null && (d.flash & 1) ? 'Flash' : null].filter(Boolean).join(' · ');
+  const stars = d.rating > 0 ? '★'.repeat(d.rating) + '☆'.repeat(5 - d.rating) : null;
+  const kv = [];
+  const addKv = (k, v) => { if (v != null && v !== '') kv.push(h('span', null, k), h('span', null, v)); };
+  if (!S.EDITING) addKv('Rating', stars);
+  if (d.creator) kv.push(h('span', null, 'Creator'), h('span', null, lnk(d.creator, { creator: d.creator })));
+  addKv('Copyright', d.copyright);
+  for (const [k, v] of Object.entries(cr)) if (!['creator', 'copyrightNotice'].includes(k)) addKv(k.replace('creatorContactInfo.', '').replace(/([A-Z])/g, ' $1').toLowerCase(), v);
+  for (const [k, v] of Object.entries(ex.properties || {})) addKv(k, v);
+  if (d.video) { addKv('Duration', d.duration ? fmtDur(d.duration) : null); addKv('Video codec', vid.codec); addKv('Frame rate', vid.fps ? `${+(+vid.fps).toFixed(2)} fps` : null); addKv('Audio', vid.audio); }
+  addKv('File modified', d.modified?.replace('T', ' '));
+  // the camera sits low in the panel, in the same small type as the details: most people never look at it
+  const ckv = [];
+  if (d.camera || exposure) ckv.push(h('span', null, 'Camera'), h('span', null, d.camera ? lnk(d.camera, { camera: d.camera }) : 'Unknown camera'));
+  if (d.lens) ckv.push(h('span', null, 'Lens'), h('span', null, lnk(d.lens, { lens: d.lens })));
+  if (exposure) ckv.push(h('span', null, 'Exposure'), h('span', null, exposure));
+  return [
     show('details') && kv.length ? [h('h4', null, 'Details'), h('div', { class: 'kv' }, kv)] : null,
     show('camera') && ckv.length ? [h('h4', null, 'Camera'), h('div', { class: 'kv' }, ckv)] : null,
-    show('file') ? [h('h4', null, 'File'), h('div', { class: 'b muted', style: 'word-break:break-all;user-select:all;font-size:12.5px' }, d.path),
-    ] : null,
-    ai.length ? [h('h4', null, 'AI analysis'), ai] : null,
-    show('history') && S.EDITING ? (() => {  // last, folded; editors only; nothing shows for a photo never changed here
+  ];
+}
+
+/** Everything a model produced, together at the end: description, detected content, objects, text, sharpness, bursts, look-alikes. */
+function infoAi(c) {
+  const { d, show, sub, lnk } = c;
+  // everything a model produced, together at the end: description, detected content, objects, text, sharpness, bursts, look-alikes
+  const ai = show('ai') ? [
+    d.caption_ai ? h('div', { class: 'muted', style: 'margin:2px 0 6px;font-style:italic' }, d.caption_ai.charAt(0).toUpperCase() + d.caption_ai.slice(1)) : null,
+    d.concepts?.length ? [sub('Detected'), h('div', { class: 'ichips' }, d.concepts.map((c) => h('span', { class: 'ichip', title: `The model’s guess (${Math.round(c.p * 100)}% of its vote)`, onclick: () => filterFromLightbox({ concept: c.name }) }, icon('spark'), c.name)))] : null,
+    d.boxes?.length ? [sub('Objects'), h('div', { class: 'ichips' }, [...new Set(d.boxes.map((b) => b.cls))].map((c) => h('span', { class: 'ichip', onclick: () => filterFromLightbox({ obj: c }) },
+      c, h('b', { style: 'font-weight:400;color:var(--fg2)' }, d.boxes.filter((b) => b.cls === c).length > 1 ? ` ×${d.boxes.filter((b) => b.cls === c).length}` : ''))))] : null,
+    d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a small' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
+    d.quality ? qualityRow(d) : null,
+    d.burst ? h('div', { class: 'irow' }, icon('dup'), h('div', null, h('div', { class: 'a' }, lnk(`Part of a burst of ${d.burst_size} frames`, { burst: d.burst, sort: 'old' })),
+      h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('button', { type: 'button', class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,
+    d.similar && !d.video ? h('div', { class: 'irow' }, icon('spark'), h('div', null, h('div', { class: 'a' }, lnk('More photos like this', { like: d.id })))) : null,
+  ].flat().filter(Boolean) : [];
+  return ai.length ? [h('h4', null, 'AI analysis'), ai] : null;
+}
+
+/** The photo's edit log, folded, last; editors only, and nothing shows for a photo never changed here. */
+function infoHistory(c) {
+  const { d, show } = c;
+  if (!show('history') || !S.EDITING) return null;
       const box = h('details', { class: 'hfold' });
       const list = h('div', { class: 'hlist small' });
       box.hidden = true;
@@ -1044,9 +1080,11 @@ export function renderInfo() {
         box.hidden = false;
       }).catch(() => {});
       return box;
-    })() : null);
-  if (mapEl) {
-    const token = LB.token;
+}
+/** The small map under Location, drawn once Leaflet is there: a pin, or the circle an approximate position may be in. */
+function infoMiniMap(d, mapEl) {
+  if (!mapEl) return;
+  const token = LB.token;
     loadLeaflet(false).then(async () => {
       if (token !== LB.token || !mapEl.isConnected) return;
       const L = window.L;
@@ -1062,7 +1100,33 @@ export function renderInfo() {
         L.marker([d.lat, d.lon], { icon: L.divIcon({ className: '', html: '<div class="pm"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(LB.mini);
       }
     }).catch(() => { mapEl.remove(); });
-  }
+}
+export function renderInfo() {
+  const d = LB.detail, el = LB.el.info;
+  if (!d) return;
+  LB.mini?.remove(); LB.mini = null;
+  const hid = infoHidden(), show = (k) => !hid.has(k);
+  const c = infoContext(d, show);
+  const mapEl = d.lat != null && show('location') ? h('div', { class: 'imap' }) : null;
+  fill(el,
+    h('div', { class: 'ihead' }, h('button', { class: 'iconbtn', title: 'Close info', onclick: toggleInfo }, icon('close')), 'Info',
+      h('button', { class: 'pillbtn iactions', style: 'margin-left:auto', title: 'Everything you can do with this photo', onclick: (e) => photoActions(e.currentTarget, d) }, icon('more'), 'Actions'),
+      h('button', { class: 'iconbtn' + (LB.prefs ? ' on' : ''), title: 'Choose what this panel shows', onclick: () => { LB.prefs = !LB.prefs; renderInfo(); } }, icon('gear'))),
+    LB.prefs ? infoPrefsEditor(renderInfo) : null,
+    show('caption') && d.title ? h('div', { class: 'title' }, d.title) : null,
+    show('caption') && d.caption ? h('div', { class: 'muted', style: 'margin:6px 0 10px;white-space:pre-wrap' }, d.caption) : null,
+    infoDate(c),
+    infoFile(c),
+    infoEditor(c),
+    infoPeople(c),
+    infoTags(c),
+    infoLocation(c, mapEl),
+    infoDetails(c),
+    show('file') ? [h('h4', null, 'File'), h('div', { class: 'b muted', style: 'word-break:break-all;user-select:all;font-size:12.5px' }, d.path),
+    ] : null,
+    infoAi(c),
+    infoHistory(c));
+  infoMiniMap(d, mapEl);
 }
 
 document.addEventListener('keydown', (e) => {

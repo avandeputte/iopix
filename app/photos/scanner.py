@@ -34,7 +34,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from app import config
+from app import config, jobs
 from app.digikam import dbsync, dkdb
 from app.photos import edits, folders, history, importer
 from app.digikam.dbsync import COLOR_TAGS, PICK_TAGS, SyncError, gps_text
@@ -58,8 +58,7 @@ READ_TAGS = [
     "Duration", "VideoFrameRate", "CompressorID", "AudioFormat", "AudioChannels", "AudioSampleRate",
     *[v[0] for v in edits.TEMPLATE_FIELDS.values()],
 ]
-progress = {"running": False, "started": None, "finished": None, "added": 0, "modified": 0, "removed": 0, "folders": 0,
-            "skipped": [], "error": None, "last": None}
+progress = jobs.Progress("scanner", started=None, finished=None, added=0, modified=0, removed=0, folders=0, skipped=[], last=None)
 _lock = threading.Lock()
 _wake = threading.Event()
 
@@ -728,7 +727,7 @@ def scan(check_running: bool = True) -> dict:
     Returns the summary (also kept in progress)."""
     if not _lock.acquire(blocking=False):
         raise SyncError("A scan is already running")
-    progress.update(running=True, started=int(time.time()), finished=None, added=0, modified=0, removed=0, folders=0, skipped=[], error=None)
+    progress.start(added=0, modified=0, removed=0, folders=0, skipped=[])
     try:
         if check_running and dbsync.digikam_running():
             progress["skipped"].append("digiKam is running; it scans the collection itself")
@@ -748,10 +747,10 @@ def scan(check_running: bool = True) -> dict:
         if added_ids or modified or vanished or made:
             log.info("scanner: %d added, %d modified, %d removed, %d folders", len(added_ids), len(modified), progress["removed"], progress["folders"])
     except Exception as e:
-        progress["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+        progress.fail(f"{type(e).__name__}: {str(e)[:200]}")
         log.warning("scanner: the scan stopped: %s", e, exc_info=True)
     finally:
-        progress.update(running=False, finished=int(time.time()))
+        progress.finish()
         progress["last"] = {k: progress[k] for k in ("finished", "added", "modified", "removed", "folders", "skipped", "error")}
         _lock.release()
     return dict(progress)
