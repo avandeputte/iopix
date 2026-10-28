@@ -39,4 +39,6 @@ On iPad and Mac the photo viewer keeps its **info pane** beside the photo, as in
 
 The viewer answers the browser's keys on a Mac or an iPad with a keyboard: ← → for the next and previous photo, 0 to 5 to rate, L for favorite, I for the info pane, F for the face boxes, E to edit, [ and ] to rotate, D to share, space for a slideshow, Delete to move to the trash and Esc to close. Zooming in past the preview shows the original file. Face boxes can be clicked to name, confirm or adjust them.
 
+The sidebar (More on iPhone) has **Library** for everyone: Favorites, Folders, Albums, Tags, Map and Events & trips. Admins also get **Library management**: Import, Trash, Duplicate files, Near-duplicates, Bursts, Detected content, Metadata quality, Date suggestions and History.
+
 The Map finds places, switches between map, satellite and hybrid, shows the photos of the visible area, draws a day's trail, and places photos that have no location. Places lists countries, their regions and towns. The Photos timeline groups by day or month and selects a whole day from its heading.
