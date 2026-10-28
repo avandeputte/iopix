@@ -18,6 +18,7 @@ import threading
 import time
 
 from app import config
+from app.data import vdb
 
 STATE_DB = config.DATA_DIR / "viewer.db"  # the SQLite file (vdb.SQLITE_FILE); the legacy migration's target
 LEGACY = (config.DATA_DIR / "state.db", config.DATA_DIR / "analysis.db")
@@ -71,12 +72,10 @@ def migrate_legacy():
 
 def connect():
     """The viewer database, SQLite or MySQL as configured (see vdb.py); rows answer to names and indexes."""
-    from app.data import vdb
     return vdb.connect(timeout=10)
 
 
 def init():
-    from app.data import vdb
     park = migrate_legacy()
     if park:
         logging.getLogger("app.data.state").info("state.db and analysis.db were folded into viewer.db; the old files are in %s", park)
@@ -248,7 +247,6 @@ def _settings_stamp() -> tuple:
     """Changes on every write: rev for this process, and for writes by another one (the stdio
     MCP server shares this database) the file's mtime on SQLite, or a few-second clock on MySQL,
     where no cheap change marker exists."""
-    from app.data import vdb
     if vdb.is_mysql():
         return rev, int(time.time() / 5)
     try:

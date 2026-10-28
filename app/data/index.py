@@ -28,8 +28,7 @@ from app import config
 from app.digikam import dkdb, library
 from app.photos import dateprecision, edits
 from app.geo import places
-from app.data import vdb
-from app.data import state as appstate
+from app.data import state as appstate, vdb
 from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.data.index")

@@ -25,9 +25,11 @@ import tempfile
 import threading
 import time
 
-from app import jobs, thumbs
+from app import core, jobs, thumbs
 from app.data import vdb
 from app.digikam.dkdb import chunked
+from app.photos import history, lossless
+from app.digikam import dbsync, dkdb
 
 log = logging.getLogger("app.photos.filecheck")
 JOB = "filecheck"
@@ -45,7 +47,6 @@ LABELS = {"end_marker": "The end-of-image marker is missing; the picture itself 
 
 
 def jpegtran():
-    from app.photos import lossless
     return lossless.jpegtran()
 
 
@@ -172,24 +173,20 @@ def keep_rect(W: int, H: int, keep: int, orientation: int) -> list:
 def keep_intact(ids: list, check_running: bool = True) -> dict:
     """Crop each photo losslessly to the part of the picture that is intact (lossless.crop: backed up first, in the
     edit log with undo). {cropped: [ids], failed: [{id, error}]}."""
-    from app.photos import lossless
-    done, failed = [], []
-    for pid in ids:
-        try:
-            p = lossless.photo(int(pid))
-            lossless.check(p)
-            if os.path.splitext(p["path"])[1].lower() not in JPEG_EXT:
-                raise ValueError("Only JPEGs can be cropped this way")
-            r = check_file(p["path"])
-            got = intact_rows(p["path"]) if r and r["problem"] in ("truncated", "corrupt_data") else None
-            if not got:
-                raise ValueError("No missing part at the bottom of this picture to crop away")
-            W, H, keep = got
-            lossless.crop(p["id"], keep_rect(W, H, keep, p["orientation"]), check_running, reencode_damaged=True)
-            done.append(p["id"])
-        except Exception as e:
-            failed.append({"id": pid, "error": str(e)[:300]})
-    return {"cropped": done, "failed": failed}
+
+    def one(con, pid, after):
+        p = lossless.photo(int(pid))
+        lossless.check(p)
+        if os.path.splitext(p["path"])[1].lower() not in JPEG_EXT:
+            raise ValueError("Only JPEGs can be cropped this way")
+        r = check_file(p["path"])
+        got = intact_rows(p["path"]) if r and r["problem"] in ("truncated", "corrupt_data") else None
+        if not got:
+            raise ValueError("No missing part at the bottom of this picture to crop away")
+        W, H, keep = got
+        lossless.crop(p["id"], keep_rect(W, H, keep, p["orientation"]), check_running, reencode_damaged=True, con=con, after=after)
+    r = dbsync.batch([int(i) for i in ids], one, check_running, "the photos")
+    return {"cropped": r["done"], "failed": r["failed"]}
 
 
 def _with_keep(path: str, r: dict) -> dict:
@@ -262,7 +259,6 @@ def _stamp(p: dict) -> str:
 
 
 def _photos() -> list:
-    from app import core
     con = core.db()
     try:
         return [dict(r) for r in con.execute(f"SELECT {core.THUMB_COLS} FROM photos WHERE video = 0 ORDER BY ts DESC")]
@@ -338,41 +334,31 @@ def report() -> dict:
 def repair(ids: list, check_running: bool = True) -> dict:
     """Add the missing end marker to these photos' JPEGs (only where the check found the picture complete).
     {repaired: [ids], failed: [{id, error}]}."""
-    from app.digikam import dbsync, dkdb
-    from app.photos import history, lossless
-    db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")  # digiKam's rows change too: refused while it runs, before any file is touched
-    done, failed = [], []
-    for pid in ids:
-        try:
-            p = lossless.photo(int(pid))
-            lossless.check(p)
-            r = check_file(p["path"])
-            if not r or r["problem"] != "end_marker" or not r["fixable"]:
-                raise ValueError("This file does not have a repairable missing end marker (checked again just now)")
-            copy = lossless.copy_before(p["path"])
-            with open(p["path"], "ab") as f:
-                f.write(b"\xff\xd9")
-            if check_file(p["path"]):  # the repair made it no better: the copy goes back
-                shutil.copy2(copy, p["path"])
-                raise ValueError("Adding the end marker did not make the file sound; it was left as it was")
-            size = os.path.getsize(p["path"])
-            with dbsync.write_transaction(db_path, check_running) as con:
-                con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (size, p["id"]))
-            lossless.forget_checksum(p["id"])
-            thumbs.forget(p["id"])
-            history.record([{"photo_id": p["id"], "action": "filerepair", "summary": "Missing JPEG end marker added to the file",
-                             "path": p["path"], "file_copy": copy, "undo": {"filerepair": {"file_copy": copy, "fileSize": p["size"]}}}])
-            done.append(p["id"])
-        except Exception as e:
-            failed.append({"id": pid, "error": str(e)[:300]})
-    return {"repaired": done, "failed": failed}
+
+    def one(con, pid, after):  # digiKam's rows change too: the batch is refused while it runs, before any file is touched
+        p = lossless.photo(int(pid))
+        lossless.check(p)
+        r = check_file(p["path"])
+        if not r or r["problem"] != "end_marker" or not r["fixable"]:
+            raise ValueError("This file does not have a repairable missing end marker (checked again just now)")
+        copy = lossless.copy_before(p["path"])
+        with open(p["path"], "ab") as f:
+            f.write(b"\xff\xd9")
+        if check_file(p["path"]):  # the repair made it no better: the copy goes back
+            shutil.copy2(copy, p["path"])
+            raise ValueError("Adding the end marker did not make the file sound; it was left as it was")
+        size = os.path.getsize(p["path"])
+        con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (size, p["id"]))
+        lossless.forget_checksum(p["id"])
+        thumbs.forget(p["id"])
+        history.record([{"photo_id": p["id"], "action": "filerepair", "summary": "Missing JPEG end marker added to the file",
+                         "path": p["path"], "file_copy": copy, "undo": {"filerepair": {"file_copy": copy, "fileSize": p["size"]}}}])
+    r = dbsync.batch([int(i) for i in ids], one, check_running, "the photos")
+    return {"repaired": r["done"], "failed": r["failed"]}
 
 
 def undo(entry: dict, check_running: bool = True) -> dict:
     """Put the file back as it was before the repair."""
-    from app.digikam import dbsync, dkdb
-    from app.photos import history, lossless
     u = (entry.get("undo") or {}).get("filerepair") or {}
     copy = entry.get("file_copy") if entry.get("file_copy") and os.path.isfile(entry["file_copy"]) else u.get("file_copy")
     if not copy or not os.path.isfile(copy):

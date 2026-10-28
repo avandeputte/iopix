@@ -26,6 +26,8 @@ from app import config
 from app.digikam import dbsync, dkdb
 from app.data import vdb
 from app.digikam.dkdb import chunked
+from app.photos import history
+from app.ai import semantic
 
 log = logging.getLogger("app.photos.deletion")
 BACKUP_DIR = config.DATA_DIR / "deleted-photos"
@@ -128,7 +130,6 @@ def delete(photos: list, check_running: bool = True) -> dict:
         except OSError as e:
             failed.append({"id": p["id"], "error": f"removed from the database, but the file could not be deleted: {e}"})
             done.append(p["id"])
-    from app.photos import history
     man = {m["id"]: m for m in manifest}
     history.record([{"photo_id": pid, "action": "deleted", "summary": "Photo deleted (files and sidecar copied to deleted-photos first)",
                      "details": {"backup": str(dest), "root": str(_root_of(next((p["path"] for p in ok if p["id"] == pid), ""))),
@@ -157,7 +158,6 @@ def forget(ids: list):
     """Everything the viewer keeps about these photos."""
     if not ids:
         return
-    from app.ai import semantic
     with vdb.writer() as con:
         for part in chunked(ids, 300):
             chunk = ",".join(str(int(x)) for x in part)

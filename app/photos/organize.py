@@ -26,8 +26,10 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.digikam.dbsync import SyncError
-from app.photos import deletion
+from app.photos import deletion, edits, export, folders
 from app.digikam.dkdb import chunked
+from app.photos.folders import _album, clean_name
+from app.data import index
 
 log = logging.getLogger("app.photos.organize")
 TRASHED, VISIBLE = 3, 1
@@ -65,7 +67,6 @@ def _free(d: Path, name: str) -> str:
 
 
 def _clean(name: str) -> str:
-    from app.photos.folders import clean_name
     return clean_name(name, "file")
 
 
@@ -210,7 +211,6 @@ def _by_info(infos: list) -> list:
 
 def restore(infos: list, check_running: bool = True) -> dict:
     """Put trashed photos back where they were (their record names the path). Returns {restored: [ids], failed}."""
-    from app.photos import folders
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
     items = _by_info(infos)
@@ -299,7 +299,6 @@ def _restore_rows(done: list, ids: list, db_path, check_running: bool):
 
 def _restore_new(done: list, ids: list, check_running: bool):
     """After the rows are back: photos with no row any more are registered anew, and the edit log gets its lines."""
-    from app.photos import folders
     if done:
         fresh = [t for t in done if t.get("new")]
         if fresh:
@@ -349,7 +348,6 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
     """Move these photos into the folder album_id (their sidecars too); with new_name (one photo) rename it as well.
     album_id None keeps each photo in its own folder: a rename, with `names` {id: new name} naming several at once
     (one preflight, one transaction, one change-log batch). Returns {moved: [{id, name, path}], failed}."""
-    from app.photos.folders import _album
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
     with dkdb.reader() as con:
@@ -425,7 +423,6 @@ def rename_photo(photo_id: int, new_name: str, check_running: bool = True) -> di
 
 # ---- folders
 def _folder(con, album_id: int) -> dict:
-    from app.photos.folders import _album
     return _album(con, int(album_id))
 
 
@@ -433,8 +430,6 @@ def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> di
     """Rename library files by a date pattern (export.name_for): the ids stay, sidecars move along, every one is in
     the change log with undo. The new names are worked out first, then every file is renamed in one batch (one
     preflight, one database transaction). Returns {renamed: [{id, name, was}], unchanged, failed}."""
-    from app.photos import export
-    from app.data import index
     if pattern not in ("date", "date-name", "date-seq"):
         raise SyncError("Unknown naming pattern")
     con = index.open_index()
@@ -471,7 +466,6 @@ def rename_folder(album_id: int, new_name: str, check_running: bool = True) -> d
 
 def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_name: str = None) -> dict:
     """Move a folder under another (new_parent_id; None keeps its parent), optionally with a new name."""
-    from app.photos.folders import clean_name
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "folders")
     with dkdb.reader() as con:
@@ -508,6 +502,5 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
     except BaseException:
         shutil.move(str(new_dir), str(src["dir"]))  # the database refused: the directory goes back
         raise
-    from app.photos import edits
     edits.move_backups(str(src["dir"]), str(new_dir))  # the photos' sidecar and file backups follow the folder
     return {"id": src["id"], "path": new_rel, "folders": len(children)}

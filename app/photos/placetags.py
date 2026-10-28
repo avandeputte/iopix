@@ -9,7 +9,7 @@ sidecars (and files, if enabled) are written and the assignment waits for
 """
 import threading
 
-from app.digikam import dbsync, dkdb
+from app.digikam import dbsync
 from app.photos import edits, tagmanager
 from app.data import index
 from app.digikam.dbsync import SyncError
@@ -57,17 +57,6 @@ def plan(photo_ids: list = None) -> dict:
             "_todo": todo, "_untag": untag}
 
 
-def _tag_ids_in_digikam() -> dict:
-    """{full path: id} of every tag in digiKam's database (read-only): the only place that knows a tag created a
-    moment ago, read once for a whole batch and kept up to date as tags are created."""
-    src = dkdb.connect(write=False)
-    try:
-        tags = dkdb.tag_tree(src)
-    finally:
-        src.close()
-    return {dkdb.tag_path(tags, tid): tid for tid in tags}
-
-
 def run(photo_ids: list = None):
     """Create the missing tags, then assign each photo its place tag (background)."""
     p = plan(photo_ids)
@@ -78,21 +67,9 @@ def run(photo_ids: list = None):
             if p["missing_tags"]:
                 if dbsync.digikam_running():
                     raise SyncError("digiKam is running. Quit digiKam first; new place tags are created in its database.")
-                # one database backup for the whole batch, instead of one copy per tag created.
-                # Parents before children: sorted paths guarantee that. Parents are looked up in
-                # digiKam's own database, the only place that knows a tag created a moment ago.
-                dkdb.backup()
-                by_path = _tag_ids_in_digikam()
-                for full in p["missing_tags"]:
-                    parts = full.split("/")
-                    pid = 0
-                    if len(parts) > 1:
-                        pid = by_path.get("/".join(parts[:-1]), 0)
-                        if not pid:
-                            raise SyncError(f"Could not find the parent tag for {full}")
-                    made = tagmanager.apply({"op": "add", "parent": pid, "name": parts[-1]}, check_running=True, backup=False)
-                    by_path[full] = int(made["id"])
-                    progress["created"] += 1
+                # one transaction for every missing tag, parents before children
+                made = tagmanager.add_tags(p["missing_tags"], check_running=True)
+                progress["created"] = len([f for f in p["missing_tags"] if f in made])
                 # the index must know the new tags before edits can resolve them
                 index.build()
             con = index.open_index()

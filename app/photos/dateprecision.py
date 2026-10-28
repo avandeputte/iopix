@@ -14,6 +14,8 @@ digiKam reads): the 1st of January of the year, or the 1st of the month. How muc
 An unknown date keeps the photo's date as it is (where digiKam sorts it), only marked as unknown.
 """
 import re
+from app.digikam import dkdb
+from app.data import index
 
 ROOT = "Date approximate"
 TAGS = {"month": ROOT + "/Month and year", "year": ROOT + "/Year only", "unknown": ROOT + "/Unknown"}
@@ -83,7 +85,6 @@ def ensure_tags(precision: str):
     The tag manager does the write: digiKam closed, as for any new tag."""
     if precision not in TAGS:
         return
-    from app.digikam import dkdb
     from app.photos import tagmanager
 
     def find(con, full):
@@ -99,5 +100,4 @@ def ensure_tags(precision: str):
     if not root:
         root = tagmanager.apply({"op": "add", "parent": 0, "name": ROOT}, backup=False)["id"]
     tagmanager.apply({"op": "add", "parent": root, "name": TAGS[precision].split("/", 1)[1]}, backup=False)
-    from app.data import index
     index.build()  # the edit that follows resolves the new tag by its path

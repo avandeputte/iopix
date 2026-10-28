@@ -29,6 +29,8 @@ from urllib.parse import quote
 
 from app import config, jobs, thumbs
 from app.digikam.dkdb import chunked
+from app.data import vdb
+from app.ai import caption, detector as det, looks
 
 try:
     import numpy as np
@@ -44,13 +46,11 @@ on_progress = None  # set by the web app: called now and then so the index picks
 
 
 def connect():
-    from app.data import vdb
     return vdb.connect(timeout=30)
 
 
 def _writer():
     """One serialised write transaction on the viewer database (vdb.writer)."""
-    from app.data import vdb
     return vdb.writer()
 
 
@@ -60,7 +60,6 @@ def init():
 
 def _counts() -> dict:
     """{job: photos analysed so far}, or None when the database is missing or unreadable."""
-    from app.data import vdb
     if not vdb.exists():
         return None
     con = connect()
@@ -159,7 +158,6 @@ def _analyse_one(p: dict, want_quality: bool, detector):
 
 
 def _pixel_job(photos: list, gen: int):
-    from app.ai import detector as det
     workers = config.ANALYSIS_WORKERS or jobs.threads()
     detector = det.load(max(1, jobs.threads() // workers))  # None until the model is installed
     con = connect()
@@ -370,7 +368,6 @@ def _vision_job(photos: list, gen: int):
 
 
 def _caption_job(photos: list, gen: int):
-    from app.ai import caption
     if not caption.available():
         return
     todo = _todo("captions", photos)
@@ -407,7 +404,6 @@ def _caption_job(photos: list, gen: int):
 
 def _looks_parts() -> dict:
     """Which parts of the photo quality job can run here: focus always, the others with their models."""
-    from app.ai import looks
     # each part's value is the version of its measure recorded with the results, or False when it cannot run here
     return {"f": looks.VERSION, "a": 1 if looks.aesthetic_available() else False, "e": looks.EYES_VERSION if looks.eyes_available() else False}
 
@@ -460,7 +456,6 @@ def _looks_faces(ids: list) -> dict:
 
 def _looks_job(photos: list, gen: int):
     import json
-    from app.ai import looks
     if np is None:
         return
     parts = _looks_parts()
@@ -560,7 +555,6 @@ def start(photos: list):
 
 def results() -> dict:
     """{photo_id: {...}} for the index build."""
-    from app.data import vdb
     if not vdb.exists():
         return {}
     con = connect()
@@ -593,7 +587,6 @@ def results() -> dict:
 
 def boxes(photo_id: int) -> list:
     """Detected objects of one photo for the info panel: [{cls, score, x, y, w, h}], best first."""
-    from app.data import vdb
     if not vdb.exists():
         return []
     con = connect()

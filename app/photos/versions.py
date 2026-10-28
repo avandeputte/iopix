@@ -18,11 +18,12 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageOps
 
-from app.digikam import dkdb
-from app.photos import edits, folders
+from app.digikam import dbsync, dkdb
+from app.photos import edits, folders, history, scanner
 from app.data import index
 from app import thumbs
 from app.digikam.dbsync import SyncError
+from app.faces import facemgr
 
 INTERNAL = "_Digikam_Internal_Tags_"
 DERIVED_FROM = 1  # DatabaseRelation::DerivedFrom
@@ -106,8 +107,6 @@ def _internal_tag(con, name: str) -> int:
 
 
 def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
-    from app.digikam import dbsync
-    from app.photos import history, scanner
     p = clean(params)
     if not any(p[k] for k in ("exposure", "contrast", "saturation", "warmth", "angle")) and not p["autolevel"]:
         raise SyncError("Nothing to adjust")
@@ -175,7 +174,6 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
         raise
     # the original's edits not yet in digiKam's database are the version's too (its sidecar is a copy of the
     # original's); then its sidecar regions and tag list are written from its own rows: upright, at its own size
-    from app.faces import facemgr
     e = edits.pending().get(int(pid))
     if e:
         edits.save_pending([(vid, e)])

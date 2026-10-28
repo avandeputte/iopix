@@ -30,8 +30,8 @@ import time
 from PIL import Image, ImageOps
 
 from app import config, thumbs
-from app.digikam import dkdb
-from app.photos import edits
+from app.digikam import dbsync, dkdb
+from app.photos import edits, history
 from app.faces import facemgr
 from app.data import index
 from app.digikam.dbsync import SyncError
@@ -240,24 +240,31 @@ INVERSE = {"right": "left", "left": "right", "180": "180", "fliph": "fliph", "fl
 
 
 def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list, dropped: list, check_running: bool, restore_regions: list = None,
-              add_regions: list = ()):
-    from app.digikam import dbsync
+              add_regions: list = (), con=None):
+    """The photo's rows after a pixel change: in its own guarded transaction, or inside a batch's (con given)."""
+    if con is not None:
+        _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_regions, add_regions)
+        return
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
     with dbsync.write_transaction(db_path, check_running) as con:
-        con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = ? WHERE imageid = ?", (w, h, orientation, pid))
-        con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (size, pid))
-        if restore_regions is not None:
-            con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND value LIKE '%<rect%'", (pid,))
-            for tagid, prop, val in restore_regions:
-                con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
-        for tagid, prop, old, new in kept:
-            con.execute("UPDATE ImageTagProperties SET value = ? WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (new, pid, tagid, prop, old))
-        for tagid, prop, old in dropped:
-            con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, old))
-        for tagid, prop, val in add_regions:
-            if not con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, val)).fetchone():
-                con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
+        _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_regions, add_regions)
+
+
+def _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_regions, add_regions):
+    con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = ? WHERE imageid = ?", (w, h, orientation, pid))
+    con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (size, pid))
+    if restore_regions is not None:
+        con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND value LIKE '%<rect%'", (pid,))
+        for tagid, prop, val in restore_regions:
+            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
+    for tagid, prop, old, new in kept:
+        con.execute("UPDATE ImageTagProperties SET value = ? WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (new, pid, tagid, prop, old))
+    for tagid, prop, old in dropped:
+        con.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, old))
+    for tagid, prop, val in add_regions:
+        if not con.execute("SELECT 1 FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = ? AND value = ?", (pid, tagid, prop, val)).fetchone():
+            con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
 
 
 def forget_checksum(pid: int):
@@ -270,7 +277,6 @@ def forget_checksum(pid: int):
 
 
 def _finish(p: dict, orientation: int, summary: str, before: dict, copy: str, w: int, h: int, action_detail: dict):
-    from app.photos import history
     _sidecar(p["path"], orientation)
     facemgr.write_regions_many([p["id"]])
     thumbs.forget(p["id"])
@@ -282,7 +288,6 @@ def _finish(p: dict, orientation: int, summary: str, before: dict, copy: str, w:
 
 # ---- rotate and flip
 def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
-    from app.digikam import dbsync
     if op not in OPS:
         raise SyncError("Unknown transform")
     p = photo(pid)
@@ -340,11 +345,11 @@ def transform(ids: list, op: str, check_running: bool = True) -> dict:
 
 
 # ---- crop
-def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: bool = False) -> dict:
+def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: bool = False, con=None, after: list = None) -> dict:
     """Crop a photo to the upright rectangle rect. JPEGs through jpegtran, without re-encoding. With reencode_damaged,
     a damaged JPEG whose structure jpegtran refuses is decoded as far as it goes and saved again at the quality it had
-    (only for keeping the intact part of a damaged photo)."""
-    from app.digikam import dbsync
+    (only for keeping the intact part of a damaged photo). con and after: a batch's transaction (dbsync.batch) to write the
+    rows in, and its list for the work that needs them committed (the sidecar, the log entry)."""
     p = photo(pid)
     check(p)
     W, H = upright_size(p["w"], p["h"], p["orientation"])
@@ -365,7 +370,8 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
         raise SyncError("Cropping HEIC needs the pillow-heif package on the server")
     if p["ext"] not in JPEG_EXT and p["ext"] not in PIL_CROP_EXT and p["ext"] not in HEIF_EXT:
         raise SyncError("Cropping here works for JPEG, PNG, TIFF, WebP and HEIC files")
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+    if con is None:
+        dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
     copy = copy_before(p["path"])
     lossless_jpeg = p["ext"] in JPEG_EXT
@@ -425,12 +431,16 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
     kept, dropped = _new_values(p["regions"], lambda r: crop_rect(r, box))
     size = os.stat(p["path"]).st_size
     try:
-        _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running)
+        _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running, con=con)
     except BaseException:  # the database refused: the file goes back as it was
         shutil.copy2(copy, p["path"])
         raise
     how = "lossless" if lossless_jpeg or p["ext"] in (".png", ".tif", ".tiff") else "re-encoded"
-    r = _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, {"lossless": "crop", "box": list(box), "faces_dropped": len(dropped), "how": how})
+    detail = {"lossless": "crop", "box": list(box), "faces_dropped": len(dropped), "how": how}
+    if after is not None:  # inside a batch: the sidecar and the log entry wait for the commit
+        after.append(lambda: _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, detail))
+        return {"id": p["id"], **detail}
+    r = _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, detail)
     r["box"] = list(box)
     r["faces_dropped"] = len(dropped)
     r["how"] = how
@@ -440,8 +450,6 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
 # ---- undo
 def undo(entry: dict, check_running: bool = True) -> dict:
     """The file, digiKam's rows and the regions as they were before this edit."""
-    from app.digikam import dbsync
-    from app.photos import history
     u = (entry.get("undo") or {}).get("lossless")
     if not u:
         raise ValueError("This change has nothing to undo")

@@ -23,7 +23,8 @@ try:
 except Exception:  # HEIC files will fall back to a placeholder
     pillow_heif = None
 
-from app import config
+from app import config, jobs
+from app.photos import edits
 
 # a JPEG that ends early (some phones' burst frames lack the closing FFD9 marker, an interrupted copy) decodes as far as
 # its data goes instead of failing: everything that reads pictures (thumbnails, previews, analysis) imports this module
@@ -76,7 +77,6 @@ def _raw_preview(src: str):
     """The JPEG a raw file carries (the full-size preview, else the smaller ones), opened with Pillow and
     carrying the raw file's own orientation: the embedded picture is stored the way the sensor saw it, and
     its own EXIF (when it has any) does not say so. None when exiftool is missing or no preview is found."""
-    from app.photos import edits
     if not edits.EXIFTOOL:
         return None
     cmd = [*edits.exiftool_cmd(), "-charset", "filename=utf8"]
@@ -257,7 +257,6 @@ class Prewarmer:
             self.last = time.time()
 
         def run():
-            from app import jobs
             if gen != self._gen:
                 return
             self.started = self.last = time.time()
@@ -266,7 +265,6 @@ class Prewarmer:
             if gen == self._gen:
                 self.running = False
 
-        from app import jobs
         jobs.submit("thumbs", run)  # one background job at a time
 
 

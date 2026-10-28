@@ -24,8 +24,9 @@ from pathlib import Path
 
 from app import config
 from app.digikam import dkdb
-from app.photos import edits
+from app.photos import edits, history
 from app.digikam.dkdb import chunked
+from app.data import index
 
 PICK_TAGS = ["Pick Label None", "Pick Label Rejected", "Pick Label Pending", "Pick Label Accepted"]
 COLOR_TAGS = [f"Color Label {n}" for n in ("None", "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "Gray", "Black", "White")]
@@ -113,6 +114,40 @@ def write_transaction(db_path: Path = None, check_running: bool = True):
         dkdb.write_lock.release()
 
 
+def batch(items: list, per_item, check_running: bool = True, holds: str = None, db_path: Path = None, backup: bool = False) -> dict:
+    """A batch endpoint's loop as one guarded write: preflight once, one backup (when asked), one transaction, and
+    per_item(con, item, after) for each item inside it. An item that raises is rolled back to its savepoint and
+    recorded in `failed` with the message; the others stand. Returns {done: [items], failed: [{id, error}]}. per_item
+    does the item's file work too, so a batch is never a photo with its rows changed and its file not (or the
+    reverse). Work that must see the committed rows (a sidecar written from them) goes into `after`, a list of
+    callables run once the transaction is through, for the items that succeeded."""
+    db_path = Path(db_path or dkdb.sqlite_path())
+    preflight(db_path, check_running, holds)
+    if backup:
+        dkdb.backup(db_path, force=True)
+    done, failed = [], []
+    if not items:
+        return {"done": done, "failed": failed}
+    later = []
+    with write_transaction(db_path, check_running) as con:
+        for n, item in enumerate(items):
+            con.execute(f"SAVEPOINT item{n}")
+            after = []
+            try:
+                per_item(con, item, after)
+            except Exception as e:
+                con.execute(f"ROLLBACK TO SAVEPOINT item{n}")
+                con.execute(f"RELEASE SAVEPOINT item{n}")
+                failed.append({"id": item.get("id") if isinstance(item, dict) else item, "error": str(e)[:300]})
+                continue
+            con.execute(f"RELEASE SAVEPOINT item{n}")
+            done.append(item)
+            later.extend(after)
+    for fn in later:
+        fn()
+    return {"done": done, "failed": failed}
+
+
 def gps_text(is_lat: bool, v: float) -> str:
     """Port of MetaEngine::convertToGPSCoordinateString: 'DDD,MM.mmmmmmmmN'."""
     ref = ("N" if v >= 0 else "S") if is_lat else ("E" if v >= 0 else "W")
@@ -171,7 +206,6 @@ def _set_label(con, image_id: int, label_tags: list, tag_id: int):
 
 def photo_paths(ids: list) -> list:
     """[(id, file path)] from the search index."""
-    from app.data import index
     out = []
     con = index.open_index()
     try:
@@ -246,7 +280,6 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
     if applied:  # the database now says what the sidecars (and files) say: digiKam need not rescan them
         dkdb.stamp_files(photo_paths(applied))
     edits.recheck(applied)
-    from app.photos import history
     history.record([{"photo_id": pid, "action": "database", "summary": "Edits written into " + ("the library" if dkdb.standalone() else "digiKam's database"),
                      "details": {k: v for k, v in pending.get(pid, pending.get(str(pid), {})).items() if k != "caption_date"}} for pid in applied])
     return {"applied": len(applied), "skipped": skipped, "backup": None}  # (no full database copy for ordinary edits)

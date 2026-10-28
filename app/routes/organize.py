@@ -10,25 +10,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import config
-from app.digikam import dbsync
-from app.photos import deletion
-from app.photos import edits
-from app.photos import folders
-from app.data import index
-from app.photos import lossless
-from app import thumbs
-from app.data import state as appstate
-from app import users
-from app.core import IMG_CACHE
-from app.core import DB_ERRORS
-from app.core import db
-from app.core import _kick
-from app.core import _organize_allowed
-from app.core import _run_organize
-from app.core import _rebuild_after_write
-from app.core import CACHES
-from app.digikam import dkdb
+from app import config, thumbs, users
+from app.digikam import dbsync, dkdb
+from app.photos import deletion, edits, folders, importer, lossless, organize, versions
+from app.data import index, state as appstate
+from app.core import _kick, _organize_allowed, _rebuild_after_write, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE
 import secrets
 import threading
 from app.digikam.dkdb import chunked
@@ -67,7 +53,6 @@ async def api_photos_transform(request: Request):
 async def api_photo_adjust(request: Request):
     """Body {id, exposure, contrast, saturation, warmth, angle, autolevel}: save an adjusted copy as a new version
     (name_v1.jpg beside it, linked as digiKam links versions); the original is not changed."""
-    from app.photos import versions
     _organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
@@ -106,7 +91,6 @@ async def api_photos_crop(request: Request):
 @router.post("/api/photos/trash")
 async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     ids = [int(i) for i in body.get("ids") or []][:20000]
@@ -126,7 +110,6 @@ def _trash_in_background(ids: list) -> dict:
     """{background: true}: the photos leave every page at once (out of the index and its caches) and the answer goes
     out; moving the files and writing digiKam's rows happen after, then the index catches up. The result (for Undo,
     and any photo that could not be moved, which comes back) is GET /api/photos/trash/{job}."""
-    from app.photos import organize
     _run_organize(dbsync.preflight, dkdb.sqlite_path(), True, "the photos")  # digiKam open, read-only...: refused now, not later
     index.drop_photos(ids)
     for c in CACHES:
@@ -169,7 +152,6 @@ async def api_photos_trash_job(request: Request, job: str, wait: float = 0):
 @router.get("/api/trash")
 def api_trash(request: Request):
     """What is in the trash (every album root), newest first."""
-    from app.photos import organize
     if not users.can_write(request.state.user):
         raise HTTPException(403 if request.state.user else 401, "Editors only")
     items = organize.listing()
@@ -179,7 +161,6 @@ def api_trash(request: Request):
 @router.get("/api/trash/thumb")
 def api_trash_thumb(request: Request, info: str):
     """A thumbnail of a trashed file, named by its .dtrashinfo record (which must sit in an album root's trash)."""
-    from app.photos import organize
     if not users.can_write(request.state.user):
         raise HTTPException(403 if request.state.user else 401, "Editors only")
     item = organize.item_for(info)  # that one record, after checking it sits in an album root's trash (not a scan of the whole trash per thumbnail)
@@ -208,7 +189,6 @@ def api_trash_thumb(request: Request, info: str):
 @router.post("/api/trash/restore")
 async def api_trash_restore(request: Request):
     """Body {infos: [.dtrashinfo paths]}: put those photos back where they were."""
-    from app.photos import organize
     _organize_allowed()
     infos = [str(i) for i in (await request.json()).get("infos") or []][:20000]
     r = await run_in_threadpool(_run_organize, organize.restore, infos)
@@ -219,7 +199,6 @@ async def api_trash_restore(request: Request):
 @router.post("/api/trash/empty")
 async def api_trash_empty(request: Request):
     """Body {infos: [...]} or {all: true}: delete those trash entries for good."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     infos = None if body.get("all") is True else [str(i) for i in body.get("infos") or []][:20000]
@@ -233,7 +212,6 @@ async def api_trash_empty(request: Request):
 @router.post("/api/photos/move")
 async def api_photos_move(request: Request):
     """Body {ids, album}: move the photos (and their sidecars) into that folder; ids and everything attached stay."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     ids = [int(i) for i in body.get("ids") or []][:20000]
@@ -247,7 +225,6 @@ async def api_photos_move(request: Request):
 @router.post("/api/photos/rename")
 async def api_photos_rename(request: Request):
     """Body {id, name}: a new file name (the extension stays)."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
@@ -271,7 +248,6 @@ async def api_folder_properties(album_id: int, request: Request):
 @router.post("/api/photos/rename-pattern")
 async def api_photos_rename_pattern(request: Request):
     """Body {ids, pattern: date|date-name|date-seq}: rename the files by the date they were taken (ids kept, undo per photo)."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     ids = [int(i) for i in (body.get("ids") or [])][:2000]
@@ -285,7 +261,6 @@ async def api_photos_rename_pattern(request: Request):
 @router.post("/api/folders/{album_id}/rename")
 async def api_folder_rename(album_id: int, request: Request):
     """Body {name}: rename the folder on disk and in the database (subfolders follow)."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
@@ -296,7 +271,6 @@ async def api_folder_rename(album_id: int, request: Request):
 @router.post("/api/folders/{album_id}/move")
 async def api_folder_move(album_id: int, request: Request):
     """Body {parent}: move the folder (with everything in it) under another folder of the same album root."""
-    from app.photos import organize
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
@@ -378,7 +352,6 @@ async def api_folder_create(request: Request):
 @router.get("/api/import/layouts")
 def api_import_layouts(request: Request):
     """The folder layouts an import can use, and the one in use."""
-    from app.photos import importer
     # patterns: apps may send their own folder pattern ({yyyy}/{yyyy}{mm}, Uploads...) instead of a layout key
     return {"layouts": importer.layouts(), "layout": importer.layout(), "patterns": True}
 
@@ -400,7 +373,6 @@ async def _uploads(request: Request):
 async def api_import_now(request: Request):
     """One request (the apps' background uploads): multipart `files` plus `layout` or `pattern` and `duplicates`
     ('skip', the default, or 'import'), staged and imported at once. Returns what a run returns: {added, skipped}."""
-    from app.photos import importer
     form, files = await _uploads(request)
     try:
         key = _layout_or_pattern(str(form.get("layout") or ""), str(form.get("pattern") or ""))
@@ -425,7 +397,6 @@ async def api_import_now(request: Request):
 async def api_import_check(request: Request):
     """Body {files: [{size, sha256}]}: which of them the library already has, by the import's duplicate test (the
     same size, then the same SHA-256 of the whole file). Returns {present: [{sha256, id}]}."""
-    from app.photos import importer
     body = await request.json()
     files = body.get("files") if isinstance(body, dict) else None
     if not isinstance(files, list) or len(files) > 5000:
@@ -441,7 +412,6 @@ async def api_import_check(request: Request):
 async def api_import_stage(request: Request):
     """Multipart `files` (and an optional `token` to add to an import started earlier): the files are kept
     aside and looked at; nothing goes into the library yet. Returns the plan."""
-    from app.photos import importer
     form, files = await _uploads(request)
     token = str(form.get("token") or "") or None
     try:
@@ -457,14 +427,12 @@ def _layout_or_pattern(layout: str, pattern: str):
     if pattern:
         from app.photos import importer
         return importer.check_pattern(pattern)
-    from app.photos import importer
     return layout if layout in importer.LAYOUTS else None
 
 
 @router.get("/api/import/{token}")
 def api_import_plan(token: str, layout: str = None, pattern: str = None):
     """The plan for a layout key, or for a folder pattern of the app's own (?pattern={yyyy}/{yyyy}{mm})."""
-    from app.photos import importer
     try:
         key = _layout_or_pattern(layout or "", pattern or "")
     except ValueError as e:
@@ -479,7 +447,6 @@ def api_import_plan(token: str, layout: str = None, pattern: str = None):
 async def api_import_run(token: str, request: Request):
     """Body {layout?, pattern?, include?: [names], duplicates?: 'skip'|'import', remember?: bool}: import the staged
     files. `pattern` (apps): a folder pattern of their own instead of a layout, see importer.check_pattern."""
-    from app.photos import importer
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
     body = await request.json() if (await request.body()) else {}
@@ -501,7 +468,6 @@ async def api_import_run(token: str, request: Request):
 
 @router.post("/api/import/{token}/discard")
 def api_import_discard(token: str):
-    from app.photos import importer
     try:
         importer.discard(token)
     except dbsync.SyncError as e:  # not a token of ours
@@ -512,7 +478,6 @@ def api_import_discard(token: str):
 @router.post("/share")
 async def share_target(request: Request):
     """The installed app as a share target (Android): files shared to it are staged, then the Import page opens."""
-    from app.photos import importer
     if not users.can_write(request.state.user):  # the share sheet cannot show a JSON error: the page explains
         return RedirectResponse("/#/import?error=signin", status_code=303)
     if appstate.read_only() or not (config.DB_WRITE and edits.available()):

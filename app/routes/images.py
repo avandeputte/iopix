@@ -13,16 +13,9 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
-from app import thumbs
-from app.core import THUMB_COLS
-from app.core import IMG_CACHE
-from app.core import db
-from app.core import resolve
-from app import users
-from app.photos import edits
-from app.core import _form_items
-from app.core import _photo_row
-from app.core import _cached_image
+from app import thumbs, users, videostream
+from app.core import _cached_image, _form_items, _photo_row, db, IMG_CACHE, resolve, THUMB_COLS
+from app.photos import edits, export
 
 
 router = APIRouter()
@@ -86,7 +79,6 @@ def video_copy(photo_id: int):
     """A copy of a video that phones play (H.264 and AAC in an MP4, Range requests for seeking), for videos whose
     /api/photo answer says playable: false. Made on the first request: until it is ready the answer is 503 with
     Retry-After and {status: converting}; 422 {status: failed} when it cannot be made."""
-    from app import videostream
     row = _photo_row(photo_id)
     if not row["video"] or not os.path.isfile(row["path"]):
         raise HTTPException(404, "No such video")
@@ -222,7 +214,6 @@ def _zip_response(items, sidecars: int, name: str):
     if part < 0 or part >= len(parts):
         raise HTTPException(404, "No such part")
     rows = parts[part]
-    from app.photos import export
     # export options (x-prefixed: "size" and "fmt" are search filters)
     opts = {"size": int(d.get("xsize") or 0), "fmt": d.get("xfmt") or "keep", "quality": int(d.get("xquality") or 90),
             "nogps": d.get("nogps") == "1"}

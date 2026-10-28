@@ -7,8 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.data import state as appstate
 from app import users
-from app.core import db
-from app.core import jresp
+from app.core import db, jresp
 
 
 router = APIRouter()

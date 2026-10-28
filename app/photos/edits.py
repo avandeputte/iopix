@@ -29,11 +29,11 @@ from pathlib import Path
 
 from app import config
 from app.digikam import dkdb
-from app.data import state as appstate
+from app.data import index, state as appstate, vdb
 from app.digikam.dkdb import chunked
+from app.photos.paths import BACKUP_DIR, FILE_BACKUP_DIR, rel, backup_path, file_backup_path, sidecar_path  # the path helpers keep their edits.* names too
+from app.photos import consistency, dateprecision, pixelguard
 
-BACKUP_DIR = config.DATA_DIR / "sidecar-backups"
-FILE_BACKUP_DIR = config.DATA_DIR / "file-backups"  # originals of image files before their metadata is rewritten
 MIN_FREE_BYTES = 2 * 1024 ** 3  # refuse to back up (and so to write) when the disk is nearly full
 SKELETON = ('<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
             ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n  <rdf:Description rdf:about=""/>\n'
@@ -71,7 +71,6 @@ def init():
 
 def signature() -> str:
     """Changes whenever the set of remembered edits changes (part of the index version)."""
-    from app.data import vdb
     if not vdb.exists():
         return "e0"
     con = appstate.connect()
@@ -102,7 +101,6 @@ def save_pending(rows: list):
 
 def pending() -> dict:
     """photo_id -> remembered edit."""
-    from app.data import vdb
     if not vdb.exists():
         return {}
     con = appstate.connect()
@@ -116,7 +114,6 @@ def pending() -> dict:
 
 def pending_one(photo_id: int):
     """The remembered edit of one photo, or None."""
-    from app.data import vdb
     if not vdb.exists():
         return None
     con = appstate.connect()
@@ -131,7 +128,6 @@ def pending_one(photo_id: int):
 
 def pending_count() -> int:
     """How many edits are remembered (what status polls show; cheaper than loading them all)."""
-    from app.data import vdb
     if not vdb.exists():
         return 0
     con = appstate.connect()
@@ -207,7 +203,6 @@ def resolved(photo_ids, snapshot: dict = None):
     """digiKam's database now matches these edits: forget them and drop their
     backups, so a later edit starts from a fresh backup. With `snapshot` ({id: the edit as it was when compared}),
     an edit that changed since (a new edit made while the index was being built) is kept."""
-    from app.data import index  # index imports this module; only needed here
     ids = [int(i) for i in photo_ids]
     if snapshot is not None:
         with lock:
@@ -233,23 +228,6 @@ def _resolved(ids, index):
     except (sqlite3.Error, OSError):
         pass  # a backup left behind is harmless; the edit is forgotten either way
     forget(ids)
-
-
-def rel(path: str) -> Path:
-    """Where a library file sits below PHOTOS_ROOT (or below the filesystem root, for
-    files outside it): the layout both backup folders mirror."""
-    try:
-        return Path(path).resolve().relative_to(config.PHOTOS_ROOT)
-    except ValueError:
-        return Path(*Path(path).resolve().parts[1:])
-
-
-def backup_path(photo_path: str) -> Path:
-    return BACKUP_DIR / (str(rel(photo_path)) + ".xmp")
-
-
-def file_backup_path(photo_path: str) -> Path:
-    return FILE_BACKUP_DIR / rel(photo_path)
 
 
 def backup_original(photo_path: str) -> Path:
@@ -311,46 +289,6 @@ def ensure_backup(target: str, photo_path: str = None):
             shutil.copy2(target, backup)
     else:
         backup_original(target)
-
-
-def sidecar_candidates(photo_path: str) -> tuple:
-    """(photo.jpg.xmp, photo.xmp): digiKam's default sidecar name, and its "compatible file name" option."""
-    return photo_path + ".xmp", os.path.splitext(photo_path)[0] + ".xmp"
-
-
-def compat_naming() -> bool:
-    """Write new sidecars as photo.xmp (digiKam's "compatible file name" setting): SIDECAR_COMPAT=1 or the setting."""
-    if os.environ.get("SIDECAR_COMPAT", "").strip() in ("1", "true", "yes"):
-        return True
-    try:
-        from app.data import state
-        return state.get_setting("sidecar_compat", "0") == "1"
-    except Exception:
-        return False
-
-
-def _compat_owner(photo_path: str) -> bool:
-    """Whether photo.xmp belongs to this photo alone: not when photo.jpg and photo.cr2 would share it."""
-    base, _ext = os.path.splitext(photo_path)
-    stem, folder = os.path.basename(base), os.path.dirname(photo_path) or "."
-    try:
-        for f in os.listdir(folder):
-            if f != os.path.basename(photo_path) and os.path.splitext(f)[0] == stem and not f.lower().endswith(".xmp"):
-                return False
-    except OSError:
-        return False
-    return True
-
-
-def sidecar_path(photo_path: str) -> str:
-    """The sidecar this photo uses: the one that exists (photo.jpg.xmp first, then photo.xmp when it is this
-    photo's alone), else the name a new one gets (compatible naming when that setting is on)."""
-    a, b = sidecar_candidates(photo_path)
-    if os.path.isfile(a):
-        return a
-    if os.path.isfile(b) and _compat_owner(photo_path):
-        return b
-    return b if compat_naming() else a
 
 
 def prepare(photo_path: str) -> str:
@@ -547,7 +485,6 @@ def digikam_tag_paths(image_ids: list) -> dict:
     """{image id: [tag paths]} straight from digiKam's database (read-only):
     every assigned tag digiKam itself would write, i.e. all but its internal ones.
     From the viewer's copy of the library when digiKam's database cannot be read."""
-    from app.data import index
     if not dkdb.sync_enabled() or index.offline["since"]:
         return index.mirror_tag_paths(image_ids)
     try:
@@ -598,7 +535,6 @@ def _run_exiftool(jobs: list) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".args", dir=config.DATA_DIR, delete=False, encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
         argfile = f.name
-    from app.photos import pixelguard
     # image files (not sidecars) get their image data hashed before and after: a write that changed
     # the picture itself is undone (pixelguard)
     errfile = argfile + ".errors"
@@ -754,7 +690,6 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
 
 def _current_values(ids: list) -> dict:
     """{photo: {rating, title, caption, taken, gps, pick, color, tags, date_precision}} as the viewer shows them now."""
-    from app.data import index
     out = {}
     if not ids or not config.INDEX_DB.exists():
         return out
@@ -771,7 +706,6 @@ def _current_values(ids: list) -> dict:
                     out[pid]["tags"].append(full)
     finally:
         con.close()
-    from app.photos import dateprecision
     for v in out.values():
         v["date_precision"] = dateprecision.of_paths(v["tags"]) or "exact"
     return out
@@ -831,7 +765,6 @@ def rewrite_tags(photos: list) -> list:
 def db_state(image_ids: list) -> dict:
     """{id: {rating, pick, color, title, caption, tags, taken, gps}} as digiKam's database holds them (read-only): what
     a sidecar and file say once the viewer's own edits are taken back. gps is {lat, lon, alt} or None."""
-    from app.photos import consistency
     vals = consistency.db_values([int(i) for i in image_ids])
     for v in vals.values():
         v["gps"] = None
