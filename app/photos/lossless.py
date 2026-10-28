@@ -173,8 +173,21 @@ def _run(cmd: list, what: str):
         raise SyncError(f"{what} failed: {(res.stderr or res.stdout).strip()[:300]}")
 
 
+_JT_WARNINGS = ("Premature end of JPEG file", "Corrupt JPEG data")
+
+
 def _jt(jt: str, args: list, src: str, dst: str):
-    _run([jt, *args, "-copy", "all", "-outfile", dst, src], "jpegtran")
+    """jpegtran. A damaged source (data cut off, or a damaged byte) only makes it warn (exit status 2): the output is
+    still written, with the missing part grey, which is what cropping a damaged photo needs. Anything else fails."""
+    res = subprocess.run([jt, *args, "-copy", "all", "-outfile", dst, src], capture_output=True, text=True, timeout=600)
+    msg = (res.stderr or res.stdout or "").strip()
+    if res.returncode == 0:
+        return
+    lines = [ln for ln in msg.splitlines() if ln.strip()]
+    if res.returncode == 2 and lines and all(ln.startswith(_JT_WARNINGS) for ln in lines) and os.path.isfile(dst) and os.path.getsize(dst) > 0:
+        log.info("jpegtran: %s (damaged source, output kept): %s", os.path.basename(src), "; ".join(lines)[:200])
+        return
+    raise SyncError(f"jpegtran failed: {msg[:300]}")
 
 
 def _tmp(path: str, n: int) -> str:
@@ -334,7 +347,10 @@ def transform(ids: list, op: str, check_running: bool = True) -> dict:
 
 
 # ---- crop
-def crop(pid: int, rect: list, check_running: bool = True) -> dict:
+def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: bool = False) -> dict:
+    """Crop a photo to the upright rectangle rect. JPEGs through jpegtran, without re-encoding. With reencode_damaged,
+    a damaged JPEG whose structure jpegtran refuses is decoded as far as it goes and saved again at the quality it had
+    (only for keeping the intact part of a damaged photo)."""
     from app.digikam import dbsync
     p = _photo(pid)
     _check(p)
@@ -359,7 +375,8 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
     copy = _copy_before(p["path"])
-    if p["ext"] in JPEG_EXT:
+    lossless_jpeg = p["ext"] in JPEG_EXT
+    if lossless_jpeg:
         src, t1, t2 = p["path"], _tmp(p["path"], 1), _tmp(p["path"], 2)
         try:
             if p["orientation"] in _JT_UPRIGHT:
@@ -367,10 +384,15 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
                 src = t1
             _jt(jt, ["-crop", f"{w}x{h}+{x}+{y}"], src, t2)
             os.replace(t2, p["path"])
+        except SyncError:
+            if not reencode_damaged:
+                raise
+            lossless_jpeg = False  # the file itself is untouched so far: the re-encoding branch below takes over
         finally:
             for t in (t1, t2):
                 if os.path.exists(t):
                     os.unlink(t)
+    if lossless_jpeg:
         with Image.open(p["path"]) as im:
             nw, nh = im.size
         # jpegtran keeps the right and bottom edges and moves the origin down to the block grid
@@ -386,6 +408,11 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
                 kw = {"icc_profile": im.info.get("icc_profile")} if im.info.get("icc_profile") else {}
                 if fmt == "WEBP":
                     kw["quality"] = 95
+                if fmt == "JPEG":  # a damaged JPEG jpegtran refused: saved again with its own quantisation tables
+                    from PIL import JpegImagePlugin
+                    qt, sub = getattr(im, "quantization", None), JpegImagePlugin.get_sampling(im)
+                    kw.update(qtables=qt, **({"subsampling": sub} if sub >= 0 else {})) if qt else kw.update(quality=95)
+                    out = out.convert("RGB") if out.mode not in ("RGB", "L") else out
                 if p["ext"] in HEIF_EXT:
                     fmt, kw = "HEIF", {"quality": 92}  # HEVC: decoded and encoded again, as Apple Photos does on export
                     out.info["icc_profile"] = im.info.get("icc_profile")
@@ -409,7 +436,7 @@ def crop(pid: int, rect: list, check_running: bool = True) -> dict:
     except BaseException:  # the database refused: the file goes back as it was
         shutil.copy2(copy, p["path"])
         raise
-    how = "lossless" if p["ext"] in JPEG_EXT or p["ext"] in (".png", ".tif", ".tiff") else "re-encoded"
+    how = "lossless" if lossless_jpeg or p["ext"] in (".png", ".tif", ".tiff") else "re-encoded"
     r = _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, {"lossless": "crop", "box": list(box), "faces_dropped": len(dropped), "how": how})
     r["box"] = list(box)
     r["faces_dropped"] = len(dropped)

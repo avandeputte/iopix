@@ -278,7 +278,7 @@ export async function showDamaged() {
   const body = h('div', null, h('div', { class: 'muted' }, 'Loading…'));
   main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Damaged files', null]]),
     pageTitle('photo', 'rose', 'Damaged files'),
-    h('p', { class: 'muted intro mt0' }, `Every photo’s file is read and checked: JPEGs that stop early, lack their end marker or hold damaged data, PNGs with damaged data, and pictures that cannot be decoded. Files are only read. One kind of damage can be repaired safely: a JPEG whose picture is complete but whose end marker is missing (some phones’ burst photos). The repair adds the marker after keeping a copy of the file, and every repair is in the edit log with undo. A file that was cut off cannot be repaired here; a backup or the original device may still have it whole.`),
+    h('p', { class: 'muted intro mt0' }, `Every photo’s file is read and checked: JPEGs that stop early, lack their end marker or hold damaged data, PNGs with damaged data, and pictures that cannot be decoded. Files are only read until you choose a fix. A JPEG whose picture is complete but whose end marker is missing (some phones’ burst photos) can be repaired by adding the marker. A JPEG whose bottom is missing (shown grey) can be cropped, without re-encoding, to the part above the damage. Each file is copied first, and every fix is in the edit log with undo. What was lost cannot be brought back here; a backup or the original device may still have the file whole.`),
     body));
   let d;
   try { d = await api('/api/filecheck'); } catch (e) { fill(body, errorBox(e)); return; }
@@ -300,11 +300,20 @@ export async function showDamaged() {
     toast(`${plural(r.repaired.length, 'file')} repaired${r.failed.length ? `; ${nf.format(r.failed.length)} not: ${r.failed[0].error}` : ''}.`);
     showDamaged();
   };
+  const keep = async (ids, btn) => {
+    if (!await confirmDialog(`Crop ${plural(ids.length, 'photo')} to the part of the picture above the damage? The grey part is cut away without re-encoding the rest. Each file is copied first and the crop can be undone from the edit log.`, { ok: 'Crop' })) return;
+    btn.disabled = true;
+    let r;
+    try { r = await post('/api/filecheck/keep', { ids }); } catch (e) { btn.disabled = false; toastError(e); return; }
+    toast(`${plural(r.cropped.length, 'photo')} cropped to the intact part${r.failed.length ? `; ${nf.format(r.failed.length)} not: ${r.failed[0].error}` : ''}.`);
+    showDamaged();
+  };
   const all = d.found.map((x) => x.photo);
   const row = (x, k) => h('div', { class: 'hrow' },
     h('img', { src: `/thumb/${x.photo}`, alt: '', loading: 'lazy', onclick: () => openLightbox({ id: all }, k, true) }),
     h('div', { class: 'hmain' }, h('b', null, x.name), h('div', { class: 'muted' }, x.folder), h('div', { class: x.fixable ? '' : 'warn' }, x.detail)),
-    x.fixable && S.EDITING ? h('button', { class: 'pillbtn small', onclick: (e) => repair([x.photo], e.currentTarget) }, 'Repair') : null);
+    x.fixable && S.EDITING ? h('button', { class: 'pillbtn small', onclick: (e) => repair([x.photo], e.currentTarget) }, 'Repair') : null,
+    x.keep && S.EDITING ? h('button', { class: 'pillbtn small', title: 'Crop the photo losslessly to the part above the damage (the file is copied first; undo from the edit log)', onclick: (e) => keep([x.photo], e.currentTarget) }, `Keep the intact part (${Math.round(x.keep * 100)}%)`) : null);
   fill(body,
     h('div', { class: 'toolbar', style: 'margin:6px 0 14px;flex-wrap:wrap;gap:8px' }, h('span', null, status),
       p.running ? null : h('button', { class: 'pillbtn on', onclick: run(false) }, icon('spark'), d.checked < d.total ? 'Check the files' : 'Check new files'),

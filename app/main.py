@@ -68,7 +68,7 @@ async def lifespan(_app):
 app = FastAPI(title="iopix", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # every endpoint that changes the library (sidecars, files, digiKam's database); refused in read-only mode
-WRITE_PATHS = ("/api/filecheck/repair", "/api/edit", "/api/edits/db", "/api/faces/detect", "/api/photos/delete", "/api/photos/trash", "/api/photos/move", "/api/photos/rename", "/api/photos/rename-pattern", "/api/metadata", "/api/photos/transform", "/api/photos/crop", "/api/photos/adjust", "/api/trash", "/api/import", "/api/history", "/api/library/merge", "/api/location/landmark", "/api/gpx/preview", "/api/consistency/sync", "/api/gpx/apply", "/api/faces/op", "/api/faces/batch", "/api/folders",
+WRITE_PATHS = ("/api/filecheck/keep", "/api/filecheck/repair", "/api/edit", "/api/edits/db", "/api/faces/detect", "/api/photos/delete", "/api/photos/trash", "/api/photos/move", "/api/photos/rename", "/api/photos/rename-pattern", "/api/metadata", "/api/photos/transform", "/api/photos/crop", "/api/photos/adjust", "/api/trash", "/api/import", "/api/history", "/api/library/merge", "/api/location/landmark", "/api/gpx/preview", "/api/consistency/sync", "/api/gpx/apply", "/api/faces/op", "/api/faces/batch", "/api/folders",
                "/api/faces/person", "/api/placetags", "/api/tags/op")
 
 

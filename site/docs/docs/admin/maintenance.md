@@ -16,7 +16,7 @@
 | Rescan the library now | rebuild the search index |
 | Metadata consistency | compare database, sidecar and file, and fix what disagrees |
 | Metadata quality | missing locations, face problems, and more |
-| Damaged files | read every file and find JPEGs that stop early, lack their end marker or hold damaged data, damaged PNGs, and pictures that cannot be decoded; a safe repair (adding a missing end marker, the file backed up first, undo in the edit log) where there is one |
+| Damaged files | read every file and find JPEGs that stop early, lack their end marker or hold damaged data, damaged PNGs, and pictures that cannot be decoded; a repair where there is one: adding a missing end marker, or cropping a photo whose bottom is missing to the part above the damage (the file copied first, undo in the edit log) |
 | Edits waiting for digiKam | changes in sidecars not yet in digiKam's database, with **Apply to digiKam database** |
 | Tag cover photos | choose a picture for every tag automatically |
 

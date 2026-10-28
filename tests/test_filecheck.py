@@ -101,3 +101,66 @@ def test_run_repair_and_undo_on_the_scratch_library(client, lib):
         db.commit()
         db.close()
         index.build()
+
+
+def test_keep_rect_follows_the_orientation():
+    assert filecheck.keep_rect(4000, 3000, 2000, 1) == [0, 0, 4000, 2000]
+    assert filecheck.keep_rect(4000, 3000, 2000, 3) == [0, 1008, 4000, 1992]   # bottom of the stored picture is at the top
+    assert filecheck.keep_rect(4000, 3000, 2000, 6) == [1008, 0, 1992, 4000]   # ... at the left
+    assert filecheck.keep_rect(4000, 3000, 2000, 8) == [0, 0, 2000, 4000]      # ... at the right
+
+
+def _db_row(lib, pid):
+    db = sqlite3.connect(lib["db"])
+    try:
+        return (db.execute("SELECT fileSize, modificationDate FROM Images WHERE id = ?", (pid,)).fetchone(),
+                db.execute("SELECT width, height, orientation FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone(),
+                db.execute("SELECT tagid, property, value FROM ImageTagProperties WHERE imageid = ? AND value LIKE '%<rect%'", (pid,)).fetchall())
+    finally:
+        db.close()
+
+
+def test_keeping_the_intact_part_of_a_cut_off_photo(client, lib):
+    """A photo whose data stops two thirds of the way down is cropped to the part above, without re-encoding;
+    Undo puts the damaged file back. A damaged file jpegtran refuses outright is decoded and saved again."""
+    if not filecheck.jpegtran():
+        pytest.skip("jpegtran not installed here")
+    from app.data import index
+    con = index.open_index()
+    pid, path = con.execute("SELECT id, path FROM photos p WHERE video = 0 AND lower(fmt) IN ('jpg', 'jpeg') ORDER BY id LIMIT 1").fetchone()
+    con.close()
+    original = open(path, "rb").read()
+    rows_before = _db_row(lib, pid)
+    try:
+        for damage in ("cut", "two_sof"):
+            status, end = filecheck._walk(original)
+            sos = original.index(b"\xff\xda")
+            cut = original[: sos + (end - sos) * 2 // 3]  # the bottom third of the picture data is gone
+            if damage == "two_sof":  # a second frame header in the data: jpegtran refuses the file altogether
+                sof = next(original.index(m) for m in (b"\xff\xc0", b"\xff\xc2", b"\xff\xc1") if m in original)
+                seg = original[sof:sof + 2 + ((original[sof + 2] << 8) | original[sof + 3])]
+                cut = cut + seg + b"\x00" * 64
+            with open(path, "wb") as f:
+                f.write(cut)
+            index.build()
+            found = filecheck.check_file(path)
+            assert found and found["problem"] in ("truncated", "corrupt_data") and 0.4 < found.get("keep", 0) < 0.8, found
+            r = client.post("/api/filecheck/keep", json={"ids": [pid]}).json()
+            assert r["cropped"] == [pid], r
+            assert filecheck.check_file(path) is None  # what is left is sound
+            entry = client.get(f"/api/history?photo={pid}").json()["entries"][0]
+            assert entry["action"] == "lossless" and "Cropped" in entry["summary"]
+            assert ("re-encoded" in entry["summary"]) == (damage == "two_sof")
+            assert client.post(f"/api/history/{entry['id']}/restore", json={"kind": "undo"}).status_code == 200
+            assert open(path, "rb").read() == cut
+    finally:
+        with open(path, "wb") as f:
+            f.write(original)
+        db = sqlite3.connect(lib["db"])
+        db.execute("UPDATE Images SET fileSize = ?, modificationDate = ? WHERE id = ?", (*rows_before[0], pid))
+        db.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = ? WHERE imageid = ?", (*rows_before[1], pid))
+        db.execute("DELETE FROM ImageTagProperties WHERE imageid = ? AND value LIKE '%<rect%'", (pid,))  # the face boxes as they were
+        db.executemany("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?,?,?,?)", [(pid, *r) for r in rows_before[2]])
+        db.commit()
+        db.close()
+        index.build()

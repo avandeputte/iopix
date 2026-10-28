@@ -127,6 +127,78 @@ def _complete_with_marker(path: str):
     return res.returncode == 0 and "Premature end" not in msg and "Corrupt" not in msg
 
 
+def intact_rows(path: str):
+    """For a JPEG whose bottom is missing (shown grey): (stored width, stored height, rows that decoded fully, rounded
+    down to whole 16-row blocks), else None. The missing part decodes as flat mid-grey, 8 rows per pixel at 1/8 scale."""
+    import numpy as np
+    from PIL import Image
+    try:
+        with Image.open(path) as im:
+            W, H = im.size
+            im.draft("RGB", (max(1, W // 8), max(1, H // 8)))
+            a = np.asarray(im.convert("RGB"), dtype=np.float32)
+    except Exception:
+        return None
+    scale = H / a.shape[0]
+    flat = (a.std(axis=(1, 2)) < 1.0) & (np.abs(a.mean(axis=(1, 2)) - 128) < 4)
+    k = len(flat)
+    while k > 0 and flat[k - 1]:
+        k -= 1
+    # the last row that decoded may stop part way along: grey at its right end
+    while k > 0 and float(a[k - 1, -2:].std()) < 1.0 and abs(float(a[k - 1, -2:].mean()) - 128) < 4:
+        k -= 1
+    if k == len(flat) or k < len(flat) * 0.05:  # nothing missing, or nearly nothing left
+        return None
+    keep = int(k * scale) // 16 * 16
+    return (W, H, keep) if keep >= 16 else None
+
+
+def keep_rect(W: int, H: int, keep: int, orientation: int) -> list:
+    """The upright rectangle (x, y, w, h) holding the stored picture's top `keep` rows, for lossless.crop. The origin is
+    rounded up to a 16 px block so the crop (whose origin jpegtran snaps down to its blocks) keeps no grey."""
+    up = lambda v: -(-v // 16) * 16  # noqa: E731
+    if orientation in (3, 4):        # turned 180: the missing rows are at the top
+        y = up(H - keep)
+        return [0, y, W, H - y]
+    if orientation in (6, 7):        # turned 90 clockwise: at the left
+        x = up(H - keep)
+        return [x, 0, H - x, W]
+    if orientation in (5, 8):        # turned 90 anticlockwise: at the right
+        return [0, 0, keep, W]
+    return [0, 0, W, keep]
+
+
+def keep_intact(ids: list, check_running: bool = True) -> dict:
+    """Crop each photo losslessly to the part of the picture that is intact (lossless.crop: backed up first, in the
+    edit log with undo). {cropped: [ids], failed: [{id, error}]}."""
+    from app.photos import lossless
+    done, failed = [], []
+    for pid in ids:
+        try:
+            p = lossless._photo(int(pid))
+            lossless._check(p)
+            if os.path.splitext(p["path"])[1].lower() not in JPEG_EXT:
+                raise ValueError("Only JPEGs can be cropped this way")
+            r = check_file(p["path"])
+            got = intact_rows(p["path"]) if r and r["problem"] in ("truncated", "corrupt_data") else None
+            if not got:
+                raise ValueError("No missing part at the bottom of this picture to crop away")
+            W, H, keep = got
+            lossless.crop(p["id"], keep_rect(W, H, keep, p["orientation"]), check_running, reencode_damaged=True)
+            done.append(p["id"])
+        except Exception as e:
+            failed.append({"id": pid, "error": str(e)[:300]})
+    return {"cropped": done, "failed": failed}
+
+
+def _with_keep(path: str, r: dict) -> dict:
+    """A damaged JPEG whose bottom is missing gets keep: the share of the picture a crop to the intact part keeps."""
+    got = intact_rows(path)
+    if got:
+        r["keep"] = round(got[2] / got[1], 3)
+    return r
+
+
 def check_file(path: str):
     """None when the file looks sound, else {problem, detail, fixable}."""
     try:
@@ -143,14 +215,14 @@ def check_file(path: str):
                 data = f.read()
             ends = _jpeg_ends(data)
             if ends == "corrupt":  # never repairable here: adding an end marker would change nothing
-                return {"problem": "corrupt_data", "detail": LABELS["corrupt_data"], "fixable": False}
+                return _with_keep(path, {"problem": "corrupt_data", "detail": LABELS["corrupt_data"], "fixable": False})
             if ends == "no_eoi":
                 whole = _complete_with_marker(path)
                 if whole:
                     return {"problem": "end_marker", "detail": LABELS["end_marker"], "fixable": True}
                 if whole is None:
                     return {"problem": "end_marker", "detail": LABELS["end_marker"] + " (install jpegtran to check whether the picture is complete and repair it)", "fixable": False}
-                return {"problem": "truncated", "detail": LABELS["truncated"], "fixable": False}
+                return _with_keep(path, {"problem": "truncated", "detail": LABELS["truncated"], "fixable": False})
             if ends == "bad":
                 try:  # a PNG or HEIC with a .jpg name is not damage
                     with Image.open(path) as im:
@@ -181,7 +253,7 @@ def check_file(path: str):
 # the library run
 # --------------------------------------------------------------------------
 
-CHECK_VERSION = 2  # 2: damaged data inside a scan told apart from a file cut off (older results are checked again)
+CHECK_VERSION = 3  # 2: damaged data inside a scan told apart from a file cut off; 3: the intact share (keep) recorded
 
 
 def _stamp(p: dict) -> str:

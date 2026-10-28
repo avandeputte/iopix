@@ -131,6 +131,23 @@ async def api_filecheck_repair(request: Request):
     return r
 
 
+@router.post("/api/filecheck/keep")
+async def api_filecheck_keep(request: Request):
+    """Body {ids: [...]}: crop those damaged JPEGs losslessly to the part of the picture that is intact (backed up
+    first, undoable from the edit log)."""
+    from app.photos import filecheck
+    if not config.DB_WRITE or appstate.read_only():
+        raise HTTPException(403, "Writing to the library is turned off")
+    body = await request.json()
+    try:
+        r = await run_in_threadpool(filecheck.keep_intact, [int(i) for i in body.get("ids") or []])
+    except dbsync.SyncError as e:
+        raise HTTPException(409, str(e))
+    if r["cropped"]:
+        await run_in_threadpool(_rebuild_after_write)
+    return r
+
+
 @router.get("/api/history")
 def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
                 user: str = None, since: int = None, until: int = None):
