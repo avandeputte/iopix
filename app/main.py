@@ -153,8 +153,7 @@ async def _auth_guard(request: Request, call_next):
             return _no_access(request, request.state.proxy_ident)
     if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers, proxyauth.peer_of(request)):
         user = None  # a passwordless account's session (begun on the LAN) does not work from outside
-        if time.time() - proxyauth._logged.get(("lan-session", request.cookies.get(users.COOKIE)), 0) > 3600:
-            proxyauth._logged[("lan-session", request.cookies.get(users.COOKIE))] = time.time()
+        if proxyauth.once(("lan-session", request.cookies.get(users.COOKIE))):
             proxyauth.authlog.info("a one-click session is not used from outside: shown the sign-in screen (from %s)", proxyauth.source(request))
     request.state.user = user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))

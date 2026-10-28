@@ -58,7 +58,7 @@ def clear(levels: list, check_running: bool = True, after=None) -> int:
             ids = [r[0] for r in con.execute("SELECT imageid FROM ImageTags WHERE tagid = ?", (tid,))]
             con.execute("DELETE FROM ImageTags WHERE tagid = ?", (tid,))
             photos += [(i, lv) for i in ids]
-    paths = dict(dbsync._photo_paths([i for i, _lv in photos]))
+    paths = dict(dbsync.photo_paths([i for i, _lv in photos]))
     history.record([{"photo_id": i, "action": "edit", "summary": f"Pick label {LEVELS[lv]} cleared (Maintenance › Clear pick labels)",
                      "path": paths.get(i), "undo": {"pick": lv}} for i, lv in photos])
     progress.update(running=True, done=0, total=len(photos), cleared=len(photos), sidecars=0, finished=None, error=None)

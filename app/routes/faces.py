@@ -39,7 +39,7 @@ async def api_faces_detect(request: Request):
     _face_detect_allowed()
     ids = [int(i) for i in body.get("ids") or []][:50000]
     if ids and len(ids) <= 5:
-        photos = await run_in_threadpool(facedetect._photos, ids)
+        photos = await run_in_threadpool(facedetect.select_photos, ids)
         try:
             r = await run_in_threadpool(facedetect.detect, photos)
         except dbsync.SyncError as e:

@@ -237,7 +237,7 @@ def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(l
     try:
         rows = scanner.rows_for(str(probe), d, 1)
         with dbsync.write_transaction(dkdb.sqlite_path(), False) as con:
-            scanner._write_rows(con, iid, rows, scanner._Tags(con), _special(con), full=True)
+            scanner.write_rows(con, iid, rows, scanner.Tags(con), _special(con), full=True)
         dk = sqlite3.connect(lib["db"])
         tags = {r[1]: r[0] for r in dk.execute("SELECT id, name FROM Tags WHERE name = 'Zz Kw Person'")}
         assert len(dk.execute("SELECT id FROM Tags WHERE name = 'Zz Kw Person'").fetchall()) == 1, "one tag, not two"

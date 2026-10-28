@@ -30,6 +30,7 @@ from app.photos import dateprecision, edits
 from app.geo import places
 from app.data import vdb
 from app.data import state as appstate
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.data.index")
 SOURCE_ERRORS = (*vdb.Error, OSError, dkdb.SyncError)  # digiKam's database cannot be read right now
@@ -250,8 +251,8 @@ def mirror_tag_paths(image_ids: list) -> dict:
         tags = dkdb.tag_tree(con)
         internal = {r[0] for r in con.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'").fetchall()}
         out = {}
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(map(str, ids[i:i + 500]))
+        for part in chunked(ids, 500):
+            chunk = ",".join(map(str, part))
             for iid, tid in con.execute(f"SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({chunk})").fetchall():
                 if tid in tags and tid not in internal:
                     out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
@@ -304,7 +305,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
         iid, name, size, uhash = r[0], r[2], r[3], r[4]
         if uhash:
             current[iid] = (uhash, size, paths.get(iid), name)
-    with appstate._lock:
+    with appstate.lock:
         con = appstate.connect()
         try:
             rows = con.execute("SELECT vid, dk_id, hash, size, path, name, last_seen FROM photo_identity").fetchall()
@@ -338,7 +339,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
                 else:  # new, or the number now stands for another file: that is a different photo
                     inserts.append((dk, h, sz, path, name, now, now))
             if remap:
-                _rekey(con, remap)
+                rekey(con, remap)
             # a number that now belongs to a different file is taken away from the row that had it
             kept = {vid for _h, _s, _n, _t, vid in rewritten}
             taken = [(vid,) for dk, (vid, h, sz) in by_dk.items() if dk in current and (h, sz) != current[dk][:2] and vid not in kept]
@@ -367,7 +368,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
     return remap
 
 
-def _rekey(con, remap: dict):
+def rekey(con, remap: dict):
     """Move the viewer's rows about renumbered photos to their new ids, in two passes through negative
     ids so a swap of two numbers cannot collide. A row already under a new id that belongs to a photo
     which is gone for good is dropped first (its photo no longer exists under any id)."""
@@ -417,8 +418,7 @@ HIDDEN: set = set()  # photos on their way to the trash: out of the index at onc
 def _drop(con, ids):
     """Delete these photos from an index database (the photo rows, their tags, faces and text)."""
     ids = sorted(int(i) for i in ids)
-    for i in range(0, len(ids), 900):
-        part = ids[i:i + 900]
+    for part in chunked(ids, 900):
         q = ",".join("?" * len(part))
         for table, col in (("photos", "id"), ("photo_tags", "photo_id"), ("faces", "photo_id"), ("fts", "rowid")):
             con.execute(f"DELETE FROM {table} WHERE {col} IN ({q})", part)

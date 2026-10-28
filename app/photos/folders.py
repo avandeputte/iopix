@@ -42,7 +42,7 @@ def _album(con, album_id: int) -> dict:
     return {"id": r[0], "root": r[1], "rel": rel, "dir": Path(roots[r[1]]) / rel.strip("/")}
 
 
-def _clean_name(name: str, what: str) -> str:
+def clean_name(name: str, what: str) -> str:
     name = (name or "").strip()
     if not name or name in (".", "..") or "/" in name or "\\" in name or name.startswith(".") or len(name) > 200 \
             or any(ord(c) < 32 for c in name):
@@ -52,13 +52,10 @@ def _clean_name(name: str, what: str) -> str:
 
 def list_all() -> list:
     """Every folder digiKam knows, empty ones included (the index drops those), as a tree."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = {r[0]: r[1] for r in con.execute("SELECT id, label FROM AlbumRoots")}
         single = len(roots) == 1
         rows = con.execute("SELECT id, albumRoot, relativePath, caption, date, collection, icon FROM Albums ORDER BY albumRoot, relativePath").fetchall()
-    finally:
-        con.close()
     by_path = {(r[1], r[2]): r[0] for r in rows}
     out = []
     for aid, root, rel, caption, adate, collection, icon in rows:
@@ -78,13 +75,10 @@ def set_properties(album_id: int, props: dict, check_running: bool = True) -> di
     """digiKam's Album Properties: caption, date (YYYY-MM-DD), category (Albums.collection) and cover (Albums.icon,
     an image id; None for automatic). Only the keys given change."""
     import re as _re
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         _album(con, album_id)
         if props.get("icon") is not None and not con.execute("SELECT 1 FROM Images WHERE id = ? AND status = 1", (int(props["icon"]),)).fetchone():
             raise SyncError("That photo is not in the library")
-    finally:
-        con.close()
     sets, vals = [], []
     if "caption" in props:
         sets.append("caption = ?"); vals.append((props["caption"] or "").strip()[:2000] or None)
@@ -108,15 +102,12 @@ def set_properties(album_id: int, props: dict, check_running: bool = True) -> di
 
 def create(parent_id: int, name: str, check_running: bool = True) -> dict:
     """mkdir under the parent folder and the Albums row digiKam's New Album would add."""
-    name = _clean_name(name, "folder")
-    con = dkdb.connect()
-    try:
+    name = clean_name(name, "folder")
+    with dkdb.reader() as con:
         parent = _album(con, parent_id)
         rel = ("" if parent["rel"] == "/" else parent["rel"]) + "/" + name
         if con.execute("SELECT 1 FROM Albums WHERE albumRoot = ? AND relativePath = ?", (parent["root"], rel)).fetchone():
             raise SyncError("A folder with that name already exists there.")
-    finally:
-        con.close()
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "folders")
     target = parent["dir"] / name
@@ -132,7 +123,7 @@ def create(parent_id: int, name: str, check_running: bool = True) -> dict:
     return {"id": new_id, "path": rel, "dir": str(target)}
 
 
-def _category(ext: str) -> int:
+def category(ext: str) -> int:
     if ext in IMAGE_EXT:
         return 1
     if ext in VIDEO_EXT:
@@ -140,7 +131,7 @@ def _category(ext: str) -> int:
     raise SyncError(f"Files of type .{ext} are not accepted (photos and videos only).")
 
 
-def _free_name(d: Path, name: str) -> str:
+def free_name(d: Path, name: str) -> str:
     if not (d / name).exists():
         return name
     stem, ext = os.path.splitext(name)
@@ -151,7 +142,7 @@ def _free_name(d: Path, name: str) -> str:
     raise SyncError("Too many files with that name already.")
 
 
-def _probe(path: Path) -> dict:
+def probe(path: Path) -> dict:
     """What exiftool can tell about a new file: creation date, orientation, size, duration."""
     try:
         # -d formats the dates (it is a print conversion, so no global -n); Orientation# stays numeric
@@ -172,13 +163,12 @@ def staged_entry(path: Path) -> tuple:
     """(name, category, extension, path, probe info) for a file already in place."""
     name = path.name
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    return (name, _category(ext), ext, path, _probe(path))
+    return (name, category(ext), ext, path, probe(path))
 
 
 def album_for_dir(directory: Path):
     """The digiKam folder (Albums id) for a directory on disk, or None."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
         d = str(directory).rstrip("/")
         for rid, rpath in roots.items():
@@ -189,18 +179,13 @@ def album_for_dir(directory: Path):
                 if row:
                     return row[0]
         return None
-    finally:
-        con.close()
 
 
 def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     """files: [(name, bytes or an open binary file)]. Each goes into the folder (a taken name gets ' (2)'), then one
     transaction adds their rows; an open file is copied in chunks. Returns {added: [{id, name}], skipped: [{name, reason}]}."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         folder = _album(con, album_id)
-    finally:
-        con.close()
     if not folder["dir"].is_dir():
         raise SyncError(f"The folder is not on disk here: {folder['dir']}")
     db_path = dkdb.sqlite_path()
@@ -208,16 +193,16 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     staged, skipped = [], []
     for name, data in files:
         try:
-            name = _clean_name(os.path.basename(name or ""), "file")
+            name = clean_name(os.path.basename(name or ""), "file")
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-            cat = _category(ext)
+            cat = category(ext)
             if isinstance(data, (bytes, bytearray)):
                 size = len(data)
             else:
                 data.seek(0, os.SEEK_END); size = data.tell(); data.seek(0)
             if size > MAX_UPLOAD or not size:
                 raise SyncError("Empty file, or larger than 2 GB.")
-            final = _free_name(folder["dir"], name)
+            final = free_name(folder["dir"], name)
             tmp = folder["dir"] / (".upload-" + final)
             if isinstance(data, (bytes, bytearray)):
                 tmp.write_bytes(data)
@@ -228,7 +213,7 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
             path = folder["dir"] / final
             from app.photos import importer
             importer.make_sidecar(str(path))  # the file's own metadata in a sidecar, as digiKam would write one
-            staged.append((final, cat, ext, path, _probe(path)))  # exiftool runs here, not inside the write lock below
+            staged.append((final, cat, ext, path, probe(path)))  # exiftool runs here, not inside the write lock below
         except (SyncError, OSError) as e:
             skipped.append({"name": name, "reason": str(e)})
     if not staged:

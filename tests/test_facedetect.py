@@ -43,7 +43,7 @@ def test_detector_finds_the_faces_digikam_marked(client, lib, monkeypatch, detec
                 total += 1
                 matched += any(facedetect.same_face(f, e) for f in found)
         from app import thumbs
-        img, _ = thumbs._open_oriented(rows[0][1], 1600, 1600)
+        img, _ = thumbs.open_oriented(rows[0][1], 1600, 1600)
         with_pts = facedetect.detect_image(img, landmarks=True)
         for x, y, w, h, sc, pts in with_pts:
             assert len(pts) == 5

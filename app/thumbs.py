@@ -64,7 +64,7 @@ def stamp_for(uhash, size, modified) -> str:
     return f"{(uhash or 'x')[:10]}-{size or 0:x}-{zlib.crc32((modified or '').encode()) & 0xffff:x}"
 
 
-def _save(im: Image.Image, dst: Path, quality: int, icc=None):
+def save(im: Image.Image, dst: Path, quality: int, icc=None):
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(f".{dst.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     kw = {"icc_profile": icc} if icc and len(icc) < 16384 else {}
@@ -103,7 +103,7 @@ def _raw_preview(src: str):
     return im
 
 
-def _open_oriented(src: str, want_w: int, want_h: int):
+def open_oriented(src: str, want_w: int, want_h: int):
     """Open an image upright (EXIF orientation applied) in RGB or L, no smaller than
     want_w x want_h when the decoder can shrink it for free, plus its ICC profile.
     Shared by the thumbnail, analysis and caption code so every job decodes a file
@@ -135,7 +135,7 @@ def _open_oriented(src: str, want_w: int, want_h: int):
     return im, icc
 
 
-def _video_frame(src: str, dst: Path, height: int, duration) -> bool:
+def video_frame(src: str, dst: Path, height: int, duration) -> bool:
     if not FFMPEG:
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -157,7 +157,7 @@ def _video_frame(src: str, dst: Path, height: int, duration) -> bool:
 def _placeholder(dst: Path, w: int, h: int):
     scale = 240 / max(h, 1)
     im = Image.new("RGB", (max(16, int(w * scale)), 240), (58, 60, 66))
-    _save(im, dst, 60)
+    save(im, dst, 60)
 
 
 def make(kind: str, photo: dict) -> Path:
@@ -178,15 +178,15 @@ def make(kind: str, photo: dict) -> Path:
             raise FileNotFoundError(photo["path"])
         try:
             if photo["video"]:
-                if not _video_frame(photo["path"], dst, box_h if kind == "t" else 1080, photo["duration"]):
+                if not video_frame(photo["path"], dst, box_h if kind == "t" else 1080, photo["duration"]):
                     _placeholder(dst, photo["w"], photo["h"])
             else:
-                im, icc = _open_oriented(photo["path"], box_w, box_h)
+                im, icc = open_oriented(photo["path"], box_w, box_h)
                 scale = min(box_h / im.height, box_w / im.width, 1.0)
                 if scale < 1.0:
                     size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
                     im = im.resize(size, Image.Resampling.LANCZOS, reducing_gap=2.0)
-                _save(im, dst, quality, icc)
+                save(im, dst, quality, icc)
         except (UnidentifiedImageError, Image.DecompressionBombError, ValueError):  # not a picture we can decode: a placeholder keeps the grid going and is not retried
             _placeholder(dst, photo["w"], photo["h"])
         except OSError:  # unreadable right now (a dropped mount, a truncated copy still syncing): nothing cached, tried again later
@@ -207,14 +207,14 @@ def make_face(tag_id: int, photo: dict, rect: tuple, size: int = 256) -> Path:
         pw, ph = photo["w"], photo["h"]
         if not pw or not ph or pw <= 8 or ph <= 8:  # the index's placeholder size: the file says
             pw, ph = true_size(photo["path"]) or (pw, ph)
-        im, icc = _open_oriented(photo["path"], int(pw * factor) + 1, int(ph * factor) + 1)
+        im, icc = open_oriented(photo["path"], int(pw * factor) + 1, int(ph * factor) + 1)
         sx, sy = im.width / max(pw, 1), im.height / max(ph, 1)
         cx, cy = (x + w / 2) * sx, (y + h / 2) * sy
         half = max(w * sx, h * sy) * 0.85
         box = (int(max(0, cx - half)), int(max(0, cy - half)), int(min(im.width, cx + half)), int(min(im.height, cy + half)))
         im = im.crop(box)
         im = ImageOps.fit(im, (size, size), Image.Resampling.LANCZOS)
-        _save(im, dst, 84, icc)
+        save(im, dst, 84, icc)
     return dst
 
 

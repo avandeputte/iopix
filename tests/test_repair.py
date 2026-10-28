@@ -37,7 +37,7 @@ def test_repairing_a_library_video_in_place(client, lib):
     import sqlite3
     from app.digikam import dbsync
     vid = lib["videos"][0]
-    path = dict(dbsync._photo_paths([vid]))[vid]
+    path = dict(dbsync.photo_paths([vid]))[vid]
     keep = path + ".keep"
     shutil.copy2(path, keep)
     try:

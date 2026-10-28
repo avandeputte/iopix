@@ -26,6 +26,7 @@ except ImportError:  # numpy comes with the search/objects extras; without it th
 from app import config, jobs, thumbs
 from app.data import index, vdb
 from app.ai import models
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.faces.facevecs")
 SIZE = 112
@@ -194,19 +195,13 @@ def _proto_faces():
 
 
 def _have_protos() -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {(r[1], r[2], r[3], r[4], r[5]): r[0] for r in con.execute("SELECT tag_id, photo_id, x, y, w, h FROM ai_person_references")}
-    finally:
-        con.close()
 
 
 def _have() -> set:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM ai_face_embeddings")}
-    finally:
-        con.close()
 
 
 def coverage() -> tuple:
@@ -229,11 +224,12 @@ def start():
 def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
     """todo: [(key..., path, pw, ph)] where key is (photo, x, y, w, h) or (tag, photo, x, y, w, h); rows go to `table`."""
     tagged = table == "ai_person_references"
-    for i in range(0, len(todo), 32):
+    done = 0
+    for todo_batch in chunked(todo, 32):
         if gen != _run["gen"]:
             return False
         batch, paths = [], []
-        for row in todo[i:i + 32]:
+        for row in todo_batch:
             key, (path, pw, ph) = row[:-3], row[-3:]
             pid = key[1] if tagged else key[0]
             rect = key[2:6] if tagged else key[1:5]
@@ -257,7 +253,8 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
                 else:
                     con.executemany("INSERT OR REPLACE INTO ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?)",
                                     [(*key, vecs[k].astype(np.float32).tobytes()) for k, key in enumerate(batch)])
-        progress["done"] = offset + min(len(todo), i + 32)
+        done += len(todo_batch)
+        progress["done"] = offset + done
     return True
 
 
@@ -321,11 +318,8 @@ def reset():
 
 def _prototypes() -> tuple:
     """(matrix of prototype vectors, their tag ids, {tag: name}) for the suggestions; empty when none."""
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         rows = [(r[0], np.frombuffer(r[1], dtype=np.float32)) for r in con.execute("SELECT tag_id, vec FROM ai_person_references")]
-    finally:
-        con.close()
     rows = [r for r in rows if len(r[1]) == DIMS.get(chosen(), 128)]  # never a stray vector of another model
     if not rows:
         return None, None, {}

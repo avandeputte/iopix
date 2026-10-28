@@ -40,7 +40,7 @@ _state = {}
 
 def _snapshot():
     repo = models.REGISTRY[KEY]["repos"][0]
-    sha, _ = models._hf_local(repo)
+    sha, _ = models.hf_local(repo)
     if not sha:
         return None
     return models.MODEL_DIR / f"models--{repo.replace('/', '--')}" / "snapshots" / sha
@@ -141,7 +141,7 @@ def describe(paths: list) -> list:
     out = []
     for p in paths:
         try:
-            im, _ = thumbs._open_oriented(p, 1024, 1024)  # the model looks at 768 px
+            im, _ = thumbs.open_oriented(p, 1024, 1024)  # the model looks at 768 px
         except Exception as e:
             log.warning("captions: cannot read %s (%s)", p, e)
             out.append(None)

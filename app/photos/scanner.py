@@ -361,7 +361,7 @@ def rows_for(path: str, d: dict, category: int) -> dict:
 
 
 # ---- writing
-class _Tags:
+class Tags:
     """Tag lookups and creation inside one write transaction."""
 
     def __init__(self, con):
@@ -410,7 +410,7 @@ class _Tags:
         return tid
 
 
-def _write_rows(con, iid: int, r: dict, tags: _Tags, special: dict, full: bool):
+def write_rows(con, iid: int, r: dict, tags: Tags, special: dict, full: bool):
     """Write the scanned rows of one photo. full: every table (a new file); else only what a modified file updates."""
     i = r["info"]
     if full:
@@ -504,7 +504,7 @@ COPY_COLS = {  # digiKam's columns (core/data/database/dbconfig.xml.cmake.in), t
 }
 
 
-def _copy_attributes(con, src: int, dst: int):
+def copy_attributes(con, src: int, dst: int):
     """CoreDB::copyImageAttributes: a new file identical to a known one takes over its attributes."""
     for t, cols in COPY_COLS.items():
         con.execute(f"DELETE FROM {t} WHERE imageid = ?", (dst,))
@@ -517,14 +517,11 @@ def complete(ids: list, check_running: bool = True) -> dict:
     ids = [int(i) for i in ids]
     if not ids:
         return {"completed": 0, "copied": 0, "failed": 0}
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
         version = hash_version(con)
         q = ",".join(map(str, ids))
         rows = con.execute(f"SELECT i.id, i.category, i.album, a.albumRoot, a.relativePath, i.name FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({q})").fetchall()
-    finally:
-        con.close()
     items = []
     for iid, cat, album, root, rel, name in rows:
         if root in roots:
@@ -534,7 +531,7 @@ def complete(ids: list, check_running: bool = True) -> dict:
     done = copied = failed = 0
     db_path = dkdb.sqlite_path()
     with dbsync.write_transaction(db_path, check_running) as con:
-        tags = _Tags(con)
+        tags = Tags(con)
         try:
             from app.faces.facemgr import _special
             special = _special(con)
@@ -549,12 +546,12 @@ def complete(ids: list, check_running: bool = True) -> dict:
                                     (uh, size, iid, album)).fetchone()
                     twin = r[0] if r else None
                 if twin:
-                    _copy_attributes(con, twin, iid)
+                    copy_attributes(con, twin, iid)
                     copied += 1
                 elif not meta.get(path):
                     raise SyncError("the file could not be read; tried again on the next pass")
                 else:
-                    _write_rows(con, iid, rows_for(path, meta[path], cat), tags, special, full=True)
+                    write_rows(con, iid, rows_for(path, meta[path], cat), tags, special, full=True)
                 stamp = dkdb.file_stamp(path)
                 con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?", (uh, size, stamp[0] if stamp else None, iid))
                 done += 1
@@ -595,7 +592,7 @@ def _walk(root: Path):
             if n.startswith(".") or "." not in n or n.lower().endswith(".xmp"):
                 continue
             try:
-                folders._category(n.rsplit(".", 1)[-1].lower())
+                folders.category(n.rsplit(".", 1)[-1].lower())
             except SyncError:
                 continue
             files.append(n)
@@ -625,8 +622,7 @@ def scan(check_running: bool = True) -> dict:
         if check_running and dbsync.digikam_running():
             progress["skipped"].append("digiKam is running; it scans the collection itself")
             return progress
-        con = dkdb.connect()
-        try:
+        with dkdb.reader() as con:
             roots = dkdb.root_paths(con)
             version = hash_version(con)
             albums = {(r[1], r[2]): r[0] for r in con.execute("SELECT id, albumRoot, relativePath FROM Albums")}
@@ -635,8 +631,6 @@ def scan(check_running: bool = True) -> dict:
             for iid, album, name, mdate, size, root, rel in con.execute(
                     "SELECT i.id, i.album, i.name, i.modificationDate, i.fileSize, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.status = 1"):
                 known[(root, rel, name)] = (iid, mdate, size, album)
-        finally:
-            con.close()
         new_files, modified, vanished = [], [], []
         for root_id, root_dir in roots.items():
             rd = Path(root_dir)
@@ -673,14 +667,11 @@ def scan(check_running: bool = True) -> dict:
             key = (root_id, rel)
             if key in albums or key in made:
                 continue
-            root_row = importer._root_folder(root_id, check_running)
-            made[key] = root_row["id"] if rel == "/" else importer._ensure_folder(rel, root_row, check_running)
+            root_row = importer.root_folder(root_id, check_running)
+            made[key] = root_row["id"] if rel == "/" else importer.ensure_folder(rel, root_row, check_running)
         albums.update(made)
-        con = dkdb.connect()
-        try:
+        with dkdb.reader() as con:
             progress["folders"] = con.execute("SELECT count(*) FROM Albums").fetchone()[0] - len(albums_before)
-        finally:
-            con.close()
         added_ids = []
         by_album = {}
         for root_id, rel, name, path in new_files:
@@ -708,7 +699,7 @@ def scan(check_running: bool = True) -> dict:
                         log.warning("scanner: %s could not be read; its rows are left as they are", path)
                         continue
                     r = rows_for(path, meta[path], cats.get(iid, 1))
-                    _write_rows(con, iid, r, None, {}, full=False)
+                    write_rows(con, iid, r, None, {}, full=False)
                     st = dkdb.file_stamp(path)
                     con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",
                                 (unique_hash(path, version), st[1] if st else None, st[0] if st else None, iid))

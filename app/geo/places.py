@@ -22,6 +22,12 @@ CELLS_X = int(round(360 / CELL))
 _geo = None
 
 
+def reset():
+    """Forget the loaded place data; the next lookup reads the files again."""
+    global _geo
+    _geo = None
+
+
 def available() -> bool:
     return all((DIR / f).exists() for f in FILES)
 

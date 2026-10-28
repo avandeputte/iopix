@@ -26,6 +26,7 @@ from app.data import index
 from app.data import state as appstate
 from app.data.query import DATE_RE, SORTS, build_where
 from app.ai.semantic import semantic, enabled as semantic_enabled
+from app.digikam.dkdb import chunked
 
 VIEWER = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # for the links in results
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -670,7 +671,7 @@ def photo_file(token: str, photo_id: int) -> dict:
     except Exception:
         pass
     try:
-        out["sidecar_backup"] = edits._backup_path(path).exists()
+        out["sidecar_backup"] = edits.backup_path(path).exists()
         out["file_backup"] = edits.file_backup_path(path).exists()
     except Exception:
         pass
@@ -772,7 +773,7 @@ def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
     from app.faces import facemgr
     from app.photos import edits
     ids = [int(i) for i in photo_ids][:5000]
-    paths = dict(dbsync._photo_paths(ids))
+    paths = dict(dbsync.photo_paths(ids))
     failed = edits.rewrite_tags([{"id": i, "path": p} for i, p in paths.items()])
     regions = facemgr.write_regions_many(list(paths))
     return {"photos": len(paths), "tags_failed": failed, "regions": {str(k): v for k, v in regions.items()}}
@@ -880,8 +881,7 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
         from app.core import _kick
         from app.routes.editing import _current_dates
         try:
-            for i in range(0, len(todo), 100):
-                chunk = todo[i:i + 100]
+            for chunk in chunked(todo, 100):
                 ch, per = {}, {}
                 dateprecision.prepare(chunk, precision, "", ch, per, _current_dates([p["id"] for p in chunk]))
                 r = edits.apply(chunk, ch, per)

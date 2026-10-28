@@ -29,6 +29,7 @@ import time
 from app.ai import analysis, models
 from app.data import index, vdb
 from app import jobs, thumbs
+from app.digikam.dkdb import chunked
 
 try:
     import numpy as np
@@ -209,7 +210,7 @@ def detect_image(img, landmarks: bool = False) -> list:
 
 def detect_photo(path: str, full_w: int, full_h: int) -> list:
     """Faces in a photo file, in upright full-resolution pixels (digiKam's region coordinates)."""
-    img, _ = thumbs._open_oriented(path, 2400, 2400)
+    img, _ = thumbs.open_oriented(path, 2400, 2400)
     if not full_w or not full_h or full_w <= 8 or full_h <= 8:  # the index's placeholder size: the file says
         full_w, full_h = thumbs.true_size(path) or (img.width, img.height)
     sx = full_w / img.width if full_w and full_w > 8 else 1.0
@@ -243,15 +244,15 @@ def new_faces(found: list, existing: list) -> list:
 
 
 # ---- which photos, what they already have
-def _photos(ids: list = None, album: int = None) -> list:
+def select_photos(ids: list = None, album: int = None) -> list:
     con = index.open_index()
     con.row_factory = sqlite3.Row
     try:
         sql = "SELECT p.id, p.path, p.name, p.w, p.h, p.hash, p.size, p.modified FROM photos p WHERE p.video = 0"
         if ids is not None:
             rows = []
-            for i in range(0, len(ids), 500):
-                chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+            for part in chunked(ids, 500):
+                chunk = ",".join(str(int(x)) for x in part)
                 rows += con.execute(sql + f" AND p.id IN ({chunk})").fetchall()
         elif album is not None:
             rows = con.execute(sql + " AND p.album_id IN (SELECT album FROM album_closure WHERE anc = ?) ORDER BY p.ts DESC", (int(album),)).fetchall()
@@ -267,8 +268,8 @@ def _existing(ids: list) -> dict:
     out = {}
     con = index.open_index()
     try:
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+        for part in chunked(ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({chunk})"):
                 out.setdefault(pid, []).append((x, y, w, h))
     finally:
@@ -277,11 +278,8 @@ def _existing(ids: list) -> dict:
 
 
 def _scanned() -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return dict(con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'facedetect'").fetchall())
-    finally:
-        con.close()
 
 
 def coverage() -> int:
@@ -312,10 +310,10 @@ def _write(found: dict) -> int:
     if not ops:
         return 0
     added = 0
-    for i in range(0, len(ops), 200):
+    for chunk in chunked(ops, 200):
         # background=True: the sidecar is left to the queue; an unknown face is not written to XMP anyway, so no
         # sidecar is created or rewritten for each of thousands of photos inside the job
-        res = facemgr.apply_many(ops[i:i + 200], background=True)
+        res = facemgr.apply_many(chunk, background=True)
         added += sum(1 for r in res if "error" not in r and not r.get("skipped"))
     return added
 
@@ -329,14 +327,14 @@ def _record(rows: list):
 
 
 def detect(photos: list, gen: int = None, on_batch=None) -> dict:
-    """Look for faces in these photos (rows from _photos), write the new ones, remember the photos."""
+    """Look for faces in these photos (rows from select_photos), write the new ones, remember the photos."""
     from concurrent.futures import ThreadPoolExecutor
     total = {"checked": 0, "found": 0, "added": 0, "photos_with_new": 0, "errors": 0}
     n = max(1, jobs.threads() // 2)
-    for i in range(0, len(photos), 48):
+    for chunk in chunked(photos, 48):
         if gen is not None and gen != _run["gen"]:
             break
-        batch = photos[i:i + 48]
+        batch = chunk
         existing = _existing([p["id"] for p in batch])
 
         def one(p):
@@ -356,7 +354,7 @@ def detect(photos: list, gen: int = None, on_batch=None) -> dict:
             total["found"] += len(found)
             if fresh:
                 new[p["id"]] = fresh
-            rows.append((p["id"], analysis._stamp(p), len(found), len(fresh), now))
+            rows.append((p["id"], analysis.stamp(p), len(found), len(fresh), now))
         added = _write(new)
         _record(rows)
         total["checked"] += len(rows)
@@ -372,10 +370,10 @@ def detect(photos: list, gen: int = None, on_batch=None) -> dict:
 def start(ids: list = None, album: int = None, redo: bool = False, after=None) -> int:
     """The background job for a folder or the whole library (or a large selection). Returns how many
     photos it will look at; the library run skips photos looked at since they last changed."""
-    photos = _photos(ids, album)
+    photos = select_photos(ids, album)
     if ids is None and album is None and not redo:
         seen = _scanned()
-        photos = [p for p in photos if seen.get(p["id"]) != analysis._stamp(p)]
+        photos = [p for p in photos if seen.get(p["id"]) != analysis.stamp(p)]
     _run["gen"] += 1
     gen = _run["gen"]
     scope = "photos" if ids is not None else "folder" if album is not None else "library"

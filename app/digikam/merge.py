@@ -237,10 +237,10 @@ def apply(check_running: bool = True) -> dict:
     if remap:  # digiKam has the rows now: whatever fails here is logged, the merge itself is done
         from app.data import index, state
         try:
-            with state._lock:
+            with state.lock:
                 c = state.connect()
                 try:
-                    index._rekey(c, remap)
+                    index.rekey(c, remap)
                     c.commit()
                 finally:
                     c.close()

@@ -11,7 +11,7 @@ What is checked (only reading the files):
 Videos are not checked. Each result is kept in ai_scans (job filecheck) under the file's stamp, so a later run
 looks only at new and changed files; the detail of a damaged one is a small JSON note.
 
-The repair adds the missing end marker to the file. The file is copied first (lossless._copy_before: the true
+The repair adds the missing end marker to the file. The file is copied first (lossless.copy_before: the true
 original once, plus a copy from just before this change), the change is in the edit log, and Undo puts the copy
 back. digiKam's row gets the new file size with its modification date cleared, so digiKam (and iopix's own
 scanner) read the file again, as after any edit of the file.
@@ -27,6 +27,7 @@ import time
 
 from app import jobs, thumbs
 from app.data import vdb
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.photos.filecheck")
 JOB = "filecheck"
@@ -175,8 +176,8 @@ def keep_intact(ids: list, check_running: bool = True) -> dict:
     done, failed = [], []
     for pid in ids:
         try:
-            p = lossless._photo(int(pid))
-            lossless._check(p)
+            p = lossless.photo(int(pid))
+            lossless.check(p)
             if os.path.splitext(p["path"])[1].lower() not in JPEG_EXT:
                 raise ValueError("Only JPEGs can be cropped this way")
             r = check_file(p["path"])
@@ -270,11 +271,8 @@ def _photos() -> list:
 
 
 def _done() -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = ?", (JOB,))}
-    finally:
-        con.close()
 
 
 def _job(gen: int, photos: list):
@@ -282,11 +280,11 @@ def _job(gen: int, photos: list):
     todo = [p for p in photos if have.get(p["id"], (None,))[0] != _stamp(p)]
     progress.update(running=True, done=0, total=len(todo), found=0, started=int(time.time()), finished=None)
     try:
-        for i in range(0, len(todo), 50):
+        for todo_batch in chunked(todo, 50):
             if gen != _run["gen"]:
                 return
             rows = []
-            for p in todo[i:i + 50]:
+            for p in todo_batch:
                 if not os.path.isfile(p["path"]):  # not reachable now (an unmounted disk): looked at again next time
                     continue
                 r = check_file(p["path"])
@@ -295,7 +293,7 @@ def _job(gen: int, photos: list):
                 rows.append((p["id"], _stamp(p), json.dumps(r) if r else None))
             with vdb.writer() as con:
                 con.executemany(f"INSERT OR REPLACE INTO ai_scans VALUES (?,'{JOB}',?,?)", rows)
-            progress["done"] += len(todo[i:i + 50])
+            progress["done"] += len(todo_batch)
     finally:
         progress.update(running=False, finished=int(time.time()))
 
@@ -347,12 +345,12 @@ def repair(ids: list, check_running: bool = True) -> dict:
     done, failed = [], []
     for pid in ids:
         try:
-            p = lossless._photo(int(pid))
-            lossless._check(p)
+            p = lossless.photo(int(pid))
+            lossless.check(p)
             r = check_file(p["path"])
             if not r or r["problem"] != "end_marker" or not r["fixable"]:
                 raise ValueError("This file does not have a repairable missing end marker (checked again just now)")
-            copy = lossless._copy_before(p["path"])
+            copy = lossless.copy_before(p["path"])
             with open(p["path"], "ab") as f:
                 f.write(b"\xff\xd9")
             if check_file(p["path"]):  # the repair made it no better: the copy goes back
@@ -361,7 +359,7 @@ def repair(ids: list, check_running: bool = True) -> dict:
             size = os.path.getsize(p["path"])
             with dbsync.write_transaction(db_path, check_running) as con:
                 con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (size, p["id"]))
-            lossless._forget_checksum(p["id"])
+            lossless.forget_checksum(p["id"])
             thumbs.forget(p["id"])
             history.record([{"photo_id": p["id"], "action": "filerepair", "summary": "Missing JPEG end marker added to the file",
                              "path": p["path"], "file_copy": copy, "undo": {"filerepair": {"file_copy": copy, "fileSize": p["size"]}}}])
@@ -379,13 +377,13 @@ def undo(entry: dict, check_running: bool = True) -> dict:
     copy = entry.get("file_copy") if entry.get("file_copy") and os.path.isfile(entry["file_copy"]) else u.get("file_copy")
     if not copy or not os.path.isfile(copy):
         raise FileNotFoundError("The copy of the file from before the repair is gone")
-    p = lossless._photo(entry["photo"])
+    p = lossless.photo(entry["photo"])
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photo")
     shutil.copy2(copy, p["path"])
     with dbsync.write_transaction(db_path, check_running) as con:
         con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (os.path.getsize(p["path"]), p["id"]))
-    lossless._forget_checksum(p["id"])
+    lossless.forget_checksum(p["id"])
     thumbs.forget(p["id"])
     history.record([{"photo_id": p["id"], "action": "restore", "summary": f"Change #{entry['id']} undone: the file is as it was before the repair", "path": p["path"]}])
     return {"undone": 1, "id": p["id"]}

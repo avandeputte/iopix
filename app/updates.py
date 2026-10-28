@@ -18,6 +18,11 @@ REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or 
 BRANCH = os.environ.get("IOPIX_BRANCH") or os.environ.get("DIGIKAM_VIEWER_BRANCH") or "main"
 progress = {"running": False, "log": "", "error": None, "finished": None}
 _checked = {}
+
+
+def forget_check():
+    """Drop the remembered result of the last update check, so the next one asks again."""
+    _checked.clear()
 _commit = None  # local_commit() once known: it only changes with update.sh, which restarts the process
 RESULT_FILE = "update-result.txt"  # in the data folder; update.sh writes the outcome there before restarting
 

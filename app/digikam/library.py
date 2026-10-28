@@ -15,6 +15,7 @@ That is what lets the viewer work without digiKam:
 """
 import re
 import time
+from app.digikam.dkdb import chunked
 
 # viewer table: (digiKam table, [(column, SQLite type, MySQL type)], SQLite constraints, MySQL constraints)
 SPEC = {
@@ -159,11 +160,8 @@ def info() -> dict:
     """{source, taken, photos, local_changes, version, changed} or {} when no copy exists yet."""
     from app.data import vdb
     try:
-        con = vdb.connect()
-        try:
+        with vdb.reader() as con:
             d = {r[0]: r[1] for r in con.execute("SELECT key, value FROM library_info").fetchall()}
-        finally:
-            con.close()
     except Exception:
         return {}
     return d
@@ -238,8 +236,8 @@ def copy_from_digikam(src) -> dict:
                             gone.append((c[0],))
                         add.append(r)
                 gone += [(k,) for k in mine]
-                for i in range(0, len(gone), 2000):
-                    con.executemany(f"DELETE FROM {name} WHERE {q(keys[0])} = ?", gone[i:i + 2000])
+                for chunk in chunked(gone, 2000):
+                    con.executemany(f"DELETE FROM {name} WHERE {q(keys[0])} = ?", chunk)
             else:  # no key: rows are compared whole, duplicates counted
                 from collections import Counter
                 mine, want, raw_of = Counter(), Counter(), {}
@@ -257,10 +255,10 @@ def copy_from_digikam(src) -> dict:
                             gone.append(c)
                         if want[c]:
                             add += [raw_of[c]] * want[c]
-                for i in range(0, len(gone), 2000):
-                    con.executemany(f"DELETE FROM {name} WHERE {where}", gone[i:i + 2000])
-            for i in range(0, len(add), 2000):
-                con.executemany(insert, add[i:i + 2000])
+                for chunk in chunked(gone, 2000):
+                    con.executemany(f"DELETE FROM {name} WHERE {where}", chunk)
+            for chunk in chunked(add, 2000):
+                con.executemany(insert, chunk)
             if gone or add:
                 written[name] = len(gone) + len(add)
         _set_info(con, {"source": source, "taken": int(time.time()), "photos": photos, "local_changes": 0,
@@ -293,12 +291,8 @@ def ensure_base():
         return
     save_base(current())
     from app.data import vdb
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         _set_info(con, {"base_source": d.get("source")})
-        con.commit()
-    finally:
-        con.close()
 
 
 def save_base(data: dict):
@@ -345,26 +339,19 @@ def load_base() -> dict:
 def current() -> dict:
     """{table: rows} of the library tables as they are now."""
     from app.data import vdb
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         out = {}
         for name, (dk, cols, *_rest) in SPEC.items():
             names = [c for c, _s, _m in cols]
             out[name] = [tuple(r) for r in con.execute(f"SELECT {', '.join(names)} FROM {name}").fetchall()]
         return out
-    finally:
-        con.close()
 
 
 def discard_local_changes():
     """Forget that changes were made here, so the next read of digiKam replaces the library with its data."""
     from app.data import vdb
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         _set_info(con, {"local_changes": 0, "source": "-"})
-        con.commit()
-    finally:
-        con.close()
 
 
 # the tags digiKam itself creates in a new database (TagsCache, FaceTags): the internal pick and color labels,

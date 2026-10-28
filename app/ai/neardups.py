@@ -16,6 +16,7 @@ except ImportError:  # numpy comes with the search/objects extras; without it th
 from app.data import index, state, vdb
 from app import jobs
 from app.ai.semantic import semantic
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.ai.neardups")
 LEVELS = {"strict": 0.97, "normal": 0.94, "loose": 0.90}  # cosine similarity of the search embeddings
@@ -55,7 +56,7 @@ def _job(gen: int, level: str):
     threshold = LEVELS[level]
     eng = semantic.active
     eng.load()
-    with eng._lock:
+    with eng.lock:
         ids, vecs = eng.ids, eng.vecs  # no copy: the engine replaces these arrays, it never writes into them
     n = len(ids)
     progress.update(running=True, done=0, total=n, error=None)
@@ -101,11 +102,8 @@ def _job(gen: int, level: str):
 
 def groups(limit: int = 300) -> list:
     """Connected components of the stored pairs, each with its photos (index facts) and the strongest score."""
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         pairs = [tuple(r) for r in con.execute("SELECT a, b, score FROM ai_similar_photos")]
-    finally:
-        con.close()
     if not pairs:
         return []
     parent = {}
@@ -133,8 +131,7 @@ def groups(limit: int = 300) -> list:
     facts = {}
     icon = index.open_index()
     try:
-        for k in range(0, len(ids), 900):
-            chunk = ids[k:k + 900]
+        for chunk in chunked(ids, 900):
             for r in icon.execute(f"SELECT p.id, p.name, p.w, p.h, p.video, p.ts, p.size, p.sharpn, p.hash, a.path FROM photos p JOIN albums a ON a.id = p.album_id "
                                   f"WHERE p.id IN ({','.join('?' * len(chunk))})", chunk):
                 facts[r[0]] = {"id": r[0], "name": r[1], "w": r[2], "h": r[3], "video": r[4], "ts": r[5], "size": r[6], "sharpn": r[7], "hash": r[8], "album": r[9]}

@@ -191,7 +191,7 @@ def _build():
     """Per embedded photo, its MAX_LABELS best concepts and their softmax probabilities
     (a weak secondary label is zeroed). Rows follow the engine's id order."""
     semantic.load()
-    with semantic._lock:
+    with semantic.lock:
         ids, vecs, gen = semantic.ids, semantic.vecs, semantic.key
     if ids is None or not len(ids):
         return None
@@ -304,7 +304,7 @@ def representative(photo_ids: list, text: str = None):
     """The most typical photo of a set: closest to the set's average embedding,
     nudged toward `text` (e.g. the tag's name) when given."""
     semantic.load()
-    with semantic._lock:
+    with semantic.lock:
         ids, vecs = semantic.ids, semantic.vecs
     if ids is None or not len(ids) or not photo_ids:
         return None

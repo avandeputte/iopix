@@ -122,9 +122,8 @@ def upright_size(w: int, h: int, orientation: int):
 
 
 # ---- the photo in digiKam's database
-def _photo(pid: int) -> dict:
-    con = dkdb.connect()
-    try:
+def photo(pid: int) -> dict:
+    with dkdb.reader() as con:
         row = con.execute(
             "SELECT i.id, i.name, i.category, i.fileSize, a.albumRoot, a.relativePath, ii.width, ii.height, ii.orientation "
             "FROM Images i JOIN Albums a ON a.id = i.album LEFT JOIN ImageInformation ii ON ii.imageid = i.id WHERE i.id = ? AND i.status = 1", (int(pid),)).fetchone()
@@ -136,13 +135,11 @@ def _photo(pid: int) -> dict:
         path = roots[row[4]] + row[5].rstrip("/") + "/" + row[1]
         regions = [(r[0], r[1], r[2]) for r in con.execute(
             "SELECT tagid, property, value FROM ImageTagProperties WHERE imageid = ? AND value LIKE '%<rect%'", (int(pid),))]
-    finally:
-        con.close()
     return {"id": row[0], "name": row[1], "category": row[2], "size": row[3], "path": path, "w": row[6] or 0, "h": row[7] or 0,
             "orientation": row[8] or 1, "ext": os.path.splitext(row[1])[1].lower(), "regions": regions}
 
 
-def _check(p: dict):
+def check(p: dict):
     if p["category"] != 1:
         raise SyncError("Only photos can be edited this way")
     if not os.path.isfile(p["path"]):
@@ -154,7 +151,7 @@ def _check(p: dict):
             p["w"], p["h"] = im.size
 
 
-def _copy_before(path: str) -> str:
+def copy_before(path: str) -> str:
     """The file as it is now, kept for Undo (and the true original, kept once)."""
     edits.backup_original(path)
     base = edits.file_backup_path(path)
@@ -212,7 +209,7 @@ def _file_orientation(path: str, orientation: int, w: int = None, h: int = None,
 
 
 def _sidecar(path: str, orientation: int):
-    side = edits._prepare(path)
+    side = edits.prepare(path)
     res = subprocess.run([*edits.exiftool_cmd(), "-q", "-m", "-overwrite_original", "-charset", "filename=utf8", f"-XMP-tiff:Orientation#={orientation}", side],
                          capture_output=True, text=True, timeout=300)
     if res.returncode != 0:
@@ -263,15 +260,11 @@ def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list,
                 con.execute("INSERT INTO ImageTagProperties (imageid, tagid, property, value) VALUES (?, ?, ?, ?)", (pid, tagid, prop, val))
 
 
-def _forget_checksum(pid: int):
+def forget_checksum(pid: int):
     try:
         from app.data import vdb
-        con = vdb.connect()
-        try:
+        with vdb.writer() as con:
             con.execute("DELETE FROM image_data_checksums WHERE photo_id = ?", (int(pid),))
-            con.commit()
-        finally:
-            con.close()
     except Exception:
         pass
 
@@ -281,7 +274,7 @@ def _finish(p: dict, orientation: int, summary: str, before: dict, copy: str, w:
     _sidecar(p["path"], orientation)
     facemgr.write_regions_many([p["id"]])
     thumbs.forget(p["id"])
-    _forget_checksum(p["id"])
+    forget_checksum(p["id"])
     history.record([{"photo_id": p["id"], "action": "lossless", "summary": summary, "path": p["path"], "file_copy": copy,
                      "details": action_detail, "undo": {"lossless": {**before, "file_copy": copy}}}])
     return {"id": p["id"], "w": w, "h": h, "orientation": orientation, "upright": list(upright_size(w, h, orientation))}
@@ -292,12 +285,12 @@ def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
     from app.digikam import dbsync
     if op not in OPS:
         raise SyncError("Unknown transform")
-    p = _photo(pid)
-    _check(p)
+    p = photo(pid)
+    check(p)
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
     W, H = upright_size(p["w"], p["h"], p["orientation"])
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
-    copy = _copy_before(p["path"])
+    copy = copy_before(p["path"])
     kept, dropped = _new_values(p["regions"], lambda r: turn_rect(r, op, W, H))
     jt = jpegtran()
     if p["ext"] in JPEG_EXT and jt:
@@ -352,8 +345,8 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
     a damaged JPEG whose structure jpegtran refuses is decoded as far as it goes and saved again at the quality it had
     (only for keeping the intact part of a damaged photo)."""
     from app.digikam import dbsync
-    p = _photo(pid)
-    _check(p)
+    p = photo(pid)
+    check(p)
     W, H = upright_size(p["w"], p["h"], p["orientation"])
     try:
         x, y, w, h = [int(round(float(v))) for v in rect]
@@ -374,7 +367,7 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
         raise SyncError("Cropping here works for JPEG, PNG, TIFF, WebP and HEIC files")
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
-    copy = _copy_before(p["path"])
+    copy = copy_before(p["path"])
     lossless_jpeg = p["ext"] in JPEG_EXT
     if lossless_jpeg:
         src, t1, t2 = p["path"], _tmp(p["path"], 1), _tmp(p["path"], 2)
@@ -455,8 +448,8 @@ def undo(entry: dict, check_running: bool = True) -> dict:
     copy = entry.get("file_copy") if entry.get("file_copy") and os.path.isfile(entry["file_copy"]) else u.get("file_copy")
     if not copy or not os.path.isfile(copy):
         raise FileNotFoundError("The copy of the file from before this edit is gone")
-    p = _photo(entry["photo"])
-    _check(p)
+    p = photo(entry["photo"])
+    check(p)
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
     # the face boxes as they are now, turned back: face changes made since the edit (a face named, removed...) stay,
     # instead of the boxes saved at the time coming back over them
@@ -484,6 +477,6 @@ def undo(entry: dict, check_running: bool = True) -> dict:
     _sidecar(p["path"], u["orientation"])
     facemgr.write_regions_many([p["id"]])
     thumbs.forget(p["id"])
-    _forget_checksum(p["id"])
+    forget_checksum(p["id"])
     history.record([{"photo_id": p["id"], "action": "restore", "summary": f"Change #{entry['id']} undone: the file is as it was before", "path": p["path"]}])
     return {"undone": 1, "id": p["id"]}

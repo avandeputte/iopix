@@ -16,6 +16,7 @@ Settings (environment):
                        mysqldump, e.g. "docker exec iopix-mariadb mariadb-dump -udigikam -pX digikam"
 """
 import datetime as _dt
+from contextlib import contextmanager
 import os
 import re
 import shlex
@@ -319,6 +320,23 @@ def standalone() -> bool:
     return not sync_enabled()
 
 
+def chunked(seq, size: int = 500):
+    """The sequence in slices of `size`, for IN (...) lists and other batches (SQLite takes 999 bound values)."""
+    seq = list(seq)
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+@contextmanager
+def reader(**kw):
+    """A read connection, closed when the block ends (writes go through dbsync.write_transaction)."""
+    con = connect(**kw)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
 def connect(write: bool = False, db_path=None, real: bool = False) -> Conn:
     """A connection to digiKam's database (read connections on SQLite are opened read-only at the file
     level, so a bug can never write through them). With Sync with digiKam off, the library tables in the
@@ -589,7 +607,7 @@ def backup(db_path=None, force: bool = False):
             for tail in ("-journal", "-wal"):  # a hot journal or WAL beside it belongs to the copy too
                 if os.path.exists(str(src) + tail):
                     shutil.copy2(str(src) + tail, str(dst) + tail)
-        _prune("digikam4-*.db")
+        prune("digikam4-*.db")
         return dst
     if settings()["backup"] == "skip":
         return None
@@ -612,10 +630,10 @@ def backup(db_path=None, force: bool = False):
     if res.returncode != 0 or dst.stat().st_size < 1024:
         dst.unlink(missing_ok=True)
         raise SyncError("Database dump failed: " + res.stderr.decode("utf-8", "replace")[:300])
-    _prune("digikam-mysql-*.sql")
+    prune("digikam-mysql-*.sql")
     return dst
 
 
-def _prune(pattern: str):
+def prune(pattern: str):
     for old in sorted(BACKUP_DIR.glob(pattern))[:-KEEP_BACKUPS]:
         old.unlink(missing_ok=True)

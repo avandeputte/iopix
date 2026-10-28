@@ -152,7 +152,7 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
     try:
         with dbsync.write_transaction(db_path, check_running) as con:
             vid = folders.register(album, [folders.staged_entry(Path(dst))], check_running, con=con)[0]["id"]
-            scanner._copy_attributes(con, int(pid), vid)
+            scanner.copy_attributes(con, int(pid), vid)
             con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = 1, format = 'JPG', colorDepth = 8, colorModel = 5 WHERE imageid = ?", (w, h, vid))
             if p["angle"]:
                 con.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (vid,))

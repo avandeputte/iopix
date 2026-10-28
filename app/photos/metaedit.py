@@ -93,7 +93,7 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
     xmp = [c for c in changes if c["group"].startswith("XMP-")]
     from app.digikam import dbsync
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
-    side = edits._prepare(p["path"])
+    side = edits.prepare(p["path"])
     snap = history.snapshot(p["id"], side)
     jobs = []
     if xmp:
@@ -156,23 +156,13 @@ def reread(pid: int, check_running: bool = True) -> dict:
     from app.photos import scanner
     p = _photo(pid)
     from app.faces import facemgr
-    with facemgr._side_cond:  # a face change still waiting for its sidecar: written first, or the reread would undo it
-        for _ in range(60):  # one being written right now: wait for it
-            if int(p["id"]) not in facemgr._side_writing:
-                break
-            facemgr._side_cond.wait(timeout=1)
-        waiting = facemgr._side_queue.pop(int(p["id"]), "none")
-    if waiting != "none":
-        facemgr.write_regions_many([p["id"]])
+    facemgr.flush_sidecar(p["id"])  # a face change still waiting for its sidecar: written first, or the reread would undo it
     meta = scanner.read([p["path"]])
     if not meta.get(p["path"]):  # a rewrite from nothing would empty the photo's tags, faces, caption and position
         raise SyncError("The file's metadata could not be read, so nothing was changed in digiKam's database")
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         cat = con.execute("SELECT category FROM Images WHERE id = ?", (p["id"],)).fetchone()
         version = scanner.hash_version(con)
-    finally:
-        con.close()
     rows = scanner.rows_for(p["path"], meta[p["path"]], cat[0] if cat else 1)
     with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
         # what files and sidecars do not hold, and a reread must not lose: captions in other languages, and the faces
@@ -181,13 +171,13 @@ def reread(pid: int, check_running: bool = True) -> dict:
                                     (p["id"],)).fetchall()
         keep_faces = con.execute("SELECT tagid, property, value FROM ImageTagProperties WHERE imageid = ? AND property IN "
                                  "('autodetectedFace', 'autodetectedPerson', 'ignoredFace')", (p["id"],)).fetchall()
-        tags = scanner._Tags(con)
+        tags = scanner.Tags(con)
         try:
             from app.faces.facemgr import _special
             special = _special(con)
         except SyncError:
             special = {}
-        scanner._write_rows(con, p["id"], rows, tags, special, full=True)
+        scanner.write_rows(con, p["id"], rows, tags, special, full=True)
         for c in keep_comments:
             if not con.execute("SELECT 1 FROM ImageComments WHERE imageid = ? AND type = ? AND language = ? AND coalesce(author, '') = coalesce(?, '')",
                                (p["id"], c[0], c[1], c[2])).fetchone():

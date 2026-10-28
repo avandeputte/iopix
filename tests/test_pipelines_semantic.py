@@ -41,7 +41,7 @@ def test_embeddings_carry_the_model_revision_and_are_dropped_when_it_changes(tmp
     e.load()
     assert e.revision == "rev-A" and len(e.ids) == 0
     e.ids, e.vecs = np.arange(5, dtype=np.int32), _vectors(5, 512)
-    with e._lock:
+    with e.lock:
         e._save()
     e.complete_marker.write_text("ok\n")
     assert semantic._stored_revision(e.file) == "rev-A"
@@ -53,7 +53,7 @@ def test_embeddings_carry_the_model_revision_and_are_dropped_when_it_changes(tmp
     third.load()
     assert len(third.ids) == 0 and third.revision == "rev-B", "vectors of another revision are dropped"
     assert not third.file.exists() and not third.complete_marker.exists(), "the index is incomplete until rebuilt"
-    # a loaded engine notices too (models._reset calls this after a download)
+    # a loaded engine notices too (models.reset calls this after a download)
     again.check_revision()
     assert len(again.ids) == 0 and again.revision == "rev-B"
 
@@ -66,7 +66,7 @@ def test_a_file_from_before_revisions_is_adopted_and_clip_gets_its_marker(tmp_pa
     e.load()
     assert len(e.ids) == 3 and e.revision == "rev-A", "kept: computed with the model installed then"
     assert e.complete_marker.exists(), "complete by the old rule (CLIP's file exists); the marker says so from now on"
-    with e._lock:
+    with e.lock:
         e._save()
     assert semantic._stored_revision(e.file) == "rev-A", "stamped at the first save"
 
@@ -111,13 +111,13 @@ def test_the_index_key_comes_from_the_saved_file_and_survives_a_restart(tmp_path
     e = _engine(tmp_path)
     assert e.file_key() == "clip:0", "no file yet"
     e.ids, e.vecs = np.arange(4, dtype=np.int32), _vectors(4, 512)
-    with e._lock:
+    with e.lock:
         e._save()
     k1 = e.file_key()
     assert _engine(tmp_path).file_key() == k1, "the same file after a restart: the same key"
     time.sleep(0.01)
     e.ids, e.vecs = np.arange(5, dtype=np.int32), _vectors(5, 512)
-    with e._lock:
+    with e.lock:
         e._save()
     assert e.file_key() != k1, "more vectors saved: another key"
 
@@ -140,7 +140,7 @@ def test_concept_table_in_chunks_matches_the_full_computation(monkeypatch):
     ids = rng.permutation(n).astype(np.int32)
 
     class Stub:
-        _lock = threading.Lock()
+        lock = threading.Lock()
         key = "stub:1"
 
         def load(self):
@@ -200,7 +200,7 @@ def test_near_duplicate_pairs_in_blocks_match_the_full_comparison(monkeypatch):
     ids = np.arange(100, 100 + n, dtype=np.int32)
 
     class Eng:
-        _lock = threading.Lock()
+        lock = threading.Lock()
 
         def load(self):
             pass

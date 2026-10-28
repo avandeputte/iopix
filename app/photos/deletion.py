@@ -25,6 +25,7 @@ from pathlib import Path
 from app import config
 from app.digikam import dbsync, dkdb
 from app.data import vdb
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.photos.deletion")
 BACKUP_DIR = config.DATA_DIR / "deleted-photos"
@@ -55,11 +56,8 @@ def sidecars(path: str) -> list:
 
 def _roots() -> list:
     try:
-        con = dkdb.connect()
-        try:
+        with dkdb.reader() as con:
             return [Path(v) for v in dkdb.root_paths(con).values()]
-        finally:
-            con.close()
     except Exception:
         return [Path(str(config.PHOTOS_ROOT))]
 
@@ -146,8 +144,8 @@ def drop_rows(con, ids: list):
     child rows (digiKam's SQLite schema has triggers that cascade; MariaDB and the viewer's own library tables do
     not, so the children are deleted here for every database)."""
     ids = [int(i) for i in ids]
-    for i in range(0, len(ids), 300):
-        chunk = ",".join(map(str, ids[i:i + 300]))
+    for part in chunked(ids, 300):
+        chunk = ",".join(map(str, part))
         for t in PHOTO_TABLES:
             con.execute(f"DELETE FROM {t} WHERE imageid IN ({chunk})")
         con.execute(f"UPDATE Tags SET icon = NULL WHERE icon IN ({chunk})")
@@ -161,8 +159,8 @@ def forget(ids: list):
         return
     from app.ai import semantic
     with vdb.writer() as con:
-        for i in range(0, len(ids), 300):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 300])
+        for part in chunked(ids, 300):
+            chunk = ",".join(str(int(x)) for x in part)
             for table, col in VIEWER_TABLES:
                 con.execute(f"DELETE FROM {table} WHERE {col} IN ({chunk})")
     try:

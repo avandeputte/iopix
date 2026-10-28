@@ -96,7 +96,7 @@ def needs_rehash(stored: str) -> bool:
 COLS = "id, name, role, created, last_login, hash, person, email, listed"
 
 
-def _row(r) -> dict:
+def row(r) -> dict:
     return {"id": r[0], "name": r[1], "role": r[2], "created": r[3], "last_login": r[4], "passwordless": not r[5], "person": r[6], "email": r[7] or "", "listed": r[8] != 0}
 
 
@@ -135,7 +135,7 @@ def any_users() -> bool:
 def list_users() -> list:
     con = state.connect()
     try:
-        return [_row(r) for r in con.execute(f"SELECT {COLS} FROM user_accounts ORDER BY id")]
+        return [row(r) for r in con.execute(f"SELECT {COLS} FROM user_accounts ORDER BY id")]
     finally:
         con.close()
 
@@ -144,7 +144,7 @@ def get(user_id: int):
     con = state.connect()
     try:
         r = con.execute(f"SELECT {COLS} FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
-        return _row(r) if r else None
+        return row(r) if r else None
     finally:
         con.close()
 

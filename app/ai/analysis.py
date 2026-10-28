@@ -19,6 +19,7 @@ Each analysis is one job in the shared background queue (jobs.py). A job checks
 running job stop so the new submission can take over.
 """
 from PIL import UnidentifiedImageError
+import importlib
 import logging
 import sqlite3
 import threading
@@ -27,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from app import config, jobs, thumbs
+from app.digikam.dkdb import chunked
 
 try:
     import numpy as np
@@ -85,7 +87,7 @@ def coverage() -> dict:
     return _counts() or {key: 0 for key in JOBS}
 
 
-def _stamp(p: dict) -> str:
+def stamp(p: dict) -> str:
     return thumbs.stamp_for(p["hash"], p["size"], p["modified"])
 
 
@@ -98,7 +100,7 @@ def _todo(job: str, photos: list, con=None) -> list:
     finally:
         if own:
             con.close()
-    return [p for p in photos if not p["video"] and have.get(p["id"]) != _stamp(p)]
+    return [p for p in photos if not p["video"] and have.get(p["id"]) != stamp(p)]
 
 
 def _save(sql: str, rows: list):
@@ -147,7 +149,7 @@ def measure(im) -> tuple:
 
 def _analyse_one(p: dict, want_quality: bool, detector):
     """Decode once; quality and object detection both work from the same ~1100 px image."""
-    im, _ = thumbs._open_oriented(p["path"], 1100, 1100)
+    im, _ = thumbs.open_oriented(p["path"], 1100, 1100)
     out = {}
     if want_quality:
         out["quality"] = measure(im)
@@ -191,15 +193,15 @@ def _pixel_job(photos: list, gen: int):
 
         last = time.time()
         with ThreadPoolExecutor(workers, thread_name_prefix="analyse") as pool:
-            for i in range(0, len(todo), 64):
+            for chunk in chunked(todo, 64):
                 if gen != _run["gen"]:
                     return
                 qrows, orows, done = [], [], []
-                for res in pool.map(work, todo[i:i + 64]):
+                for res in pool.map(work, chunk):
                     if not res:
                         continue
                     p, out = res
-                    st = _stamp(p)
+                    st = stamp(p)
                     if "quality" in out:
                         qrows.append((p["id"], st, *out["quality"]))  # (photo, stamp, sharp, bright, clip_lo, clip_hi)
                     if p["id"] in o_todo:
@@ -261,7 +263,7 @@ def _ocr_engine_locked():
         # rapidocr 3.x uses headless OpenCV (good for Docker); rapidocr_onnxruntime is the older package
         for mod in ("rapidocr", "rapidocr_onnxruntime"):
             try:
-                cls = __import__(mod, fromlist=["RapidOCR"]).RapidOCR
+                cls = importlib.import_module(mod).RapidOCR
                 try:
                     # log_level: the engine logs every model load at INFO and resets its logger's level itself
                     engine = cls(params={"EngineConfig.onnxruntime.intra_op_num_threads": k, "Global.log_level": "error"})
@@ -283,8 +285,8 @@ def face_regions(photo_ids: list) -> dict:
         return out
     con = sqlite3.connect(f"file:{quote(str(config.INDEX_DB))}?mode=ro", uri=True)
     try:
-        for i in range(0, len(photo_ids), 500):
-            chunk = ",".join(str(int(x)) for x in photo_ids[i:i + 500])
+        for part in chunked(photo_ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({chunk})"):
                 out.setdefault(pid, []).append((x, y, w, h))
     finally:
@@ -299,10 +301,10 @@ def _portable_batch(batch: list) -> list:
     rows = []
     for p in batch:
         try:
-            im, _ = thumbs._open_oriented(p["path"], 1600, 1600)
+            im, _ = thumbs.open_oriented(p["path"], 1600, 1600)
         except Exception as e:
             log.warning("vision: cannot read %s (%s)", p["path"], e)
-            rows.append((p["id"], _stamp(p), "", 0, None))  # recorded so it is not retried forever
+            rows.append((p["id"], stamp(p), "", 0, None))  # recorded so it is not retried forever
             continue
         text = ""
         if ocr is not None:
@@ -323,7 +325,7 @@ def _portable_batch(batch: list) -> list:
             crop = im.crop(box).convert("L").resize((96, 96))
             # 0..1: a crisp face at this size has a Laplacian variance around 400+
             quals.append(float(min(1.0, (_laplacian_var(np.asarray(crop, dtype=np.float32)) / 400.0) ** 0.5)))
-        rows.append((p["id"], _stamp(p), text, len(faces), max(quals) if quals else None))
+        rows.append((p["id"], stamp(p), text, len(faces), max(quals) if quals else None))
     return rows
 
 
@@ -351,10 +353,10 @@ def _vision_job(photos: list, gen: int):
         last = time.time()
         n = _vision_workers()
         with ThreadPoolExecutor(n, thread_name_prefix="vision") as pool:
-            for i in range(0, len(batches), n):
+            for chunk in chunked(batches, n):
                 if gen != _run["gen"]:
                     return
-                for rows in pool.map(recognise, batches[i:i + n]):  # (photo, stamp, text, nfaces, faceq)
+                for rows in pool.map(recognise, chunk):  # (photo, stamp, text, nfaces, faceq)
                     if gen != _run["gen"]:
                         return
                     with _writer() as con:
@@ -377,17 +379,17 @@ def _caption_job(photos: list, gen: int):
         return
     try:
         last = time.time()
-        for i in range(0, len(todo), 8):  # one thread: the GPU serialises anyway, and the other jobs keep the CPU
+        for chunk in chunked(todo, 8):  # one thread: the GPU serialises anyway, and the other jobs keep the CPU
             if gen != _run["gen"]:
                 return
-            batch = todo[i:i + 8]
+            batch = chunk
             try:
                 texts = caption.describe([p["path"] for p in batch])
             except Exception as e:  # the batch is not recorded, so these photos are tried again on the next run
                 log.warning("captions: batch starting at %s failed (%s)", batch[0]["path"], e)
                 progress["captions"]["done"] += len(batch)
                 continue
-            rows = [(p["id"], _stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
+            rows = [(p["id"], stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
             if gen != _run["gen"]:
                 return
             with _writer() as con:
@@ -426,7 +428,7 @@ def _looks_todo(photos: list, parts: dict, con=None) -> list:
         if p["video"]:
             continue
         st, detail = have.get(p["id"], (None, None))
-        if st != _stamp(p):
+        if st != stamp(p):
             need = {k for k, v in parts.items() if v}
         else:
             try:
@@ -447,8 +449,8 @@ def _looks_faces(ids: list) -> dict:
         return out
     con = sqlite3.connect(f"file:{quote(str(config.INDEX_DB))}?mode=ro", uri=True)
     try:
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+        for part in chunked(ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE kind != 'ignored' AND photo_id IN ({chunk})"):
                 out.setdefault(pid, []).append((x, y, w, h))
     finally:
@@ -470,16 +472,16 @@ def _looks_job(photos: list, gen: int):
     try:
         last = time.time()
         with ThreadPoolExecutor(n, thread_name_prefix="looks") as pool:
-            for i in range(0, len(todo), 16):
+            for chunk in chunked(todo, 16):
                 if gen != _run["gen"]:
                     return
-                batch = todo[i:i + 16]
+                batch = chunk
                 faces = _looks_faces([p["id"] for p, need in batch if "e" in need])
 
                 def prepare(item):
                     p, need = item
                     try:
-                        im, _ = thumbs._open_oriented(p["path"], 1600, 1600)
+                        im, _ = thumbs.open_oriented(p["path"], 1600, 1600)
                     except OSError as e:  # unreadable right now (a dropped mount): tried again on the next pass
                         log.warning("photo quality: cannot read %s (%s)", p["path"], e)
                         return None
@@ -516,7 +518,7 @@ def _looks_job(photos: list, gen: int):
                         f"SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks' AND photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
                     rows, scans = [], []
                     for p, need, out, _clip in ready:
-                        st = _stamp(p)
+                        st = stamp(p)
                         prev = old.get(p["id"])
                         was, detail = have.get(p["id"], (None, None))
                         try:

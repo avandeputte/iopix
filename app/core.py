@@ -99,7 +99,7 @@ def _start_prewarm():
     ages.start()
 
 
-def _run_analysis_soon():
+def run_analysis_soon():
     """Queue the analysis jobs again in the background (a model they use was just downloaded)."""
     def work():
         con = db()
