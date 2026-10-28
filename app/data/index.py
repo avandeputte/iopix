@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import threading
+from types import SimpleNamespace
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -461,11 +462,10 @@ def build(dst_path: Path = config.INDEX_DB, source: tuple = None) -> dict:
     return stats
 
 
-def _build(dst_path: Path, source: tuple) -> dict:
-    t0 = time.time()
-    geo = places.geocoder()
+def _read_source(source: tuple):
+    """The rows the index is built from. Returns (kind, version, raw rows, {root id: path}, read straight from digiKam)."""
     kind, ver = source or probe()
-    raw = None
+    raw = root_path = None
     if kind == "digikam":
         m = mirror_info()
         try:
@@ -495,15 +495,11 @@ def _build(dst_path: Path, source: tuple) -> dict:
             root_path = dkdb.root_paths(con)
         finally:
             con.close()
-    all_images = raw["images"]  # the renumbering check below sees every photo, hidden ones included (a photo queued for the trash is not "gone")
-    if HIDDEN:  # on their way to the trash: left out before anything is counted (digiKam's rows may not say so yet)
-        hidden = set(HIDDEN)
-        raw["images"] = [r for r in raw["images"] if r[0] not in hidden]
-    version = _version_for(ver)
-    last_source.update(kind=kind, version=ver)
-    phases = {"read": time.time() - t0}
+    return kind, ver, raw, root_path, direct
 
-    # ---- album roots and albums
+
+def _album_rows(raw: dict, root_path: dict) -> dict:
+    """{album id: {id, root, rel, caption, label, date, category, icon, pid, name, path}} for the albums under a known root."""
     roots = {r[0]: r[1] for r in raw["roots"]}
     single_root = len(roots) == 1
     albums = {}
@@ -520,15 +516,12 @@ def _build(dst_path: Path, source: tuple) -> dict:
             parent = rel.rsplit("/", 1)[0] or "/"
             a["pid"], a["name"] = by_path.get((a["root"], parent)), rel.rsplit("/", 1)[1]
         a["path"] = rel if single_root else f"/{a['label']}{'' if rel == '/' else rel}"
-    if kind == "digikam":
-        full_paths = {r[0]: root_path[albums[r[1]]["root"]] + albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
-                      for r in all_images if r[1] in albums and albums[r[1]]["root"] in root_path}
-        try:
-            sync_photo_ids(all_images, full_paths)
-        except Exception as e:  # bookkeeping only; the index must still be built
-            log.warning("photo_ids were not updated: %s", e)
+    return albums
 
-    # ---- tags
+
+def _tag_rows(raw: dict):
+    """Every tag with its ancestors, full path and person flag. Returns (tags, props, internal, special, hidden):
+    hidden tags (digiKam's internal ones and the special face tags) are kept out of the index."""
     # icon: the photo digiKam shows for the tag ("Set as Tag Thumbnail"); for people it is the face on that photo
     tags = {tid: {"id": tid, "pid": pid, "name": name, "icon": icon} for tid, pid, name, icon in raw["tags"]
             if tid != 0}  # MySQL's "_Digikam_root_tag_" row; pid 0 means "no parent" on both backends
@@ -555,8 +548,12 @@ def _build(dst_path: Path, source: tuple) -> dict:
         t["anc"] = ancestors(tid)
         t["full"] = "/".join(tags[x]["name"] for x in reversed([tid] + t["anc"]))
         t["person"] = 1 if "person" in props[tid] and tid not in hidden else 0
+    return tags, props, internal, special, hidden
 
-    # ---- per-image side tables
+
+def _side_tables(raw: dict, tags: dict, props: dict, internal: set, special: set, hidden: set) -> dict:
+    """What digiKam keeps in side tables, keyed by image id: tags, pick and color labels, faces, title and caption,
+    copyright fields and the other properties."""
     img_tags, pick, color = defaultdict(list), {}, {}
     for iid, tid in raw["imagetags"]:
         t = tags.get(tid)
@@ -612,25 +609,46 @@ def _build(dst_path: Path, source: tuple) -> dict:
     for iid, prop, val in raw["props"]:
         if val and val.strip() and set(val) - set("?, "):
             iprops[iid][prop] = val.strip()
+    return {"img_tags": img_tags, "pick": pick, "color": color, "faces": faces, "title": title, "caption": caption,
+            "copyright": copyright_, "iprops": iprops}
 
-    # ---- photos
-    rows = raw["images"]
 
-    photos, fts_rows, photo_tag_rows = [], [], []
-    # edits made in the viewer live in sidecars; show them until digiKam's database catches up
+def _edit_done(e: dict, db: dict, add: list, rem: list, unknown_tags: bool) -> bool:
+    """Whether digiKam's database already holds everything a pending edit asked for (then the edit is resolved)."""
+    g = e.get("gps")
+    lat_db, lon_db, alt_db = db["lat"], db["lon"], db["alt"]
+    gps_same = ("gps" not in e or (g is None and lat_db is None)
+                or (g is not None and lat_db is not None and abs(g["lat"] - lat_db) < 1e-6 and abs(g["lon"] - lon_db) < 1e-6
+                    and ((g.get("alt") is None and alt_db is None)
+                         or (g.get("alt") is not None and alt_db is not None and abs(float(g["alt"]) - float(alt_db)) < 0.05))))
+    dbcr, tids = db["copyright"], db["tids"]
+    return (("rating" not in e or e["rating"] == db["rating"])
+            and ("taken" not in e or e["taken"] == (db["taken"] or "")[:19])
+            and gps_same
+            and ("template" not in e or all((dbcr.get(k) or "") == (v or "") for k, v in e["template"].items()))
+            and ("pick" not in e or e["pick"] == db["pick"]) and ("color" not in e or e["color"] == db["color"])
+            and ("title" not in e or (e["title"] or None) == db["title"])
+            and ("caption" not in e or (e["caption"] or None) == db["caption"])
+            and all(t in tids for t in add) and not any(t in tids for t in rem) and not unknown_tags)
+
+
+def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: set, side: dict, geo, phases: dict):
+    """One row per photo for the photos, fts and photo_tags tables, with the viewer's pending edits overlaid
+    (edits made here live in sidecars; they show until digiKam's database catches up). Returns a namespace with
+    the rows, the per-tag and per-album counts, and the edits digiKam has caught up with."""
+    out = SimpleNamespace(photos=[], fts_rows=[], photo_tag_rows=[], burst_rows=[], resolved=[], resolved_snapshot={},
+                          tag_direct=defaultdict(set), tag_all=defaultdict(set), album_n=defaultdict(int))
+    img_tags, pick, color, title, caption, copyright_, iprops = (side[k] for k in ("img_tags", "pick", "color", "title", "caption", "copyright", "iprops"))
     t1 = time.time()
-    pending, resolved, resolved_snapshot = edits.pending(), [], {}
+    pending = edits.pending()
     seen = analysis.results()  # sharpness, OCR text, objects... from the app's own analysis
     phases["analysis"] = time.time() - t1
-    burst_rows = []
     tag_by_full = {t["full"]: tid for tid, t in tags.items() if tid not in hidden}
     # approximate dates (dateprecision.py): the tag that says how much of a photo's date is known
     prec_tags = {tag_by_full[full]: dateprecision.LEVELS[k] for k, full in dateprecision.TAGS.items() if full in tag_by_full}
-    tag_direct, tag_all = defaultdict(set), defaultdict(set)
-    album_n = defaultdict(int)
     for (iid, album_id, name, size, uhash, mod, category, rating, created, orient, w, h, fmt,
          make, model, lens, aperture, focal, focal35, exposure, iso, flash, wb, metering, program,
-         lat, lon, alt, gps_orientation, gps_accuracy, duration, vcodec, fps, acodec, aspect) in rows:
+         lat, lon, alt, gps_orientation, gps_accuracy, duration, vcodec, fps, acodec, aspect) in raw["images"]:
         album = albums.get(album_id)
         if not album:
             continue
@@ -666,23 +684,11 @@ def _build(dst_path: Path, source: tuple) -> dict:
             rem = [tag_by_full[t] for t in e.get("remove_tags", []) if t in tag_by_full]
             # a tag path digiKam does not have (yet): the edit is not done, whatever the rest says
             unknown_tags = any(t not in tag_by_full for t in e.get("add_tags", []))  # (removing a tag digiKam lacks is done)
-            dbcr = copyright_.get(iid, {})
-            g = e.get("gps")
-            gps_same = ("gps" not in e or (g is None and lat_db is None)
-                        or (g is not None and lat_db is not None and abs(g["lat"] - lat_db) < 1e-6 and abs(g["lon"] - lon_db) < 1e-6
-                            and ((g.get("alt") is None and alt_db is None)
-                                 or (g.get("alt") is not None and alt_db is not None and abs(float(g["alt"]) - float(alt_db)) < 0.05))))
-            same = (("rating" not in e or e["rating"] == rating)
-                    and ("taken" not in e or e["taken"] == (created_db or "")[:19])
-                    and gps_same
-                    and ("template" not in e or all((dbcr.get(k) or "") == (v or "") for k, v in e["template"].items()))
-                    and ("pick" not in e or e["pick"] == p_pick) and ("color" not in e or e["color"] == p_color)
-                    and ("title" not in e or (e["title"] or None) == p_title)
-                    and ("caption" not in e or (e["caption"] or None) == p_caption)
-                    and all(t in tids for t in add) and not any(t in tids for t in rem) and not unknown_tags)
-            if same:
-                resolved.append(iid)
-                resolved_snapshot[iid] = e
+            db = {"rating": rating, "taken": created_db, "lat": lat_db, "lon": lon_db, "alt": alt_db, "copyright": copyright_.get(iid, {}),
+                  "pick": p_pick, "color": p_color, "title": p_title, "caption": p_caption, "tids": tids}
+            if _edit_done(e, db, add, rem, unknown_tags):
+                out.resolved.append(iid)
+                out.resolved_snapshot[iid] = e
             else:
                 edited = 1
                 rating = e.get("rating", rating)
@@ -715,9 +721,9 @@ def _build(dst_path: Path, source: tuple) -> dict:
         rel = album["rel"].rstrip("/") + "/" + name
         an = seen.get(iid, {})
         # a placeholder date is shared by many photos: no bursts among them (left out like videos)
-        burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video or dprec,
-                           an.get("focus"), an.get("aesth"), an.get("eyes_checked"), an.get("eyes_closed")))
-        photos.append((
+        out.burst_rows.append((iid, ts, name, f"{cam}|{w}x{h}", an.get("sharp"), an.get("faceq"), video or dprec,
+                               an.get("focus"), an.get("aesth"), an.get("eyes_checked"), an.get("eyes_closed")))
+        out.photos.append((
             iid, album_id, name, root_path[album["root"]] + rel,
             # an approximate date has no day of the year to show On this day
             (created or mod or "")[:19], ts, f"{y:04d}-{mo:02d}-{d:02d}", y, mo, None if dprec else f"{mo:02d}-{d:02d}",
@@ -732,92 +738,94 @@ def _build(dst_path: Path, source: tuple) -> dict:
             an.get("ocr"), None, None, an.get("caption_ai"), dprec,
             an.get("aesth"), None, None, an.get("eyes_checked"), an.get("eyes_closed"), None,
         ))
-        album_n[album_id] += 1
+        out.album_n[album_id] += 1
         people_names, tag_names = [], []
         for tid in tids:
             t = tags[tid]
-            photo_tag_rows.append((tid, iid))
-            tag_direct[tid].add(iid)
-            tag_all[tid].add(iid)
+            out.photo_tag_rows.append((tid, iid))
+            out.tag_direct[tid].add(iid)
+            out.tag_all[tid].add(iid)
             for a in t["anc"]:
-                tag_all[a].add(iid)
+                out.tag_all[a].add(iid)
             (people_names if t["person"] else tag_names).append(t["full"].replace("/", " "))
         extra_words = " ".join(an["objects"]) if an.get("objects") else ""
         misc = extra_words + " " + " ".join(str(x) for x in (
             # only the known part of the date is searchable
             y if (dprec or 0) < 3 else None, MONTHS[mo] if (dprec or 0) < 2 else None, fmt, "video" if video else "photo", lens, cr.get("creator"),
             cr.get("copyrightNotice"), " ".join(iprops.get(iid, {}).values()), *(loc or ())) if x)
-        fts_rows.append((iid, name, album["path"], p_title, p_caption,
-                         " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai")))
+        out.fts_rows.append((iid, name, album["path"], p_title, p_caption,
+                             " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai")))
+    return out
 
-    # ---- write the new index next to the old one, then swap
-    dst_path = Path(dst_path)
+
+def _rank(dst, rows: SimpleNamespace, col: str, k: int):
+    """A 0..1 rank across the library for an analysis score, so "blurry" means the same everywhere."""
+    ranked = sorted((r[k], r[0]) for r in rows.burst_rows if r[k] is not None)
+    if ranked:
+        dst.executemany(f"UPDATE photos SET {col} = ? WHERE id = ?",
+                        [(round(i / max(1, len(ranked) - 1), 4), pid) for i, (_, pid) in enumerate(ranked)])
+
+
+def _fill(dst, rows: SimpleNamespace, albums: dict, root_path: dict, tags: dict, hidden: set, faces: list):
+    """Every table of a new index file, from the rows computed above."""
+    dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
+    dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 64)})", rows.photos)
+    dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows.fts_rows)
+    _rank(dst, rows, "sharpn", 4)
+    _rank(dst, rows, "focusn", 7)
+    _rank(dst, rows, "aesthn", 8)
+    try:
+        bursts = moments.find_bursts(rows.burst_rows)
+    except Exception:
+        bursts = {}
+    dst.executemany("UPDATE photos SET burst = ?, burst_best = ? WHERE id = ?", [(b, best, pid) for pid, (b, best, _w) in bursts.items()])
+    dst.execute("CREATE INDEX photos_burst ON photos (burst)")
+    dst.executemany("UPDATE photos SET reject = ? WHERE id = ?", likely_rejects(dst, bursts))
+    dst.executemany("INSERT OR IGNORE INTO photo_tags VALUES (?,?)", rows.photo_tag_rows)
+    present = {r[0] for r in rows.photos}
+    dst.executemany("INSERT INTO faces VALUES (?,?,?,?,?,?,?)", [f for f in faces if f[0] in present])
+    dst.executemany("INSERT INTO tags VALUES (?,?,?,?,?,?,?,?)", [
+        (tid, t["pid"] if t["pid"] in tags and t["pid"] not in hidden else None, t["name"], t["full"],
+         t["person"], len(rows.tag_direct[tid]), len(rows.tag_all[tid]), t["icon"] if t["icon"] in present else None)
+        for tid, t in tags.items() if tid not in hidden])
+    dst.executemany("INSERT OR IGNORE INTO tag_closure VALUES (?,?)", [
+        (a, tid) for tid, t in tags.items() if tid not in hidden for a in [tid] + t["anc"]])
+
+    # album totals including sub-albums, plus a cover photo
+    closure = []
+    for aid, a in albums.items():
+        cur, seen = aid, set()
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            closure.append((cur, aid))
+            cur = albums[cur]["pid"]
+    dst.executemany("INSERT OR IGNORE INTO album_closure VALUES (?,?)", closure)
+    dst.executemany("INSERT INTO albums (id, pid, path, name, root, caption, n, adate, category, icon) VALUES (?,?,?,?,?,?,?,?,?,?)", [
+        (aid, a["pid"], a["path"], a["name"], root_path[a["root"]], a["caption"], rows.album_n[aid], a["date"], a["category"], a["icon"])
+        for aid, a in albums.items()])
+    if HIDDEN:  # added to the trash while this build ran: out of the tables too (the counts follow at the next build)
+        _drop(dst, set(HIDDEN))
+    dst.execute("""
+        UPDATE albums SET
+          n_all  = (SELECT count(*) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
+          ts_min = (SELECT min(ts) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
+          ts_max = (SELECT max(ts) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
+          cover  = coalesce((SELECT p.id FROM photos p WHERE p.id = albums.icon),  -- the cover chosen in digiKam or here
+                            (SELECT p.id FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id
+                             ORDER BY p.video, (p.pick = 1), p.rating DESC, p.ts LIMIT 1))
+    """)
+    dst.execute("DELETE FROM albums WHERE n_all = 0")
+
+
+def _swap_in(dst_path: Path, fill) -> None:
+    """Write a new index file next to the old one (fill(connection) puts the tables in), then swap it in."""
     tmp = dst_path.with_suffix(f".{os.getpid()}-{threading.get_ident()}.tmp")  # another process (the MCP server) may build too
     for p in (tmp, Path(str(tmp) + "-journal")):
         p.unlink(missing_ok=True)
-    phases["compute"] = time.time() - t0 - sum(phases.values())
-    t2 = time.time()
     dst = sqlite3.connect(tmp)
     try:
-        dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
-        dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 64)})", photos)
-        dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)", fts_rows)
-        # sharpness as a 0..1 rank across the library, so "blurry" means the same everywhere
-        ranked = sorted((r[4], r[0]) for r in burst_rows if r[4] is not None)
-        if ranked:
-            dst.executemany("UPDATE photos SET sharpn = ? WHERE id = ?",
-                            [(round(i / max(1, len(ranked) - 1), 4), pid) for i, (_, pid) in enumerate(ranked)])
-        # the same for focus and the aesthetic score
-        for col, k in (("focusn", 7), ("aesthn", 8)):
-            ranked = sorted((r[k], r[0]) for r in burst_rows if r[k] is not None)
-            if ranked:
-                dst.executemany(f"UPDATE photos SET {col} = ? WHERE id = ?",
-                                [(round(i / max(1, len(ranked) - 1), 4), pid) for i, (_, pid) in enumerate(ranked)])
-        try:
-            bursts = moments.find_bursts(burst_rows)
-        except Exception:
-            bursts = {}
-        dst.executemany("UPDATE photos SET burst = ?, burst_best = ? WHERE id = ?", [(b, best, pid) for pid, (b, best, _w) in bursts.items()])
-        dst.execute("CREATE INDEX photos_burst ON photos (burst)")
-        dst.executemany("UPDATE photos SET reject = ? WHERE id = ?", likely_rejects(dst, bursts))
-        dst.executemany("INSERT OR IGNORE INTO photo_tags VALUES (?,?)", photo_tag_rows)
-        present = {r[0] for r in photos}
-        dst.executemany("INSERT INTO faces VALUES (?,?,?,?,?,?,?)", [f for f in faces if f[0] in present])
-        dst.executemany("INSERT INTO tags VALUES (?,?,?,?,?,?,?,?)", [
-            (tid, t["pid"] if t["pid"] in tags and t["pid"] not in hidden else None, t["name"], t["full"],
-             t["person"], len(tag_direct[tid]), len(tag_all[tid]), t["icon"] if t["icon"] in present else None)
-            for tid, t in tags.items() if tid not in hidden])
-        dst.executemany("INSERT OR IGNORE INTO tag_closure VALUES (?,?)", [
-            (a, tid) for tid, t in tags.items() if tid not in hidden for a in [tid] + t["anc"]])
-
-        # album totals including sub-albums, plus a cover photo
-        closure = []
-        for aid, a in albums.items():
-            cur, seen = aid, set()
-            while cur is not None and cur not in seen:
-                seen.add(cur)
-                closure.append((cur, aid))
-                cur = albums[cur]["pid"]
-        dst.executemany("INSERT OR IGNORE INTO album_closure VALUES (?,?)", closure)
-        dst.executemany("INSERT INTO albums (id, pid, path, name, root, caption, n, adate, category, icon) VALUES (?,?,?,?,?,?,?,?,?,?)", [
-            (aid, a["pid"], a["path"], a["name"], root_path[a["root"]], a["caption"], album_n[aid], a["date"], a["category"], a["icon"])
-            for aid, a in albums.items()])
-        if HIDDEN:  # added to the trash while this build ran: out of the tables too (the counts follow at the next build)
-            _drop(dst, set(HIDDEN))
-        dst.execute("""
-            UPDATE albums SET
-              n_all  = (SELECT count(*) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
-              ts_min = (SELECT min(ts) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
-              ts_max = (SELECT max(ts) FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id),
-              cover  = coalesce((SELECT p.id FROM photos p WHERE p.id = albums.icon),  -- the cover chosen in digiKam or here
-                                (SELECT p.id FROM photos p JOIN album_closure c ON c.album = p.album_id WHERE c.anc = albums.id
-                                 ORDER BY p.video, (p.pick = 1), p.rating DESC, p.ts LIMIT 1))
-        """)
-        dst.execute("DELETE FROM albums WHERE n_all = 0")
-        stats = {"version": version, "built": int(time.time()), "photos": len(photos), "resolved_edits": resolved, "resolved_snapshot": resolved_snapshot,
-                 "build_seconds": round(time.time() - t0, 2)}
-        dst.executemany("INSERT INTO meta VALUES (?,?)", [(k, str(v)) for k, v in stats.items() if k != "resolved_snapshot"])
+        fill(dst)
         dst.commit()
         dst.execute("INSERT INTO fts(fts) VALUES ('optimize')")
         dst.commit()
@@ -832,8 +840,44 @@ def _build(dst_path: Path, source: tuple) -> dict:
         except OSError:
             pass
     os.replace(tmp, dst_path)
+
+
+def _build(dst_path: Path, source: tuple) -> dict:
+    t0 = time.time()
+    geo = places.geocoder()
+    kind, ver, raw, root_path, direct = _read_source(source)
+    all_images = raw["images"]  # the renumbering check below sees every photo, hidden ones included (a photo queued for the trash is not "gone")
+    if HIDDEN:  # on their way to the trash: left out before anything is counted (digiKam's rows may not say so yet)
+        hidden_ids = set(HIDDEN)
+        raw["images"] = [r for r in all_images if r[0] not in hidden_ids]
+    version = _version_for(ver)
+    last_source.update(kind=kind, version=ver)
+    phases = {"read": time.time() - t0}
+
+    albums = _album_rows(raw, root_path)
+    if kind == "digikam":
+        full_paths = {r[0]: root_path[albums[r[1]]["root"]] + albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
+                      for r in all_images if r[1] in albums and albums[r[1]]["root"] in root_path}
+        try:
+            sync_photo_ids(all_images, full_paths)
+        except Exception as e:  # bookkeeping only; the index must still be built
+            log.warning("photo_ids were not updated: %s", e)
+    tags, props, internal, special, hidden = _tag_rows(raw)
+    side = _side_tables(raw, tags, props, internal, special, hidden)
+    rows = _photo_rows(raw, albums, root_path, tags, hidden, side, geo, phases)
+
+    phases["compute"] = time.time() - t0 - sum(phases.values())
+    t2 = time.time()
+    stats = {"version": version, "photos": len(rows.photos), "resolved_edits": rows.resolved, "resolved_snapshot": rows.resolved_snapshot}
+
+    def fill(dst):
+        _fill(dst, rows, albums, root_path, tags, hidden, side["faces"])
+        stats.update(built=int(time.time()), build_seconds=round(time.time() - t0, 2))
+        dst.executemany("INSERT INTO meta VALUES (?,?)", [(k, str(v)) for k, v in stats.items() if k != "resolved_snapshot"])
+
+    _swap_in(Path(dst_path), fill)
     phases["write"] = time.time() - t2
-    log.info("index built from %s in %.1fs: %d photos (%s)", "digiKam's database" if direct else "the library copy", time.time() - t0, len(photos),
+    log.info("index built from %s in %.1fs: %d photos (%s)", "digiKam's database" if direct else "the library copy", time.time() - t0, len(rows.photos),
              ", ".join(f"{k} {v:.1f}s" for k, v in phases.items()))
     return stats
 

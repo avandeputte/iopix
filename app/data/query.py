@@ -35,154 +35,207 @@ def _num(v):
         return None
 
 
-def build_where(items) -> tuple[str, list]:
-    """items: iterable of (key, value) pairs from the query string."""
-    multi: dict[str, list[str]] = {}
-    for k, v in items:
-        if v != "":
-            multi.setdefault(k, []).append(v)
-    one = lambda k: multi.get(k, [None])[0]
-    where, params = [], []
+class _Where:
+    """The clauses collected so far, and the query-string values they are built from."""
 
-    # q: the text index, plus (qids, aligned with q, filled in by main.resolve) the photos the
-    # content model labels with a matching concept, so "audience" finds what Detected content shows
-    qids = multi.get("qids", [])
-    for i, text in enumerate(multi.get("q", [])):
+    def __init__(self, items):
+        self.multi: dict[str, list[str]] = {}
+        for k, v in items:
+            if v != "":
+                self.multi.setdefault(k, []).append(v)
+        self.where, self.params = [], []
+
+    def one(self, key):
+        return self.multi.get(key, [None])[0]
+
+    def all(self, key):
+        return self.multi.get(key, [])
+
+    def add(self, sql, *params):
+        self.where.append(sql)
+        self.params += params
+
+    def ids(self, ids):
+        """An explicit list of photo ids (ints only, so safe to inline)."""
+        self.add(f"id IN ({','.join(map(str, ids[:50000])) or 'NULL'})")
+
+
+def _text(w):
+    """q: the text index, plus (qids, aligned with q, filled in by main.resolve) the photos the
+    content model labels with a matching concept, so "audience" finds what Detected content shows."""
+    qids = w.all("qids")
+    for i, text in enumerate(w.all("q")):
         fq = fts_query(text)
         extra = [x for x in (_ints([qids[i]]) if i < len(qids) else []) if x > 0]  # "0": no concept photos
-        clauses = []
+        clauses, params = [], []
         if fq:
             clauses.append("id IN (SELECT rowid FROM fts WHERE fts MATCH ?)")
             params.append(fq)
         if extra:
             clauses.append(f"id IN ({','.join(map(str, extra[:50000]))})")
         if clauses:
-            where.append("(" + " OR ".join(clauses) + ")")
-    ids = _ints(multi.get("ids", []))
-    if "ids" in multi:  # an explicit selection (ints only, so safe to inline)
-        where.append(f"id IN ({','.join(map(str, ids[:50000])) or 'NULL'})")
-    if one("fav") == "1":  # favorites and the viewer's albums live in the viewer database (SQLite or MySQL): inlined as ids
+            w.add("(" + " OR ".join(clauses) + ")", *params)
+
+
+def _selection(w):
+    if "ids" in w.multi:  # an explicit selection
+        w.ids(_ints(w.all("ids")))
+
+
+def _favorites(w):
+    """Favorites and the viewer's albums live in the viewer database (SQLite or MySQL): inlined as ids."""
+    if w.one("fav") == "1":
         from app.data import state
-        where.append(f"id IN ({','.join(map(str, state.favorite_ids()[:50000])) or 'NULL'})")
-    ualbums = _ints(multi.get("ualbum", []))
+        w.ids(state.favorite_ids())
+
+
+def _viewer_albums(w):
+    ualbums = _ints(w.all("ualbum"))
     if ualbums:
         from app.data import state
-        where.append(f"id IN ({','.join(map(str, state.album_item_ids(ualbums)[:50000])) or 'NULL'})")
-    if one("blurry") == "1":   # the least sharp tenth of the library
-        where.append("sharpn < 0.1")
-    if one("sharpest") == "1":
-        where.append("sharpn >= 0.8")
-    if one("exposure") == "dark":
-        where.append("(bright < 0.2 OR clip_lo > 0.5)")
-    elif one("exposure") == "bright":
-        where.append("(bright > 0.8 OR clip_hi > 0.3)")
-    if one("rejects") == "1":  # photo quality: suggested rejects (index.likely_rejects), any reason or one
-        where.append("reject IS NOT NULL")
-    for why in multi.get("reject", []):
-        if why in ("blur", "eyes", "burst", "exposure"):
-            where.append("(',' || reject || ',') LIKE ?")
-            params.append(f"%,{why},%")
-    if one("looks") == "top":  # the best-looking tenth by the aesthetic score
-        where.append("aesthn >= 0.9")
-    if one("eyes") == "closed":  # someone's eyes closed (even when most faces are fine)
-        where.append("eyes_closed > 0")
-    if one("hastext") == "1":
-        where.append("ocr IS NOT NULL AND length(ocr) >= 3")
-    if one("bursts") == "1":
-        where.append("burst IS NOT NULL")
-    if one("bestonly") == "1":  # collapse each burst to its best frame
-        where.append("(burst IS NULL OR burst_best = 1)")
-    for b in _ints(multi.get("burst", [])):
-        where.append("burst = ?")
-        params.append(b)
-    for obj in multi.get("obj", []):
-        where.append("objects LIKE ?")
-        params.append(f"%,{obj},%")
-    if one("npeople") is not None:
-        v = one("npeople")
-        if v.endswith("+") and v[:-1].isdigit():
-            where.append("npeople >= ?")
-            params.append(int(v[:-1]))
-        elif v.isdigit():
-            where.append("npeople = ?")
-            params.append(int(v))
-    if one("faces") in ("unknown", "suggested", "ignored", "confirmed"):  # photos with faces of that kind
-        where.append("id IN (SELECT photo_id FROM faces WHERE kind = ?)")
-        params.append(one("faces"))
-    if one("edited") == "1":
-        where.append("edited = 1")
-    if one("dupes") == "1":
-        where.append("(hash, size) IN (SELECT hash, size FROM photos WHERE hash IS NOT NULL AND hash != '' "
-                     "GROUP BY hash, size HAVING count(*) > 1)")
-    for tid in _ints(multi.get("tag", [])):  # every tag must match; child tags count
-        where.append("id IN (SELECT photo_id FROM photo_tags WHERE tag_id IN "
-                     "(SELECT tag FROM tag_closure WHERE anc = ?))")
-        params.append(tid)
-    for tid in _ints(multi.get("nottag", [])):
-        where.append("id NOT IN (SELECT photo_id FROM photo_tags WHERE tag_id IN "
-                     "(SELECT tag FROM tag_closure WHERE anc = ?))")
-        params.append(tid)
-    albums = _ints(multi.get("album", []))
+        w.ids(state.album_item_ids(ualbums))
+
+
+def _flag(key, clauses: dict):
+    """A switch whose value picks one fixed clause: blurry=1, exposure=dark, type=video..."""
+    def f(w):
+        sql = clauses.get(w.one(key))
+        if sql:
+            w.add(sql)
+    return f
+
+
+def _each(key, sql, allowed=None, cast=None):
+    """One clause per value of a repeatable parameter: reject=blur&reject=eyes, tag=3&tag=9..."""
+    def f(w):
+        for v in (_ints(w.all(key)) if cast is int else w.all(key)):
+            if allowed is None or v in allowed:
+                w.add(sql, v if cast is None or cast is int else cast(v))
+    return f
+
+
+def _people_count(w):
+    v = w.one("npeople")
+    if v is None:
+        return
+    if v.endswith("+") and v[:-1].isdigit():
+        w.add("npeople >= ?", int(v[:-1]))
+    elif v.isdigit():
+        w.add("npeople = ?", int(v))
+
+
+def _faces(w):
+    if w.one("faces") in ("unknown", "suggested", "ignored", "confirmed"):  # photos with faces of that kind
+        w.add("id IN (SELECT photo_id FROM faces WHERE kind = ?)", w.one("faces"))
+
+
+def _albums(w):
+    albums = _ints(w.all("album"))
     if albums:
-        where.append(f"album_id IN (SELECT album FROM album_closure WHERE anc IN ({','.join('?' * len(albums))}))")
-        params += albums
-    for key, col in (("camera", "camera"), ("lens", "lens"), ("fmt", "fmt"), ("creator", "creator"),
-                     ("place", "place"), ("region", "region"), ("country", "country")):
-        vals = multi.get(key)
+        w.add(f"album_id IN (SELECT album FROM album_closure WHERE anc IN ({','.join('?' * len(albums))}))", *albums)
+
+
+def _any_of_text(key, col):
+    """camera=X&camera=Y: any of the values; "~" stands for no value at all."""
+    def f(w):
+        vals = w.all(key)
+        if not vals:
+            return
+        parts, params = [], []
+        for v in vals:
+            if v == "~":
+                parts.append(f"{col} IS NULL")
+            else:
+                parts.append(f"{col} = ?")
+                params.append(v)
+        w.add("(" + " OR ".join(parts) + ")", *params)
+    return f
+
+
+def _any_of_int(key, col):
+    def f(w):
+        vals = _ints(w.all(key))
         if vals:
-            parts = []
-            for v in vals:
-                if v == "~":
-                    parts.append(f"{col} IS NULL")
-                else:
-                    parts.append(f"{col} = ?")
-                    params.append(v)
-            where.append("(" + " OR ".join(parts) + ")")
-    for key, col in (("pick", "pick"), ("color", "color"), ("year", "year"), ("month", "month")):
-        vals = _ints(multi.get(key, []))
-        if vals:
-            where.append(f"{col} IN ({','.join('?' * len(vals))})")
-            params += vals
-    if one("from") and DATE_RE.match(one("from")):
-        where.append("day >= ?")
-        params.append(one("from"))
-    if one("to") and DATE_RE.match(one("to")):
-        where.append("day <= ?")
-        params.append(one("to"))
-    if one("md") and re.match(r"^\d\d-\d\d$", one("md")):
-        where.append("md = ?")
-        params.append(one("md"))
-    if _num(one("rating")) is not None:
-        where.append("rating >= ?")
-        params.append(int(_num(one("rating"))))
-    if one("type") == "video":
-        where.append("video = 1")
-    elif one("type") == "photo":
-        where.append("video = 0")
-    if one("geo") == "1":
-        where.append("lat IS NOT NULL")
-    elif one("geo") == "0":
-        where.append("lat IS NULL")
-    if one("untagged") == "1":
-        where.append("ntags = 0")
-    if one("bbox"):
-        b = [_num(x) for x in one("bbox").split(",")]
-        if len(b) == 4 and None not in b:
-            s, w, n, e = b
-            where.append("lat BETWEEN ? AND ?")
-            params += [s, n]
-            if w <= e:
-                where.append("lon BETWEEN ? AND ?")
-                params += [w, e]
-            else:  # box crosses the antimeridian
-                where.append("(lon >= ? OR lon <= ?)")
-                params += [w, e]
-    for key, col in (("iso", "iso"), ("ap", "aperture"), ("fl", "coalesce(focal35, focal)"), ("exp", "exposure")):
-        lo, hi = _num(one(key + "_min")), _num(one(key + "_max"))
+            w.add(f"{col} IN ({','.join('?' * len(vals))})", *vals)
+    return f
+
+
+def _date(key, sql, pattern=DATE_RE):
+    def f(w):
+        v = w.one(key)
+        if v and pattern.match(v):
+            w.add(sql, v)
+    return f
+
+
+def _rating(w):
+    if _num(w.one("rating")) is not None:
+        w.add("rating >= ?", int(_num(w.one("rating"))))
+
+
+def _bbox(w):
+    if not w.one("bbox"):
+        return
+    b = [_num(x) for x in w.one("bbox").split(",")]
+    if len(b) != 4 or None in b:
+        return
+    s, west, n, e = b
+    w.add("lat BETWEEN ? AND ?", s, n)
+    if west <= e:
+        w.add("lon BETWEEN ? AND ?", west, e)
+    else:  # box crosses the antimeridian
+        w.add("(lon >= ? OR lon <= ?)", west, e)
+
+
+def _range(key, col):
+    """iso_min / iso_max and the like."""
+    def f(w):
+        lo, hi = _num(w.one(key + "_min")), _num(w.one(key + "_max"))
         if lo is not None:
-            where.append(f"{col} >= ?")
-            params.append(lo)
+            w.add(f"{col} >= ?", lo)
         if hi is not None:
-            where.append(f"{col} <= ?")
-            params.append(hi)
-    return (" AND ".join(where) or "1"), params
+            w.add(f"{col} <= ?", hi)
+    return f
+
+
+# every filter the query string can carry, in the order their clauses appear in the SQL
+FILTERS = [
+    _text, _selection, _favorites, _viewer_albums,
+    _flag("blurry", {"1": "sharpn < 0.1"}),  # the least sharp tenth of the library
+    _flag("sharpest", {"1": "sharpn >= 0.8"}),
+    _flag("exposure", {"dark": "(bright < 0.2 OR clip_lo > 0.5)", "bright": "(bright > 0.8 OR clip_hi > 0.3)"}),
+    _flag("rejects", {"1": "reject IS NOT NULL"}),  # photo quality: suggested rejects (index.likely_rejects), any reason or one
+    _each("reject", "(',' || reject || ',') LIKE ?", allowed=("blur", "eyes", "burst", "exposure"), cast=lambda v: f"%,{v},%"),
+    _flag("looks", {"top": "aesthn >= 0.9"}),  # the best-looking tenth by the aesthetic score
+    _flag("eyes", {"closed": "eyes_closed > 0"}),  # someone's eyes closed (even when most faces are fine)
+    _flag("hastext", {"1": "ocr IS NOT NULL AND length(ocr) >= 3"}),
+    _flag("bursts", {"1": "burst IS NOT NULL"}),
+    _flag("bestonly", {"1": "(burst IS NULL OR burst_best = 1)"}),  # collapse each burst to its best frame
+    _each("burst", "burst = ?", cast=int),
+    _each("obj", "objects LIKE ?", cast=lambda v: f"%,{v},%"),
+    _people_count, _faces,
+    _flag("edited", {"1": "edited = 1"}),
+    _flag("dupes", {"1": "(hash, size) IN (SELECT hash, size FROM photos WHERE hash IS NOT NULL AND hash != '' "
+                         "GROUP BY hash, size HAVING count(*) > 1)"}),
+    # every tag must match; child tags count
+    _each("tag", "id IN (SELECT photo_id FROM photo_tags WHERE tag_id IN (SELECT tag FROM tag_closure WHERE anc = ?))", cast=int),
+    _each("nottag", "id NOT IN (SELECT photo_id FROM photo_tags WHERE tag_id IN (SELECT tag FROM tag_closure WHERE anc = ?))", cast=int),
+    _albums,
+    *(_any_of_text(k, k) for k in ("camera", "lens", "fmt", "creator", "place", "region", "country")),
+    *(_any_of_int(k, k) for k in ("pick", "color", "year", "month")),
+    _date("from", "day >= ?"), _date("to", "day <= ?"), _date("md", "md = ?", re.compile(r"^\d\d-\d\d$")),
+    _rating,
+    _flag("type", {"video": "video = 1", "photo": "video = 0"}),
+    _flag("geo", {"1": "lat IS NOT NULL", "0": "lat IS NULL"}),
+    _flag("untagged", {"1": "ntags = 0"}),
+    _bbox,
+    _range("iso", "iso"), _range("ap", "aperture"), _range("fl", "coalesce(focal35, focal)"), _range("exp", "exposure"),
+]
+
+
+def build_where(items) -> tuple[str, list]:
+    """items: iterable of (key, value) pairs from the query string."""
+    w = _Where(items)
+    for f in FILTERS:
+        f(w)
+    return (" AND ".join(w.where) or "1"), w.params
