@@ -25,6 +25,14 @@ def test_the_jpeg_marker_walk(progressive):
     assert filecheck._jpeg_ends(good[:-2]) == "no_eoi"
     assert filecheck._jpeg_ends(good[: len(good) // 2]) == "no_eoi"
     assert filecheck._jpeg_ends(b"\x89PNG....") == "bad"
+    # a damaged byte inside the picture data that looks like a marker (FF95): the file is whole, the data damaged
+    sos = good.index(b"\xff\xda")
+    k = sos + (len(good) - sos) // 2
+    hurt = good[:k] + b"\xff\x95\x12\x34" + good[k + 4:]
+    assert filecheck._jpeg_ends(hurt) == "corrupt"
+    # the same damage with a junk length that runs the walk off the end: still not "cut off", the file ends with FFD9
+    hurt2 = good[:k] + b"\xff\xc4\xff\xf0" + good[k + 4:]
+    assert filecheck._jpeg_ends(hurt2) == "corrupt"
 
 
 def test_what_the_check_finds(tmp_path):
@@ -39,9 +47,15 @@ def test_what_the_check_finds(tmp_path):
     cases["bad.png"], cases["ok.png"] = bytes(png), buf.getvalue()
     for name, data in cases.items():
         (tmp_path / name).write_bytes(data)
+    sos = good.index(b"\xff\xda")
+    k = sos + (len(good) - sos) // 2
+    cases["glitch.jpg"] = good[:k] + b"\xff\x95\x12\x34" + good[k + 4:]
+    for name, data in cases.items():
+        (tmp_path / name).write_bytes(data)
     got = {n: (filecheck.check_file(str(tmp_path / n)) or {}).get("problem") for n in cases}
-    assert got == {"good.jpg": None, "nomarker.jpg": "end_marker", "cut.jpg": "truncated", "empty.jpg": "empty", "bad.png": "png_crc", "ok.png": None}
+    assert got == {"good.jpg": None, "nomarker.jpg": "end_marker", "cut.jpg": "truncated", "empty.jpg": "empty", "bad.png": "png_crc", "ok.png": None, "glitch.jpg": "corrupt_data"}
     assert filecheck.check_file(str(tmp_path / "nomarker.jpg"))["fixable"] and not filecheck.check_file(str(tmp_path / "cut.jpg"))["fixable"]
+    assert not filecheck.check_file(str(tmp_path / "glitch.jpg"))["fixable"]  # never "repaired" as if it were cut off
 
 
 def test_run_repair_and_undo_on_the_scratch_library(client, lib):

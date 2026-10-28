@@ -278,7 +278,7 @@ export async function showDamaged() {
   const body = h('div', null, h('div', { class: 'muted' }, 'Loading…'));
   main.replaceChildren(h('div', { class: 'page spage cpage' }, crumbs([['Maintenance', '#/maintenance'], ['Damaged files', null]]),
     pageTitle('photo', 'rose', 'Damaged files'),
-    h('p', { class: 'muted intro mt0' }, `Every photo’s file is read and checked: JPEGs that stop early or lack their end marker, PNGs with damaged data, and pictures that cannot be decoded. Files are only read. One kind of damage can be repaired safely: a JPEG whose picture is complete but whose end marker is missing (some phones’ burst photos). The repair adds the marker after keeping a copy of the file, and every repair is in the edit log with undo. A file that was cut off cannot be repaired here; a backup or the original device may still have it whole.`),
+    h('p', { class: 'muted intro mt0' }, `Every photo’s file is read and checked: JPEGs that stop early, lack their end marker or hold damaged data, PNGs with damaged data, and pictures that cannot be decoded. Files are only read. One kind of damage can be repaired safely: a JPEG whose picture is complete but whose end marker is missing (some phones’ burst photos). The repair adds the marker after keeping a copy of the file, and every repair is in the edit log with undo. A file that was cut off cannot be repaired here; a backup or the original device may still have it whole.`),
     body));
   let d;
   try { d = await api('/api/filecheck'); } catch (e) { fill(body, errorBox(e)); return; }

@@ -36,6 +36,7 @@ _run = {"gen": 0}
 _lock = threading.Lock()
 LABELS = {"end_marker": "The end-of-image marker is missing; the picture itself is complete",
           "truncated": "The file stops early: the bottom of the picture is missing",
+          "corrupt_data": "Damaged data inside the picture (it shows, with a glitch where the damage is); the file itself is complete",
           "empty": "The file is empty",
           "not_jpeg": "Named as a JPEG but is not one, and could not be read",
           "unreadable": "The picture cannot be decoded",
@@ -51,13 +52,21 @@ def _jpeg_ends(data: bytes):
     return _walk(data)[0]
 
 
+# markers that may follow a scan's data: tables, restart interval, another scan, end of image, application data,
+# comments, frame headers (C0-CF but DHT C4, JPG C8 and DAC CC, which are tables); anything else inside a scan is a damaged byte
+_AFTER_SCAN = {0xC4, 0xCC, 0xDA, 0xD9, 0xDB, 0xDC, 0xDD, 0xFE} | set(range(0xC0, 0xD0)) | set(range(0xE0, 0xF0))
+
+
 def _walk(data: bytes):
-    """(status, offset of the end-of-image marker or None). Walk a JPEG's markers. Returns 'ok' when an end-of-image marker closes the image data (anything after it is a
-    trailer some cameras add), 'no_eoi' when the data runs to the end of the file without one, 'bad' when it is not a
-    JPEG stream at all."""
+    """(status, offset of the end-of-image marker or None). Walks a JPEG's markers:
+      ok        an end-of-image marker closes the image data (anything after it is a trailer some cameras add)
+      corrupt   damaged bytes inside the picture data (a stray marker), the file otherwise whole: it decodes with a glitch
+      no_eoi    the data runs to the end of the file without an end marker: a missing marker or a file cut off
+      bad       not a JPEG stream at all"""
     n = len(data)
     if n < 4 or data[0] != 0xFF or data[1] != 0xD8:
         return "bad", None
+    damaged = False
     i = 2
     while i < n:
         if data[i] != 0xFF:  # garbage between segments: libjpeg skips it too, looking for the next marker
@@ -66,15 +75,15 @@ def _walk(data: bytes):
         while i < n and data[i] == 0xFF:  # fill bytes
             i += 1
         if i >= n:
-            return "no_eoi", None
+            break
         m = data[i]
         i += 1
         if m == 0xD9:
-            return "ok", i - 2
+            return ("corrupt" if damaged else "ok"), i - 2
         if m in (0x01,) or 0xD0 <= m <= 0xD7:  # markers without a length
             continue
         if i + 2 > n:
-            return "no_eoi", None
+            break
         seg = (data[i] << 8) | data[i + 1]
         if seg < 2:
             return "bad", None
@@ -83,13 +92,22 @@ def _walk(data: bytes):
             while True:
                 j = data.find(b"\xff", i)
                 if j < 0 or j + 1 >= n:
-                    return "no_eoi", None
+                    i = n
+                    break
                 nxt = data[j + 1]
                 if nxt == 0x00 or 0xD0 <= nxt <= 0xD7 or nxt == 0xFF:
                     i = j + 1 if nxt == 0xFF else j + 2
                     continue
+                if nxt not in _AFTER_SCAN:  # a damaged byte that looks like a marker: the data goes on after it
+                    damaged = True
+                    i = j + 2
+                    continue
                 i = j
                 break
+    # no end marker reached: a file that still ends with one has damage that broke the walk (a bad segment length),
+    # not a missing end
+    if data.rstrip(b"\x00").endswith(b"\xff\xd9"):
+        return "corrupt", None
     return "no_eoi", None
 
 
@@ -124,6 +142,8 @@ def check_file(path: str):
             with open(path, "rb") as f:
                 data = f.read()
             ends = _jpeg_ends(data)
+            if ends == "corrupt":  # never repairable here: adding an end marker would change nothing
+                return {"problem": "corrupt_data", "detail": LABELS["corrupt_data"], "fixable": False}
             if ends == "no_eoi":
                 whole = _complete_with_marker(path)
                 if whole:
@@ -161,8 +181,11 @@ def check_file(path: str):
 # the library run
 # --------------------------------------------------------------------------
 
+CHECK_VERSION = 2  # 2: damaged data inside a scan told apart from a file cut off (older results are checked again)
+
+
 def _stamp(p: dict) -> str:
-    return thumbs.stamp_for(p["hash"], p["size"], p["modified"])
+    return f"{thumbs.stamp_for(p['hash'], p['size'], p['modified'])}:v{CHECK_VERSION}"
 
 
 def _photos() -> list:
