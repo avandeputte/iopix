@@ -163,7 +163,6 @@ def test_photos_with_only_unnamed_faces_can_be_accepted_or_ignored(client, lib):
 
 
 def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, lib):
-    from app.ai import analysis
     from app.data import vdb
     q = client.get("/api/quality").json()["untagged"]
     assert {"count", "items", "accepted"} <= set(q)
@@ -175,7 +174,7 @@ def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, l
     dk = sqlite3.connect(lib["db"])  # the fixture's photos all carry some face region: take this one's away for the test
     saved = dk.execute("SELECT imageid, tagid, property, value FROM ImageTagProperties WHERE imageid = ?", (pid,)).fetchall()
     dk.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (pid,)); dk.commit(); dk.close()
-    with analysis._write_lock:
+    with vdb.write_lock:
         con = vdb.connect()
         con.executemany("INSERT INTO ai_objects (photo_id, cls, score, x, y, w, h) VALUES (?,?,?,?,?,?,?)", [(pid, "person", 0.9, 0.1, 0.1, 0.2, 0.4), (pid, "person", 0.8, 0.5, 0.1, 0.2, 0.4)])
         con.commit(); con.close()
@@ -187,7 +186,7 @@ def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, l
     assert not any(x["photo"] == pid for x in q2["items"]) and q2["accepted"] >= 1
     client.post("/api/quality/accept", json={"photos": [pid], "check": "untagged", "on": False})
     assert any(x["photo"] == pid for x in client.get("/api/quality").json()["untagged"]["items"])
-    with analysis._write_lock:
+    with vdb.write_lock:
         con = vdb.connect(); con.execute("DELETE FROM ai_objects WHERE photo_id = ?", (pid,)); con.commit(); con.close()
     dk = sqlite3.connect(lib["db"]); dk.executemany("INSERT INTO ImageTagProperties VALUES (?,?,?,?)", saved); dk.commit(); dk.close()
     index.build()

@@ -588,10 +588,10 @@ export async function showImport(params) {
   const pick = (camera) => {
     const inp = h('input', { type: 'file', multiple: !camera, accept: 'image/*,video/*', hidden: true });
     if (camera) inp.setAttribute('capture', 'environment');
-    inp.onchange = () => { const files = [...inp.files]; inp.remove(); if (files.length) send(files); };
+    inp.onchange = () => { const files = [...inp.files]; inp.remove(); if (files.length) stage(files); };
     document.body.append(inp); inp.click();
   };
-  const send = async (files) => {
+  const stage = async (files) => {  // (not "send": that is core's upload helper, used inside)
     fill(status, `Uploading ${plural(files.length, 'file')}…`);
     try {
       let done = 0;
@@ -633,7 +633,7 @@ export async function showImport(params) {
   };
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', (e) => { const files = [...e.dataTransfer.files]; if (files.length) send(files); });
+  drop.addEventListener('drop', (e) => { const files = [...e.dataTransfer.files]; if (files.length) stage(files); });
   fill(body, drop,
     h('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:14px 0 4px' }, h('span', null, 'Folders: '), layoutSel, remember, h('span', { style: 'margin-left:8px' }, 'Duplicates: '), dupSel),
     status, table, h('div', { style: 'margin-top:12px;display:flex;gap:8px' }, run, token ? h('button', { class: 'pillbtn', onclick: async () => { if (!await confirmDialog('Discard the staged photos? They are removed from the server; nothing has reached the library yet.', { ok: 'Discard', danger: true })) return; await post(`/api/import/${token}/discard`, {}).catch(() => {}); token = null; plan = null; location.hash = '#/import'; draw(); } }, 'Discard') : null));

@@ -266,7 +266,7 @@ def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
         img = dk.execute("SELECT id FROM Images WHERE status = 1 AND category = 1 AND id NOT IN (SELECT imageid FROM ImageTagProperties WHERE property IN ('tagRegion', 'autodetectedFace')) LIMIT 1").fetchone()[0]
     finally:
         dk.close()
-    path = dict(__import__("app.digikam.dbsync", fromlist=["_photo_paths"])._photo_paths([img]))[img]
+    path = dict(__import__("app.digikam.dbsync", fromlist=["photo_paths"]).photo_paths([img]))[img]
     full = edits.digikam_tag_paths([img])[img]
     r = facemgr.apply({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": person}, check_running=False)
     try:
@@ -313,7 +313,7 @@ def test_people_on_a_video_and_one_person_per_name(lib, client):
         from app.photos import history
         said = history.entries(photo_id=vid, limit=1)["entries"][0]["summary"]
         assert said == "Zz Kid Person added to the photo (no face box)", said  # a first add, not "put back"
-        path = dict(__import__("app.digikam.dbsync", fromlist=["x"])._photo_paths([vid]))[vid]
+        path = dict(__import__("app.digikam.dbsync", fromlist=["x"]).photo_paths([vid]))[vid]
         out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
         tags = _json.loads(out)[0].get("TagsList") or []
         assert "People/Zz Fam/Zz Kid Person" in (tags if isinstance(tags, list) else [tags]), tags

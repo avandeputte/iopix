@@ -327,13 +327,13 @@ export async function showFolders() {
     inp.onchange = async () => {
       const files = [...inp.files]; inp.remove();
       if (!files.length) return;
-      const send = async () => {
+      const upload = async () => {  // (not "send": that is core's upload helper, used inside)
         const fd = new FormData(); files.forEach((f) => fd.append('files', f));
         toast(`Uploading ${plural(files.length, 'file')} to ${folder.path}…`, null, null, 120000);
         return send(`/api/folders/${folder.id}/upload`, fd);
       };
       try {
-        const r = await send();
+        const r = await upload();
         toast(`${plural(r.added.length, 'file')} added to ${folder.path}` + (r.skipped.length ? `; ${plural(r.skipped.length, 'file')} skipped (${r.skipped[0].reason})` : '') + (S.NO_DK ? '.' : '. digiKam reads the full metadata on its next run.'), null, null, 9000);
       } catch (e) { toastError(e); }
       refresh();
