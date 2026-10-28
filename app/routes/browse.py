@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 
 from app.ai import analysis, concepts, moments
-from app import __version__ as APP_VERSION, config, jobs as bgjobs, updates, users
+from app import __version__ as APP_VERSION, access, config, jobs as bgjobs, updates, users
 from app.photos import edits, lossless, tagmanager
 from app.faces import facedetect
 from app.data import index, state as appstate
@@ -68,7 +68,7 @@ def _photos_cached(version: str, key: str) -> bytes:
     return gzip.compress(orjson.dumps(data), compresslevel=3)
 
 
-@router.get("/api/random")
+@router.get("/api/random", dependencies=[access.public])
 def api_random(request: Request, n: int = 12):
     """Explore › Rediscover: photos picked at random from the whole library (stills): {id, w, h, ts} and the badges
     {video, geo, faces} as /api/photos gives them (by position)."""
@@ -85,7 +85,7 @@ def api_random(request: Request, n: int = 12):
             "dp": {str(i): r[8] for i, r in enumerate(rows) if r[8]}}
 
 
-@router.get("/api/badges")
+@router.get("/api/badges", dependencies=[access.public])
 def api_badges(request: Request, ids: str = ""):
     """The marks on a thumbnail outside the Photos grid (Rediscover, On this day, bursts, duplicates...), for up to
     500 photo ids: {geo: [id], faces: [id], video: {id: seconds}}, as /api/photos gives them by position."""
@@ -106,7 +106,7 @@ def api_badges(request: Request, ids: str = ""):
             "video": {str(r[0]): (round(r[2]) if r[2] else 0) for r in rows if r[1]}}
 
 
-@router.get("/api/thenandnow")
+@router.get("/api/thenandnow", dependencies=[access.public])
 def api_then_and_now(request: Request, n: int = 3, person: int = None):
     """Explore › Then and now: people photographed years apart, with their earliest and latest named face:
     {pairs: [{tag, name, then: {photo, ts, rect}, now: {...}, years}]}. person: that one person; else random ones."""
@@ -130,7 +130,7 @@ def api_then_and_now(request: Request, n: int = 3, person: int = None):
     return {"pairs": pairs}
 
 
-@router.get("/api/photos")
+@router.get("/api/photos", dependencies=[access.public])
 def api_photos(request: Request):
     """The whole result set in compact column form; the browser lays it out and
     fetches thumbnails lazily, so scrolling never waits on the server."""
@@ -202,13 +202,13 @@ def _meta(version: str) -> dict:
         con.close()
 
 
-@router.get("/api/meta")
+@router.get("/api/meta", dependencies=[access.public])
 def api_meta(request: Request):
     return jresp(request, {**_meta(state["version"]), "version": _public_version()})
 
 
 
-@router.get("/api/status")
+@router.get("/api/status", dependencies=[access.public])
 def api_status(request: Request):
     user = request.state.user
     if user is None and users.require_login():  # the sign-in screen: only what it needs, nothing about the library or the server
@@ -233,7 +233,7 @@ def api_status(request: Request):
             "analysis": analysis.progress, "jobs": bgjobs.status()}
 
 
-@router.get("/api/facets")
+@router.get("/api/facets", dependencies=[access.public])
 def api_facets(request: Request):
     """Counts of every metadata value within the current result set."""
     where, params, _ = resolve(request.query_params.multi_items())
@@ -299,13 +299,13 @@ def _events(version: str) -> list:
         con.close()
 
 
-@router.get("/api/events")
+@router.get("/api/events", dependencies=[access.public])
 def api_events(request: Request):
     """Trips (runs of days away from home) and busy days, worked out from dates, places and titles."""
     return jresp(request, {"events": _events(state["version"])})
 
 
-@router.get("/api/explore")
+@router.get("/api/explore", dependencies=[access.public])
 def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
     """Everything the Explore page fetches, in one request (the apps): {random, thenAndNow, events, onThisDay,
     peopleGroups}, each as its own endpoint gives it (/api/random, /api/thenandnow, /api/events, /api/photos?md=,
@@ -317,7 +317,7 @@ def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
                            "events": _events(state["version"]), "onThisDay": on_this_day, "peopleGroups": api_people_groups(request)})
 
 
-@router.get("/api/bursts")
+@router.get("/api/bursts", dependencies=[access.public])
 def api_bursts(request: Request, offset: int = 0, limit: int = 40):
     """Bursts within the current filters, newest first, each with its frames and best pick."""
     items = [(k, v) for k, v in request.query_params.multi_items() if k not in ("offset", "limit")]
@@ -345,7 +345,7 @@ def api_bursts(request: Request, offset: int = 0, limit: int = 40):
                            "groups": [{"burst": b, "items": groups[b]} for b in page]})
 
 
-@router.get("/api/trail")
+@router.get("/api/trail", dependencies=[access.public])
 def api_trail(request: Request, day: str):
     """The day's geotagged photos in time order, to draw the route taken."""
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
@@ -359,7 +359,7 @@ def api_trail(request: Request, day: str):
                            "lat": [round(r[2], 6) for r in rows], "lon": [round(r[3], 6) for r in rows], "alt": [r[4] for r in rows]})
 
 
-@router.get("/api/map")
+@router.get("/api/map", dependencies=[access.public])
 def api_map(request: Request):
     where, params, _ = resolve(request.query_params.multi_items())
     con = db()
@@ -415,7 +415,7 @@ def _quality(d: dict):
             "reject": why, "rejectLabels": [REJECT_REASONS[w] for w in why if w in REJECT_REASONS]}
 
 
-@router.get("/api/photo/{photo_id}")
+@router.get("/api/photo/{photo_id}", dependencies=[access.public])
 def api_photo(photo_id: int, request: Request):
     con = db()
     try:
@@ -473,7 +473,7 @@ def api_photo(photo_id: int, request: Request):
 # Detected content and duplicates
 # --------------------------------------------------------------------------
 
-@router.get("/api/concepts")
+@router.get("/api/concepts", dependencies=[access.public])
 def api_concepts(request: Request):
     """What the content-search model sees: everyday subjects with how many photos match each."""
     if not semantic_enabled():
@@ -486,7 +486,7 @@ def api_concepts(request: Request):
     return jresp(request, {"enabled": True, "indexing": semantic.running, "concepts": concepts.summary(valid)})
 
 
-@router.get("/api/duplicates")
+@router.get("/api/duplicates", dependencies=[access.public])
 def api_duplicates(request: Request):
     """Groups of files with identical content (same digiKam file hash and size)."""
     con = db()

@@ -6,7 +6,7 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app.data import state as appstate
-from app import users
+from app import access, users
 from app.core import db, jresp
 
 
@@ -39,7 +39,7 @@ def _can_change_album(a: dict, user) -> bool:
     return bool(user) and a["owner_id"] == user.get("id")
 
 
-@router.get("/api/state")
+@router.get("/api/state", dependencies=[access.public])
 def api_state(request: Request):
     user = request.state.user
     s = appstate.summary(user)
@@ -50,14 +50,14 @@ def api_state(request: Request):
     return jresp(request, {"rev": appstate.rev, **s, **_album_rights(user)})
 
 
-@router.post("/api/favorites")
+@router.post("/api/favorites", dependencies=[access.signed_in])
 async def api_favorites(request: Request):
     body = await request.json()
     await run_in_threadpool(lambda: appstate.set_favorites(_with_hashes(body.get("ids", [])), bool(body.get("on", True))))  # the viewer database may be MySQL
     return {"ok": True}
 
 
-@router.post("/api/ualbums")
+@router.post("/api/ualbums", dependencies=[access.signed_in])
 async def api_ualbum_create(request: Request):
     """Body: {name, shared: bool (default: shared when allowed), ids?}. Shared albums: editors and admins;
     private albums: any signed-in user, seen only by them."""
@@ -78,7 +78,7 @@ async def api_ualbum_create(request: Request):
     return {"id": album_id}
 
 
-@router.post("/api/ualbums/{album_id}")
+@router.post("/api/ualbums/{album_id}", dependencies=[access.signed_in])
 async def api_ualbum_update(album_id: int, request: Request):
     """Body: {name} to rename, {ids, on} to add or remove photos, {shared: bool} to share it or make it
     private, {delete: true} to remove the album. A shared album is changed by editors and admins, a private
@@ -106,7 +106,7 @@ async def api_ualbum_update(album_id: int, request: Request):
     return {"ok": True}
 
 
-@router.post("/api/searches")
+@router.post("/api/searches", dependencies=[access.signed_in])
 async def api_search_create(request: Request):
     """A smart album: {name, query} where query is the photo filter query string (as in #/photos?...)."""
     if not users.can_write(request.state.user):  # smart albums are shared by everyone: editors and admins keep them, as with shared albums
@@ -119,7 +119,7 @@ async def api_search_create(request: Request):
     return {"id": appstate.create_search(name, query)}
 
 
-@router.post("/api/searches/{search_id}")
+@router.post("/api/searches/{search_id}", dependencies=[access.signed_in])
 async def api_search_update(search_id: int, request: Request):
     """Body: {name} to rename, {delete: true} to remove."""
     if not users.can_write(request.state.user):

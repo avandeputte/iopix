@@ -8,18 +8,18 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import config, thumbs, users
+from app import access, config, events, thumbs, users
 from app.digikam import dbsync
 from app.photos import edits
 from app.faces import ages, facedetect, facemgr, facevecs
 from app.ai import neardups
 from app.data import state as appstate
-from app.core import _face_detect_allowed, _kick, _photo_row, _rebuild_after_write, db, DB_ERRORS, IMG_CACHE, jresp
+from app.core import _face_detect_allowed, _photo_row, db, DB_ERRORS, IMG_CACHE, jresp
 
 
 router = APIRouter()
 
-@router.post("/api/faces/detect")
+@router.post("/api/faces/detect", dependencies=[access.editor_write])
 async def api_faces_detect(request: Request):
     """Body: {ids: [...]} | {album: id} | {all: true}, optional redo. Up to five photos are looked at now and
     the answer says what was found; a folder, the library or a larger selection runs in the background."""
@@ -33,7 +33,7 @@ async def api_faces_detect(request: Request):
         except dbsync.SyncError as e:
             raise HTTPException(409, str(e))
         if r["added"]:
-            await run_in_threadpool(_rebuild_after_write)
+            await run_in_threadpool(events.after_write)
             facevecs.start()  # embed the new faces for grouping and "looks like" suggestions
         return {"done": True, **r}
     album = body.get("album")
@@ -41,7 +41,7 @@ async def api_faces_detect(request: Request):
         raise HTTPException(400, "Choose photos, a folder or the whole library")
 
     def after():
-        _rebuild_after_write()
+        events.after_write()
         facevecs.start()
     n = await run_in_threadpool(facedetect.start, ids or None, int(album) if album is not None else None, bool(body.get("redo")), after)  # reads the whole library's rows
     return {"done": False, "queued": n}
@@ -52,7 +52,7 @@ async def api_faces_detect(request: Request):
 # Faces (digiKam's database; digiKam must be closed)
 # --------------------------------------------------------------------------
 
-@router.post("/api/faces/op")
+@router.post("/api/faces/op", dependencies=[access.editor_write])
 async def api_face_op(request: Request):
     """One face change (see facemgr.apply). Writes digiKam's database; digiKam must be closed."""
     if not (config.DB_WRITE and edits.available()):
@@ -64,7 +64,7 @@ async def api_face_op(request: Request):
         raise HTTPException(409, str(e))
     except (*DB_ERRORS, ValueError, KeyError, TypeError) as e:
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
-    _kick.set()
+    events.kick()
     return res
 
 
@@ -84,20 +84,20 @@ def _group_name(body: dict) -> str:
     return name
 
 
-@router.get("/api/people/groups")
+@router.get("/api/people/groups", dependencies=[access.public])
 def api_people_groups(request: Request):
     """{groups: [{id, name, members: [person tag ids in order]}], canEdit}."""
     return {"groups": appstate.people_groups(), "canEdit": bool(users.can_write(request.state.user))}
 
 
-@router.post("/api/people/groups")
+@router.post("/api/people/groups", dependencies=[access.public])
 async def api_people_group_create(request: Request):
     """Body {name}: a new group, last in the order."""
     _groups_writer(request)
     return {"id": appstate.create_people_group(_group_name(await request.json()))}
 
 
-@router.post("/api/people/groups/order")
+@router.post("/api/people/groups/order", dependencies=[access.public])
 async def api_people_groups_order(request: Request):
     """Body {ids: [group ids]}: the order of the groups on the People page."""
     _groups_writer(request)
@@ -105,7 +105,7 @@ async def api_people_groups_order(request: Request):
     return {"ok": True}
 
 
-@router.post("/api/people/groups/{group_id}")
+@router.post("/api/people/groups/{group_id}", dependencies=[access.public])
 async def api_people_group_update(group_id: int, request: Request):
     """Body {name?, members?: [person tag ids in order]}: rename the group and/or set who is in it."""
     _groups_writer(request)
@@ -125,7 +125,7 @@ async def api_people_group_update(group_id: int, request: Request):
     return {"ok": True}
 
 
-@router.delete("/api/people/groups/{group_id}")
+@router.delete("/api/people/groups/{group_id}", dependencies=[access.public])
 def api_people_group_delete(group_id: int, request: Request):
     """The group goes; the people in it stay where they are in digiKam."""
     _groups_writer(request)
@@ -133,7 +133,7 @@ def api_people_group_delete(group_id: int, request: Request):
     return {"ok": True}
 
 
-@router.get("/api/faces/nearby")
+@router.get("/api/faces/nearby", dependencies=[access.public])
 def api_faces_nearby(photo: int, limit: int = 12):
     """The people in the photos around this one in the same folder (named faces or person tags), the nearest in
     time and the most frequent first: [{tag, n}]. For the "Who is this?" list."""
@@ -154,7 +154,7 @@ def api_faces_nearby(photo: int, limit: int = 12):
     return {"people": [{"tag": r[0], "n": r[1]} for r in rows]}
 
 
-@router.post("/api/faces/batch")
+@router.post("/api/faces/batch", dependencies=[access.editor_write])
 async def api_face_batch(request: Request):
     """Many face changes in one transaction with one backup: {ops: [...]} (see facemgr.apply_many)."""
     if not (config.DB_WRITE and edits.available()):
@@ -169,11 +169,11 @@ async def api_face_batch(request: Request):
         raise HTTPException(409, str(e))
     except (*DB_ERRORS, ValueError, KeyError, TypeError) as e:
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
-    _kick.set()
+    events.kick()
     return {"results": res, "done": sum(1 for r in res if "error" not in r), "failed": [r for r in res if "error" in r]}
 
 
-@router.get("/api/faces/queue")
+@router.get("/api/faces/queue", dependencies=[access.public])
 def api_faces_queue(kind: str = "suggested", tag: int = None, offset: int = 0, limit: int = 200):
     """Faces waiting for a decision: suggestions grouped by the suggested person, or unnamed faces."""
     if kind not in ("suggested", "unknown", "ignored"):
@@ -215,7 +215,7 @@ def facecrop(photo_id: int, x: int, y: int, w: int, h: int):
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 
-@router.post("/api/faces/person")
+@router.post("/api/faces/person", dependencies=[access.editor_write])
 async def api_face_person(request: Request):
     """Create a new person tag: {name, parent} (parent = a People family tag id, or 0)."""
     if not (config.DB_WRITE and edits.available()):
@@ -228,11 +228,11 @@ async def api_face_person(request: Request):
         tid = await run_in_threadpool(facemgr.create_person, name, int(body.get("parent") or 0))
     except dbsync.SyncError as e:
         raise HTTPException(409, str(e))
-    _kick.set()
+    events.kick()
     return {"id": tid}
 
 
-@router.get("/api/faces/groups")
+@router.get("/api/faces/groups", dependencies=[access.public])
 def api_faces_groups(kind: str = "unknown", tag: int = None, threshold: float = None):
     """Undecided faces with look-alikes grouped (SFace embeddings); never a name proposal."""
     if kind not in ("unknown", "suggested"):
@@ -247,7 +247,7 @@ def api_faces_groups(kind: str = "unknown", tag: int = None, threshold: float = 
     return out
 
 
-@router.get("/api/neardups")
+@router.get("/api/neardups", dependencies=[access.public])
 def api_neardups(request: Request):
     """Near-duplicate groups from the content-search embeddings, with whether they are current."""
     st = neardups.status()
@@ -257,7 +257,7 @@ def api_neardups(request: Request):
     return jresp(request, st)
 
 
-@router.post("/api/neardups")
+@router.post("/api/neardups", dependencies=[access.admin])
 async def api_neardups_run(request: Request):
     """Body: {level: strict|normal|loose}. Computes the pairs in the background (admin)."""
     body = await request.json()
@@ -270,7 +270,7 @@ async def api_neardups_run(request: Request):
     return {"ok": True}
 
 
-@router.get("/api/faces/summary")
+@router.get("/api/faces/summary", dependencies=[access.public])
 def api_faces_summary():
     con = db()
     try:
@@ -285,7 +285,7 @@ def api_faces_summary():
 # year suggestions for undated photos (ages.py)
 # --------------------------------------------------------------------------
 
-@router.get("/api/datesuggest")
+@router.get("/api/datesuggest", dependencies=[access.editor])
 def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str = ""):
     """Suggested years for the photos marked "Date unknown", from the ages of the named people in them:
     {total, items: [{id, year, lo, hi, people: [{tag, name, age, year}]}], people: [{tag, name, birth, entered, basis, n}],
@@ -297,7 +297,7 @@ def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str
                            "people": out["people"], "ready": ages.available(), "faces": list(ages.coverage())})
 
 
-@router.post("/api/people/birth")
+@router.post("/api/people/birth", dependencies=[access.signed_in])
 async def api_people_birth(request: Request):
     """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.
     Kept in the viewer's own database only."""
