@@ -15,12 +15,12 @@ from app.data import index
 from app.digikam.dbsync import SyncError
 
 ROOT = "Places"
+progress = {"running": False, "done": 0, "total": 0, "created": 0, "error": None}
 
 
 def _part(name: str) -> str:
     """A place name as a tag name: one line, no "/" or "|" (Biel/Bienne becomes Biel-Bienne), at most 120 characters."""
     return " ".join(str(name).replace("/", "-").replace("|", "-").split())[:120]
-progress = {"running": False, "done": 0, "total": 0, "created": 0, "error": None}
 
 
 def plan(photo_ids: list = None) -> dict:
@@ -57,14 +57,15 @@ def plan(photo_ids: list = None) -> dict:
             "_todo": todo, "_untag": untag}
 
 
-def _tag_id_in_digikam(full: str) -> int:
-    """Id of the tag with this full path in digiKam's database (read-only), or 0."""
+def _tag_ids_in_digikam() -> dict:
+    """{full path: id} of every tag in digiKam's database (read-only): the only place that knows a tag created a
+    moment ago, read once for a whole batch and kept up to date as tags are created."""
     src = dkdb.connect(write=False)
     try:
         tags = dkdb.tag_tree(src)
     finally:
         src.close()
-    return next((tid for tid in tags if dkdb.tag_path(tags, tid) == full), 0)
+    return {dkdb.tag_path(tags, tid): tid for tid in tags}
 
 
 def run(photo_ids: list = None):
@@ -81,14 +82,16 @@ def run(photo_ids: list = None):
                 # Parents before children: sorted paths guarantee that. Parents are looked up in
                 # digiKam's own database, the only place that knows a tag created a moment ago.
                 dkdb.backup()
+                by_path = _tag_ids_in_digikam()
                 for full in p["missing_tags"]:
                     parts = full.split("/")
                     pid = 0
                     if len(parts) > 1:
-                        pid = _tag_id_in_digikam("/".join(parts[:-1]))
+                        pid = by_path.get("/".join(parts[:-1]), 0)
                         if not pid:
                             raise SyncError(f"Could not find the parent tag for {full}")
-                    tagmanager.apply({"op": "add", "parent": pid, "name": parts[-1]}, check_running=True, backup=False)
+                    made = tagmanager.apply({"op": "add", "parent": pid, "name": parts[-1]}, check_running=True, backup=False)
+                    by_path[full] = int(made["id"])
                     progress["created"] += 1
                 # the index must know the new tags before edits can resolve them
                 index.build()

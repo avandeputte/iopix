@@ -905,11 +905,11 @@ def revert(photos: list) -> dict:
                 failed.append({"id": pid, "error": str(e_)})
         forget(done)
     # tags and faces: the database's, now that the edits are forgotten (one exiftool run for all)
-    keep = [pid for pid in done if os.path.exists(sidecar_path(next(p["path"] for p in photos if p["id"] == pid)))]
+    paths = {p["id"]: p["path"] for p in photos}
+    keep = [pid for pid in done if pid in paths and os.path.exists(sidecar_path(paths[pid]))]
     if keep:
         facemgr.write_regions_many(keep)
     from app.photos import history
-    paths = {p["id"]: p["path"] for p in photos}
     history.record([{"photo_id": pid, "action": "revert", "summary": "Viewer edits undone: the sidecar (and file) say what digiKam's database says again",
                      "path": paths.get(pid)} for pid in done])
     return {"reverted": len(done), "failed": failed}

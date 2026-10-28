@@ -47,7 +47,7 @@ def _forget(lib, ids, files=()):
     index.build()
 
 
-def test_unique_hash_is_digikams():
+def test_unique_hash_is_digikams(lib):
     """Against the source library the fixture is cut from (read only): files digiKam hashed and nobody changed since."""
     from conftest import SRC_DB, SRC_ROOT
     con = sqlite3.connect(f"file:{SRC_DB}?mode=ro", uri=True)

@@ -26,6 +26,7 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.digikam.dbsync import SyncError
+from app.photos import deletion
 
 log = logging.getLogger("app.photos.organize")
 TRASHED, VISIBLE = 3, 1
@@ -48,7 +49,6 @@ def _rows(con, ids: list) -> list:
 
 
 def sidecars_of(path: str) -> list:
-    from app.photos import deletion
     return deletion.sidecars(path)
 
 
@@ -99,6 +99,7 @@ def trash(ids: list, check_running: bool = True) -> dict:
     moved, failed = [], []
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     for r in rows:
+        done_moves, rec = [], None  # what to put back if a later step of this photo fails, and its trash record
         try:
             if not os.path.exists(r["path"]):
                 raise SyncError("the file is not on disk")
@@ -106,14 +107,7 @@ def trash(ids: list, check_running: bool = True) -> dict:
             base = _trash_base(info_dir, r["name"])
             suffix = r["name"].rsplit(".", 1)[1] if "." in r["name"] else ""  # the extension only: "my.photo.jpg" keeps one stem
             dst = files_dir / (f"{base}.{suffix}" if suffix else base)
-            rec = info_dir / f"{base}.dtrashinfo"
-            rec.write_text(json.dumps({"path": r["path"], "deletiontimestamp": now, "imageid": str(r["id"])}, indent=4) + "\n")
-            try:
-                os.chmod(rec, 0o600)
-            except OSError:
-                pass
             sides = sidecars_of(r["path"])
-            done_moves = []  # (now, was): what to put back if a later step of this photo fails
             shutil.move(r["path"], dst)
             done_moves.append((str(dst), r["path"]))
             side_moves, side_from = [], []
@@ -122,13 +116,18 @@ def trash(ids: list, check_running: bool = True) -> dict:
                 shutil.move(s, sdst)
                 done_moves.append((str(sdst), s))
                 side_moves.append(str(sdst)); side_from.append(s)
+            # the record last, once the files are in the trash: a record without its file would show digiKam a ghost
+            rec = info_dir / f"{base}.dtrashinfo"
+            rec.write_text(json.dumps({"path": r["path"], "deletiontimestamp": now, "imageid": str(r["id"])}, indent=4) + "\n")
+            try:
+                os.chmod(rec, 0o600)
+            except OSError:
+                pass
             moved.append({**r, "trash": str(dst), "info": str(rec), "sides": side_moves, "sides_from": side_from})
         except (OSError, SyncError) as e:
-            if "done_moves" in locals() and done_moves:  # half moved: the file and its sidecars go back, the record goes
-                _move_back(done_moves, str(rec))
+            if done_moves:  # half moved: the file and its sidecars go back, the record (if it got written) goes
+                _move_back(done_moves, str(rec) if rec else None)
             failed.append({"id": r["id"], "error": str(e)})
-        finally:
-            done_moves = []
     if moved:
         try:
             with dbsync.write_transaction(db_path, check_running) as con:
@@ -141,13 +140,7 @@ def trash(ids: list, check_running: bool = True) -> dict:
         from app.photos import history
         history.record([{"photo_id": r["id"], "action": "trashed", "summary": "Moved to the trash", "path": r["path"],
                          "details": {"trash": r["trash"], "info": r["info"], "album": r["album"], "name": r["name"]}} for r in moved])
-        _forget_index_only([r["id"] for r in moved])
     return {"trashed": [r["id"] for r in moved], "infos": [r["info"] for r in moved], "failed": failed}
-
-
-def _forget_index_only(ids: list):
-    """Thumbnails of trashed photos stay (the trash shows them); nothing else to drop: the row remains."""
-    return
 
 
 def listing() -> list:
@@ -338,16 +331,9 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
     # nothing), the files only after the rows are gone
     ids = [t["id"] for t in items if t["id"]]
     if ids:
-        from app.photos import deletion
         dkdb.backup(db_path, force=True)
         with dbsync.write_transaction(db_path, check_running) as con:
-            for i in range(0, len(ids), 300):
-                chunk = ",".join(map(str, ids[i:i + 300]))
-                for tbl in deletion.PHOTO_TABLES:
-                    con.execute(f"DELETE FROM {tbl} WHERE imageid IN ({chunk})")
-                con.execute(f"UPDATE Tags SET icon = NULL WHERE icon IN ({chunk})")
-                con.execute(f"UPDATE Albums SET icon = NULL WHERE icon IN ({chunk})")
-                con.execute(f"DELETE FROM Images WHERE id IN ({chunk})")
+            deletion.drop_rows(con, ids)
     gone, failed = [], []
     for t in items:
         try:
@@ -367,28 +353,34 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
 
 
 # ---- moving and renaming photos
-def move_photos(ids: list, album_id: int, check_running: bool = True, new_name: str = None) -> dict:
+def move_photos(ids: list, album_id, check_running: bool = True, new_name: str = None, names: dict = None) -> dict:
     """Move these photos into the folder album_id (their sidecars too); with new_name (one photo) rename it as well.
-    Returns {moved: [{id, name, path}], failed}."""
+    album_id None keeps each photo in its own folder: a rename, with `names` {id: new name} naming several at once
+    (one preflight, one transaction, one change-log batch). Returns {moved: [{id, name, path}], failed}."""
     from app.photos.folders import _album
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
     con = dkdb.connect()
     try:
-        folder = _album(con, int(album_id))
         rows = _rows(con, ids)
+        folders = {a: _album(con, a) for a in ({int(album_id)} if album_id is not None else {r["album"] for r in rows})}
     finally:
         con.close()
-    if not folder["dir"].is_dir():
-        raise SyncError(f"The folder is not on disk here: {folder['dir']}")
+    for f in folders.values():
+        if not f["dir"].is_dir():
+            raise SyncError(f"The folder is not on disk here: {f['dir']}")
     if new_name is not None and len(rows) != 1:
         raise SyncError("A new name goes with one photo at a time.")
+    names = dict(names or {})
+    if new_name is not None:
+        names[rows[0]["id"]] = new_name
     moved, failed = [], []
     for r in rows:
+        folder = folders[int(album_id)] if album_id is not None else folders[r["album"]]
         try:
             name = r["name"]
-            if new_name is not None:
-                name = _clean(new_name)
+            if r["id"] in names:
+                name = _clean(names[r["id"]])
                 old_ext, new_ext = os.path.splitext(r["name"])[1].lower(), os.path.splitext(name)[1].lower()
                 if new_ext != old_ext:
                     name = os.path.splitext(name)[0] + os.path.splitext(r["name"])[1]  # the extension stays: it says what the file is
@@ -409,14 +401,17 @@ def move_photos(ids: list, album_id: int, check_running: bool = True, new_name: 
             if str(dst) != r["path"]:
                 from app.photos import edits
                 edits.move_backups(r["path"], str(dst))
-            moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"], "moves": moves})
+            moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"], "to_rel": folder["rel"], "moves": moves})
         except (OSError, SyncError) as e:
             failed.append({"id": r["id"], "error": str(e)})
     if moved:
         try:
             with dbsync.write_transaction(db_path, check_running) as con:
                 for r in moved:
-                    con.execute("DELETE FROM Images WHERE album = ? AND name = ? AND id != ?", (r["to_album"], r["final"], r["id"]))  # a stale row at the destination
+                    # a stale row at the destination (a file deleted outside digiKam, say): it goes with its child rows
+                    stale = [x[0] for x in con.execute("SELECT id FROM Images WHERE album = ? AND name = ? AND id != ?", (r["to_album"], r["final"], r["id"]))]
+                    if stale:
+                        deletion.drop_rows(con, stale)
                     con.execute("UPDATE Images SET album = ?, name = ? WHERE id = ?", (r["to_album"], r["final"], r["id"]))
         except BaseException:  # the database refused: the files go back
             from app.photos import edits
@@ -426,7 +421,7 @@ def move_photos(ids: list, album_id: int, check_running: bool = True, new_name: 
                     edits.move_backups(r["dst"], r["path"])
             raise
         from app.photos import history
-        history.record([{"photo_id": r["id"], "action": "moved", "summary": (f"Renamed to {r['final']}" if r["to_album"] == r["album"] else f"Moved to {folder['rel']}") + (f" (was {r['name']})" if r["final"] != r["name"] and r["to_album"] != r["album"] else ""),
+        history.record([{"photo_id": r["id"], "action": "moved", "summary": (f"Renamed to {r['final']}" if r["to_album"] == r["album"] else f"Moved to {r['to_rel']}") + (f" (was {r['name']})" if r["final"] != r["name"] and r["to_album"] != r["album"] else ""),
                          "path": r["dst"], "details": {"from": r["path"], "to": r["dst"]}, "undo": {"move": {"album": r["album"], "name": r["name"]}}} for r in moved])
     return {"moved": [{"id": r["id"], "name": r["final"], "path": r["dst"]} for r in moved], "failed": failed}
 
@@ -449,8 +444,9 @@ def _folder(con, album_id: int) -> dict:
 
 
 def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> dict:
-    """Rename library files by a date pattern (export.name_for), each a normal rename: the id stays, sidecars move
-    along, every one is in the change log with undo. Returns {renamed: [{id, name}], unchanged, failed}."""
+    """Rename library files by a date pattern (export.name_for): the ids stay, sidecars move along, every one is in
+    the change log with undo. The new names are worked out first, then every file is renamed in one batch (one
+    preflight, one database transaction). Returns {renamed: [{id, name, was}], unchanged, failed}."""
     from app.photos import export
     from app.data import index
     if pattern not in ("date", "date-name", "date-seq"):
@@ -464,22 +460,21 @@ def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> di
     finally:
         con.close()
     out = {"renamed": [], "unchanged": 0, "failed": []}
+    names, was = {}, {}
     for iid in sorted(rows, key=lambda i: (rows[i][3] or 0, i)):
         _id, aid, name, ts = rows[iid]
         used = taken.setdefault(aid, set())
         used.discard(name.lower())
         new = export.name_for(pattern, ts, name, used)
+        used.add(new.lower())
         if new == name:
             out["unchanged"] += 1
             continue
-        try:
-            r = rename_photo(iid, new, check_running)
-            got = (r.get("moved") or [{}])[0].get("name", new)
-            used.add(got.lower())
-            out["renamed"].append({"id": iid, "name": got, "was": name})
-        except (SyncError, OSError) as e:
-            used.add(name.lower())
-            out["failed"].append({"id": iid, "error": str(e)})
+        names[iid], was[iid] = new, name
+    if names:
+        r = move_photos(list(names), None, check_running, names=names)
+        out["renamed"] = [{"id": m["id"], "name": m["name"], "was": was.get(m["id"])} for m in r["moved"]]
+        out["failed"] = r["failed"]
     return out
 
 

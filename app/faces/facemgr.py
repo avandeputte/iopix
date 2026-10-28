@@ -167,7 +167,9 @@ def _retry(images, db_path):
     for i in images:
         _tries[i] = _tries.get(i, 0) + 1
     if again:
-        threading.Timer(60, queue_sidecars, args=(again, db_path)).start()
+        t = threading.Timer(60, queue_sidecars, args=(again, db_path))
+        t.daemon = True  # a pending retry must not hold the process open at shutdown
+        t.start()
 
 
 def queue_sidecars(images: list, db_path=None):
@@ -436,19 +438,10 @@ def create_person(name: str, parent: int = 0) -> int:
         tid = existing
     else:
         tid = int(tagmanager.apply({"op": "add", "parent": parent, "name": name})["id"])
-    # tagmanager.apply just ran every check and took the backup; this follow-up row is tiny
-    with dkdb.write_lock:
-        con = dkdb.connect(write=True)
-        try:
-            con.begin_write()
-            _ensure_person(con, tid)
-            con.commit()
-            dkdb.note_own_write()
-        except BaseException:
-            con.rollback()
-            raise
-        finally:
-            con.close()
+    # tagmanager.apply just ran every check and took the backup; this follow-up row is tiny, but it goes through the
+    # same guarded transaction as every other write (version check, integrity check, digiKam not started meanwhile)
+    with dbsync.write_transaction(dkdb.sqlite_path()) as con:
+        _ensure_person(con, tid)
     return tid
 
 

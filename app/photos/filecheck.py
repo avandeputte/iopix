@@ -293,12 +293,8 @@ def _job(gen: int, photos: list):
                 if r:
                     progress["found"] += 1
                 rows.append((p["id"], _stamp(p), json.dumps(r) if r else None))
-            con = vdb.connect()
-            try:
+            with vdb.writer() as con:
                 con.executemany(f"INSERT OR REPLACE INTO ai_scans VALUES (?,'{JOB}',?,?)", rows)
-                con.commit()
-            finally:
-                con.close()
             progress["done"] += len(todo[i:i + 50])
     finally:
         progress.update(running=False, finished=int(time.time()))
@@ -307,12 +303,8 @@ def _job(gen: int, photos: list):
 def start(redo: bool = False) -> int:
     """Check the files not checked yet (or changed since); with redo every file again. Returns how many are queued."""
     if redo:
-        con = vdb.connect()
-        try:
+        with vdb.writer() as con:
             con.execute("DELETE FROM ai_scans WHERE job = ?", (JOB,))
-            con.commit()
-        finally:
-            con.close()
     photos = _photos()
     have = _done()
     n = sum(1 for p in photos if have.get(p["id"], (None,))[0] != _stamp(p))

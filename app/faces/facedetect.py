@@ -22,6 +22,7 @@ next library run, since that photo is not looked at again unless it changes.
 """
 import json
 import logging
+import sqlite3
 import threading
 import time
 
@@ -244,7 +245,7 @@ def new_faces(found: list, existing: list) -> list:
 # ---- which photos, what they already have
 def _photos(ids: list = None, album: int = None) -> list:
     con = index.open_index()
-    con.row_factory = __import__("sqlite3").Row
+    con.row_factory = sqlite3.Row
     try:
         sql = "SELECT p.id, p.path, p.name, p.w, p.h, p.hash, p.size, p.modified FROM photos p WHERE p.video = 0"
         if ids is not None:
@@ -299,13 +300,8 @@ def coverage() -> int:
 def reset():
     """Forget which photos were looked at, so the next library run looks at all of them again."""
     _run["gen"] += 1
-    with analysis._write_lock:
-        con = vdb.connect()
-        try:
-            con.execute("DELETE FROM ai_scans WHERE job = 'facedetect'")
-            con.commit()
-        finally:
-            con.close()
+    with vdb.writer() as con:
+        con.execute("DELETE FROM ai_scans WHERE job = 'facedetect'")
 
 
 # ---- running
@@ -327,14 +323,9 @@ def _write(found: dict) -> int:
 def _record(rows: list):
     if not rows:
         return
-    with analysis._write_lock:
-        con = vdb.connect()
-        try:
-            con.executemany("INSERT OR REPLACE INTO ai_scans (photo_id, job, stamp, detail) VALUES (?,'facedetect',?,?)",
-                            [(r[0], r[1], json.dumps({"found": r[2], "added": r[3], "checked": r[4]})) for r in rows])
-            con.commit()
-        finally:
-            con.close()
+    with vdb.writer() as con:
+        con.executemany("INSERT OR REPLACE INTO ai_scans (photo_id, job, stamp, detail) VALUES (?,'facedetect',?,?)",
+                        [(r[0], r[1], json.dumps({"found": r[2], "added": r[3], "checked": r[4]})) for r in rows])
 
 
 def detect(photos: list, gen: int = None, on_batch=None) -> dict:

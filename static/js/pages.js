@@ -1,5 +1,5 @@
 /** The pages: explore, people, places, folders, albums, tags, import and the trash. */
-import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, store } from './core.js';
+import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, del, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, send, store } from './core.js';
 import { NAV, S, ST, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
@@ -207,7 +207,7 @@ export async function showPeople() {
       k < groups.length - 1 ? h('button', { class: 'iconbtn turn', title: 'Move this group down', onclick: () => { const was = snap(); groups.splice(k + 1, 0, groups.splice(k, 1)[0]); saveOrder(was); draw(); } }, icon('right')) : null,
       h('button', { class: 'iconbtn', title: 'Delete this group (the people stay)', onclick: async () => {
         if (!await confirmDialog(`Delete the group “${g.name}”? The people in it stay; only the group goes.`, { ok: 'Delete', danger: true })) return;
-        try { await fetch(`/api/people/groups/${g.id}`, { method: 'DELETE' }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); }); } catch (e) { toastError(e); return; }
+        try { await del(`/api/people/groups/${g.id}`); } catch (e) { toastError(e); return; }
         groups = groups.filter((x) => x !== g); draw(); } }, icon('trash'))) : null;
     const sec = h('section', { class: 'pgroup' + (editing ? ' editing' : '') },
       title ? h('h2', { class: 'sec pghead' }, title, h('span', { class: 'muted' }, nf.format(list.length)), tools) : null,
@@ -330,10 +330,7 @@ export async function showFolders() {
       const send = async () => {
         const fd = new FormData(); files.forEach((f) => fd.append('files', f));
         toast(`Uploading ${plural(files.length, 'file')} to ${folder.path}…`, null, null, 120000);
-        const res = await fetch(`/api/folders/${folder.id}/upload`, { method: 'POST', body: fd });
-        let r = {}; try { r = await res.json(); } catch { /* not json */ }
-        if (!res.ok) throw new Error(r.detail || `${res.status}`);
-        return r;
+        return send(`/api/folders/${folder.id}/upload`, fd);
       };
       try {
         const r = await send();

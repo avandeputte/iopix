@@ -1,5 +1,5 @@
 /** Metadata editing dialogs: rating, titles, captions, tags, dates, locations and templates. */
-import { $, UTC, accuracyChoices, api, date, dfTimeLocal, fill, fmtDist, fmtWhen, fromHeight, h, heightUnit, icon, nf, norm, plural, post, toHeight } from './core.js';
+import { $, UTC, accuracyChoices, api, date, dfTimeLocal, fill, fmtDist, fmtWhen, fromHeight, h, heightUnit, icon, nf, norm, plural, post, send, toHeight } from './core.js';
 import { S, go, hashFor, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, setBadges } from './grid.js';
 import { confirmDialog, modal } from './actions.js';
@@ -448,7 +448,7 @@ export async function gpxDialog(ids) {
     Object.entries(params()).forEach(([k, v]) => fd.append(k, v === true ? '1' : v === false ? '0' : v));
     fill(result, h('p', { class: 'muted' }, 'Matching…'));
     let r;
-    try { const res = await fetch('/api/gpx/preview', { method: 'POST', body: fd }); r = await res.json(); if (!res.ok) throw new Error(r.detail || res.status); } catch (e) { fill(result, h('p', { class: 'warn' }, e.message)); return; }
+    try { r = await send('/api/gpx/preview', fd); } catch (e) { fill(result, h('p', { class: 'warn' }, e.message)); return; }
     token = r.token; preview = r;
     const t = r.track;
     fill(result,

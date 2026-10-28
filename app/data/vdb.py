@@ -20,6 +20,7 @@ from urllib.parse import quote
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -297,6 +298,22 @@ def connect(timeout: float = 10, cfg: dict = None) -> VConn:
     if c["type"] == "mysql" and (cfg is not None or error is None):
         return VConn(_mysql_raw(c), True, True)
     return VConn(_sqlite_raw(SQLITE_FILE, timeout), False, True)
+
+
+write_lock = threading.Lock()  # one writer at a time in this process: a web request never waits out SQLite's busy timeout behind a job
+
+
+@contextmanager
+def writer(timeout: float = 30):
+    """One serialised write transaction on the viewer database: committed on success, always closed.
+    Every module that writes AI results, checks or bookkeeping goes through this."""
+    with write_lock:
+        con = connect(timeout=timeout)
+        try:
+            yield con
+            con.commit()
+        finally:
+            con.close()
 
 
 def columns(con: VConn, table: str) -> list:

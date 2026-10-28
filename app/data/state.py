@@ -252,9 +252,14 @@ def _settings_stamp() -> tuple:
     if vdb.is_mysql():
         return rev, int(time.time() / 5)
     try:
-        return rev, STATE_DB.stat().st_mtime_ns
+        stamp = STATE_DB.stat().st_mtime_ns
     except OSError:
         return rev, None
+    try:  # WAL mode: a commit lands in the -wal file and moves the main file only at a checkpoint
+        stamp = max(stamp, STATE_DB.with_name(STATE_DB.name + "-wal").stat().st_mtime_ns)
+    except OSError:
+        pass
+    return rev, stamp
 
 
 def get_setting(key: str, default: str = "") -> str:

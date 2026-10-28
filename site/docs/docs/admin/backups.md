@@ -24,7 +24,7 @@ Sidecar and file backups are never deleted automatically. Allow disk space for t
 
 ## Backing iopix up
 
-Back up the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives iopix's database as SQLite plus the content-search index and the restore steps.
+Back up the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives iopix's database as SQLite plus the content-search index and the restore steps. The MCP admin token is not included, so set a new one after a restore if you use the MCP server.
 
 To restore: stop iopix, copy the files into the data folder, start it again.
 
