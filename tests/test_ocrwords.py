@@ -57,3 +57,15 @@ def test_the_index_shows_the_cleaned_text(client, lib):
         db.commit()
         db.close()
         index.build()
+
+
+def test_without_the_word_lists_nothing_is_dropped(monkeypatch):
+    """An install without pyspellchecker keeps the text as read rather than dropping every word."""
+    from types import SimpleNamespace
+    from app.data import index
+    monkeypatch.setattr(ocrwords, "dictionary", lambda: {})
+    row = [None] * 64
+    row[0], row[index._OCR_COL] = 1, "NIVHITY IOWA."
+    out = SimpleNamespace(photos=[tuple(row)], fts_rows=[(1, *[None] * 8, "NIVHITY IOWA.", None)])
+    index._clean_ocr(out, {}, {})
+    assert out.photos[0][index._OCR_COL] == "NIVHITY IOWA." and out.fts_rows[0][9] == "NIVHITY IOWA."

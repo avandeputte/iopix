@@ -767,7 +767,7 @@ def _clean_ocr(out: SimpleNamespace, tags: dict, albums: dict):
     as words, as does a word read in several photos. The stored text is untouched."""
     from app.ai import ocrwords
     texts = [r[_OCR_COL] for r in out.photos]
-    if not any(texts):
+    if not any(texts) or not ocrwords.dictionary():  # without the word lists (pyspellchecker missing) the text stays as read
         return
     named = [t["name"] for t in tags.values()] + [a.get("name") for a in albums.values()] + [a.get("path") for a in albums.values()]
     named += [x for r in out.photos for x in (r[32], r[33], r[36], r[37], r[38])]  # title, caption, place, region, country
