@@ -768,6 +768,24 @@ export async function settingsPage(view) {
       return row('Damaged files', h('span', null, line, 'Every file read and checked: JPEGs that stop early or lack their end marker, damaged PNGs, pictures that cannot be decoded; a safe repair where there is one.'),
         h('a', { class: 'pillbtn on', href: '#/damaged' }, 'Open'));
     })(),
+    S.CAN_MANAGE ? (() => {  // digiKam's pick labels, which iopix does not use: counted, and cleared on request
+      const line = h('span', null, '');
+      const boxes = { 1: h('input', { type: 'checkbox', checked: true }), 2: h('input', { type: 'checkbox' }), 3: h('input', { type: 'checkbox' }) };
+      const names = { 1: 'Rejected', 2: 'Pending', 3: 'Accepted' };
+      const wrap = h('span', { class: 'toolbar' });
+      api('/api/picklabels').then((d) => {
+        const c = d.counts, p = d.progress;
+        fill(line, p.running ? `Clearing… sidecars ${nf.format(p.done)} / ${nf.format(p.total)}. ` : `${['Rejected', 'Pending', 'Accepted'].map((n, i) => `${n}: ${nf.format(c[i + 1])}`).join(', ')}. `);
+        fill(wrap, [1, 2, 3].map((k) => h('label', { class: 'chk' }, boxes[k], names[k])), btn('Clear…', async () => {
+          const ks = [1, 2, 3].filter((k) => boxes[k].checked), n = ks.reduce((a, k) => a + c[k], 0);
+          if (!ks.length || !n) { toast('No photo carries the chosen labels.'); return; }
+          if (!await confirmDialog(`Take the ${ks.map((k) => names[k]).join(', ')} pick label off ${plural(n, 'photo')}? digiKam’s database is backed up first, sidecars that carry the label are cleaned too (each backed up), and every photo’s change is in the edit log with undo.`, { ok: 'Clear', danger: true })) return;
+          try { const r = await post('/api/picklabels/clear', { levels: ks }); toast(`Pick label cleared from ${plural(r.cleared, 'photo')}.`); } catch (e) { toastError(e); }
+          if (S.route.view === view) settingsPage(view);
+        }, true));
+      }).catch(() => fill(line, ''));
+      return row('Pick labels', h('span', null, line, `digiKam’s pick labels. ${S.APP_NAME} does not use them and never sets them; clear the ones an older tool left behind.`), wrap);
+    })() : null,
     S.EDITING ? row('Edits waiting for digiKam', m.pendingEdits ? `${plural(m.pendingEdits, 'photo has', 'photos have')} edits saved in sidecars that digiKam’s database does not have yet. digiKam is ${m.digikamRunning ? 'running, so they cannot be applied right now' : 'closed, so they can be applied now'}.` : 'None. digiKam’s database and the sidecars agree.',
       m.pendingEdits ? btn('Apply to digiKam database…', dbDialog, !m.digikamRunning) : null) : null,
     row('Tag cover photos', 'The photo shown for each tag is chosen by the content model. Pick them again after big tagging changes.', btn('Pick again', () => act('covers', 'Choosing tag covers in the background.'))),

@@ -17,6 +17,7 @@
 | Metadata consistency | compare database, sidecar and file, and fix what disagrees |
 | Metadata quality | missing locations, face problems, and more |
 | Damaged files | read every file and find JPEGs that stop early, lack their end marker or hold damaged data, damaged PNGs, and pictures that cannot be decoded; a repair where there is one: adding a missing end marker, or cropping a photo whose bottom is missing to the part above the damage (the file copied first, undo in the edit log) |
+| Pick labels | how many photos carry digiKam's Rejected, Pending and Accepted labels (iopix never sets them), and **Clear…** to take the chosen ones off every photo: digiKam's database backed up first, sidecars cleaned too, undo in the edit log |
 | Edits waiting for digiKam | changes in sidecars not yet in digiKam's database, with **Apply to digiKam database** |
 | Tag cover photos | choose a picture for every tag automatically |
 

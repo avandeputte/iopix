@@ -148,6 +148,31 @@ async def api_filecheck_keep(request: Request):
     return r
 
 
+@router.get("/api/picklabels")
+def api_picklabels():
+    """Maintenance › Pick labels: how many photos carry each of digiKam's pick labels, and the clearing's progress."""
+    from app.photos import picklabels
+    return {"counts": picklabels.counts(), "progress": dict(picklabels.progress)}
+
+
+@router.post("/api/picklabels/clear")
+async def api_picklabels_clear(request: Request):
+    """Body {levels: [1, 2, 3]}: take those pick labels (Rejected, Pending, Accepted) off every photo, in digiKam's
+    database now (after a full backup) and in the sidecars in the background; each photo's change is in the edit log."""
+    from app.photos import picklabels
+    if not config.DB_WRITE or appstate.read_only():
+        raise HTTPException(403, "Writing to the library is turned off")
+    body = await request.json()
+    try:
+        n = await run_in_threadpool(picklabels.clear, body.get("levels") or [], True, _kick.set)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except dbsync.SyncError as e:
+        raise HTTPException(409, str(e))
+    await run_in_threadpool(_rebuild_after_write)
+    return {"cleared": n}
+
+
 @router.get("/api/history")
 def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
                 user: str = None, since: int = None, until: int = None):
