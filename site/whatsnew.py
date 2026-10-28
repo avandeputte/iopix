@@ -1,4 +1,5 @@
 """Writes docs/docs/whats-new.md from the version commits in git history ("v1.2.3: Title. Details...")."""
+import datetime as dt
 import re
 import subprocess
 import sys
@@ -6,7 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 OUT = Path(__file__).parent / 'docs' / 'docs' / 'whats-new.md'
-HEAD = '# What\'s new\n\nEvery iopix release, newest first. Update from **Maintenance › iopix › Update now**, or see [Updating](install/updating.md).\n'
+HEAD = '# What\'s new\n\nWhat changed in iopix, one entry per day, newest first; each entry carries the day\'s last version. Update from **Maintenance › iopix › Update now**, or see [Updating](install/updating.md).\n'
 VERSION = re.compile(r'^v(\d+)\.(\d+)\.(\d+):\s+(.*)$')
 
 
@@ -23,6 +24,14 @@ def summary(text):
     if not title.startswith('iopix'):
         title = title[:1].upper() + title[1:]
     return title, rest
+
+
+def short(title, limit=200):
+    """A fix's title, cut at a clause break when it runs long."""
+    if len(title) <= limit:
+        return title
+    cut = max(title.rfind(c, 60, limit) for c in (';', ':', ','))
+    return title[:cut] if cut > 0 else title[:limit].rsplit(' ', 1)[0] + '…'
 
 
 def main():
@@ -46,10 +55,17 @@ def main():
         title, rest = summary(m.group(4))
         days.setdefault(date, []).append((ver, title, rest))
     lines = [HEAD]
-    for date, items in days.items():
-        lines.append(f'\n## {date}\n')
-        for ver, title, rest in items:
-            lines.append(f'- **{ver}** · {title}.' + (f' {rest}' if rest else ''))
+    for date, items in days.items():  # one entry per day, as one release: its last version, new features, then fixes
+        day = dt.date.fromisoformat(date)
+        lines.append(f'\n## {items[0][0]} · {day:%B} {day.day}, {day.year}\n')
+        new = [(t, r) for v, t, r in reversed(items) if v.endswith('.0')]
+        fixes = list(OrderedDict.fromkeys(short(t) for v, t, r in reversed(items) if not v.endswith('.0')))
+        for title, rest in new:
+            lines.append(f'- **{title}.**' + (f' {rest}' if rest else ''))
+        if fixes:
+            if new:
+                lines.append('\n**Fixes and improvements**\n')
+            lines.extend(f'- {t}.' for t in fixes)
     OUT.write_text('\n'.join(lines) + '\n')
     print(f'whatsnew: {len(seen)} versions')
 
