@@ -653,19 +653,21 @@ export async function loadUser() {
 }
 // which bar item a view belongs to: Explore's sub-pages light Explore, the Faces page People, Maintenance's pages Maintenance
 export const NAV_OF = { duplicates: 'explore', detected: 'explore', bursts: 'explore', events: 'explore', faces: 'people', analysis: 'maintenance', history: 'maintenance', consistency: 'maintenance', quality: 'maintenance', trash: 'folders', import: 'folders' };
-export const MORE_VIEWS = ['favorites', 'folders', 'albums', 'tags', 'map', 'settings', 'maintenance'];
+export const MORE_VIEWS = ['favorites', 'folders', 'albums', 'tags', 'map', 'events', 'settings', 'maintenance'];
 export function currentNav() {
   const fp = filterParams();
   if (S.route.view === 'photos' && fp.get('fav') === '1' && [...fp.keys()].length === 1) return 'favorites';
-  return NAV_OF[S.route.view] || S.route.view;
+  const v = S.route.view;
+  if ($(`#nav a[data-v="${v}"]`)?.offsetParent) return v;  // a page with its own link in the sidebar (Manage is admins' only)
+  return NAV_OF[v] || v;
 }
 /** Phones: the bottom bar shows four destinations; the rest, with Settings and Maintenance, open from "More". */
 export function moreSheet() {
-  const rest = NAV.filter(([v]) => ['favorites', 'folders', 'albums', 'tags', 'map'].includes(v)).map(([v, label, ic, href]) => [href || `#/${v}`, label, ic, v]);  // the ones the phone bar hides
+  const rest = NAV.filter(([v]) => ['favorites', 'folders', 'albums', 'tags', 'map', 'events'].includes(v)).map(([v, label, ic, href]) => [href || `#/${v}`, label, ic, v]);  // the ones the phone bar hides
   if (S.CAN_MANAGE) rest.push(['#/import', 'Import', 'add', 'import']);
   rest.push(['#/settings', 'Settings', 'gear', 'settings']);
   if (S.IS_ADMIN) rest.push(['#/maintenance', 'Maintenance', 'wrench', 'maintenance']);
-  const back = modal('More', h('div', { class: 'sheetgrid' }, rest.map(([href, label, ic, v]) => h('a', { href, class: currentNav() === v ? 'on' : '', style: `--hue:var(--c-${{ favorites: 'rose', folders: 'teal', albums: 'indigo', tags: 'orange', map: 'cyan' }[v] || 'slate'})`, onclick: () => back.remove() }, h('span', { class: 'sic' }, icon(ic)), label))),
+  const back = modal('More', h('div', { class: 'sheetgrid' }, rest.map(([href, label, ic, v]) => h('a', { href, class: currentNav() === v ? 'on' : '', style: `--hue:var(--c-${{ favorites: 'rose', folders: 'teal', albums: 'indigo', tags: 'orange', map: 'cyan', events: 'green' }[v] || 'slate'})`, onclick: () => back.remove() }, h('span', { class: 'sic' }, icon(ic)), label))),
     h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
 }
 export function renderUserMenu() {

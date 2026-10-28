@@ -76,8 +76,16 @@ export function toast(msg, action, fn, ms = 6000) {
 
 export const FILTER_VIEWS = ['photos', 'map'];
 export const NAV = [
-  ['explore', 'Explore', 'explore'], ['photos', 'Photos', 'photo'], ['favorites', 'Favorites', 'heartO', '#/photos?fav=1'],
-  ['people', 'People', 'person'], ['places', 'Places', 'place'], ['folders', 'Folders', 'folder'], ['albums', 'Albums', 'album'], ['tags', 'Tags', 'tag'], ['map', 'Map', 'map'],
+  ['explore', 'Explore', 'explore'], ['photos', 'Photos', 'photo'], ['people', 'People', 'person'], ['places', 'Places', 'place'],
+  ['favorites', 'Favorites', 'heartO', '#/photos?fav=1'], ['folders', 'Folders', 'folder'], ['albums', 'Albums', 'album'], ['tags', 'Tags', 'tag'], ['map', 'Map', 'map'],
+  ['events', 'Events & trips', 'calendar'],
+];
+export const NAV_LIBRARY = 'favorites';  // the first link of the sidebar's "Library" group (everyone)
+// the sidebar's "Manage" group: library management, for admins only
+export const NAV_MANAGE = [
+  ['import', 'Import', 'add'], ['trash', 'Trash', 'trash'], ['duplicates', 'Duplicate files', 'dup'], ['bursts', 'Bursts & best shots', 'dup'],
+  ['detected', 'Detected content', 'spark'], ['quality', 'Metadata quality', 'check'], ['datesuggest', 'Date suggestions', 'calendar'],
+  ['damaged', 'Damaged files', 'photo'], ['history', 'Edit log', 'edit'],
 ];
 // hash S.route name -> page renderer (function declarations are hoisted, so this can sit above them)
 export const VIEW_FNS = { photos: showPhotos, explore: showExplore, people: showPeople, places: showPlaces, folders: showFolders, albums: showAlbums, tags: showTags, map: showMap, duplicates: showDuplicates,

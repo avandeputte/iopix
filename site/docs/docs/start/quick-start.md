@@ -63,6 +63,8 @@ Each of these asks for (or lets you set) the photo folder, digiKam's database (o
 
 Go to `http://<your-server>:8600` in a browser. The first visit builds the thumbnails in the background; you can browse straight away while it works.
 
+The sidebar has three groups: **Explore, Photos, People and Places** at the top; **Library** (Favorites, Folders, Albums, Tags, Map, Events & trips), which everyone sees; and, for admins only, **Manage** (Import, Trash, Duplicate files, Bursts & best shots, Detected content, Metadata quality, Date suggestions, Damaged files and the Edit log). Settings and Maintenance sit at its foot. On a phone the main pages are in the bottom bar and the rest under **More**.
+
 !!! tip "Use it from anywhere"
     iopix speaks plain HTTP. To use it away from home, or to install it on a phone, put it behind a reverse proxy with HTTPS. See [HTTPS and a reverse proxy](../install/reverse-proxy.md).
 

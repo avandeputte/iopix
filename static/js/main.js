@@ -1,6 +1,6 @@
 /** Startup: metadata, state, the first route. */
 import { $, NET, NO_CONNECTION, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
-import { FILTER_VIEWS, NAV, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toast, toastError } from './state.js';
+import { FILTER_VIEWS, NAV, NAV_LIBRARY, NAV_MANAGE, S, ST, toast, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toastError } from './state.js';
 import { initSearch } from './search.js';
 import { confirmDialog } from './actions.js';
 import { G } from './grid.js';
@@ -208,7 +208,11 @@ export async function start() {
   // the sidebar: the destinations in groups (a gap after Favorites, Places and Map), then Settings and Maintenance at
   // the foot above the status line. On phones the same links are the bottom bar: four of them and More.
   const link = ([v, label, ic, href]) => h('a', { href: href || `#/${v}`, 'data-v': v }, icon(ic), h('span', { class: 'nl' }, label));
-  $('#nav').append(...NAV.map((n) => [link(n), ['favorites', 'places'].includes(n[0]) ? h('div', { class: 'navgap' }) : null]).flat().filter(Boolean),
+  // three groups: browsing, the Library everyone has, and (admins only) managing the library
+  document.body.classList.toggle('noadmin', !S.IS_ADMIN);
+  const sec = (label, cls) => h('div', { class: 'navsec' + (cls ? ' ' + cls : '') }, label);
+  $('#nav').append(...NAV.map((n) => [n[0] === NAV_LIBRARY ? [h('div', { class: 'navgap' }), sec('Library')] : null, link(n)]).flat(2).filter(Boolean),
+    h('div', { class: 'navmanage' }, h('div', { class: 'navgap' }), sec('Manage'), ...NAV_MANAGE.map(link)),
     h('button', { class: 'navmore', 'data-v': 'more', title: 'More', onclick: moreSheet }, icon('more'), 'More'),
     h('div', { class: 'navfoot' }, link(['settings', 'Settings', 'gear']), link(['maintenance', 'Maintenance', 'wrench']), h('div', { id: 'status', role: 'status', 'aria-live': 'polite' })));
   initSidebar();

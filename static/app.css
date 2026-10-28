@@ -122,6 +122,10 @@ body.side-docked { --nav: var(--side); }
 #nav a[data-v="folders"] { --hue: var(--c-teal); } #nav a[data-v="albums"] { --hue: var(--c-indigo); }
 #nav a[data-v="settings"], #nav a[data-v="maintenance"] { color: var(--fg2); }
 .navgap { flex: none; height: 14px; }
+.navsec { flex: none; padding: 0 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg2); }
+.navmanage { display: flex; flex-direction: column; gap: 2px; }
+body.noadmin #nav .navmanage { display: none; }
+#nav a[data-v="events"] { --hue: var(--c-green); }
 #nav .navmore { display: none; }
 .navfoot { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; gap: 2px; }
 #status { padding: 8px 12px 12px; font-size: var(--fs-xs); color: var(--fg2); line-height: 1.3; }
@@ -817,7 +821,7 @@ button.lnk:hover { text-decoration: underline; }
   .cbulk { left: 0; bottom: calc(56px + env(safe-area-inset-bottom)); }
   /* ---- small screens: bottom nav, full-width filters, no hover-only controls */
   :root { --topbar: 48px; --nav: 0px; }
-  #menubtn, #navscrim, .navhead, .navgap, .navfoot, #nav a[data-v="settings"], #nav a[data-v="maintenance"] { display: none; }  /* Settings and Maintenance are under More */
+  #menubtn, #navscrim, .navhead, .navgap, .navsec, .navmanage, .navfoot, #nav a[data-v="settings"], #nav a[data-v="maintenance"] { display: none; }  /* Settings and Maintenance are under More */
   #topbar { gap: 8px; padding: 0 8px; left: 0; }
   #filterbtn span:last-child { display: none; }
   #filterbtn { padding: 0 8px; border: 0; }
@@ -880,7 +884,7 @@ button.lnk:hover { text-decoration: underline; }
   input, select, textarea, #q, .einput, .mtable .mpick, .modal input[type=file], .gbar select, #selbar select { font-size: var(--fs-l); }  /* under 16px, iOS zooms the whole page in when a field gets focus */
   #nav { overflow: hidden; justify-content: space-around; padding-bottom: env(safe-area-inset-bottom); height: calc(56px + env(safe-area-inset-bottom)); }
   #nav a, #nav .navmore { min-width: 0; flex: 1; width: auto; border-radius: 0; }
-  #nav a[data-v="favorites"], #nav a[data-v="folders"], #nav a[data-v="albums"], #nav a[data-v="tags"], #nav a[data-v="map"] { display: none; }
+  #nav a[data-v="favorites"], #nav a[data-v="folders"], #nav a[data-v="albums"], #nav a[data-v="tags"], #nav a[data-v="map"], #nav a[data-v="events"] { display: none; }
   .navmore { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0 6px; font-size: var(--fs-s); color: var(--fg2); background: none; border: 0; font-family: inherit; }
   .navmore.on { color: var(--accent); font-weight: 600; }
   #main, #filters { bottom: calc(56px + env(safe-area-inset-bottom)); }

@@ -345,6 +345,7 @@ def test_users_flow_in_the_browser(page, server, browser):
     assert visitor.locator(".lb-info h4", has_text="People").count() == 1, "the panel is open"
     assert visitor.locator(".lb-info input[placeholder='Title']").count() == 0
     assert not visitor.locator("#nav a[data-v=maintenance]").is_visible()
+    assert not visitor.locator("#nav .navmanage").is_visible() and visitor.locator("#nav a[data-v=events]").is_visible()
     visitor.keyboard.press("Escape"); visitor.wait_for_timeout(400)  # the lightbox covers the top bar
     visitor.locator("#usermenu button").click()
     visitor.wait_for_selector(".modal .account", timeout=5000)
@@ -683,6 +684,9 @@ def test_folders_and_albums_are_separate_pages(page, server, lib):
     page.wait_for_selector("h1:has-text('Folders')", timeout=10000)
     page.wait_for_timeout(1200)
     assert page.locator("#nav a[data-v=folders]").count() == 1 and page.locator("#nav a[data-v=albums]").count() == 1
+    # the sidebar's groups: Library for everyone, Manage for admins only
+    assert page.locator("#nav .navsec", has_text="Library").count() == 1
+    assert page.locator("#nav .navmanage a[data-v=damaged]").count() == 1 and page.locator("#nav a[data-v=events]").count() == 1
     assert page.locator(".tree .trow").count() >= 1, "a tree of folders"
     assert page.locator(".tree .tact[title^='Upload photos']").count() >= 1, "editors can upload"
     assert page.locator(".tree .tact[title^='New folder']").count() >= 1
