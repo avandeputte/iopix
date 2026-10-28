@@ -10,11 +10,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import config, thumbs, users
+from app import access, config, events, thumbs, users
 from app.digikam import dbsync, dkdb
 from app.photos import deletion, edits, folders, importer, lossless, organize, versions
 from app.data import index, state as appstate
-from app.core import _kick, _organize_allowed, _rebuild_after_write, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE
+from app.core import _organize_allowed, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE
 import secrets
 import threading
 from app.digikam.dkdb import chunked
@@ -23,12 +23,12 @@ from app.digikam.dkdb import chunked
 def _rebuild_soon():
     """The index catches up in the background: the answer goes out as soon as the files and digiKam's rows are
     done (a rebuild takes seconds on a large library), and the page shows the change at once on its own."""
-    threading.Thread(target=_rebuild_after_write, name="rebuild-after-write", daemon=True).start()
+    threading.Thread(target=events.after_write, name="rebuild-after-write", daemon=True).start()
 
 
 router = APIRouter()
 
-@router.post("/api/photos/transform")
+@router.post("/api/photos/transform", dependencies=[access.editor_write])
 async def api_photos_transform(request: Request):
     """Body {ids, op: right|left|180|fliph|flipv}: turn or flip photos without loss (JPEG pixels with jpegtran,
     otherwise the orientation flag); face regions turn with them; each is in the change log with Undo."""
@@ -45,11 +45,11 @@ async def api_photos_transform(request: Request):
     except dbsync.SyncError as e:
         raise HTTPException(409, str(e))
     if r["done"]:
-        await run_in_threadpool(_rebuild_after_write)
+        await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/adjust")
+@router.post("/api/photos/adjust", dependencies=[access.editor_write])
 async def api_photo_adjust(request: Request):
     """Body {id, exposure, contrast, saturation, warmth, angle, autolevel}: save an adjusted copy as a new version
     (name_v1.jpg beside it, linked as digiKam links versions); the original is not changed."""
@@ -63,11 +63,11 @@ async def api_photo_adjust(request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (OSError, ValueError) as e:
         raise HTTPException(500, f"The version could not be saved: {e}")
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/crop")
+@router.post("/api/photos/crop", dependencies=[access.editor_write])
 async def api_photos_crop(request: Request):
     """Body {id, rect: [x, y, w, h]} in upright pixels: crop the file (JPEG without loss via jpegtran; PNG, TIFF,
     WebP re-saved), faces shifted or dropped with it, a copy kept for Undo."""
@@ -84,11 +84,11 @@ async def api_photos_crop(request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The crop failed: {e}")
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/trash")
+@router.post("/api/photos/trash", dependencies=[access.editor_write])
 async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
     _organize_allowed()
@@ -130,12 +130,12 @@ def _trash_in_background(ids: list) -> dict:
         index.HIDDEN.difference_update(ids)
         TRASH_JOBS[job]["result"] = r
         TRASH_JOBS[job]["done"].set()
-        _rebuild_after_write()  # the photos that could not be moved come back
+        events.after_write()  # the photos that could not be moved come back
     threading.Thread(target=work, name="trash", daemon=True).start()
     return {"job": job, "queued": ids}
 
 
-@router.get("/api/photos/trash/{job}")
+@router.get("/api/photos/trash/{job}", dependencies=[access.public])
 async def api_photos_trash_job(request: Request, job: str, wait: float = 0):
     """How a background move to the trash went: {done, trashed, infos, failed}; wait (seconds, at most 30) holds the
     answer until it is done."""
@@ -149,7 +149,7 @@ async def api_photos_trash_job(request: Request, job: str, wait: float = 0):
     return {"done": j["done"].is_set(), **(j["result"] or {})}
 
 
-@router.get("/api/trash")
+@router.get("/api/trash", dependencies=[access.public])
 def api_trash(request: Request):
     """What is in the trash (every album root), newest first."""
     if not users.can_write(request.state.user):
@@ -158,7 +158,7 @@ def api_trash(request: Request):
     return {"items": items, "bytes": sum(i["size"] for i in items)}
 
 
-@router.get("/api/trash/thumb")
+@router.get("/api/trash/thumb", dependencies=[access.public])
 def api_trash_thumb(request: Request, info: str):
     """A thumbnail of a trashed file, named by its .dtrashinfo record (which must sit in an album root's trash)."""
     if not users.can_write(request.state.user):
@@ -186,17 +186,17 @@ def api_trash_thumb(request: Request, info: str):
     return FileResponse(dst, media_type="image/jpeg", headers=IMG_CACHE)
 
 
-@router.post("/api/trash/restore")
+@router.post("/api/trash/restore", dependencies=[access.editor_write])
 async def api_trash_restore(request: Request):
     """Body {infos: [.dtrashinfo paths]}: put those photos back where they were."""
     _organize_allowed()
     infos = [str(i) for i in (await request.json()).get("infos") or []][:20000]
     r = await run_in_threadpool(_run_organize, organize.restore, infos)
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/trash/empty")
+@router.post("/api/trash/empty", dependencies=[access.editor_write])
 async def api_trash_empty(request: Request):
     """Body {infos: [...]} or {all: true}: delete those trash entries for good."""
     _organize_allowed()
@@ -205,11 +205,11 @@ async def api_trash_empty(request: Request):
     if infos is not None and not infos:
         raise HTTPException(400, "Choose what to delete")
     r = await run_in_threadpool(_run_organize, organize.empty, infos)
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/move")
+@router.post("/api/photos/move", dependencies=[access.editor_write])
 async def api_photos_move(request: Request):
     """Body {ids, album}: move the photos (and their sidecars) into that folder; ids and everything attached stay."""
     _organize_allowed()
@@ -218,21 +218,21 @@ async def api_photos_move(request: Request):
     if not ids or body.get("album") is None:
         raise HTTPException(400, "Choose photos and a folder")
     r = await run_in_threadpool(_run_organize, organize.move_photos, ids, int(body["album"]))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/rename")
+@router.post("/api/photos/rename", dependencies=[access.editor_write])
 async def api_photos_rename(request: Request):
     """Body {id, name}: a new file name (the extension stays)."""
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/folders/{album_id}/properties")
+@router.post("/api/folders/{album_id}/properties", dependencies=[access.editor_write])
 async def api_folder_properties(album_id: int, request: Request):
     """Body {caption?, date?, category?, icon?}: digiKam's folder properties (Albums caption, date, collection, icon)."""
     _organize_allowed()
@@ -241,11 +241,11 @@ async def api_folder_properties(album_id: int, request: Request):
         r = await run_in_threadpool(folders.set_properties, album_id, {k: body[k] for k in ("caption", "date", "category", "icon") if k in body})
     except dbsync.SyncError as e:
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/rename-pattern")
+@router.post("/api/photos/rename-pattern", dependencies=[access.editor_write])
 async def api_photos_rename_pattern(request: Request):
     """Body {ids, pattern: date|date-name|date-seq}: rename the files by the date they were taken (ids kept, undo per photo)."""
     _organize_allowed()
@@ -254,31 +254,31 @@ async def api_photos_rename_pattern(request: Request):
     if not ids:
         raise HTTPException(400, "No photos")
     r = await run_in_threadpool(_run_organize, organize.rename_by_pattern, ids, str(body.get("pattern") or ""))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/folders/{album_id}/rename")
+@router.post("/api/folders/{album_id}/rename", dependencies=[access.editor_write])
 async def api_folder_rename(album_id: int, request: Request):
     """Body {name}: rename the folder on disk and in the database (subfolders follow)."""
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/folders/{album_id}/move")
+@router.post("/api/folders/{album_id}/move", dependencies=[access.editor_write])
 async def api_folder_move(album_id: int, request: Request):
     """Body {parent}: move the folder (with everything in it) under another folder of the same album root."""
     _organize_allowed()
     body = await request.json()
     r = await run_in_threadpool(_run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/photos/delete")
+@router.post("/api/photos/delete", dependencies=[access.editor_write])
 async def api_photos_delete(request: Request):
     """Body: {ids, confirm: true}. Deletes the photos for good: a backup of the files, sidecars and
     database first (data/deleted-photos, db-backups), then the database rows, the files and sidecars,
@@ -311,12 +311,12 @@ async def api_photos_delete(request: Request):
         raise HTTPException(409, str(e))
     except DB_ERRORS as e:
         raise HTTPException(500, f"The deletion failed and was rolled back: {e}")
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return result
 
 
 
-@router.get("/api/folders")
+@router.get("/api/folders", dependencies=[access.public])
 def api_folders():
     """Every digiKam folder as a tree, empty ones included, with the viewer's item counts where it has them."""
     try:
@@ -333,7 +333,7 @@ def api_folders():
     return {"folders": rows, "canManage": config.DB_WRITE and edits.available() and not appstate.read_only()}
 
 
-@router.post("/api/folders")
+@router.post("/api/folders", dependencies=[access.editor_write])
 async def api_folder_create(request: Request):
     """Body: {parent: folder id, name}. A new digiKam folder: the directory and its Albums row (digiKam closed)."""
     if not (config.DB_WRITE and edits.available()):
@@ -345,11 +345,11 @@ async def api_folder_create(request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
-    _kick.set()
+    events.kick()
     return result
 
 
-@router.get("/api/import/layouts")
+@router.get("/api/import/layouts", dependencies=[access.editor])
 def api_import_layouts(request: Request):
     """The folder layouts an import can use, and the one in use."""
     # patterns: apps may send their own folder pattern ({yyyy}/{yyyy}{mm}, Uploads...) instead of a layout key
@@ -369,7 +369,7 @@ async def _uploads(request: Request):
     return form, [(f.filename, f.file) for f in ups[:500]]
 
 
-@router.post("/api/import")
+@router.post("/api/import", dependencies=[access.editor_write])
 async def api_import_now(request: Request):
     """One request (the apps' background uploads): multipart `files` plus `layout` or `pattern` and `duplicates`
     ('skip', the default, or 'import'), staged and imported at once. Returns what a run returns: {added, skipped}."""
@@ -389,11 +389,11 @@ async def api_import_now(request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The import failed and was rolled back: {e}")
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/import/check")
+@router.post("/api/import/check", dependencies=[access.editor_write])
 async def api_import_check(request: Request):
     """Body {files: [{size, sha256}]}: which of them the library already has, by the import's duplicate test (the
     same size, then the same SHA-256 of the whole file). Returns {present: [{sha256, id}]}."""
@@ -408,7 +408,7 @@ async def api_import_check(request: Request):
     return {"present": await run_in_threadpool(importer.present, files)}
 
 
-@router.post("/api/import/stage")
+@router.post("/api/import/stage", dependencies=[access.editor_write])
 async def api_import_stage(request: Request):
     """Multipart `files` (and an optional `token` to add to an import started earlier): the files are kept
     aside and looked at; nothing goes into the library yet. Returns the plan."""
@@ -430,7 +430,7 @@ def _layout_or_pattern(layout: str, pattern: str):
     return layout if layout in importer.LAYOUTS else None
 
 
-@router.get("/api/import/{token}")
+@router.get("/api/import/{token}", dependencies=[access.editor])
 def api_import_plan(token: str, layout: str = None, pattern: str = None):
     """The plan for a layout key, or for a folder pattern of the app's own (?pattern={yyyy}/{yyyy}{mm})."""
     try:
@@ -443,7 +443,7 @@ def api_import_plan(token: str, layout: str = None, pattern: str = None):
         raise HTTPException(404, str(e))
 
 
-@router.post("/api/import/{token}/run")
+@router.post("/api/import/{token}/run", dependencies=[access.editor_write])
 async def api_import_run(token: str, request: Request):
     """Body {layout?, pattern?, include?: [names], duplicates?: 'skip'|'import', remember?: bool}: import the staged
     files. `pattern` (apps): a folder pattern of their own instead of a layout, see importer.check_pattern."""
@@ -462,11 +462,11 @@ async def api_import_run(token: str, request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The import failed and was rolled back: {e}")
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/import/{token}/discard")
+@router.post("/api/import/{token}/discard", dependencies=[access.editor_write])
 def api_import_discard(token: str):
     try:
         importer.discard(token)
@@ -493,7 +493,7 @@ async def share_target(request: Request):
     return RedirectResponse(f"/#/import?staged={token}", status_code=303)
 
 
-@router.post("/api/folders/{album_id}/upload")
+@router.post("/api/folders/{album_id}/upload", dependencies=[access.editor_write])
 async def api_folder_upload(album_id: int, request: Request):
     """Multipart: one or more `files`. Each is stored in the folder and registered in digiKam's
     database for digiKam to scan fully on its next run."""
@@ -512,5 +512,5 @@ async def api_folder_upload(album_id: int, request: Request):
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The upload failed and was rolled back: {e}")
-    _kick.set()
+    events.kick()
     return result
