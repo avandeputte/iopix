@@ -37,7 +37,7 @@ They connect to your own iopix server; there is no account to create anywhere el
 
 On iPad and Mac the photo viewer keeps its **info pane** beside the photo, as in the browser, with the same Actions menu, section chooser and edit log. Its text can be selected and copied. **Edit** at the top of the pane (for accounts that can change photos) turns the pane into the editor, and **✕** goes back to the details. On iPhone the same pane opens as a sheet.
 
-The viewer answers the browser's keys on a Mac or an iPad with a keyboard: ← → for the next and previous photo, 0 to 5 to rate, L for favorite, I for the info pane, F for the face boxes, E to edit, [ and ] to rotate, D to share, space for a slideshow, Delete to move to the trash and Esc to close. Zooming in past the preview shows the original file. Face boxes can be clicked to name, confirm or adjust them.
+The viewer answers the browser's keys on a Mac or an iPad with a keyboard: ← → for the next and previous photo, 0 to 5 to rate, L for favorite, I for the info pane, F for the face boxes, E to edit, [ and ] to rotate, D to share, space for a slideshow, Delete to move to the trash and Esc to close. On the Mac the mouse wheel zooms towards the pointer; a trackpad pinch zooms and a two-finger scroll pans. Zooming in past the preview shows the original file. Face boxes can be clicked to name, confirm or adjust them.
 
 The sidebar (More on iPhone) has **Library** for everyone: Favorites, Folders, Albums, Tags, Map and Events & trips. Admins also get **Library management**: Import, Trash, Duplicate files, Near-duplicates, Bursts, Detected content, Metadata quality, Date suggestions and History.
 
