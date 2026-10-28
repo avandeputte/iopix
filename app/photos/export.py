@@ -16,10 +16,9 @@ import tempfile
 
 from PIL import Image, ImageOps
 
-from app import config
+from app import config, thumbs
 from app.photos import edits
 
-from app import thumbs
 
 HEIC = thumbs.pillow_heif is not None  # importing thumbs registers HEIC decoding with Pillow
 

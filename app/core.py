@@ -16,21 +16,13 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
 
-from app.ai import analysis
-from app.ai import concepts
-from app import config
-from app.digikam import dbsync
-from app.digikam import dkdb
+from app.ai import analysis, concepts, models as dlmodels
+from app import config, events, thumbs
+from app.digikam import dbsync, dkdb
 from app.photos import edits
-from app.faces import facedetect
-from app.faces import facevecs
-from app.data import index
-from app.data import vdb
-from app import thumbs
-from app.data import state as appstate
-from app.ai import models as dlmodels
-from app.ai.semantic import semantic
-from app.ai.semantic import enabled as semantic_enabled
+from app.faces import ages, facedetect, facevecs
+from app.data import index, state as appstate, vdb
+from app.ai.semantic import enabled as semantic_enabled, semantic
 from app.data.query import build_where
 
 CACHES: list = []  # lru caches cleared when the index changes (the browsing routes register theirs)
@@ -95,7 +87,6 @@ def _start_prewarm():
     analysis.start(rows)
     facevecs.start()
     semantic.start(rows)
-    from app.faces import ages
     ages.start()
 
 
@@ -375,3 +366,7 @@ def _rebuild_after_write():
         logging.getLogger("app.data.index").warning("rebuild after a database write failed: %s", e)
     state["version"] = None
     _kick.set()
+
+
+events.on("after_write", _rebuild_after_write)  # writers call events.after_write() without importing the server
+events.on("kick", _kick.set)

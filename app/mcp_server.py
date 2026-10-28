@@ -20,13 +20,18 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from app import config, proxyauth, thumbs, updates
-from app.photos import consistency, edits
-from app.data import index
-from app.data import state as appstate
+from app import __version__, config, events, jobs, logs, proxyauth, thumbs, updates, users
+from app.photos import consistency, datecheck, dateprecision, edits, organize, repair, tagmanager
+from app.data import index, state as appstate
 from app.data.query import DATE_RE, SORTS, build_where
 from app.ai.semantic import semantic, enabled as semantic_enabled
 from app.digikam.dkdb import chunked
+from app.digikam import dbsync, dkdb
+from app.ai import models
+from app.ai.analysis import progress as analysis_progress
+from app.faces import facemgr, facequality
+from app.digikam.dbsync import SyncError
+from app.routes.editing import _current_dates
 
 VIEWER = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # for the links in results
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -436,7 +441,6 @@ def _request_has_token() -> bool:
 def _anon_paths_ok() -> bool:
     """File paths in answers: only for a request that carried the admin token (checked by the HTTP layer when sign-in
     is required), or on an install with no accounts at all."""
-    from app import users
     return not users.any_users() or _request_has_token()
 
 
@@ -460,10 +464,6 @@ def diagnostics(token: str) -> dict:
     import shutil as sh
     import sys
     import time
-    from app import __version__, jobs, users
-    from app.digikam import dkdb
-    from app.ai import models
-    from app.ai.analysis import progress as analysis_progress
     try:
         free = sh.disk_usage(str(config.DATA_DIR)).free
     except OSError:
@@ -514,7 +514,6 @@ def server_log(token: str, lines: int = 200, contains: str = "", level: Literal[
     """The last lines of the viewer's own log (data/viewer.log, rotating). `contains` keeps only lines
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
     _need_token(token)
-    from app import logs
     try:
         return logs.tail(min(int(lines), 2000), contains, level)
     except OSError as e:
@@ -528,8 +527,6 @@ def job_queue(token: str) -> dict:
     completed item (a stall shows as a large 'idle_seconds')."""
     _need_token(token)
     import time
-    from app import jobs
-    from app.ai.analysis import progress as analysis_progress
     q = jobs.status()
     now = time.time()
     out = {"running": q["running"], "queued": q["queued"], "threads": q["threads"], "cores": q["cores"],
@@ -551,8 +548,6 @@ def repair_video(token: str, photo_id: int) -> dict:
     rewrapped without re-encoding, checked to play in full before it replaces the file. The original is kept
     (the change log can put it back). Needs the admin token."""
     _need_token(token, writes=True)
-    from app.photos import repair
-    from app.digikam import dbsync
     try:
         return repair.video(int(photo_id))
     except dbsync.SyncError as e:
@@ -567,14 +562,12 @@ def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optiona
     them (mode: off|cloudflare|haproxy|nginx|caddy|traefik|header; an empty string clears one; iopix.env still wins).
     Needs the admin token."""
     _need_token(token)
-    from app import proxyauth
     changes = {k: v for k, v in (("AUTH_PROXY", mode), ("CF_ACCESS_TEAM", cf_access_team), ("CF_ACCESS_AUD", cf_access_aud),
                                  ("AUTH_PROXY_TRUSTED", trusted), ("AUTH_PROXY_CREATE", create_role)) if v is not None}
     if "AUTH_PROXY" in changes and changes["AUTH_PROXY"] not in ("", "off", *proxyauth.PRESETS):
         raise ToolError("mode: off, cloudflare, haproxy, nginx, caddy, traefik or header")
     if changes:
         proxyauth.save(changes)
-    from app import users
     out = proxyauth.status()
     # which account each person the proxy lets in maps to (matched on email, then name)
     out["accounts"] = [{"name": u["name"], "role": u["role"], "email": u.get("email") or None} for u in users.list_users()]
@@ -682,7 +675,6 @@ def photo_file(token: str, photo_id: int) -> dict:
 def check_for_update() -> dict:
     """Installed version and commit versus GitHub's main branch (network), and the outcome of the
     last update run (lastUpdate: ok, text, at)."""
-    from app import __version__
     return {"version": __version__, **updates.check(), "lastUpdate": updates.last_result()}
 
 
@@ -692,7 +684,6 @@ def consistency_report(token: str, field: str = "", offset: int = 0, limit: int 
     caption or tags differ between digiKam's database, the XMP sidecar and the image file, with each
     source's value. field narrows it to one of rating|title|caption|tags. Needs the admin token."""
     _need_token(token)
-    from app.photos import consistency
     return {"progress": dict(consistency.progress), "summary": consistency.summary(),
             **consistency.report(field or None, max(0, offset), max(1, min(limit, 2000)))}
 
@@ -705,7 +696,6 @@ def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, c
     apply_to_database written into digiKam's database right away (digiKam closed). Needs the admin token."""
     _need_token(token, writes=True)
     import re
-    from app.digikam import dbsync
     ch = {}
     if taken is not None:
         if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", taken):
@@ -739,7 +729,6 @@ def consistency_scan(token: str, rescan_all: bool = False) -> dict:
     every photo (rescan_all) or those changed since they were last checked. consistency_report shows the progress and
     the results. Needs the admin token."""
     _need_token(token)
-    from app.photos import consistency
     con = db()
     try:
         rows = [dict(r) for r in con.execute("SELECT id, path, name, video, hash, size, modified FROM photos ORDER BY ts DESC")]
@@ -755,8 +744,6 @@ def consistency_sync(token: str, photo_ids: list[int], source: str, targets: lis
     as the consistency page's Sync does: sidecars and files are backed up first; writing the database needs
     digiKam closed and is backed up too. Returns {synced, skipped}. Needs the admin token."""
     _need_token(token, writes=True)
-    from app.photos import consistency
-    from app.digikam import dbsync
     try:
         return consistency.sync([int(i) for i in photo_ids][:20000], source, targets, fields)
     except (ValueError, dbsync.SyncError) as e:
@@ -769,9 +756,6 @@ def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
     after a tag or face change: for when the database was changed outside the viewer. Each sidecar is backed up
     before its first change. Returns {photos, tags_failed, regions}. Needs the admin token."""
     _need_token(token, writes=True)
-    from app.digikam import dbsync
-    from app.faces import facemgr
-    from app.photos import edits
     ids = [int(i) for i in photo_ids][:5000]
     paths = dict(dbsync.photo_paths(ids))
     failed = edits.rewrite_tags([{"id": i, "path": p} for i, p in paths.items()])
@@ -785,7 +769,6 @@ def face_quality(token: str) -> dict:
     (near), the same person in two separate places (separate), empty or out-of-photo rectangles (invalid), and
     the progress of the last clean-up. Needs the admin token."""
     _need_token(token)
-    from app.faces import facequality
     return facequality.summary(limit=20)
 
 
@@ -795,9 +778,6 @@ def rename_folder(token: str, folder: str, new_name: str) -> dict:
     subfolders and sidecars follow, backups move with it. folder: its id or path (e.g. "2022/20221008 Soccer").
     digiKam must be closed. Needs the admin token."""
     _need_token(token, writes=True)
-    from app.core import _rebuild_after_write
-    from app.digikam.dbsync import SyncError
-    from app.photos import organize
     con = db()
     try:
         aid = _resolve_album(con, folder)
@@ -807,7 +787,7 @@ def rename_folder(token: str, folder: str, new_name: str) -> dict:
         r = organize.rename_folder(aid, new_name)
     except SyncError as e:
         raise ToolError(str(e))
-    _rebuild_after_write()
+    events.after_write()
     return r
 
 
@@ -820,9 +800,6 @@ def tag_op(token: str, op: Literal["person", "notperson", "merge", "rename", "mo
     level); add (name inside parent). Ids are those of list_tags/list_people. digiKam must be closed unless the viewer
     runs without it. Needs the admin token."""
     _need_token(token, writes=True)
-    from app.core import _kick
-    from app.digikam.dbsync import SyncError
-    from app.photos import tagmanager
     if not (config.DB_WRITE and edits.available()):
         raise ToolError("Tag management is turned off (needs DB_WRITE and EDITING)")
     body = {"op": op, "id": tag_id, "into": into, "name": name, "parent": parent or None}
@@ -834,7 +811,7 @@ def tag_op(token: str, op: Literal["person", "notperson", "merge", "rename", "mo
         r = tagmanager.apply(body)
     except (SyncError, ValueError) as e:
         raise ToolError(str(e))
-    _kick.set()
+    events.kick()
     return r
 
 
@@ -851,8 +828,6 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
     how many photos match, per year, and how many already have this precision; with dry_run=False the change runs in
     the background (call again with dry_run=True to see progress). Needs the admin token."""
     _need_token(token, writes=True)
-    from app.data import index
-    from app.photos import dateprecision
     if not (ids or years):
         raise ToolError("Give ids or years")
     con = index.open_index()
@@ -878,8 +853,6 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
     _precision_job.update(running=True, done=0, total=len(todo), error=None)
 
     def run():
-        from app.core import _kick
-        from app.routes.editing import _current_dates
         try:
             for chunk in chunked(todo, 100):
                 ch, per = {}, {}
@@ -888,7 +861,7 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
                 _precision_job["done"] += r["edited"]
                 if r["failed"]:
                     _precision_job["error"] = f"{len(r['failed'])} failed, e.g. {r['failed'][0]['error']}"
-            _kick.set()
+            events.kick()
         except Exception as e:
             _precision_job["error"] = str(e)[:300]
         finally:
@@ -906,7 +879,6 @@ def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
     dates disagree with each other; tags_matching_the_folder says which tags those are. detail: per photo. Read-only.
     Needs the admin token."""
     _need_token(token)
-    from app.photos import datecheck
     return datecheck.wrongfolder(detail=detail, limit=limit)
 
 
@@ -918,10 +890,6 @@ def face_cleanup(token: str, files: bool = False) -> dict:
     the cleaned photos that still carry the duplicates are rewritten too (each backed up first, pixels checked
     unchanged). Runs in the background; face_quality shows progress. Needs the admin token."""
     _need_token(token)
-    from app import config
-    from app.digikam import dbsync
-    from app.faces import facequality
-    from app.data import state as appstate
     if not config.DB_WRITE or appstate.read_only():
         raise ToolError("Writing to digiKam's database is turned off")
     try:

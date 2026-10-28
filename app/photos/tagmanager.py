@@ -24,6 +24,7 @@ from app.digikam import dbsync, dkdb
 from app.photos import edits
 from app.data import state as appstate
 from app.digikam.dbsync import SyncError
+from app.faces import facemgr
 
 OPS_BACKUP_DIR = edits.BACKUP_DIR / "tag-ops"
 KEEP_OPS = 8
@@ -307,6 +308,33 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
     return summary
 
 
+def add_tags(full_paths: list, check_running: bool = True, db_path: Path = None) -> dict:
+    """Create every tag path that does not exist yet ("Places/France/Paris" makes the missing parents too), as one
+    guarded write: one preflight, one transaction. Returns {full path: tag id} for every path, existing ones included."""
+    db_path = Path(db_path or dkdb.sqlite_path())
+    dbsync.preflight(db_path, check_running, "tags")
+    out = {}
+    with dbsync.write_transaction(db_path, check_running) as con:
+        tree = _Tree(con)
+        by_path = {tree.full(t): t for t in tree.rows}
+        for full in sorted(set(full_paths)):  # parents before children
+            parts = [p for p in full.split("/") if p]
+            pid = 0
+            for depth in range(1, len(parts) + 1):
+                path = "/".join(parts[:depth])
+                tid = by_path.get(path)
+                if tid is None:
+                    name = _check_name(parts[depth - 1])
+                    if any(r["pid"] == pid and r["name"].lower() == name.lower() for r in tree.rows.values()):
+                        raise SyncError(f"A tag named “{name}” already exists there.")
+                    tid = con.execute("INSERT INTO Tags (pid, name) VALUES (?,?)", (pid, name)).lastrowid
+                    tree.rows[tid] = {"pid": pid, "name": name}
+                    by_path[path] = tid
+                pid = tid
+            out[full] = pid
+    return out
+
+
 def _after_merge(src: int, dst: int, images: list, db_path):
     """What the viewer keeps about the merged tag follows it: People groups and face references; the sidecars'
     face regions are rewritten from the database (the tag lists through the queue, like any tag change)."""
@@ -336,7 +364,6 @@ def _run_group(op: str, rows: list):
         if not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(side, dst)
-    from app.faces import facemgr
     res = facemgr.write_regions_many([i for i, _p in rows])  # stamps the files it wrote: no digiKam rescan needed
     failed = [i for i, v in res.items() if v != "written"]
     if failed:

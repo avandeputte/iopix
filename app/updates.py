@@ -11,7 +11,8 @@ import threading
 import time
 import urllib.request
 
-from app import config
+from app import __version__, config
+from app.data import state
 
 # IOPIX_*; the DIGIKAM_VIEWER_* names from before the rename are still honoured
 REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or "avandeputte/iopix"
@@ -30,7 +31,6 @@ RESULT_FILE = "update-result.txt"  # in the data folder; update.sh writes the ou
 def admin_token() -> str:
     """The token that lets an MCP client run the update (the endpoint itself has no sign-in).
     MCP_ADMIN_TOKEN in the environment wins; otherwise one is generated once and kept in settings."""
-    from app.data import state
     env = os.environ.get("MCP_ADMIN_TOKEN", "").strip()
     if env:
         return env
@@ -42,7 +42,6 @@ def admin_token() -> str:
 
 
 def regenerate_token() -> str:
-    from app.data import state
     tok = secrets.token_urlsafe(24)
     state.set_setting("mcp_admin_token", tok)
     return tok
@@ -91,7 +90,6 @@ DAILY = 24 * 3600
 
 def auto_check_enabled() -> bool:
     """Settings › Viewer › Check for updates daily (on unless switched off; UPDATE_CHECK=0 locks it off)."""
-    from app.data import state
     if os.environ.get("UPDATE_CHECK", "").strip() == "0":
         return False
     return state.get_setting("update_check", "1") == "1"
@@ -137,7 +135,6 @@ def _remote_app_version(sha: str):
 
 def check() -> dict:
     """{installed, remote, remoteDate, remoteMessage, remoteVersion, status: current|update|error}"""
-    from app import __version__
     mine = local_commit()
     out = {"installed": mine[:7], "checked": int(time.time())}
     try:
@@ -180,7 +177,6 @@ def _app_writable() -> bool:
 
 
 def status() -> dict:
-    from app import __version__
     return {"version": __version__, "installed": local_commit()[:7], "docker": in_docker(), "canRun": (config.APP_DIR / "update.sh").exists() and not in_docker() and _app_writable(),
             "check": dict(_checked) if _checked else None, "progress": dict(progress), "lastUpdate": last_result()}
 

@@ -14,7 +14,9 @@ import tempfile
 
 from app.digikam import dbsync, dkdb
 from app.digikam.dbsync import SyncError
-from app.photos import edits
+from app.photos import edits, history, scanner
+from app.data import index
+from app import thumbs
 
 
 def _boxes(path: str) -> list:
@@ -72,9 +74,6 @@ def rewrap(path: str, work: str, ff: str):
 
 def video(pid: int, check_running: bool = True) -> dict:
     """Repair one video in place. Returns {id, fixed_by, size_before, size_after, duration}."""
-    from app.data import index
-    from app.photos import history, scanner
-    from app import thumbs
     ff = shutil.which("ffmpeg")
     if not ff:
         raise SyncError("ffmpeg is not installed on the server")

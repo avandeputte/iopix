@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from app.digikam import dbsync, dkdb
-from app.photos import edits
+from app.photos import edits, history, scanner
 from app.digikam.dbsync import SyncError
 
 IMAGE_EXT = {"jpg", "jpeg", "png", "gif", "tif", "tiff", "webp", "heic", "heif", "avif", "bmp", "jp2", "psd",
@@ -219,11 +219,9 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     if not staged:
         return {"added": [], "skipped": skipped}
     added = register(album_id, staged, check_running)
-    from app.photos import scanner
     scanner.complete([a["id"] for a in added], check_running)  # camera, place, keywords, faces, digiKam's hash, as digiKam's scan would
     from app.photos import importer
     importer.sidecars_from_db([a["id"] for a in added])
-    from app.photos import history
     history.record([{"photo_id": a["id"], "action": "added", "summary": f"Uploaded into {folder.get('rel') or folder['dir']} (sidecar created)", "path": str(folder["dir"] / a["name"])} for a in added])
     return {"added": added, "skipped": skipped}
 

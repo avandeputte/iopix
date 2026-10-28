@@ -16,6 +16,8 @@ import threading
 import time
 
 from app.digikam import dbsync, dkdb
+from app.data import index
+from app.photos import edits, history
 
 log = logging.getLogger("app.photos.picklabels")
 LEVELS = {1: "Rejected", 2: "Pending", 3: "Accepted"}
@@ -25,7 +27,6 @@ _SIDECAR_PICK = re.compile(r'(?:digiKam:PickLabel|xmpDM:Pick|xmpDM:Good)\s*=\s*"
 
 def counts() -> dict:
     """{1: photos labelled Rejected, 2: Pending, 3: Accepted} from the index."""
-    from app.data import index
     con = index.open_index()
     try:
         have = dict(con.execute("SELECT pick, count(*) FROM photos WHERE pick IN (1, 2, 3) GROUP BY 1").fetchall())
@@ -37,7 +38,6 @@ def counts() -> dict:
 def clear(levels: list, check_running: bool = True, after=None) -> int:
     """Take the chosen pick labels (1 Rejected, 2 Pending, 3 Accepted) off every photo. The database part is done
     before this returns; the sidecars follow in the background. Returns how many photos lost a label."""
-    from app.photos import history
     levels = sorted({int(x) for x in levels if int(x) in LEVELS})
     if not levels:
         raise ValueError("Choose Rejected, Pending or Accepted")
@@ -68,7 +68,6 @@ def clear(levels: list, check_running: bool = True, after=None) -> int:
 
 def _sidecars(paths: list, after):
     """Remove the label from the sidecars that carry it (most do not: digiKam writes it there only when told to)."""
-    from app.photos import edits
     try:
         jobs = []
         for path in paths:

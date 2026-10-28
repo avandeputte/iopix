@@ -15,35 +15,18 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 
-from app.ai import analysis
-from app.ai import concepts
-from app import config
-from app.photos import edits
+from app.ai import analysis, concepts, moments
+from app import __version__ as APP_VERSION, config, jobs as bgjobs, updates, users
+from app.photos import edits, lossless, tagmanager
 from app.faces import facedetect
-from app.data import index
-from app.photos import lossless
-from app.ai import moments
+from app.data import index, state as appstate
 from app.geo import places
-from app.photos import tagmanager
-from app.data import state as appstate
-from app import jobs as bgjobs
-from app import users
-from app import updates
-from app import __version__ as APP_VERSION
-from app.ai.semantic import semantic
-from app.ai.semantic import enabled as semantic_enabled
+from app.ai.semantic import enabled as semantic_enabled, semantic
 from app.data.query import SORTS
-from app.core import state
-from app.core import prewarmer
-from app.core import db
-from app.core import resolve
-from app.core import _public_version
-from app.core import jresp
-from app.core import app_name
-from app.core import _app_stamp
-from app.core import CACHES
+from app.core import _app_stamp, _public_version, _tag_covers, app_name, CACHES, db, jresp, prewarmer, resolve, state
 
-from app.core import _tag_covers
+from app.routes.faces import api_people_groups
+from app.data.index import REJECT_REASONS, _parse_dt
 
 router = APIRouter()
 
@@ -327,7 +310,6 @@ def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
     """Everything the Explore page fetches, in one request (the apps): {random, thenAndNow, events, onThisDay,
     peopleGroups}, each as its own endpoint gives it (/api/random, /api/thenandnow, /api/events, /api/photos?md=,
     /api/people/groups). md: the viewer's own today as MM-DD; without it, onThisDay is null."""
-    from app.routes.faces import api_people_groups
     on_this_day = None
     if re.fullmatch(r"\d\d-\d\d", md or ""):
         on_this_day = orjson.loads(gzip.decompress(_photos_cached(state["version"], f"{appstate.rev}.{semantic.key}|md={md}")))
@@ -396,7 +378,6 @@ def _overlay_pending(con, d: dict):
     """An edit just made (written to the sidecar, remembered until digiKam's database has it) shows in the answer at
     once, as the index shows it after its next rebuild a moment later; so the answer (and its ETag) changes as soon as
     the edit is accepted. Doing it again once the index has it changes nothing."""
-    from app.data.index import _parse_dt
     e = edits.pending_one(d["id"])
     if not e:
         return
@@ -428,7 +409,6 @@ def _quality(d: dict):
     many had them, and the reasons it looks like a reject ([] when it does not)."""
     if d.get("video") or all(d.get(k) is None for k in ("aesth", "focusn", "eyes_checked", "sharpn")):
         return None
-    from app.data.index import REJECT_REASONS
     why = [w for w in (d.get("reject") or "").split(",") if w]
     return {"aesthetic": d.get("aesth"), "aestheticRank": d.get("aesthn"), "focusRank": d.get("focusn") if d.get("focusn") is not None else d.get("sharpn"),
             "eyesChecked": d.get("eyes_checked"), "eyesClosed": d.get("eyes_closed"),

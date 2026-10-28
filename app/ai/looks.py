@@ -23,6 +23,7 @@ import threading
 import zipfile
 
 from app.ai import models
+from app.faces import facedetect
 
 try:
     import numpy as np
@@ -53,7 +54,6 @@ def aesthetic_available() -> bool:
 
 
 def eyes_available() -> bool:
-    from app.faces import facedetect
     return np is not None and models.path("eyes").exists() and facedetect.available()
 
 
@@ -252,7 +252,6 @@ def eyes(im, faces: list, full_w: int, full_h: int) -> tuple:
     """(faces judged, faces with both eyes closed) over the given face regions (upright full-size pixels).
     A face is judged only when the detector finds it again, seen from the front, with the eyes far enough
     apart to see; the others are left out of both counts."""
-    from app.faces import facedetect
     sx, sy = im.width / max(full_w or im.width, 1), im.height / max(full_h or im.height, 1)
     judged = closed = 0
     for x, y, w, h in faces:

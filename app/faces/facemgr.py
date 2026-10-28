@@ -22,9 +22,10 @@ import threading
 from pathlib import Path
 
 from app.digikam import dbsync, dkdb
-from app.photos import edits, tagmanager
+from app.photos import edits, history, tagmanager
 from app.data import index
 from app.digikam.dbsync import SyncError
+from app.faces.facequality import NEAR
 
 log = logging.getLogger("app.faces.facemgr")
 
@@ -238,7 +239,6 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
                     results.append({"op": op.get("op"), "image": op.get("image"), "error": str(e)})
             if not any("error" not in r for r in results):
                 raise SyncError(results[0]["error"])
-    from app.photos import history
     labels = {"name": "Face named {name}", "confirm": "Suggested face confirmed as {name}", "ignore": "Face marked as ignored", "unknown": "Face name removed (now unknown)",
               "remove": "Face region removed", "add": "Face added for {name}", "move": "Face region moved", "detected": "Unnamed face added by face detection",
               "suggest": "Suggestion for {name} put back", "untag": "{name} taken off the photo (no face box)",
@@ -326,7 +326,6 @@ def inverse_ops(d: dict) -> list:
 def _person_already_there(con, image: int, tag: int, rect) -> bool:
     """Whether this person already has a face region on the photo within a few pixels of rect (the duplicates
     Maintenance › Metadata quality cleans up must not be made here)."""
-    from app.faces.facequality import NEAR
     x, y, w, h = map(int, rect)
     for (val,) in con.execute("SELECT value FROM ImageTagProperties WHERE imageid = ? AND tagid = ? AND property = 'tagRegion'", (image, tag)):
         m = index.RECT_RE.search(val or "")

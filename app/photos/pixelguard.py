@@ -17,6 +17,8 @@ import time
 
 from app import config
 from app.digikam.dkdb import chunked
+from app.photos import edits
+from app.data import index
 
 log = logging.getLogger("app.photos.pixelguard")
 _warned = [False]
@@ -26,7 +28,6 @@ def hashes(paths: list) -> dict:
     """{path: SHA-256 of the image data, or None when exiftool cannot hash that file}."""
     if not paths:
         return {}
-    from app.photos import edits
     with tempfile.NamedTemporaryFile("w", suffix=".args", dir=config.DATA_DIR, delete=False, encoding="utf-8") as f:
         f.write("\n".join(paths) + "\n")
         argfile = f.name
@@ -108,7 +109,6 @@ def _log_refused(path: str):
 
 def _photo_ids(paths: list) -> dict:
     """{path: photo id} from the index, for the checksum rows (which are kept by photo, so moves and renames keep them)."""
-    from app.data import index
     out = {}
     try:
         con = index.open_index()

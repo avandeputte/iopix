@@ -23,7 +23,7 @@ import time
 from app import config
 from app.ai import analysis
 from app.digikam import dbsync, dkdb
-from app.photos import edits
+from app.photos import edits, history
 from app.data import index, vdb
 from app.digikam.dkdb import chunked
 
@@ -523,7 +523,6 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     if source == "db" and done:  # the database was chosen as the truth: edits not in it yet are given up for these fields
         edits.drop_pending_fields(done, fields)
     recheck(done)
-    from app.photos import history
     labels = {"db": "the database", "sidecar": "the sidecar", "file": "the image file"}
     history.record([{"photo_id": pid, "action": "sync", "summary": f"Synced {', '.join(fields)} from {labels[source]} to {' and '.join(labels[t] for t in targets)}",
                      "path": stored.get(pid, {}).get("path")} for pid in done])

@@ -15,45 +15,16 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.ai import analysis
-from app.ai import caption
-from app import proxyauth
-from app import config
-from app.digikam import dbsync
-from app.ai import detector
-from app.ai import looks
-from app.faces import ages
-from app.digikam import dkdb
-from app.photos import edits
-from app.digikam import merge
-from app.faces import facedetect
-from app.faces import facevecs
-from app.digikam import library
-from app.data import index
-from app.data import vdb
-from app import thumbs
-from app.data import state as appstate
-from app import jobs as bgjobs
-from app.geo import geocode
-from app.geo import maps
-from app import users
-from app import updates
-from app.ai import models as dlmodels
-from app.ai.semantic import ENGINES
-from app.ai.semantic import semantic
-from app.ai.semantic import enabled as semantic_enabled
-from app.ai.semantic import _ready as semantic_ready
-from app.core import DB_ERRORS
-from app.core import state
-from app.core import prewarmer
-from app.core import db
-from app.core import _start_prewarm
-from app.core import _kick
-from app.core import app_name
-from app.core import _face_detect_allowed
-from app.core import _rebuild_after_write
+from app.ai import analysis, caption, detector, looks, models as dlmodels
+from app import config, jobs as bgjobs, logs, proxyauth, thumbs, updates, users
+from app.digikam import dbsync, dkdb, library, merge
+from app.faces import ages, facedetect, facevecs
+from app.photos import edits, paths, scanner
+from app.data import index, state as appstate, vdb
+from app.geo import geocode, maps
+from app.ai.semantic import _ready as semantic_ready, enabled as semantic_enabled, ENGINES, semantic
+from app.core import _compute_tag_covers, _face_detect_allowed, _kick, _rebuild_after_write, _start_prewarm, app_name, db, DB_ERRORS, prewarmer, state
 
-from app.core import _compute_tag_covers
 
 from app.routes.browse import _photos_cached
 
@@ -743,7 +714,6 @@ def api_restart():
 @router.get("/api/log")
 def api_log(lines: int = 300, level: str = "any", contains: str = "", requests: int = 0):
     """Maintenance › Server log: the end of data/viewer.log, filtered (admins)."""
-    from app import logs
     return logs.tail(lines, contains[:200], level if level in ("any", "warning", "error", "auth") else "any", bool(requests))
 
 
@@ -777,7 +747,7 @@ def api_maintenance(request: Request):
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
         "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": os.environ.get("MCP", "").strip() == "1",
-        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": _db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "")), "sidecarCompat": edits.compat_naming(), "searchModel": semantic.chosen(),
+        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": _db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "")), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),
         "scanner": _scanner_state(),
@@ -789,7 +759,6 @@ def api_maintenance(request: Request):
 
 
 def _scanner_state() -> dict:
-    from app.photos import scanner
     return {"enabled": scanner.enabled(), "interval": scanner.interval(), "running": scanner.progress["running"], "last": scanner.progress["last"]}
 
 
@@ -801,7 +770,6 @@ def api_scan_status():
 @router.post("/api/scan")
 async def api_scan_run():
     """Scan the album folders now (also when the setting is off): new, changed and vanished files and folders."""
-    from app.photos import scanner
     if not config.DB_WRITE:
         raise HTTPException(403, "Writing to digiKam's database is turned off (DB_WRITE=0)")
     if scanner.progress["running"]:

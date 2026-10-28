@@ -8,25 +8,13 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import config
+from app import config, thumbs, users
 from app.digikam import dbsync
 from app.photos import edits
-from app.faces import facedetect
-from app.faces import facemgr
-from app.faces import facevecs
-from app.faces import ages
+from app.faces import ages, facedetect, facemgr, facevecs
 from app.ai import neardups
-from app import thumbs
-from app import users
 from app.data import state as appstate
-from app.core import IMG_CACHE
-from app.core import DB_ERRORS
-from app.core import db
-from app.core import _kick
-from app.core import jresp
-from app.core import _photo_row
-from app.core import _face_detect_allowed
-from app.core import _rebuild_after_write
+from app.core import _face_detect_allowed, _kick, _photo_row, _rebuild_after_write, db, DB_ERRORS, IMG_CACHE, jresp
 
 
 router = APIRouter()

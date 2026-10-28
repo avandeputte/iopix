@@ -7,11 +7,10 @@ from starlette.concurrency import run_in_threadpool
 
 from app import config
 from app.digikam import dbsync
-from app.photos import history
+from app.photos import filecheck, history, picklabels
 from app.data import state as appstate
-from app.core import DB_ERRORS
-from app.core import _kick
-from app.core import _rebuild_after_write
+from app.core import _kick, _rebuild_after_write, DB_ERRORS
+from app.faces import facequality
 
 
 router = APIRouter()
@@ -19,7 +18,6 @@ router = APIRouter()
 @router.get("/api/quality")
 def api_quality():
     """Maintenance › Metadata quality: face regions stored twice, the same person in two places, broken rectangles."""
-    from app.faces import facequality
     try:
         return facequality.summary()
     except (*DB_ERRORS, dbsync.SyncError) as e:
@@ -29,7 +27,6 @@ def api_quality():
 @router.post("/api/quality/accept")
 async def api_quality_accept(request: Request):
     """Body {photos: [ids], check: "unnamed", on: true}: accept these findings as they are (on: false takes it back)."""
-    from app.faces import facequality
     body = await request.json()
     try:
         n = await run_in_threadpool(facequality.accept, body.get("photos") or [], body.get("check", "unnamed"), bool(body.get("on", True)))
@@ -41,7 +38,6 @@ async def api_quality_accept(request: Request):
 @router.get("/api/quality/items")
 def api_quality_items(check: str, offset: int = 0, limit: int = 120):
     """The next entries of one Face quality list."""
-    from app.faces import facequality
     try:
         return facequality.items(check, offset, limit)
     except ValueError as e:
@@ -51,14 +47,12 @@ def api_quality_items(check: str, offset: int = 0, limit: int = 120):
 @router.get("/api/quality/accepted")
 def api_quality_accepted(check: str = "unnamed"):
     """The photos accepted as they are for a check."""
-    from app.faces import facequality
     return {"photos": sorted(facequality.accepted_ids(check))}
 
 
 @router.post("/api/quality/ignore")
 async def api_quality_ignore(request: Request):
     """Body {photos: [ids]}: every unnamed face on them becomes "not a face to name"."""
-    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     body = await request.json()
@@ -73,7 +67,6 @@ async def api_quality_ignore(request: Request):
 @router.post("/api/quality/fit")
 async def api_quality_fit(request: Request):
     """Body {photos?: [ids]}: trim face rectangles that stick out of their photo to its edges, remove empty ones."""
-    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     body = await request.json() if (await request.body()) else {}
@@ -89,7 +82,6 @@ async def api_quality_fit(request: Request):
 async def api_quality_fix(request: Request):
     """Body {files: false}: remove the near-duplicate face regions (one kept per group) and rewrite those sidecars;
     {files: true}: then the image files that still carry the duplicates. In the background."""
-    from app.faces import facequality
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
     files = bool((await request.json() if (await request.body()) else {}).get("files"))
@@ -103,14 +95,12 @@ async def api_quality_fix(request: Request):
 @router.get("/api/filecheck")
 def api_filecheck():
     """Maintenance › Damaged files: what the file check found so far, and its progress."""
-    from app.photos import filecheck
     return filecheck.report()
 
 
 @router.post("/api/filecheck/run")
 async def api_filecheck_run(request: Request):
     """Body {redo: false}: check the files not checked yet (or changed since); redo: every file again. In the background."""
-    from app.photos import filecheck
     body = await request.json() if (await request.body()) else {}
     return {"queued": await run_in_threadpool(filecheck.start, bool(body.get("redo")))}
 
@@ -118,7 +108,6 @@ async def api_filecheck_run(request: Request):
 @router.post("/api/filecheck/repair")
 async def api_filecheck_repair(request: Request):
     """Body {ids: [...]}: add the missing end marker to those JPEGs (backed up first, undoable from the edit log)."""
-    from app.photos import filecheck
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
     body = await request.json()
@@ -135,7 +124,6 @@ async def api_filecheck_repair(request: Request):
 async def api_filecheck_keep(request: Request):
     """Body {ids: [...]}: crop those damaged JPEGs losslessly to the part of the picture that is intact (backed up
     first, undoable from the edit log)."""
-    from app.photos import filecheck
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
     body = await request.json()
@@ -151,7 +139,6 @@ async def api_filecheck_keep(request: Request):
 @router.get("/api/picklabels")
 def api_picklabels():
     """Maintenance › Pick labels: how many photos carry each of digiKam's pick labels, and the clearing's progress."""
-    from app.photos import picklabels
     return {"counts": picklabels.counts(), "progress": dict(picklabels.progress)}
 
 
@@ -159,7 +146,6 @@ def api_picklabels():
 async def api_picklabels_clear(request: Request):
     """Body {levels: [1, 2, 3]}: take those pick labels (Rejected, Pending, Accepted) off every photo, in digiKam's
     database now (after a full backup) and in the sidecars in the background; each photo's change is in the edit log."""
-    from app.photos import picklabels
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
     body = await request.json()
