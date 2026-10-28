@@ -38,6 +38,10 @@ The **Photo quality** job adds:
 
 For photos marked **Date unknown**, **Explore › Date suggestions** (for editors) proposes a year from how old the named people in them look. Each person's photos with a known date teach the age model how that person ages; photos dated only to the year or month count too, with less weight. A birth year you enter on the page helps someone with few dated photos, and no suggestion is ever earlier than an entered birth year. Every suggestion is a range with the people and ages behind it, and **Use** saves it as a year-only date, with undo in the edit log. The info panel of an undated photo shows its suggestion too.
 
+## Text in photos
+
+Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.
+
 ## In the info panel
 
 Everything the models produced is gathered at the end of the info panel under **AI analysis**: the description, detected content, objects, text found in the picture, photo quality (focus, aesthetic score, closed eyes, and why it may be a reject) and similar photos.

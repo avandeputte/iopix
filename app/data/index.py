@@ -84,7 +84,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "13"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects)
+SCHEMA_VERSION = "14"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects); 14: text in photos kept to words (ocrwords)
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -755,7 +755,26 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
             cr.get("copyrightNotice"), " ".join(iprops.get(iid, {}).values()), *(loc or ())) if x)
         out.fts_rows.append((iid, name, album["path"], p_title, p_caption,
                              " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai")))
+    _clean_ocr(out, tags, albums)
     return out
+
+
+_OCR_COL = [c.split()[0] for c in re.sub(r"\s+", " ", SCHEMA[SCHEMA.index("(") + 1:SCHEMA.index(");")]).split(",")].index("ocr")
+
+
+def _clean_ocr(out: SimpleNamespace, tags: dict, albums: dict):
+    """Text read in photos, kept to what reads as words (ocrwords.py): the library's names, titles and places count
+    as words, as does a word read in several photos. The stored text is untouched."""
+    from app.ai import ocrwords
+    texts = [r[_OCR_COL] for r in out.photos]
+    if not any(texts):
+        return
+    named = [t["name"] for t in tags.values()] + [a.get("name") for a in albums.values()] + [a.get("path") for a in albums.values()]
+    named += [x for r in out.photos for x in (r[32], r[33], r[36], r[37], r[38])]  # title, caption, place, region, country
+    known = ocrwords.known_words(ocrwords.words_of(named) | ocrwords.corpus(texts))
+    cleaned = {r[0]: ocrwords.clean(r[_OCR_COL], known) for r in out.photos if r[_OCR_COL]}
+    out.photos[:] = [r if r[0] not in cleaned else (*r[:_OCR_COL], cleaned[r[0]], *r[_OCR_COL + 1:]) for r in out.photos]
+    out.fts_rows[:] = [f if f[0] not in cleaned else (*f[:9], cleaned[f[0]], f[10]) for f in out.fts_rows]
 
 
 def _rank(dst, rows: SimpleNamespace, col: str, k: int):

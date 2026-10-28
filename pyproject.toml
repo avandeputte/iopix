@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.90.5"
+version = "1.90.6"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,10 +29,10 @@ dependencies = [
 
 [project.optional-dependencies]
 search = ["fastembed<1", "huggingface_hub<2", "numpy<3"]            # CLIP / SigLIP 2 content search (ONNX Runtime)
-ocr = ["rapidocr<4"]                                                 # text in photos
+ocr = ["rapidocr<4", "pyspellchecker<1"]                             # text in photos (word lists keep it to words)
 objects = ["numpy<3", "onnxruntime<2"]                               # YOLOX object detection
 captions = ["torch>=2,<3", "transformers>=5,<6"]                     # BLIP photo descriptions (large; CPU wheels from the PyTorch index)
-ai = ["fastembed<1", "huggingface_hub<2", "numpy<3", "rapidocr<4", "onnxruntime<2"]
+ai = ["fastembed<1", "huggingface_hub<2", "numpy<3", "rapidocr<4", "pyspellchecker<1", "onnxruntime<2"]
 test = ["pytest<10", "httpx<1", "playwright<2", "pytest-playwright<1", "pyflakes<5"]
 
 [project.urls]
