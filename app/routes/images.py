@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
-from app import thumbs, users, videostream
+from app import access, thumbs, users, videostream
 from app.core import _cached_image, _form_items, _photo_row, db, IMG_CACHE, resolve, THUMB_COLS
 from app.photos import edits, export
 
@@ -139,7 +139,7 @@ def _zip_stream(entries):
     yield sink.take()
 
 
-@router.post("/api/zip")
+@router.post("/api/zip", dependencies=[access.public])
 async def api_zip_post(request: Request):
     """Same as GET /api/zip, for selections too long for a URL (form-encoded body)."""
     _downloads_allowed(request)
@@ -154,7 +154,7 @@ def _downloads_allowed(request: Request):
         raise HTTPException(401, "Sign in to download photos")
 
 
-@router.get("/api/zip")
+@router.get("/api/zip", dependencies=[access.public])
 def api_zip(request: Request, sidecars: int = 0, name: str = "photos"):
     _downloads_allowed(request)
     return _zip_response(request.query_params.multi_items(), sidecars, name)
@@ -192,7 +192,7 @@ def _zip_parts(items, part_mb: int):
     return parts
 
 
-@router.post("/api/zip/plan")
+@router.post("/api/zip/plan", dependencies=[access.public])
 async def api_zip_plan(request: Request):
     """How a download would be split. Body: the filters, form-encoded, plus part_mb."""
     _downloads_allowed(request)

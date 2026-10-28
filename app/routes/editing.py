@@ -10,12 +10,12 @@ from fastapi import HTTPException
 from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
-from app import config
+from app import access, config, events
 from app.photos import consistency, edits, metaedit, placetags, tagmanager
 from app.digikam import dbsync, dkdb
 from app.geo import gpx
 from app.data import state as appstate
-from app.core import _form_items, _kick, _rebuild_after_write, db, DB_ERRORS, resolve
+from app.core import _form_items, db, DB_ERRORS, resolve
 from app.digikam.dkdb import chunked
 
 
@@ -25,7 +25,7 @@ router = APIRouter()
 # Metadata editing (sidecars, image files when enabled, digiKam's database on request)
 # --------------------------------------------------------------------------
 
-@router.get("/api/metadata/{photo_id}")
+@router.get("/api/metadata/{photo_id}", dependencies=[access.editor])
 def api_metadata(photo_id: int):
     """Every metadata field of the photo's file and sidecar (exiftool, grouped), with which ones can be edited."""
     try:
@@ -34,7 +34,7 @@ def api_metadata(photo_id: int):
         raise HTTPException(404, str(e))
 
 
-@router.post("/api/metadata/{photo_id}")
+@router.post("/api/metadata/{photo_id}", dependencies=[access.editor_write])
 async def api_metadata_write(photo_id: int, request: Request):
     """Body {changes: [{group, tag, value}]}: write fields (XMP to the sidecar, EXIF/GPS/IPTC to the file), then read the
     photo's database rows again from its metadata."""
@@ -45,11 +45,11 @@ async def api_metadata_write(photo_id: int, request: Request):
         r = await run_in_threadpool(metaedit.write, photo_id, list(body.get("changes") or [])[:200])
     except dbsync.SyncError as e:
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
-@router.post("/api/metadata/{photo_id}/reread")
+@router.post("/api/metadata/{photo_id}/reread", dependencies=[access.editor_write])
 async def api_metadata_reread(photo_id: int):
     """digiKam's Read Metadata From File: the photo's database rows filled again from its file and sidecar."""
     if not config.DB_WRITE:
@@ -58,7 +58,7 @@ async def api_metadata_reread(photo_id: int):
         r = await run_in_threadpool(metaedit.reread, photo_id)
     except dbsync.SyncError as e:
         raise HTTPException(409 if "digiKam is running" in str(e) else 400, str(e))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return r
 
 
@@ -76,7 +76,7 @@ def _current_tag_paths(tag_ids: list, fallback: dict) -> list:
         return [fallback[t] for t in tag_ids]
 
 
-@router.post("/api/edit")
+@router.post("/api/edit", dependencies=[access.editor_write])
 async def api_edit(request: Request):
     """Change metadata for one or more photos. Written to XMP sidecars (and into the image
     files when that setting is on); digiKam's database only on a later explicit apply.
@@ -169,7 +169,7 @@ async def api_edit(request: Request):
     if not (ch or per_photo) or not photos:
         raise HTTPException(400, "Nothing to change")
     result = await run_in_threadpool(edits.apply, photos, ch, per_photo)
-    _kick.set()
+    events.kick()
     return result
 
 
@@ -187,7 +187,7 @@ def _current_dates(ids: list) -> dict:
     return out
 
 
-@router.post("/api/edit/revert")
+@router.post("/api/edit/revert", dependencies=[access.editor_write])
 async def api_edit_revert(request: Request):
     """Undo the viewer's edits to these photos by restoring the sidecar backup."""
     body = await request.json()
@@ -201,7 +201,7 @@ async def api_edit_revert(request: Request):
     finally:
         con.close()
     result = await run_in_threadpool(edits.revert, photos)  # runs exiftool; keep the event loop free
-    _kick.set()
+    events.kick()
     return result
 
 
@@ -210,14 +210,14 @@ async def api_edit_revert(request: Request):
 # Consistency report and writing pending edits to digiKam's database
 # --------------------------------------------------------------------------
 
-@router.get("/api/consistency")
+@router.get("/api/consistency", dependencies=[access.editor])
 def api_consistency(field: str = None, offset: int = 0, limit: int = 100):
     """The metadata consistency report: photos whose database, sidecar and file disagree."""
     return {"progress": consistency.progress, "summary": consistency.summary(),
             **consistency.report(field or None, max(0, offset), max(1, min(limit, 5000)))}
 
 
-@router.post("/api/consistency/scan")
+@router.post("/api/consistency/scan", dependencies=[access.admin])
 async def api_consistency_scan(request: Request):
     """Body: the usual filters (form-encoded) to scan a subset, or nothing for the whole library;
     rescan_all=0 only compares photos not checked since they last changed."""
@@ -237,7 +237,7 @@ async def api_consistency_scan(request: Request):
     return {"queued": len(rows)}
 
 
-@router.post("/api/consistency/sync")
+@router.post("/api/consistency/sync", dependencies=[access.editor_write])
 async def api_consistency_sync(request: Request):
     """Body: {ids, source: db|sidecar|file, targets: [...], fields: [...]}."""
     body = await request.json()
@@ -248,17 +248,17 @@ async def api_consistency_sync(request: Request):
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    _kick.set()
+    events.kick()
     return res
 
 
-@router.get("/api/edits/db")
+@router.get("/api/edits/db", dependencies=[access.public])
 def api_edits_db_status():
     return {"pending": edits.pending_count(), "digikamRunning": dbsync.digikam_running(), "enabled": config.DB_WRITE,
             "ask": config.DIGIKAM_CHECK == "none"}
 
 
-@router.post("/api/edits/db")
+@router.post("/api/edits/db", dependencies=[access.editor_write])
 async def api_edits_db_apply():
     """Write the pending edits into digiKam's database. Refused while digiKam is running."""
     if not config.DB_WRITE:
@@ -276,7 +276,7 @@ async def api_edits_db_apply():
         raise HTTPException(500, f"The update failed and was rolled back: {e}")
     log.info("edits applied to digiKam's database (on request): %d photos, %d skipped%s", result["applied"], len(result["skipped"]),
              "".join(f"; {s['id']}: {s['reason']}" for s in result["skipped"][:5]))
-    await run_in_threadpool(_rebuild_after_write)
+    await run_in_threadpool(events.after_write)
     return result
 
 
@@ -288,7 +288,7 @@ async def api_edits_db_apply():
 _gpx_tracks: dict = {}  # token -> parsed points, kept in memory for this server run
 
 
-@router.post("/api/gpx/preview")
+@router.post("/api/gpx/preview", dependencies=[access.editor_write])
 async def api_gpx_preview(request: Request):
     """Multipart: file (.gpx), ids (comma-separated), utc_offset, clock_shift, max_gap (seconds),
     only_missing (1 = skip photos that already have a position). Returns matches without writing."""
@@ -329,7 +329,7 @@ async def api_gpx_preview(request: Request):
             "matched": len(matched), "matches": matched[:2000], "unmatched": len(matches) - len(matched)}
 
 
-@router.post("/api/gpx/apply")
+@router.post("/api/gpx/apply", dependencies=[access.editor_write])
 async def api_gpx_apply(request: Request):
     """Body: {token, ids, utc_offset, clock_shift, max_gap, only_missing}. Writes the matched
     positions as GPS edits (sidecar, file if enabled; database on the next apply)."""
@@ -351,7 +351,7 @@ async def api_gpx_apply(request: Request):
     if not targets:
         raise HTTPException(400, "No photo matches the track")
     result = await run_in_threadpool(edits.apply, targets, {}, per_photo)
-    _kick.set()
+    events.kick()
     return result
 
 
@@ -360,7 +360,7 @@ async def api_gpx_apply(request: Request):
 # Place tags and keyword tags (digiKam's database; digiKam must be closed)
 # --------------------------------------------------------------------------
 
-@router.get("/api/placetags")
+@router.get("/api/placetags", dependencies=[access.signed_in])
 def api_placetags_plan(ids: str = None):
     """What creating place tags would do, for the whole library or a comma-separated id list."""
     sel = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
@@ -370,7 +370,7 @@ def api_placetags_plan(ids: str = None):
     return {**p, "progress": placetags.progress, "digikamRunning": dbsync.digikam_running(), "root": placetags.ROOT}
 
 
-@router.post("/api/placetags")
+@router.post("/api/placetags", dependencies=[access.editor_write])
 async def api_placetags_run(request: Request):
     """Create missing Places/Country/Region/Town tags (digiKam closed) and assign them."""
     if not (config.DB_WRITE and edits.available()):
@@ -386,7 +386,7 @@ async def api_placetags_run(request: Request):
     return {"to_tag": p["to_tag"], "creating": len(p["missing_tags"])}
 
 
-@router.post("/api/tags/recent")
+@router.post("/api/tags/recent", dependencies=[access.signed_in])
 async def api_tags_recent(request: Request):
     """Remember the tags just assigned, newest first (shown as a quick row like digiKam's)."""
     body = await request.json()
@@ -398,7 +398,7 @@ async def api_tags_recent(request: Request):
 
 
 
-@router.post("/api/tags/op")
+@router.post("/api/tags/op", dependencies=[access.editor_write])
 def api_tag_op(op: dict):
     """Add, rename, move or delete a keyword tag (writes digiKam's database; digiKam must be closed)."""
     if not (config.DB_WRITE and edits.available()):
@@ -409,5 +409,5 @@ def api_tag_op(op: dict):
         raise HTTPException(409, str(e))
     except (*DB_ERRORS, ValueError) as e:
         raise HTTPException(500, f"The change failed and was rolled back: {e}")
-    _kick.set()
+    events.kick()
     return result

@@ -2,8 +2,8 @@
 
 The library (digiKam's database and the photo files) is only read here; the
 few endpoints that change it (sidecars, image files, digiKam's database on
-request) are listed in WRITE_PATHS and go through the modules that own those
-writes."""
+request) declare access.editor_write or access.admin_write on their route and
+go through the modules that own those writes."""
 import json
 import logging
 import threading
@@ -23,7 +23,7 @@ from app.digikam import dkdb
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
-from app.routes import browse, images, albums, editing, admin, review, organize, faces
+from app.routes import auth, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
 from app.core import state, _kick, _refresh, _auto, _watch, resolve, prewarmer, _setup_file_log, _models_arrived
 __all__ = ["app", "state", "_kick", "_refresh", "_auto", "_watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
 
@@ -57,23 +57,7 @@ async def lifespan(_app):
 app = FastAPI(title="iopix", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # every endpoint that changes the library (sidecars, files, digiKam's database); refused in read-only mode
-WRITE_PATHS = ("/api/picklabels/clear", "/api/filecheck/keep", "/api/filecheck/repair", "/api/edit", "/api/edits/db", "/api/faces/detect", "/api/photos/delete", "/api/photos/trash", "/api/photos/move", "/api/photos/rename", "/api/photos/rename-pattern", "/api/metadata", "/api/photos/transform", "/api/photos/crop", "/api/photos/adjust", "/api/trash", "/api/import", "/api/history", "/api/library/merge", "/api/location/landmark", "/api/gpx/preview", "/api/consistency/sync", "/api/gpx/apply", "/api/faces/op", "/api/faces/batch", "/api/folders",
-               "/api/faces/person", "/api/placetags", "/api/tags/op")
-
-
-ADMIN_PATHS = ("/api/picklabels", "/api/filecheck", "/api/settings", "/api/maintenance", "/api/scan", "/api/quality", "/api/log", "/api/library/merge", "/api/consistency/scan", "/api/analysis/run", "/api/models/check", "/api/models/download", "/api/restart", "/api/users", "/api/update", "/api/neardups")
-SIGNED_IN_PATHS = ("/api/people/birth", "/api/favorites", "/api/ualbums", "/api/searches", "/api/tags/recent", "/api/auth/settings", "/api/auth/password", "/api/auth/logout_all")
-# reads that spend a shared resource (Nominatim's one request a second; the place-tag plan reads the whole index)
-SIGNED_IN_READ_PATHS = ("/api/geocode", "/api/placetags")
-# reads that are not for everyone, whatever the method: the server log and the merge plan (admins); the change log and
-# the elevation lookup, which spends Google credits (editors)
-ADMIN_READ_PATHS = ("/api/picklabels", "/api/filecheck", "/api/log", "/api/library/merge", "/api/quality")
-EDITOR_READ_PATHS = ("/api/datesuggest", "/api/history", "/api/elevation", "/api/import", "/api/metadata", "/api/consistency")  # (the report lists file paths)
 MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it is read (uploads are multipart and not bound here)
-
-
-def _hits(path: str, paths) -> bool:
-    return any(path == p or path.startswith(p + "/") for p in paths)
 
 
 # what a visitor may still fetch when sign-in is required: the app shell and the sign-in endpoints
@@ -124,9 +108,9 @@ def _no_access(request: Request, ident: str):
 
 @app.middleware("http")
 async def _auth_guard(request: Request, call_next):
-    """Who is asking (session cookie), and may they do this? Library writes need an editor
-    or admin, settings and maintenance an admin, favorites and albums a signed-in user; all
-    of that only once a user exists. Read-only mode refuses library writes for everyone."""
+    """Who is asking (session cookie or the proxy's identity), whether sign-in is required at all, and the
+    cross-site check on writes. What each route needs beyond that (an editor, an admin, an account) is declared
+    on the route (app/access.py)."""
     session = request.cookies.get(users.COOKIE)
     user = users.user_from_token(session) if session else None
     cookie_uid = user["id"] if user else None
@@ -159,26 +143,13 @@ async def _auth_guard(request: Request, call_next):
         elif not _open_to_visitors(path):
             return JSONResponse({"detail": "Sign in to use the viewer."}, status_code=401)
     path = request.url.path
-    if _hits(path, ADMIN_READ_PATHS) and not users.is_admin(user):
-        return JSONResponse({"detail": "Admins only"}, status_code=403 if user else 401)
-    if _hits(path, EDITOR_READ_PATHS) and not users.can_write(user):
-        return JSONResponse({"detail": "Editors only"}, status_code=403 if user else 401)
-    if _hits(path, SIGNED_IN_READ_PATHS) and not users.is_signed_in(user):
-        return JSONResponse({"detail": "Sign in to use this"}, status_code=401)
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         # a page on another site (or another port) cannot drive this one with the browser's cookies: the request's
-        # Origin, when the browser sends one, has to be this host
+        # Origin, when the browser sends one, has to be this host. Who may call which route is declared on the
+        # route itself (app/access.py), not here.
         origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
         if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
             return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
-        if _hits(path, WRITE_PATHS) and appstate.read_only():
-            return JSONResponse({"detail": "The viewer is in read-only mode; nothing in the library can be changed."}, status_code=403)
-        if _hits(path, WRITE_PATHS) and not users.can_write(user):
-            return JSONResponse({"detail": "Sign in as an editor to change the library."}, status_code=403 if user else 401)
-        if _hits(path, ADMIN_PATHS) and not users.is_admin(user):
-            return JSONResponse({"detail": "Only an admin can change settings or run maintenance."}, status_code=403 if user else 401)
-        if _hits(path, SIGNED_IN_PATHS) and not users.is_signed_in(user):
-            return JSONResponse({"detail": "Sign in to keep favorites and albums."}, status_code=401)
     response = await call_next(request)
     if (user and not request.state.via_proxy and cookie_uid == user["id"] and path not in ("/api/auth/logout", "/api/auth/logout_all", "/api/auth/password")
             and users.renew_due(session) and "set-cookie" not in response.headers):
@@ -222,7 +193,12 @@ app.include_router(browse.router)
 app.include_router(images.router)
 app.include_router(albums.router)
 app.include_router(editing.router)
-app.include_router(admin.router)
+app.include_router(settings.router)
+app.include_router(maintenance.router)
+app.include_router(auth.router)
+app.include_router(users_routes.router)
+app.include_router(geo.router)
+app.include_router(backup.router)
 app.include_router(review.router)
 app.include_router(organize.router)
 app.include_router(faces.router)
