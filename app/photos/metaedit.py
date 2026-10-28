@@ -15,10 +15,11 @@ import json
 import os
 import subprocess
 
-from app.digikam import dkdb
-from app.photos import edits
+from app.digikam import dbsync, dkdb
+from app.photos import edits, history, pixelguard, scanner
 from app.data import index
 from app.digikam.dbsync import SyncError
+from app.faces import facemgr
 
 EDITABLE = ("IFD0", "ExifIFD", "GPS", "IPTC", "XMP-dc", "XMP-xmp", "XMP-photoshop", "XMP-iptcCore", "XMP-iptcExt", "XMP-exif",
             "XMP-exifEX", "XMP-tiff", "XMP-xmpRights", "XMP-digiKam", "XMP-lr", "XMP-aux", "XMP-acdsee", "XMP-MicrosoftPhoto")
@@ -78,7 +79,6 @@ def _args(changes: list) -> list:
 
 
 def write(pid: int, changes: list, check_running: bool = True) -> dict:
-    from app.photos import history, pixelguard
     p = _photo(pid)
     changes = [c for c in changes if c.get("group") in EDITABLE and c.get("tag") and c["tag"] not in NOT_EDITABLE
                and all(ch.isalnum() or ch in "-_" for ch in c["tag"])]
@@ -91,7 +91,6 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
                         "(and this must be a JPEG, PNG, TIFF or WebP)")
     before = {f"{x['group']}:{x['tag']}": x["value"] for x in _dump(p["path"]) + _dump(edits.sidecar_path(p["path"]))}
     xmp = [c for c in changes if c["group"].startswith("XMP-")]
-    from app.digikam import dbsync
     dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
     side = edits.prepare(p["path"])
     snap = history.snapshot(p["id"], side)
@@ -152,10 +151,7 @@ def _mirror_gps_and_date(path: str, changes: list, in_file: bool):
 
 def reread(pid: int, check_running: bool = True) -> dict:
     """The photo's rows filled again from its file and sidecar, as digiKam's Read Metadata From File does."""
-    from app.digikam import dbsync
-    from app.photos import scanner
     p = _photo(pid)
-    from app.faces import facemgr
     facemgr.flush_sidecar(p["id"])  # a face change still waiting for its sidecar: written first, or the reread would undo it
     meta = scanner.read([p["path"]])
     if not meta.get(p["path"]):  # a rewrite from nothing would empty the photo's tags, faces, caption and position

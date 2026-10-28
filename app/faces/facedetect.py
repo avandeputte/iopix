@@ -27,7 +27,7 @@ import threading
 import time
 
 from app.ai import analysis, models
-from app.data import index, vdb
+from app.data import index, vdb, vdb as v
 from app import jobs, thumbs
 from app.digikam.dkdb import chunked
 
@@ -283,7 +283,6 @@ def _scanned() -> dict:
 
 
 def coverage() -> int:
-    from app.data import vdb as v
     if not v.exists():
         return 0
     con = v.connect()

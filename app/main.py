@@ -15,20 +15,11 @@ from contextlib import asynccontextmanager
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.ai import analysis
-from app import config
-from app.photos import consistency
-from app.photos import edits
-from app.photos import history
-from app.photos import tagmanager
-from app import thumbs
+from app.ai import analysis, models as dlmodels
+from app import config, events, mcp_server, proxyauth, thumbs, updates, users
+from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate
-from app import users
-from app import proxyauth
-from app import mcp_server
-from app import updates
 from app.digikam import dkdb
-from app.ai import models as dlmodels
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
@@ -53,9 +44,7 @@ async def lifespan(_app):
     _refresh(initial=True)
     threading.Thread(target=thumbs.prune_previews, daemon=True).start()
     threading.Thread(target=_watch, name="reindex", daemon=True).start()
-    from app.photos import scanner
-    from app.core import _rebuild_after_write
-    scanner.start(_rebuild_after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
+    scanner.start(events.after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
     if dkdb.no_digikam() and scanner.enabled():
         scanner.run_soon()  # no digiKam to have found what was added while iopix was stopped: a pass right after start-up
     updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it

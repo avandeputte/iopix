@@ -16,6 +16,8 @@ That is what lets the viewer work without digiKam:
 import re
 import time
 from app.digikam.dkdb import chunked
+from app.digikam import dkdb
+from app import config
 
 # viewer table: (digiKam table, [(column, SQLite type, MySQL type)], SQLite constraints, MySQL constraints)
 SPEC = {
@@ -204,7 +206,6 @@ def copy_from_digikam(src) -> dict:
     rows digiKam no longer has are deleted, new and changed ones are written, the rest is left alone.
     src: a read connection to digiKam's database (dkdb.Conn) inside a snapshot. Returns {table: rows
     written}; the very first copy writes everything."""
-    from app.digikam import dkdb
     from app.data import vdb
     t0 = time.time()
     theirs = {}
@@ -279,7 +280,6 @@ BASE_FILE = None  # set from config below
 
 
 def _base_path():
-    from app import config
     return config.DATA_DIR / "library-base.sqlite"
 
 
@@ -366,7 +366,6 @@ def start_new() -> bool:
     when the library tables were never filled; an existing library (a copy of digiKam's, or one started here
     earlier) is left as it is. Returns whether it started one."""
     import os
-    from app import config
     from app.digikam.dbsync import COLOR_TAGS, PICK_TAGS
     if info().get("taken"):
         return False

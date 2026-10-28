@@ -25,6 +25,8 @@ import logging
 import os
 import threading
 import time
+from app.data import state
+from app import users
 
 log = logging.getLogger("app.proxyauth")
 
@@ -59,7 +61,6 @@ def opt(name: str):
 
 def save(values: dict):
     """Store proxy sign-in settings (keys of KEYS; empty removes one). Values in the environment still win."""
-    from app.data import state
     for k, v in values.items():
         if k in KEYS:
             state.set_setting(k.lower(), str(v or "").strip())
@@ -246,8 +247,6 @@ def deny_unknown() -> bool:
 def user_for(ident: str):
     """The account for this identity (email first, then name, case-insensitively), created with AUTH_PROXY_CREATE's
     role when there is none and that is allowed; None otherwise."""
-    from app import users
-    from app.data import state
     v = ident.strip().lower()
     con = state.connect()
     try:

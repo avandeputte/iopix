@@ -17,7 +17,8 @@ import time
 from pathlib import Path
 
 from app import config
-from app.data import vdb
+from app.data import index, vdb
+from app.photos import consistency, edits
 
 log = logging.getLogger("app.photos.history")
 SNAP_DIR = config.DATA_DIR / "history"
@@ -108,7 +109,6 @@ def describe_edit(before: dict, ch: dict) -> str:
 
 def _photos_of_person(tag_id: int) -> list:
     """Photo ids where this person (or a tag under it) is tagged or has a face region, from the index."""
-    from app.data import index
     con = index.open_index()
     try:
         return [r[0] for r in con.execute(
@@ -151,7 +151,6 @@ def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str
         total = con.execute(f"SELECT count(*) FROM photo_history{w}", params).fetchone()[0]
         rows = con.execute(f"SELECT id, photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM photo_history{w} "
                            f"ORDER BY id DESC LIMIT ? OFFSET ?", params + [int(limit), int(offset)]).fetchall()
-    from app.photos import edits
     from app.faces import facemgr
     known_paths = _paths([r[1] for r in rows if not r[9]])
     out = []
@@ -211,8 +210,6 @@ def restore(entry_id: int, kind: str) -> dict:
     e = get(entry_id)
     if not e:
         raise LookupError("No such change")
-    from app.photos import edits
-    from app.data import index
     pid = e["photo"]
     if kind == "deleted":
         return _restore_deleted(e)
@@ -291,7 +288,6 @@ def restore(entry_id: int, kind: str) -> dict:
 
 
 def _photo(pid: int):
-    from app.data import index
     con = index.open_index()
     try:
         r = con.execute("SELECT id, path FROM photos WHERE id = ?", (int(pid),)).fetchone()
@@ -305,9 +301,7 @@ def _pending_from_sidecar(photo: dict):
     pending edit (merged into any edit already pending; a field the sidecar does not hold is left alone). People are
     not taken from it: faces live in digiKam's database, and the sidecar's regions and tag list are written again
     from there, so an old sidecar can never take a person or a face box off the photo."""
-    from app.photos import consistency, edits
     from app.faces import facemgr
-    from app.data import index
     side = edits.sidecar_path(photo["path"])
     vals = consistency.exif_read([side]).get(side) or {}
     con = index.open_index()
@@ -340,7 +334,6 @@ def _restore_deleted(e: dict) -> dict:
     """Put a deleted photo's files back where they were and add it to the library again, with its
     rating, title, caption and tags (they are in the restored sidecar, and queued as edits)."""
     from app.photos import deletion, edits, folders
-    from app.data import vdb as _v
     d = e["details"] or {}
     backup = Path(d.get("backup") or "")
     files = d.get("files") or []
@@ -360,7 +353,7 @@ def _restore_deleted(e: dict) -> dict:
             shutil.copy2(src, dst)
     added = folders.register(album, [folders.staged_entry(main_file)])
     new_id = added[0]["id"]
-    con = _v.connect()
+    con = vdb.connect()
     try:  # the photo's history continues under its new id
         con.execute("UPDATE photo_history SET photo_id = ? WHERE photo_id = ?", (new_id, e["photo"]))
         # and its identity, so the next index build does not take the restored file (same fingerprint) for a

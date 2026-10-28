@@ -15,7 +15,7 @@ except ImportError:  # numpy comes with the search/objects extras; without it th
 
 from app.data import index, state, vdb
 from app import jobs
-from app.ai.semantic import semantic
+from app.ai.semantic import enabled, semantic
 from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.ai.neardups")
@@ -38,7 +38,6 @@ def status() -> dict:
 def _enabled() -> bool:
     if np is None:
         return False
-    from app.ai.semantic import enabled
     return enabled()
 
 

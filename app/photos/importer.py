@@ -24,10 +24,12 @@ import time
 from pathlib import Path
 
 from app import config
-from app.digikam import dkdb
-from app.photos import edits, folders
+from app.digikam import dbsync, dkdb
+from app.photos import edits, folders, history
 from app.digikam.dbsync import SyncError
 from app.digikam.dkdb import chunked
+from app.data import index, state
+from app.faces import facemgr
 
 log = logging.getLogger("app.photos.importer")
 STAGING = config.DATA_DIR / "import-staging"
@@ -43,13 +45,11 @@ _TOKEN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
 def layout() -> str:
-    from app.data import state
     key = state.get_setting("import_layout", "")
     return key if key in LAYOUTS else "year-yearmonth"
 
 
 def set_layout(key: str):
-    from app.data import state
     if key not in LAYOUTS:
         raise ValueError("Unknown folder layout")
     state.set_setting("import_layout", key)
@@ -201,7 +201,6 @@ def _same_size(sizes: set) -> dict:
     """{size: [(photo id, path)]} for library photos of these sizes."""
     if not sizes:
         return {}
-    from app.data import index
     con = index.open_index()
     try:
         out = {}
@@ -263,7 +262,6 @@ def root_folder(root_id: int = None, check_running: bool = True) -> dict:
     if rows:
         r = rows[0]
         return {"id": r[0], "root": r[1], "dir": Path(roots[r[1]])}
-    from app.digikam import dbsync
     root = sorted(roots)[0]
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
@@ -304,12 +302,10 @@ def sidecars_from_db(ids: list):
     """Once a new file's rows are written (scanner.complete, which also reads IPTC and EXIF): its sidecar says the
     same as digiKam's database, caption, title, date, position, tags and face regions included. exiftool's copy of
     the file's metadata holds only what the file had as XMP, so an IPTC-only JPEG would get an empty one."""
-    from app.faces import facemgr
     ids = [int(i) for i in ids]
     if not ids:
         return
     vals = edits.db_state(ids)
-    from app.digikam import dbsync
     jobs = []
     for pid, path in dbsync.photo_paths(ids):
         side, v = edits.sidecar_path(path), vals.get(pid) or {}
@@ -329,8 +325,6 @@ def sidecars_from_db(ids: list):
 
 def run(token: str, key: str = None, include: list = None, skip_duplicates: bool = True, root_id: int = None, check_running: bool = True) -> dict:
     """Import the staged files (all, or the names in include). Returns {added: [{id, name, path, folder}], skipped: [{name, reason}]}."""
-    from app.digikam import dbsync
-    from app.photos import history
     p = plan(token, key)
     want = set(include) if include is not None else None
     d = _dir(token)

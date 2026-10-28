@@ -22,7 +22,7 @@ import secrets
 import threading
 import time
 
-from app import config
+from app import config, proxyauth
 from app.data import state
 
 ROLES = ("viewer", "editor", "admin")
@@ -229,7 +229,6 @@ def delete(user_id: int):
 
 def _forget_proxy_identities():
     """A sign-in through the proxy is remembered for half a minute (proxyauth); a change here must not outlive that."""
-    from app import proxyauth  # (proxyauth imports this module)
     proxyauth.forget_identities()
 
 

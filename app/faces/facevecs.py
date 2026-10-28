@@ -24,9 +24,10 @@ except ImportError:  # numpy comes with the search/objects extras; without it th
     np = None
 
 from app import config, jobs, thumbs
-from app.data import index, vdb
+from app.data import index, state, vdb
 from app.ai import models
 from app.digikam.dkdb import chunked
+from app.faces import facedetect
 
 log = logging.getLogger("app.faces.facevecs")
 SIZE = 112
@@ -108,7 +109,6 @@ def _similarity(src, dst):
 
 def _landmarks(im):
     """The five landmarks of the face in the middle of a crop, from the chosen face detector; None when none is found."""
-    from app.faces import facedetect
     if not facedetect.available():
         return None
     try:
@@ -267,7 +267,6 @@ def _built_key(kind: str) -> str:
 
 def _same_model():
     """Vectors from another model, or another revision of it, are useless now: forget them (once) when that changed."""
-    from app.data import state
     kind = chosen()
     want = _built_key(kind)
     have = state.get_setting("face_vectors_built", "sface")

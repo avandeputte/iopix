@@ -8,8 +8,10 @@ import json
 import subprocess
 from collections import Counter
 
-from app.photos import edits
+from app.photos import edits, organize
 from app.digikam.dkdb import chunked
+from app.data import index
+from app.faces import facequality
 
 # file-system dates say when the file was copied, not when the photo was taken: reported, but kept apart
 SYSTEM = ("System:FileModifyDate", "System:FileAccessDate", "System:FileInodeChangeDate", "System:FileCreateDate")
@@ -40,7 +42,6 @@ def dates(paths: list) -> dict:
 def report(items: list, detail: bool = False) -> dict:
     """items: [{photo, path, taken, start, end}] (start/end: the folder's date span, ISO days). Per photo, which dates
     agree with the folder; summed up: how many photos have some date that matches the folder, and which tags."""
-    from app.photos import organize
     files, cars = [], {}
     for it in items:
         files.append(it["path"])
@@ -90,8 +91,6 @@ def report(items: list, detail: bool = False) -> dict:
 
 def wrongfolder(detail: bool = False, limit: int = 0) -> dict:
     """report() for the photos of the "date does not match the folder" quality check."""
-    from app.data import index
-    from app.faces import facequality
     issues = facequality.wrongfolder()
     if limit:
         issues = issues[:limit]

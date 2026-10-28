@@ -35,9 +35,11 @@ import unicodedata
 from pathlib import Path
 
 from app import config
-from app.digikam import dkdb
-from app.photos import edits, folders
+from app.digikam import dbsync, dkdb
+from app.photos import edits, folders, history, importer
 from app.digikam.dbsync import COLOR_TAGS, PICK_TAGS, SyncError, gps_text
+from app.data import state
+from app.faces.facemgr import _unrotate, rect_xml
 
 log = logging.getLogger("app.photos.scanner")
 
@@ -64,12 +66,10 @@ _wake = threading.Event()
 
 # ---- settings
 def enabled() -> bool:
-    from app.data import state
     return state.get_setting("file_scanner", "1" if dkdb.no_digikam() else "0") == "1"  # with no digiKam, nothing else finds new photos
 
 
 def interval() -> int:
-    from app.data import state
     try:
         return max(1, min(1440, int(state.get_setting("scan_interval", "15"))))
     except ValueError:
@@ -237,7 +237,6 @@ def _sensor_grid(regions: list, applied, file_wh):
 def _to_file_grid(area, grid: int, orientation: int):
     """A region's (centre x, centre y, w, h) fractions on a grid that turns upright by `grid`, as fractions of
     the file's own grid (which turns upright by `orientation`)."""
-    from app.faces.facemgr import _unrotate
     cx, cy, w, h = area
     inv = {6: 8, 8: 6}.get(grid, grid)
     ux, uy, uw, uh, *_ = _unrotate(cx - w / 2, cy - h / 2, w, h, 1, 1, inv)  # upright
@@ -297,7 +296,6 @@ def _regions(d: dict) -> list:
 
 def _upright(rect, file_wh, orientation):
     """A rectangle in the file's pixel grid turned into upright pixels (TagRegion::adjustToOrientation)."""
-    from app.faces.facemgr import _unrotate
     inv = {6: 8, 8: 6}.get(orientation or 1, orientation or 1)
     x, y, w, h, _uw, _uh = _unrotate(*rect, file_wh[0], file_wh[1], inv)
     return int(x), int(y), int(w), int(h)
@@ -486,7 +484,6 @@ def write_rows(con, iid: int, r: dict, tags: Tags, special: dict, full: bool):
 
 
 def folders_rect(rect) -> str:
-    from app.faces.facemgr import rect_xml
     return rect_xml(*rect)
 
 
@@ -513,7 +510,6 @@ def copy_attributes(con, src: int, dst: int):
 
 def complete(ids: list, check_running: bool = True) -> dict:
     """Full rows for photos the viewer registered itself (modificationDate NULL). Returns {completed, copied, failed}."""
-    from app.digikam import dbsync
     ids = [int(i) for i in ids]
     if not ids:
         return {"completed": 0, "copied": 0, "failed": 0}
@@ -613,8 +609,6 @@ def _same_time(a, b) -> bool:
 
 def scan(check_running: bool = True) -> dict:
     """One pass over every album root. Returns the summary (also kept in progress)."""
-    from app.digikam import dbsync
-    from app.photos import history, importer
     if not _lock.acquire(blocking=False):
         raise SyncError("A scan is already running")
     progress.update(running=True, started=int(time.time()), finished=None, added=0, modified=0, removed=0, folders=0, skipped=[], error=None)

@@ -25,8 +25,10 @@ import time
 from pathlib import Path
 
 from app.digikam import dbsync, dkdb
-from app.data import index
+from app.data import index, vdb
 from app.digikam.dkdb import chunked
+from app.photos import edits, history
+from app import config
 
 log = logging.getLogger("app.faces.facequality")
 NEAR = 3          # pixels: regions of one person this close on every coordinate are the same face
@@ -263,7 +265,6 @@ def _baddate() -> list:
 
 def accepted_ids(check: str) -> dict:
     """{photo: signature} the owner accepted for this check."""
-    from app.data import vdb
     with vdb.reader() as con:
         return dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = ?", (check,)).fetchall())
 
@@ -289,8 +290,6 @@ def ignore_unnamed(photos: list) -> dict:
 
 def accept(photos: list, check: str = "unnamed", on: bool = True) -> int:
     """Accept these photos' finding as it is (they leave the list until their faces change), or take it back."""
-    from app.photos import history
-    from app.data import vdb
     if check not in ("unnamed", "untagged", "nolocation", "wrongfolder", "baddate"):
         raise ValueError("Unknown check")
     want = {int(p) for p in photos}
@@ -341,7 +340,6 @@ def _file_regions(paths: list) -> dict:
     the image files themselves (not their sidecars)."""
     import json
     import subprocess
-    from app.photos import edits
     out = {}
     if not paths:
         return out
@@ -388,8 +386,6 @@ def fix_files(after=None) -> int:
     """After the clean-up: the image files of the photos it cleaned that still carry the duplicate regions get
     their regions rewritten from the database too (the file is backed up first, and its pixels are checked
     unchanged). Runs in the background. Returns how many photos it will look at."""
-    from app.photos import edits
-    from app.data import vdb
     if progress["running"]:
         raise dbsync.SyncError("The clean-up is still running; the image files follow when it has finished.")
     with vdb.reader() as con:
@@ -400,7 +396,6 @@ def fix_files(after=None) -> int:
         return 0
     import shutil
     need = sum(os.path.getsize(p) for _i, p in todo if os.path.exists(p)) * 1.1 + 200 * 1024 ** 2
-    from app import config
     if shutil.disk_usage(str(config.DATA_DIR)).free < need:
         raise dbsync.SyncError(f"Not enough free space for the backups of the original files ({need / 1e9:.1f} GB needed).")
     progress.update(running=True, files=True, done=0, total=len(todo), removed=0, photos=0, errors=0, started=int(time.time()), finished=None, error=None)
@@ -421,7 +416,6 @@ def fix_files(after=None) -> int:
 
 def _run_files(todo: list):
     from app.faces import facemgr
-    from app.photos import history
     for batch in chunked(todo, 50):
         regions = _file_regions([p for _i, p in batch])
         dirty = [(pid, p) for pid, p in batch if p in regions and _has_duplicates(*regions[p])]
@@ -498,7 +492,6 @@ def fix_near_duplicates(after=None, check_running: bool = True) -> int:
 
 
 def _run(todo: dict, db_path: Path, check_running: bool):
-    from app.photos import edits, history
     from app.faces import facemgr
     backup = dkdb.backup(db_path, force=True)  # thousands of regions removed in one go: one full copy first
     progress["backup"] = str(backup) if backup else None
