@@ -1,0 +1,114 @@
+site_name: iopix
+site_description: Documentation for iopix, a web companion for your digiKam library.
+site_url: https://iopix.net/docs/
+repo_url: https://github.com/avandeputte/iopix
+repo_name: avandeputte/iopix
+edit_uri: ""
+copyright: © 2026 Alex Van de Putte · MIT licence
+docs_dir: docs
+site_dir: ../dist/docs
+
+theme:
+  name: material
+  custom_dir: overrides
+  favicon: img/mark.svg
+  logo: img/mark.svg
+  font: false
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-sunny, name: Light theme }
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-night, name: Dark theme }
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight: { anchor_linenums: false }
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.tabbed: { alternate_style: true }
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Start:
+      - Quick start: start/quick-start.md
+      - What you need: start/requirements.md
+      - How iopix works: start/how-it-works.md
+  - Install:
+      - Choosing an install: install/choosing.md
+      - Docker: install/docker.md
+      - Proxmox container: install/proxmox.md
+      - Linux installer: install/linux.md
+      - setup.sh on macOS or Linux: install/setup-script.md
+      - HTTPS and a reverse proxy: install/reverse-proxy.md
+      - Updating: install/updating.md
+  - Connect:
+      - Connecting to digiKam: connect/digikam.md
+      - Using iopix without digiKam: connect/no-digikam.md
+      - digiKam on MariaDB or MySQL: connect/mariadb.md
+      - Album roots and folders: connect/album-roots.md
+      - iopix's own database: connect/iopix-database.md
+      - Sync and working without digiKam: connect/sync.md
+  - Use it:
+      - Explore: use/explore.md
+      - Photos and the timeline: use/photos.md
+      - Search and filters: use/search.md
+      - The photo viewer: use/viewer.md
+      - People and faces: use/people.md
+      - Places and the map: use/places.md
+      - Folders, albums and tags: use/collections.md
+      - Selecting and downloading: use/selecting.md
+      - Phones, tablets and apps: use/apps.md
+  - Edit:
+      - How editing works: edit/how-editing-works.md
+      - Ratings, captions and tags: edit/basics.md
+      - Dates and locations: edit/dates-locations.md
+      - Naming faces: edit/faces.md
+      - Rotate, crop and adjust: edit/rotate-crop.md
+      - Import, move, rename, trash: edit/files.md
+      - Tag manager: edit/tag-manager.md
+      - Metadata tools: edit/metadata-tools.md
+      - The edit log and undo: edit/edit-log.md
+  - AI analysis:
+      - Overview: ai/overview.md
+      - Models: ai/models.md
+      - What you get: ai/results.md
+  - Run it:
+      - Users and sign-in: admin/users.md
+      - Sign-in through a proxy: admin/proxy-signin.md
+      - Settings: admin/settings.md
+      - Maintenance: admin/maintenance.md
+      - Backups and the data folder: admin/backups.md
+  - Connect more:
+      - MCP server for AI assistants: integrations/mcp.md
+      - Google Maps and Cloud Vision: integrations/google.md
+  - Reference:
+      - Configuration variables: reference/configuration.md
+      - Keyboard shortcuts: reference/keyboard.md
+      - FAQ and troubleshooting: reference/faq.md
+      - Credits: reference/credits.md

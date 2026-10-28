@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://iopix.net/sitemap.xml
