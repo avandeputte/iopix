@@ -6,7 +6,7 @@
 
 ## Bursts and best shots
 
-Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the one in focus, with the sharpest faces and nobody's eyes closed, with a small say for the aesthetic score. **Show only the best frame of each burst** is a filter, and **Explore › Bursts & best shots** can mark every other frame of a burst as Rejected in one click.
+Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the one in focus, with the sharpest faces and nobody's eyes closed, with a small say for the aesthetic score. **Show only the best frame of each burst** is a filter.
 
 ## Events and trips
 
@@ -32,7 +32,7 @@ The **Photo quality** job adds:
 - an **aesthetic score** from about 1 to 10 for light, colour, composition and clarity (it rates the picture, not the moment: a dull snapshot of a moment you love can score low), with a **Best looking first** sort and a **Best looking tenth** filter,
 - **closed eyes** on faces seen from the front, with a **Someone's eyes closed** filter.
 
-**Filters › Quality › Likely rejects** lists photos that are blurred all over, have most eyes closed, are clearly worse frames of a burst, or are nearly black or blown out, each with its reason. It is only a suggestion: **Mark as rejected** in the info panel sets the Rejected label, with undo in the edit log.
+**Filters › Quality › Likely rejects** lists photos that are blurred all over, have most eyes closed, are clearly worse frames of a burst, or are nearly black or blown out, each with its reason. It is only a suggestion: no label is set on any photo.
 
 ## Date suggestions
 

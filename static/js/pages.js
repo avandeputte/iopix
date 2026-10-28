@@ -568,14 +568,10 @@ export async function showBursts(vp) {
       h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, start + k, true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' }), x.best ? h('span', { class: 'bestbadge' }, icon('star'), 'Best') : null),
       h('div', { class: 'sb' }, [x.focusn != null ? `focus ${pct(x.focusn)}` : x.sharpn != null ? `sharpness ${pct(x.sharpn)}` : null, x.faceq != null ? `faces ${pct(x.faceq)}` : null,
-        x.aesthetic != null ? `looks ${x.aesthetic.toFixed(1)}` : null, x.eyesClosed ? 'eyes closed' : null, x.pick === 1 ? 'rejected' : null].filter(Boolean).join(' · ') || ' '),)));
-    const rest = g.items.filter((x) => !x.best && x.pick !== 1).map((x) => x.id);
-    const rejectRest = S.EDITING && rest.length ? h('button', { type: 'button', class: 'lnk', title: 'Set the “Rejected” pick label on every frame but the best (undo from the edit log)',
-      onclick: async (e) => { e.target.disabled = true; if (await editPhotos(rest, { pick: 1 })) { g.items.forEach((x) => { if (!x.best) x.pick = 1; }); e.target.replaceWith(h('span', { class: 'muted' }, 'Others marked rejected')); } else e.target.disabled = false; } },
-      `Mark the other ${rest.length === 1 ? 'frame' : rest.length + ' frames'} as rejected`) : null;
+        x.aesthetic != null ? `looks ${x.aesthetic.toFixed(1)}` : null, x.eyesClosed ? 'eyes closed' : null].filter(Boolean).join(' · ') || ' '),)));
     return h('div', { class: 'dupgroup' }, h('div', { style: 'display:flex;gap:14px;align-items:baseline;flex-wrap:wrap' },
       h('span', null, dfDay.format(date(g.items[0].ts)), ' ', h('span', { class: 'muted' }, `${dfTime.format(date(g.items[0].ts))} · ${g.items.length} frames`)),
-      h('a', { class: 'lnk', href: hashFor('photos', photosWith({ burst: g.burst, sort: 'old' })) }, 'Open in grid'), rejectRest), row);
+      h('a', { class: 'lnk', href: hashFor('photos', photosWith({ burst: g.burst, sort: 'old' })) }, 'Open in grid')), row);
   };
   const load = async () => {
     qs.set('offset', offset);

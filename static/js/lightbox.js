@@ -912,9 +912,7 @@ function qualityRow(d) {
     d.bright != null && (d.bright < 0.2 || d.clip_lo > 0.5) ? 'Very dark' : null,
     d.bright != null && (d.bright > 0.8 || d.clip_hi > 0.3) ? 'Very bright' : null,
   ].filter(Boolean);
-  const reject = q.reject.length ? h('div', { class: 'b' }, h('b', { style: 'font-weight:500' }, 'Likely reject: '), q.rejectLabels.join(', ').toLowerCase(),
-    S.EDITING && d.pick !== 1 ? [' · ', h('button', { type: 'button', class: 'lnk', title: 'Set the “Rejected” pick label (undo from the edit log)', onclick: () => editPhotos([d.id], { pick: 1 }) }, 'Mark as rejected')] : null,
-    d.pick === 1 ? ' · marked rejected' : null) : null;
+  const reject = q.reject.length ? h('div', { class: 'b' }, h('b', { style: 'font-weight:500' }, 'Likely reject: '), q.rejectLabels.join(', ').toLowerCase()) : null;  // a suggestion only: nothing is ever marked
   return h('div', { class: 'irow' }, icon('spark'), h('div', null, lines.map((t) => h('div', { class: 'a' }, t)), small.length ? h('div', { class: 'b' }, small.join(' · ')) : null, reject));
 }
 

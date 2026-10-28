@@ -22,7 +22,7 @@ AI results are guesses, and iopix treats them that way:
 - a suggested name is never written anywhere until you accept it,
 - detected content is a filter, not stored tags,
 - descriptions are shown with the AI analysis at the end of the info panel, never in place of your own caption,
-- a likely reject is only a suggestion: nothing is marked Rejected until you do it,
+- a likely reject is only a suggestion: no label is ever set on a photo,
 - a suggested year is only saved when you click **Use**.
 
 ## Background jobs
