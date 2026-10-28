@@ -8,4 +8,4 @@ pip install mkdocs==1.6.1 mkdocs-material==9.7.7
 python3 -m http.server -d dist 8000
 ```
 
-Hosted on Cloudflare Pages (project `iopix`). `.github/workflows/site.yml` builds and publishes it on every push to main that touches `site/`, the screenshots or the version; the Cloudflare key is the repository secret `CLOUDFLARE_API_TOKEN` (with `CLOUDFLARE_ACCOUNT_ID`). The What's new page is generated from the version commits by `whatsnew.py`.
+Hosted on Cloudflare Pages (project `iopix`). `.github/workflows/site.yml` builds and publishes it on every push to main that touches `site/`, the screenshots or the version; the Cloudflare key is `CLOUDFLARE_API_TOKEN` (with `CLOUDFLARE_ACCOUNT_ID`) in the GitHub environment `iopix.net`, which only main may use. `functions/_middleware.js` redirects www.iopix.net to iopix.net. The What's new page is generated from the version commits by `whatsnew.py`.

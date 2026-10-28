@@ -1,7 +1,7 @@
 # Builds iopix.net (site/) and publishes it to Cloudflare Pages on every push to main that
 # touches the site, the README screenshots or the version (for the What's new page).
-# The Cloudflare key lives only in the repository secret CLOUDFLARE_API_TOKEN; pull requests
-# and forks never run this workflow, so the secret is never handed to code from outside.
+# The Cloudflare key lives only in the secrets of the GitHub environment "iopix.net", which only
+# the main branch may use; pull requests and forks never run this workflow.
 name: Website
 
 on:
@@ -24,6 +24,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: iopix.net
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,4 +45,5 @@ jobs:
             echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets not set; built but not published"
             exit 0
           fi
-          npx -y wrangler@4 pages deploy site/dist --project-name iopix --branch main --commit-dirty=true
+          # from site/, so the Pages Functions in site/functions (the www redirect) go along
+          cd site && npx -y wrangler@4.152.0 pages deploy dist --project-name iopix --branch main --commit-dirty=true
