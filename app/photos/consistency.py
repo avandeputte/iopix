@@ -25,6 +25,7 @@ from app.ai import analysis
 from app.digikam import dbsync, dkdb
 from app.photos import edits
 from app.data import index, vdb
+from app.digikam.dkdb import chunked
 
 CHECK_VERSION = 2  # bumped when the check compares more: every photo is looked at again by "Check new and changed photos"
 FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
@@ -101,7 +102,7 @@ def edit_value(field: str, v):
     return v
 
 
-def _norm(field: str, v):
+def norm(field: str, v):
     """A comparable form of a value: labels 0/absent/-1 are all 'none', text is stripped,
     tags are a sorted list of paths."""
     if field in ("rating", "pick", "color"):
@@ -128,8 +129,8 @@ def _boxed_people(ids: list) -> dict:
     src = dkdb.connect()
     try:
         tags = dkdb.tag_tree(src)
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+        for part in chunked(ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, tid in src.execute(f"SELECT imageid, tagid FROM ImageTagProperties WHERE imageid IN ({chunk}) AND property IN ('tagRegion', 'autodetectedFace')"):
                 if tid in tags:
                     out.setdefault(pid, set()).add(dkdb.tag_path(tags, tid))
@@ -147,8 +148,8 @@ def db_values(photo_ids: list) -> dict:
         internal = {r[0] for r in src.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'")}
         pick_ids = {tid: index.PICK[n] for tid, (_, n) in tags.items() if n in index.PICK and tid in internal}
         color_ids = {tid: index.COLOR[n] for tid, (_, n) in tags.items() if n in index.COLOR and tid in internal}
-        for i in range(0, len(photo_ids), 500):
-            chunk = ",".join(str(int(x)) for x in photo_ids[i:i + 500])
+        for part in chunked(photo_ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, rating in src.execute(f"SELECT imageid, rating FROM ImageInformation WHERE imageid IN ({chunk})"):
                 out[pid] = {**_blank(), "rating": rating}
             for pid, tid in src.execute(f"SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({chunk})"):
@@ -175,7 +176,7 @@ def db_values(photo_ids: list) -> dict:
     return out
 
 
-def _exif_read(paths: list) -> dict:
+def exif_read(paths: list) -> dict:
     """{path: {field: value}} for every readable path; a path with no XMP block gives {}."""
     if not paths:
         return {}
@@ -222,7 +223,7 @@ def compare(photos: list) -> list:
     dbv = db_values([p["id"] for p in photos])
     sidecars = [edits.sidecar_path(p["path"]) for p in photos if os.path.isfile(edits.sidecar_path(p["path"]))]
     files = [p["path"] for p in photos if _can_hold_metadata(p["path"])]
-    read = _exif_read(sidecars + files)
+    read = exif_read(sidecars + files)
     records = []
     for p in photos:
         side = read.get(edits.sidecar_path(p["path"]))
@@ -234,7 +235,7 @@ def compare(photos: list) -> list:
             row = {}
             for s in SOURCES:
                 v = vals[s]
-                row[s] = None if v is None or (s == "file" and not v) else _norm(f, v.get(f))
+                row[s] = None if v is None or (s == "file" and not v) else norm(f, v.get(f))
             present = [row[s] for s in SOURCES if row[s] is not None]
             same = all(same_value(f, x, present[0]) for x in present)
             fields[f] = {**row, "ok": same}
@@ -258,7 +259,7 @@ def _cstamp(p: dict) -> str:
         side = f"{st.st_size}.{int(st.st_mtime)}"
     except OSError:
         side = "-"
-    return f"{CHECK_VERSION}|{analysis._stamp(p)}|{side}"
+    return f"{CHECK_VERSION}|{analysis.stamp(p)}|{side}"
 
 
 def scan(photos: list, rescan_all: bool = True):
@@ -279,10 +280,10 @@ def scan(photos: list, rescan_all: bool = True):
 
     def work():
         try:
-            for i in range(0, len(todo), 200):
+            for chunk in chunked(todo, 200):
                 if gen != _run["gen"]:
                     return
-                batch = todo[i:i + 200]
+                batch = chunk
                 try:
                     recs = compare(batch)
                 except Exception as e:  # one bad batch must not end the scan, but it must be visible
@@ -404,16 +405,16 @@ def _changes_from(values: dict, fields: list, db_tags: list) -> dict:
     ch = {}
     for f in fields:
         if f == "tags":
-            want = set(_norm("tags", values.get("tags")))
+            want = set(norm("tags", values.get("tags")))
             have = set(db_tags)
             ch["add_tags"] = sorted(want - have)
             ch["remove_tags"] = sorted(have - want)
         elif f in ("taken", "gps"):
-            v = _norm(f, values.get(f))
+            v = norm(f, values.get(f))
             if v is not None:  # a copy without a date or position says nothing about it
                 ch[f] = edit_value(f, v)
         else:
-            ch[f] = _norm(f, values.get(f))
+            ch[f] = norm(f, values.get(f))
     return ch
 
 
@@ -431,8 +432,8 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     con = analysis.connect()
     try:
         stored = {}
-        for i in range(0, len(photo_ids), 500):
-            chunk = ",".join(str(int(x)) for x in photo_ids[i:i + 500])
+        for part in chunked(photo_ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, data in con.execute(f"SELECT photo_id, data FROM metadata_check WHERE photo_id IN ({chunk})"):
                 if data:  # photos that agree have no stored report (nothing to copy anyway)
                     stored[pid] = json.loads(data)
@@ -443,7 +444,7 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     photos = [{"id": pid, "path": stored[pid]["path"], "name": stored[pid]["name"]} for pid in photo_ids if pid in stored]
     dbv = db_values([p["id"] for p in photos]) if source == "db" or "db" in targets else {}
     src_path = (lambda p: edits.sidecar_path(p["path"])) if source == "sidecar" else (lambda p: p["path"])
-    read = _exif_read([src_path(p) for p in photos]) if source != "db" else {}
+    read = exif_read([src_path(p) for p in photos]) if source != "db" else {}
 
     def source_values(p):
         if source == "db":
@@ -470,7 +471,7 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
                 skipped.append({"id": p["id"], "reason": f"no {source} metadata to copy"})
                 continue
             cur = dbv.get(p["id"], {"tags": []})
-            ch = _changes_from(src_vals, fields_for(src_vals), _norm("tags", cur.get("tags")))
+            ch = _changes_from(src_vals, fields_for(src_vals), norm("tags", cur.get("tags")))
             if "remove_tags" in ch:
                 ch["remove_tags"] = [t for t in ch["remove_tags"] if not is_person(p["id"], t)]
             if "add_tags" in ch:
@@ -493,18 +494,18 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
                     skipped.append({"id": p["id"], "reason": f"no {source} metadata to copy"})
                 continue
             use = fields_for(src_vals)
-            ch = {f: _norm(f, src_vals.get(f)) for f in use if f not in ("tags", "taken", "gps")}
+            ch = {f: norm(f, src_vals.get(f)) for f in use if f not in ("tags", "taken", "gps")}
             ch.update({k: v for k, v in _changes_from(src_vals, [f for f in use if f in ("taken", "gps")], []).items()})
             if "caption" in ch:
                 ch["caption_date"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             tag_paths = None
             if "tags" in use:
-                kw = [t for t in _norm("tags", src_vals.get("tags")) if not is_person(p["id"], t)]
+                kw = [t for t in norm("tags", src_vals.get("tags")) if not is_person(p["id"], t)]
                 tag_paths = sorted(set(kw) | set(db_people.get(p["id"], [])))
             for t in file_targets:
                 if t == "sidecar":
                     try:
-                        side = edits._prepare(p["path"])  # backs the sidecar up first
+                        side = edits.prepare(p["path"])  # backs the sidecar up first
                     except OSError:
                         skipped.append({"id": p["id"], "reason": "cannot create the sidecar"})
                         continue

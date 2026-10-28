@@ -30,7 +30,7 @@ log = logging.getLogger("app.faces.facemgr")
 
 # which ImageTagProperties row holds the rectangle of each kind of face
 REGION_PROP = {"confirmed": "tagRegion", "unknown": "autodetectedFace", "suggested": "autodetectedFace", "ignored": "ignoredFace"}
-_lock = threading.Lock()
+lock = threading.Lock()
 
 
 def rect_xml(x, y, w, h) -> str:
@@ -188,6 +188,20 @@ def sidecars_pending() -> int:
         return len(_side_queue)
 
 
+def flush_sidecar(pid: int):
+    """A face change of this photo still waiting for its sidecar is written now (a reread of the file would undo it);
+    one being written right now is waited for first."""
+    pid = int(pid)
+    with _side_cond:
+        for _ in range(60):
+            if pid not in _side_writing:
+                break
+            _side_cond.wait(timeout=1)
+        waiting = _side_queue.pop(pid, "none")
+    if waiting != "none":
+        write_regions_many([pid])
+
+
 def apply_many(ops: list, db_path=None, check_running: bool = True, background: bool = False) -> list:
     """Several face changes in one transaction with one backup. Each op:
     {op: name|confirm|ignore|unknown|remove|add|move, image, rect: [x,y,w,h], tag?, new_rect?}
@@ -212,7 +226,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
             raise SyncError("Unknown face operation")
     dbsync.preflight(db_path, check_running, "faces")
     results, touched = [], []
-    with _lock:
+    with lock:
         backup = None  # face changes take no full database copy; each is in the change log
         with dbsync.write_transaction(db_path, check_running) as con:
             sp = _special(con)
@@ -231,7 +245,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
               "tagonly": "{name} added to the photo (no face box)"}
     done = [r for r in results if "error" not in r and not r.get("skipped")]
     try:
-        paths = dict(dbsync._photo_paths(list({r["image"] for r in done})))
+        paths = dict(dbsync.photo_paths(list({r["image"] for r in done})))
     except Exception:
         paths = {}
     rows = []
@@ -248,7 +262,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
                      "summary": labels.get(r.get("op"), "Face changed").format(name=(r.get("name") or "").split("/")[-1] or "a person"),
                      "details": det, "undo": {"face_ops": inv} if inv else None})
     history.record(rows)
-    edits._recheck(list(dict.fromkeys(r["image"] for r in done)))  # the consistency report's entries for these photos are stale now
+    edits.recheck(list(dict.fromkeys(r["image"] for r in done)))  # the consistency report's entries for these photos are stale now
     # a person tagged without a box lives in the sidecar's tag list, not its regions: rewrite that list too
     tag_only = list(dict.fromkeys(r["image"] for r in done if r.get("op") in ("untag", "tagonly")))
     if tag_only:  # now, not queued (a video or a photo without a sidecar gets one)
@@ -552,7 +566,7 @@ def write_regions_many(images: list, db_path=None, files: bool = None, sidecars:
     # and a sidecar with the regions but not the tags reads as a mismatch (and loses the name on a rescan)
     ok = [i for i, (path, _a) in built.items() if path is not None]
     paths = {}
-    with edits._lock:  # pending edits read and the sidecars written as one step: a tag edit made meanwhile is kept
+    with edits.lock:  # pending edits read and the sidecars written as one step: a tag edit made meanwhile is kept
         db_tags, pend = edits.digikam_tag_paths(ok) if ok else {}, edits.pending()
         for image, (path, args) in built.items():
             if path is None:
@@ -561,7 +575,7 @@ def write_regions_many(images: list, db_path=None, files: bool = None, sidecars:
             tag_paths = edits.effective_tags(db_tags.get(image, []), pend.get(image, {}))
             try:
                 if sidecars:
-                    side = edits._prepare(path)
+                    side = edits.prepare(path)
                     jobs.append((side, args + edits.write_args({}, tag_paths, False))); owner[side] = image
                 if files and edits.can_write_file(path):
                     jobs.append((path, args + edits.write_args({}, tag_paths, True))); owner[path] = image

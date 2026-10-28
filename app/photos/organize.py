@@ -27,6 +27,7 @@ from pathlib import Path
 from app.digikam import dbsync, dkdb
 from app.digikam.dbsync import SyncError
 from app.photos import deletion
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.photos.organize")
 TRASHED, VISIBLE = 3, 1
@@ -37,8 +38,8 @@ def _rows(con, ids: list) -> list:
     """[{id, album, name, root, rel, dir, path}] for these Images ids (status 1), with their folder on disk."""
     roots = dkdb.root_paths(con)
     out = []
-    for i in range(0, len(ids), 500):
-        chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+    for part in chunked(ids, 500):
+        chunk = ",".join(str(int(x)) for x in part)
         for iid, album, name, root, rel in con.execute(
                 f"SELECT i.id, i.album, i.name, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({chunk}) AND i.status = 1"):
             if root not in roots:
@@ -64,8 +65,8 @@ def _free(d: Path, name: str) -> str:
 
 
 def _clean(name: str) -> str:
-    from app.photos.folders import _clean_name
-    return _clean_name(name, "file")
+    from app.photos.folders import clean_name
+    return clean_name(name, "file")
 
 
 # ---- trash
@@ -91,11 +92,8 @@ def trash(ids: list, check_running: bool = True) -> dict:
     """Move these photos to their album root's trash, as digiKam does. Returns {trashed, failed}."""
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         rows = _rows(con, ids)
-    finally:
-        con.close()
     moved, failed = [], []
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     for r in rows:
@@ -145,12 +143,9 @@ def trash(ids: list, check_running: bool = True) -> dict:
 
 def listing() -> list:
     """What is in the trash of every album root: [{id, name, path, when, trash, info, root, size, exists}], newest first."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
         status = {r[0]: r[1] for r in con.execute("SELECT id, status FROM Images WHERE status = ?", (TRASHED,)).fetchall()}
-    finally:
-        con.close()
     out = []
     for rid, rpath in roots.items():
         info = Path(rpath) / ".dtrash" / "info"
@@ -196,11 +191,8 @@ def item_for(info: str):
         real = rec.resolve(strict=True)
     except OSError:
         return None
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
-    finally:
-        con.close()
     for rid, rpath in roots.items():
         info_dir = (Path(rpath) / ".dtrash" / "info")
         try:
@@ -360,12 +352,9 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
     from app.photos.folders import _album
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photos")
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         rows = _rows(con, ids)
         folders = {a: _album(con, a) for a in ({int(album_id)} if album_id is not None else {r["album"] for r in rows})}
-    finally:
-        con.close()
     for f in folders.values():
         if not f["dir"].is_dir():
             raise SyncError(f"The folder is not on disk here: {f['dir']}")
@@ -427,11 +416,8 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
 
 
 def rename_photo(photo_id: int, new_name: str, check_running: bool = True) -> dict:
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         rows = _rows(con, [int(photo_id)])
-    finally:
-        con.close()
     if not rows:
         raise SyncError("That photo is not in the library.")
     return move_photos([int(photo_id)], rows[0]["album"], check_running, new_name)
@@ -485,11 +471,10 @@ def rename_folder(album_id: int, new_name: str, check_running: bool = True) -> d
 
 def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_name: str = None) -> dict:
     """Move a folder under another (new_parent_id; None keeps its parent), optionally with a new name."""
-    from app.photos.folders import _clean_name
+    from app.photos.folders import clean_name
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "folders")
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         src = _folder(con, album_id)
         if src["rel"] == "/":
             raise SyncError("The root folder cannot be moved or renamed.")
@@ -502,7 +487,7 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
                 raise SyncError("Folders can be moved within one album root only.")
             if parent["rel"] == src["rel"] or parent["rel"].startswith(src["rel"].rstrip("/") + "/"):
                 raise SyncError("A folder cannot be moved into itself.")
-        name = _clean_name(new_name, "folder") if new_name is not None else src["dir"].name
+        name = clean_name(new_name, "folder") if new_name is not None else src["dir"].name
         new_rel = (parent["rel"].rstrip("/") + "/" + name) if parent["rel"] != "/" else "/" + name
         if new_rel == src["rel"]:
             return {"id": src["id"], "path": src["rel"]}
@@ -512,8 +497,6 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
                                (src["root"], src["rel"], src["rel"].rstrip("/") + "/%")).fetchall()
         prefix = src["rel"].rstrip("/") + "/"
         children = [(aid, rel) for aid, rel in children if rel == src["rel"] or rel.startswith(prefix)]  # LIKE treats _ and % in names as wildcards
-    finally:
-        con.close()
     if not src["dir"].is_dir():
         raise SyncError(f"The folder is not on disk here: {src['dir']}")
     new_dir = parent["dir"] / name

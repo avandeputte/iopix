@@ -27,6 +27,13 @@ _lock = threading.Lock()
 _instance = None
 
 
+def reset():
+    """Drop the loaded detector so the next use reads the model files again."""
+    global _instance
+    with _lock:
+        _instance = None
+
+
 def chosen() -> str:
     return models.chosen("object_model")
 

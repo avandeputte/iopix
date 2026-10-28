@@ -304,6 +304,16 @@ write_lock = threading.Lock()  # one writer at a time in this process: a web req
 
 
 @contextmanager
+def reader(timeout: float = 10):
+    """A read connection to the viewer database, closed when the block ends."""
+    con = connect(timeout=timeout)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+@contextmanager
 def writer(timeout: float = 30):
     """One serialised write transaction on the viewer database: committed on success, always closed.
     Every module that writes AI results, checks or bookkeeping goes through this."""

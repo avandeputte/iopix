@@ -31,7 +31,7 @@ def _fake_raw(tmp_path, ext=".cr2"):
 @pytest.mark.skipif(not edits.EXIFTOOL, reason="exiftool is not available here")
 def test_raw_file_opens_as_its_embedded_preview_turned_by_the_raw_orientation(tmp_path):
     raw = _fake_raw(tmp_path)
-    im, _ = thumbs._open_oriented(str(raw), 200, 200)
+    im, _ = thumbs.open_oriented(str(raw), 200, 200)
     assert im.mode == "RGB"
     assert (im.width, im.height) == (107, 160), "the embedded 160x107 thumbnail, turned upright by Orientation 6 (rotate 90 CW)"
     # left half blue in the stored picture: after a 90 degree clockwise turn it is the top half
@@ -52,7 +52,7 @@ def test_raw_thumbnail_is_cached_like_any_photo_and_a_raw_without_preview_gets_t
         bad = tmp_path / "noise.arw"
         bad.write_bytes(os.urandom(4096))
         with pytest.raises(UnidentifiedImageError):
-            thumbs._open_oriented(str(bad), 200, 200)
+            thumbs.open_oriented(str(bad), 200, 200)
         photo2 = dict(photo, id=987_654_302, path=str(bad), hash="rawtest2", size=4096)
         out2 = thumbs.make("t", photo2)
         with Image.open(out2) as t:
@@ -67,7 +67,7 @@ def test_raw_path_without_exiftool_asks_pillow_as_before(tmp_path, monkeypatch):
     bad = tmp_path / "noise.dng"
     bad.write_bytes(b"\xff" * 64)
     with pytest.raises(UnidentifiedImageError):
-        thumbs._open_oriented(str(bad), 200, 200)
+        thumbs.open_oriented(str(bad), 200, 200)
 
 
 def test_preview_cache_is_pruned_by_modification_time(tmp_path, monkeypatch):

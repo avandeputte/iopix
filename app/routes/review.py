@@ -52,7 +52,7 @@ def api_quality_items(check: str, offset: int = 0, limit: int = 120):
 def api_quality_accepted(check: str = "unnamed"):
     """The photos accepted as they are for a check."""
     from app.faces import facequality
-    return {"photos": sorted(facequality._accepted(check))}
+    return {"photos": sorted(facequality.accepted_ids(check))}
 
 
 @router.post("/api/quality/ignore")

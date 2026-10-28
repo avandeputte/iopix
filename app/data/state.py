@@ -22,7 +22,7 @@ from app import config
 STATE_DB = config.DATA_DIR / "viewer.db"  # the SQLite file (vdb.SQLITE_FILE); the legacy migration's target
 LEGACY = (config.DATA_DIR / "state.db", config.DATA_DIR / "analysis.db")
 rev = 0  # bumped on every write so cached query results can be invalidated
-_lock = threading.Lock()
+lock = threading.Lock()
 _settings = (-1, {})  # (stamp it was read at, {key: value}); settings are read on every poll and every POST
 
 
@@ -83,9 +83,9 @@ def init():
     vdb.init()  # the tables of every module, on whichever database is configured
 
 
-def _write(fn):
+def write(fn):
     global rev
-    with _lock:
+    with lock:
         con = connect()
         try:
             out = fn(con)
@@ -136,9 +136,9 @@ def set_favorites(items: list, on: bool):
     """items: [(photo_id, hash)]"""
     now = int(time.time())
     if on:
-        _write(lambda c: c.executemany("INSERT OR IGNORE INTO favorite_photos VALUES (?,?,?)", [(i, h, now) for i, h in items]))
+        write(lambda c: c.executemany("INSERT OR IGNORE INTO favorite_photos VALUES (?,?,?)", [(i, h, now) for i, h in items]))
     else:
-        _write(lambda c: c.executemany("DELETE FROM favorite_photos WHERE photo_id = ?", [(i,) for i, _ in items]))
+        write(lambda c: c.executemany("DELETE FROM favorite_photos WHERE photo_id = ?", [(i,) for i, _ in items]))
 
 
 # ---- People groups (the People page's sections; digiKam is not touched)
@@ -161,7 +161,7 @@ def create_people_group(name: str) -> int:
     def go(c):
         pos = (c.execute("SELECT max(position) FROM people_groups").fetchone()[0] or 0) + 1
         return c.execute("INSERT INTO people_groups (name, position, created) VALUES (?,?,?)", (name, pos, int(time.time()))).lastrowid
-    return _write(go)
+    return write(go)
 
 
 def update_people_group(group_id: int, name: str = None, members: list = None) -> bool:
@@ -176,22 +176,22 @@ def update_people_group(group_id: int, name: str = None, members: list = None) -
             seen = list(dict.fromkeys(int(t) for t in members))
             c.executemany("INSERT INTO people_group_members (group_id, tag_id, position) VALUES (?,?,?)", [(group_id, t, k) for k, t in enumerate(seen)])
         return True
-    return _write(go)
+    return write(go)
 
 
 def delete_people_group(group_id: int):
     def go(c):
         c.execute("DELETE FROM people_group_members WHERE group_id = ?", (group_id,))
         c.execute("DELETE FROM people_groups WHERE id = ?", (group_id,))
-    _write(go)
+    write(go)
 
 
 def order_people_groups(ids: list):
-    _write(lambda c: c.executemany("UPDATE people_groups SET position = ? WHERE id = ?", [(k, int(i)) for k, i in enumerate(ids)]))
+    write(lambda c: c.executemany("UPDATE people_groups SET position = ? WHERE id = ?", [(k, int(i)) for k, i in enumerate(ids)]))
 
 
 def create_album(name: str, owner_id: int = None, shared: bool = True) -> int:
-    return _write(lambda c: c.execute("INSERT INTO viewer_albums (name, created, owner_id, is_shared) VALUES (?,?,?,?)",
+    return write(lambda c: c.execute("INSERT INTO viewer_albums (name, created, owner_id, is_shared) VALUES (?,?,?,?)",
                                       (name, int(time.time()), owner_id, 1 if shared else 0)).lastrowid)
 
 
@@ -207,40 +207,40 @@ def album(album_id: int) -> dict:
 
 def set_album_sharing(album_id: int, shared: bool, owner_id: int = None):
     """Shared: everyone sees it. Private: only owner_id does (the user who made it private)."""
-    _write(lambda c: c.execute("UPDATE viewer_albums SET is_shared = ?, owner_id = COALESCE(?, owner_id) WHERE id = ?",
+    write(lambda c: c.execute("UPDATE viewer_albums SET is_shared = ?, owner_id = COALESCE(?, owner_id) WHERE id = ?",
                                (1 if shared else 0, owner_id, int(album_id))))
 
 
 def rename_album(album_id: int, name: str):
-    _write(lambda c: c.execute("UPDATE viewer_albums SET name = ? WHERE id = ?", (name, album_id)))
+    write(lambda c: c.execute("UPDATE viewer_albums SET name = ? WHERE id = ?", (name, album_id)))
 
 
 def delete_album(album_id: int):
     def run(c):
         c.execute("DELETE FROM viewer_album_photos WHERE album_id = ?", (album_id,))
         c.execute("DELETE FROM viewer_albums WHERE id = ?", (album_id,))
-    _write(run)
+    write(run)
 
 
 def create_search(name: str, query: str) -> int:
-    return _write(lambda c: c.execute("INSERT INTO saved_searches (name, query, created) VALUES (?,?,?)", (name, query, int(time.time()))).lastrowid)
+    return write(lambda c: c.execute("INSERT INTO saved_searches (name, query, created) VALUES (?,?,?)", (name, query, int(time.time()))).lastrowid)
 
 
 def rename_search(search_id: int, name: str):
-    _write(lambda c: c.execute("UPDATE saved_searches SET name = ? WHERE id = ?", (name, search_id)))
+    write(lambda c: c.execute("UPDATE saved_searches SET name = ? WHERE id = ?", (name, search_id)))
 
 
 def delete_search(search_id: int):
-    _write(lambda c: c.execute("DELETE FROM saved_searches WHERE id = ?", (search_id,)))
+    write(lambda c: c.execute("DELETE FROM saved_searches WHERE id = ?", (search_id,)))
 
 
 def set_album_items(album_id: int, items: list, on: bool):
     now = int(time.time())
     if on:
-        _write(lambda c: c.executemany("INSERT OR IGNORE INTO viewer_album_photos VALUES (?,?,?,?)",
+        write(lambda c: c.executemany("INSERT OR IGNORE INTO viewer_album_photos VALUES (?,?,?,?)",
                                        [(album_id, i, h, now) for i, h in items]))
     else:
-        _write(lambda c: c.executemany("DELETE FROM viewer_album_photos WHERE album_id = ? AND photo_id = ?",
+        write(lambda c: c.executemany("DELETE FROM viewer_album_photos WHERE album_id = ? AND photo_id = ?",
                                        [(album_id, i) for i, _ in items]))
 
 
@@ -286,7 +286,7 @@ def read_only() -> bool:
 
 
 def set_setting(key: str, value: str):
-    _write(lambda c: c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)", (key, value)))
+    write(lambda c: c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)", (key, value)))
 
 
 # ---- what the index queries used to read through an attached copy of this database

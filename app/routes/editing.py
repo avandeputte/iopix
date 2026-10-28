@@ -25,6 +25,7 @@ from app.core import resolve
 from app.core import _kick
 from app.core import _form_items
 from app.core import _rebuild_after_write
+from app.digikam.dkdb import chunked
 
 
 router = APIRouter()
@@ -189,8 +190,8 @@ def _current_dates(ids: list) -> dict:
     con = db()
     try:
         out = {}
-        for i in range(0, len(ids), 500):
-            out.update({r[0]: r[1] for r in con.execute(f"SELECT id, taken FROM photos WHERE id IN ({','.join(str(int(x)) for x in ids[i:i + 500])})")})
+        for chunk in chunked(ids, 500):
+            out.update({r[0]: r[1] for r in con.execute(f"SELECT id, taken FROM photos WHERE id IN ({','.join(str(int(x)) for x in chunk)})")})
     finally:
         con.close()
     pend = edits.pending()

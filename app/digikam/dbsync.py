@@ -25,6 +25,7 @@ from pathlib import Path
 from app import config
 from app.digikam import dkdb
 from app.photos import edits
+from app.digikam.dkdb import chunked
 
 PICK_TAGS = ["Pick Label None", "Pick Label Rejected", "Pick Label Pending", "Pick Label Accepted"]
 COLOR_TAGS = [f"Color Label {n}" for n in ("None", "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "Gray", "Black", "White")]
@@ -34,18 +35,26 @@ SUPPORTED_DB_VERSIONS = range(10, 18)  # schema generations with the tables used
 SyncError = dkdb.SyncError  # one error type for every refusal to write digiKam's database
 
 
+RUNNING_MEMO = 2.0  # seconds a pgrep answer is reused
+_running_seen = [False, float("-inf")]  # [answer, when]
+
+
 def digikam_running() -> bool:
     """Whether digiKam is open, as far as this machine can tell. DIGIKAM_CHECK=none (and "ask", its name
     before v1.19): the viewer cannot see digiKam's process (a container, digiKam on another machine), so
     it does not check and does not ask; a write goes ahead."""
     if config.DIGIKAM_CHECK in ("none", "ask") or dkdb.standalone():
         return False
+    now = time.monotonic()
+    if now - _running_seen[1] < RUNNING_MEMO:  # status pages ask several times a second; two pgrep runs each time is wasteful
+        return _running_seen[0]
     try:
-        if subprocess.run(["pgrep", "-x", "digikam"], capture_output=True, timeout=5).returncode == 0:
-            return True
-        return subprocess.run(["pgrep", "-f", "digikam.app/Contents/MacOS/digikam"], capture_output=True, timeout=5).returncode == 0
+        running = subprocess.run(["pgrep", "-x", "digikam"], capture_output=True, timeout=5).returncode == 0 or \
+            subprocess.run(["pgrep", "-f", "digikam.app/Contents/MacOS/digikam"], capture_output=True, timeout=5).returncode == 0
     except (OSError, subprocess.SubprocessError):
-        return True  # cannot tell, so assume it is
+        running = True  # cannot tell, so assume it is
+    _running_seen[:] = [running, time.monotonic()]
+    return running
 
 
 def _confirmed_closed() -> bool:
@@ -160,14 +169,14 @@ def _set_label(con, image_id: int, label_tags: list, tag_id: int):
     con.execute("INSERT OR IGNORE INTO ImageTags (imageid, tagid) VALUES (?,?)", (image_id, tag_id))
 
 
-def _photo_paths(ids: list) -> list:
+def photo_paths(ids: list) -> list:
     """[(id, file path)] from the search index."""
     from app.data import index
     out = []
     con = index.open_index()
     try:
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+        for part in chunked(ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             out += [tuple(r) for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({chunk})")]
     finally:
         con.close()
@@ -235,8 +244,8 @@ def apply_pending(db_path: Path = None, pending: dict = None, check_running: boo
                 con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (image_id, tid))
             applied.append(image_id)
     if applied:  # the database now says what the sidecars (and files) say: digiKam need not rescan them
-        dkdb.stamp_files(_photo_paths(applied))
-    edits._recheck(applied)
+        dkdb.stamp_files(photo_paths(applied))
+    edits.recheck(applied)
     from app.photos import history
     history.record([{"photo_id": pid, "action": "database", "summary": "Edits written into " + ("the library" if dkdb.standalone() else "digiKam's database"),
                      "details": {k: v for k, v in pending.get(pid, pending.get(str(pid), {})).items() if k != "caption_date"}} for pid in applied])

@@ -294,12 +294,12 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
         have = {j[2] for j in jobs}
         extra = [i for i in touched if i not in have]
         if extra:
-            jobs += [(stamp, path, iid) for iid, path in dbsync._photo_paths(extra)]
+            jobs += [(stamp, path, iid) for iid, path in dbsync.photo_paths(extra)]
     summary.update(sidecars=len(jobs), backup=str(backup_file) if backup_file else None)
     if kind == "merge":
         _after_merge(summary["id"], summary["into"], merged_images, db_path)
     if queue and jobs:
-        appstate._write(lambda c: c.executemany(
+        appstate.write(lambda c: c.executemany(
             "INSERT INTO tag_rewrite_queue (op, path, image_id) VALUES (?,?,?)", jobs))
         start_worker()
     elif not queue:
@@ -317,7 +317,7 @@ def _after_merge(src: int, dst: int, images: list, db_path):
             else:
                 c.execute("UPDATE people_group_members SET tag_id = ? WHERE group_id = ? AND tag_id = ?", (dst, gid, src))
         c.execute("UPDATE ai_person_references SET tag_id = ? WHERE tag_id = ?", (dst, src))
-    appstate._write(go)
+    appstate.write(go)
     if images:
         from app.faces import facemgr
         facemgr.queue_sidecars(images, db_path)
@@ -332,7 +332,7 @@ def _run_group(op: str, rows: list):
         side = edits.sidecar_path(p)
         if not os.path.isfile(side):
             continue
-        dst = OPS_BACKUP_DIR / op / edits._rel(side)
+        dst = OPS_BACKUP_DIR / op / edits.rel(side)
         if not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(side, dst)
@@ -368,7 +368,7 @@ def start_worker():
                 except Exception as e:  # leave the rows queued; they are retried on the next start
                     progress["error"] = str(e)
                     break
-                appstate._write(lambda c: c.executemany("DELETE FROM tag_rewrite_queue WHERE id = ?", [(r[0],) for r in rows]))
+                appstate.write(lambda c: c.executemany("DELETE FROM tag_rewrite_queue WHERE id = ?", [(r[0],) for r in rows]))
                 progress["done"] += len(rows)
             if OPS_BACKUP_DIR.exists():
                 for old in sorted(p for p in OPS_BACKUP_DIR.iterdir() if p.is_dir())[:-KEEP_OPS]:

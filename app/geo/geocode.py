@@ -18,6 +18,12 @@ from app.geo import maps, places
 URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "iopix/1.0 (https://github.com/avandeputte/iopix)"
 _cache = OrderedDict()
+
+
+def clear_cache():
+    """Forget every remembered place search (after the map provider or its key changed)."""
+    with _lock:
+        _cache.clear()
 _lock = threading.Lock()       # the cache
 _net_lock = threading.Lock()   # the rate limit and the request itself, so a cached answer never waits behind a slow one
 _last = [0.0]

@@ -31,6 +31,7 @@ from app.core import CACHES
 from app.digikam import dkdb
 import secrets
 import threading
+from app.digikam.dkdb import chunked
 
 
 def _rebuild_soon():
@@ -191,12 +192,12 @@ def api_trash_thumb(request: Request, info: str):
         dst.parent.mkdir(parents=True, exist_ok=True)
         try:
             if item["name"].rsplit(".", 1)[-1].lower() in folders.VIDEO_EXT:
-                if not thumbs._video_frame(item["trash"], dst, 360, None):
+                if not thumbs.video_frame(item["trash"], dst, 360, None):
                     raise HTTPException(404)
             else:
-                im, icc = thumbs._open_oriented(item["trash"], 540, 360)
+                im, icc = thumbs.open_oriented(item["trash"], 540, 360)
                 im.thumbnail((540, 360))
-                thumbs._save(im, dst, 76, icc)
+                thumbs.save(im, dst, 76, icc)
         except HTTPException:
             raise
         except Exception:
@@ -321,8 +322,8 @@ async def api_photos_delete(request: Request):
     con = db()
     try:
         photos = []
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(map(str, ids[i:i + 500]))
+        for part in chunked(ids, 500):
+            chunk = ",".join(map(str, part))
             tags = {}
             for pid, full in con.execute(f"SELECT pt.photo_id, t.full FROM photo_tags pt JOIN tags t ON t.id = pt.tag_id WHERE pt.photo_id IN ({chunk})"):
                 tags.setdefault(pid, []).append(full)

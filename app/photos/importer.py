@@ -27,6 +27,7 @@ from app import config
 from app.digikam import dkdb
 from app.photos import edits, folders
 from app.digikam.dbsync import SyncError
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.photos.importer")
 STAGING = config.DATA_DIR / "import-staging"
@@ -112,10 +113,10 @@ def stage(files: list, token: str = None) -> str:
     for name, data in files:
         name = os.path.basename(name or "") or "photo"
         try:
-            name = folders._clean_name(name, "file")
+            name = folders.clean_name(name, "file")
         except SyncError:
             name = "photo-" + secrets.token_hex(3) + os.path.splitext(name)[1]
-        dst = d / folders._free_name(d, name)
+        dst = d / folders.free_name(d, name)
         _store(dst, data)
     _sweep()
     return token
@@ -204,8 +205,8 @@ def _same_size(sizes: set) -> dict:
     con = index.open_index()
     try:
         out = {}
-        for i in range(0, len(sizes), 500):
-            chunk = ",".join(str(int(s)) for s in list(sizes)[i:i + 500])
+        for part in chunked(sizes, 500):
+            chunk = ",".join(str(int(s)) for s in part)
             for pid, path, size in con.execute(f"SELECT id, path, size FROM photos WHERE size IN ({chunk})"):
                 out.setdefault(size, []).append((pid, path))
         return out
@@ -226,7 +227,7 @@ def plan(token: str, key: str = None) -> dict:
     for p in files:
         ext = p.name.rsplit(".", 1)[-1].lower() if "." in p.name else ""
         try:
-            kind = folders._category(ext)
+            kind = folders.category(ext)
         except SyncError as e:
             items.append({"name": p.name, "size": p.stat().st_size, "error": str(e)})
             continue
@@ -240,7 +241,7 @@ def plan(token: str, key: str = None) -> dict:
                 if hashes[path] == mine:
                     dup = pid
                     break
-        info = folders._probe(p)
+        info = folders.probe(p)
         items.append({"name": p.name, "size": p.stat().st_size, "when": info["when"], "folder": folder_for(info["when"], key),
                       "duplicate_of": dup, "kind": "video" if kind == 2 else "photo"})
     return {"token": token, "layout": key or layout(), "items": items,
@@ -248,11 +249,10 @@ def plan(token: str, key: str = None) -> dict:
 
 
 # ---- doing it
-def _root_folder(root_id: int = None, check_running: bool = True) -> dict:
+def root_folder(root_id: int = None, check_running: bool = True) -> dict:
     """The album root folder (relativePath '/') to import under: the given root, else the first mounted one.
     digiKam always has that row; if it is missing (a root digiKam has not scanned yet), it is added."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
         if root_id is not None:
             roots = {k: v for k, v in roots.items() if k == int(root_id)}
@@ -260,8 +260,6 @@ def _root_folder(root_id: int = None, check_running: bool = True) -> dict:
             raise SyncError("No album root to import into (Settings › Album roots)")
         rows = con.execute("SELECT id, albumRoot FROM Albums WHERE relativePath = '/'").fetchall()
         rows = [r for r in rows if r[1] in roots]
-    finally:
-        con.close()
     if rows:
         r = rows[0]
         return {"id": r[0], "root": r[1], "dir": Path(roots[r[1]])}
@@ -275,17 +273,14 @@ def _root_folder(root_id: int = None, check_running: bool = True) -> dict:
         return {"id": cur.lastrowid, "root": root, "dir": Path(roots[root])}
 
 
-def _ensure_folder(rel: str, root: dict, check_running: bool) -> int:
+def ensure_folder(rel: str, root: dict, check_running: bool) -> int:
     """The Albums id for /a/b under the root, creating a and a/b (directories and rows) when missing."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         row = con.execute("SELECT id FROM Albums WHERE albumRoot = ? AND relativePath = ?", (root["root"], rel)).fetchone()
-    finally:
-        con.close()
     if row:
         return row[0]
     parent_rel = rel.rsplit("/", 1)[0] or "/"
-    parent_id = root["id"] if parent_rel == "/" else _ensure_folder(parent_rel, root, check_running)
+    parent_id = root["id"] if parent_rel == "/" else ensure_folder(parent_rel, root, check_running)
     return folders.create(parent_id, rel.rsplit("/", 1)[1], check_running)["id"]
 
 
@@ -316,7 +311,7 @@ def sidecars_from_db(ids: list):
     vals = edits.db_state(ids)
     from app.digikam import dbsync
     jobs = []
-    for pid, path in dbsync._photo_paths(ids):
+    for pid, path in dbsync.photo_paths(ids):
         side, v = edits.sidecar_path(path), vals.get(pid) or {}
         if not os.path.exists(side):
             continue
@@ -341,7 +336,7 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
     d = _dir(token)
     db_path = dkdb.sqlite_path()
     dbsync.preflight(db_path, check_running, "the photo list")
-    root = _root_folder(root_id, check_running)
+    root = root_folder(root_id, check_running)
     added, skipped = [], []
     by_folder = {}
     for it in p["items"]:
@@ -357,7 +352,7 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
             by_folder.setdefault(it["folder"], []).append(it)
     for rel, items in by_folder.items():
         try:
-            album_id = _ensure_folder(rel, root, check_running)
+            album_id = ensure_folder(rel, root, check_running)
         except SyncError as e:
             skipped += [{"name": it["name"], "reason": f"folder {rel}: {e}"} for it in items]
             continue
@@ -365,11 +360,11 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
         staged = []
         for it in items:
             try:
-                final = folders._free_name(target, it["name"])
+                final = folders.free_name(target, it["name"])
                 dst = target / final
                 shutil.move(str(d / it["name"]), dst)
                 make_sidecar(str(dst))
-                staged.append((final, 2 if it["kind"] == "video" else 1, final.rsplit(".", 1)[-1].lower(), dst, folders._probe(dst)))
+                staged.append((final, 2 if it["kind"] == "video" else 1, final.rsplit(".", 1)[-1].lower(), dst, folders.probe(dst)))
             except (OSError, SyncError) as e:
                 skipped.append({"name": it["name"], "reason": str(e)})
         if staged:

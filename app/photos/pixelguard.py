@@ -16,6 +16,7 @@ import tempfile
 import time
 
 from app import config
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.photos.pixelguard")
 _warned = [False]
@@ -112,8 +113,7 @@ def _photo_ids(paths: list) -> dict:
     try:
         con = index.open_index()
         try:
-            for i in range(0, len(paths), 400):
-                chunk = paths[i:i + 400]
+            for chunk in chunked(paths, 400):
                 for pid, path in con.execute(f"SELECT id, path FROM photos WHERE path IN ({','.join('?' * len(chunk))})", chunk):
                     out[path] = pid
         finally:

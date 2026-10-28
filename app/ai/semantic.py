@@ -18,6 +18,7 @@ import time
 
 from app import config, jobs, thumbs
 from app.ai import models
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger(__name__)
 MODEL_DIR = config.DATA_DIR / "models"
@@ -128,7 +129,7 @@ class Engine:
         self._image_threads = 0
         self._todo_ids = set()
         self.failed = set()   # ids that could not be embedded (no thumbnail, unreadable file); they never block a switch-over
-        self._lock = threading.Lock()
+        self.lock = threading.Lock()
         self._run = 0
         self._text_cache = {}
 
@@ -152,6 +153,13 @@ class Engine:
     def installed_revision(self):
         return models.installed_revision(self.name)
 
+    def unload(self):
+        """Drop the loaded model objects so the next use reads the files again (after a download or a switch)."""
+        self._image = self._text = None
+        self._image_threads = 0
+        self._text_cache.clear()
+        self.check_revision()  # the same model downloaded again may be another revision: its embeddings are then dropped
+
     def check_revision(self):
         """Drop the vectors when the installed model is not the revision they were computed with (a re-download,
         a hub update): vectors of different revisions do not compare. The next start() rebuilds the index, and
@@ -166,7 +174,7 @@ class Engine:
         self.revision = installed
 
     def _save(self):
-        """Caller holds self._lock."""
+        """Caller holds self.lock."""
         _write(self.file, self.ids, self.vecs, self.revision)
 
     def file_key(self) -> str:
@@ -192,7 +200,7 @@ class Engine:
         if not enabled():
             return
         self.load()
-        with self._lock:  # drop any id embedded twice by overlapping runs
+        with self.lock:  # drop any id embedded twice by overlapping runs
             _, keep = np.unique(self.ids, return_index=True)
             if len(keep) != len(self.ids):
                 keep.sort()
@@ -227,11 +235,12 @@ class Engine:
                 self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
                 self._image_threads = n
             last_save = time.time()
-            for i in range(0, len(todo), BATCH):
+            done = 0
+            for todo_batch in chunked(todo, BATCH):
                 if run != self._run:
                     return
                 batch, paths = [], []
-                for p in todo[i:i + BATCH]:
+                for p in todo_batch:
                     try:
                         paths.append(str(thumbs.make("t", p)))  # the grid thumbnail is plenty for a 224 px model
                         batch.append(p["id"])
@@ -254,17 +263,18 @@ class Engine:
                                 log.warning("embeddings: cannot embed %s (%s)", path, e1)
                         batch, vecs = good, (np.concatenate(vl) if vl else None)
                     if batch:
-                        with self._lock:
+                        with self.lock:
                             if run != self._run:
                                 return
                             self.ids = np.concatenate([self.ids, np.asarray(batch, np.int32)])
                             self.vecs = np.concatenate([self.vecs, vecs])
-                self.done = min(len(todo), i + BATCH)
+                done += len(todo_batch)
+                self.done = done
                 if time.time() - last_save > 60:
-                    with self._lock:
+                    with self.lock:
                         self._save()
                     last_save = time.time()
-            with self._lock:
+            with self.lock:
                 self._save()
             if run == self._run:
                 self._finished_ok = True
@@ -276,7 +286,7 @@ class Engine:
 
     # ---- search
     def _rank(self, query_vec, k: int, exclude=None) -> list:
-        with self._lock:
+        with self.lock:
             ids, vecs = self.ids, self.vecs
         if ids is None or not len(ids):
             return []
@@ -308,7 +318,7 @@ class Engine:
     def reset(self):
         """Forget every embedding so the library is indexed again from scratch."""
         self._run += 1
-        with self._lock:
+        with self.lock:
             self.ids, self.vecs = np.zeros(0, np.int32), np.zeros((0, self.cfg["dim"]), np.float32)
             self.file.unlink(missing_ok=True)
             self.complete_marker.unlink(missing_ok=True)
@@ -316,7 +326,7 @@ class Engine:
     def similar(self, photo_id: int, k: int = 200) -> list:
         """Photo ids that look most like the given photo, most similar first."""
         self.load()
-        with self._lock:
+        with self.lock:
             pos = np.nonzero(self.ids == photo_id)[0] if self.ids is not None else []
             vec = self.vecs[pos[0]] if len(pos) else None
         return [photo_id] + self._rank(vec, k + 1, exclude=photo_id) if vec is not None else []
@@ -436,7 +446,7 @@ def remove_ids(ids: list):
         return
     gone = np.array(sorted({int(i) for i in ids}), np.int32)
     for eng in semantic.engines.values():
-        with eng._lock:
+        with eng.lock:
             if not eng.file.exists():
                 continue
             loaded = eng.ids is not None
@@ -457,7 +467,7 @@ def remap_ids(remap: dict):
     if not _HAVE or not remap:
         return
     for eng in semantic.engines.values():
-        with eng._lock:
+        with eng.lock:
             if not eng.file.exists():
                 continue
             loaded = eng.ids is not None

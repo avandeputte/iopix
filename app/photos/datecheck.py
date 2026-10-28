@@ -9,6 +9,7 @@ import subprocess
 from collections import Counter
 
 from app.photos import edits
+from app.digikam.dkdb import chunked
 
 # file-system dates say when the file was copied, not when the photo was taken: reported, but kept apart
 SYSTEM = ("System:FileModifyDate", "System:FileAccessDate", "System:FileInodeChangeDate", "System:FileCreateDate")
@@ -28,8 +29,7 @@ def _day(v: str):
 def dates(paths: list) -> dict:
     """{path: {group:tag: value}} of every date/time tag in each file (exiftool -time:all)."""
     out = {}
-    for i in range(0, len(paths), 100):
-        chunk = paths[i:i + 100]
+    for chunk in chunked(paths, 100):
         res = subprocess.run([*edits.exiftool_cmd(), "-j", "-G1", "-a", "-q", "-m", "-time:all", "-api", "LargeFileSupport=1", *chunk],
                              capture_output=True, text=True, timeout=600)
         for rec in json.loads(res.stdout or "[]"):
@@ -92,7 +92,7 @@ def wrongfolder(detail: bool = False, limit: int = 0) -> dict:
     """report() for the photos of the "date does not match the folder" quality check."""
     from app.data import index
     from app.faces import facequality
-    issues = facequality._wrongfolder()
+    issues = facequality.wrongfolder()
     if limit:
         issues = issues[:limit]
     con = index.open_index()
@@ -103,6 +103,6 @@ def wrongfolder(detail: bool = False, limit: int = 0) -> dict:
     items = []
     for u in issues:
         fd = facequality.folder_date(u["folder"])
-        start, end = facequality._folder_span(fd)
+        start, end = facequality.folder_span(fd)
         items.append({"photo": u["photo"], "path": paths.get(u["photo"]), "taken": u["taken"], "start": start.isoformat(), "end": end.isoformat()})
     return report([i for i in items if i["path"]], detail)

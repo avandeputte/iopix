@@ -182,7 +182,7 @@ def _remember(key: str, revision):
     RECORD.write_text(json.dumps(rec, indent=1))
 
 
-def _hf_local(repo: str):
+def hf_local(repo: str):
     """(commit id, downloaded time) of a cached repository, or (None, None)."""
     ref = MODEL_DIR / f"models--{repo.replace('/', '--')}" / "refs" / "main"
     try:
@@ -200,7 +200,7 @@ def local(key: str) -> dict:
     if m["kind"] == "hf":
         shas, ats = [], []
         for repo in m["repos"]:
-            sha, at = _hf_local(repo)
+            sha, at = hf_local(repo)
             if sha is None:
                 return {"installed": False}
             shas.append(sha[:7]); ats.append(at)
@@ -258,7 +258,7 @@ def installed_revision(key: str):
     if m["kind"] == "hf":
         shas = []
         for repo in m["repos"]:
-            sha, _ = _hf_local(repo)
+            sha, _ = hf_local(repo)
             if sha is None:
                 return None
             shas.append(sha)
@@ -292,7 +292,7 @@ def check(key: str) -> dict:
                     info = json.load(r)
                 sha = info.get("sha", "")
                 remote.append(sha[:7])
-                mine, _ = _hf_local(repo)
+                mine, _ = hf_local(repo)
                 changed |= bool(mine) and sha != mine
                 out["remote_at"] = info.get("lastModified")
             out["remote"] = "+".join(remote)
@@ -364,7 +364,7 @@ def download(key: str):
             if res.returncode != 0:
                 raise RuntimeError((res.stderr or res.stdout).strip().splitlines()[-1][:300] if (res.stderr or res.stdout).strip() else f"exit code {res.returncode}")
             _remember(key, local(key).get("revision"))
-            _reset(key)
+            reset(key)
             with _lock:
                 _checked.pop(key, None)
             if REGISTRY[key].get("choice") in ("search_model", "face_vectors"):
@@ -408,12 +408,12 @@ def _recompute_looks():
     """A photo quality model arrived: queue the analysis, which fills in the scores it could not compute before."""
     try:
         from app import core
-        core._run_analysis_soon()
+        core.run_analysis_soon()
     except Exception as e:
         logging.getLogger(__name__).warning("models: photo quality was not restarted after the download: %s", e)
 
 
-def _reset(key: str):
+def reset(key: str):
     """Drop the loaded model objects so the next use reads the new files (after a download or a switch)."""
     group = REGISTRY.get(key, {}).get("choice")
     try:
@@ -421,19 +421,14 @@ def _reset(key: str):
             from app.ai.semantic import semantic
             e = semantic.engines.get(key)
             if e is not None:
-                e._image = e._text = None
-                e._image_threads = 0
-                e._text_cache.clear()
-                e.check_revision()  # the same model downloaded again may be another revision: its embeddings are then dropped
+                e.unload()
         elif group == "caption_model":
             from app.ai import caption, florence
-            with caption._lock:
-                caption._state.clear()
+            caption.reset()
             florence.reset()
         elif group == "object_model":
             from app.ai import detector
-            with detector._lock:
-                detector._instance = None
+            detector.reset()
         elif group == "face_vectors":
             from app.faces import facevecs
             facevecs.reset_session()
@@ -448,7 +443,7 @@ def _reset(key: str):
             ages.reset_session()
         elif key == "geonames":
             from app.geo import places
-            places._geo = None  # loaded again from the new files on the next lookup
+            places.reset()  # loaded again from the new files on the next lookup
     except Exception:  # the download itself succeeded; the old objects simply stay until a restart
         traceback.print_exc()
 

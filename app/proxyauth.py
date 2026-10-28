@@ -41,7 +41,7 @@ _opts = {"at": 0.0, "values": {}}
 seen = {}  # the last Cloudflare Access token seen (unverified claims), to set this up from: {iss, aud, email, peer, at}
 
 
-def _opt(name: str):
+def opt(name: str):
     """A setting: the environment (iopix.env) wins, else what an admin saved (Settings, or the MCP tool), re-read every
     few seconds."""
     if os.environ.get(name) not in (None, ""):
@@ -137,6 +137,15 @@ authlog = logging.getLogger("app.auth")  # sign-ins, failed attempts and sign-ou
 _logged = {}  # identity -> when its proxy sign-in was last logged (a page load makes dozens of requests)
 
 
+def once(key, seconds: float = 3600) -> bool:
+    """True when this key has not been logged in the last `seconds` (and records it now): one line per hour, not one per request."""
+    now = time.time()
+    if now - _logged.get(key, 0) > seconds:
+        _logged[key] = now
+        return True
+    return False
+
+
 def source(request) -> str:
     """Where a request came from, for the log: the visitor's address, and whether it came through Cloudflare."""
     h = request.headers
@@ -146,19 +155,19 @@ def source(request) -> str:
 
 
 def mode() -> str:
-    m = (_opt("AUTH_PROXY") or "off").strip().lower()
+    m = (opt("AUTH_PROXY") or "off").strip().lower()
     return m if m in PRESETS else "off"
 
 
 def headers() -> list:
-    raw = (_opt("AUTH_PROXY_HEADER") or "").strip()
+    raw = (opt("AUTH_PROXY_HEADER") or "").strip()
     if raw:
         return [h.strip() for h in raw.split(",") if h.strip()]
     return [CF_HEADER] if mode() == "cloudflare" else list(GENERIC_HEADERS)
 
 
 def trusted() -> list:
-    raw = (_opt("AUTH_PROXY_TRUSTED") or "").strip() or "127.0.0.1,::1"
+    raw = (opt("AUTH_PROXY_TRUSTED") or "").strip() or "127.0.0.1,::1"
     out = []
     for part in raw.replace(" ", ",").split(","):
         if part:
@@ -170,8 +179,8 @@ def trusted() -> list:
 
 
 def cf_settings():
-    team = (_opt("CF_ACCESS_TEAM") or "").strip().removeprefix("https://").rstrip("/")
-    aud = (_opt("CF_ACCESS_AUD") or "").strip()
+    team = (opt("CF_ACCESS_TEAM") or "").strip().removeprefix("https://").rstrip("/")
+    aud = (opt("CF_ACCESS_AUD") or "").strip()
     return (team, aud) if team and aud else (None, None)
 
 
@@ -196,8 +205,7 @@ def _cf_email(token: str, team: str, aud: str):
         key = client.get_signing_key_from_jwt(token).key
         claims = jwt.decode(token, key, algorithms=["RS256"], audience=aud, issuer=f"https://{team}", leeway=30, options={"require": ["exp"]})
     except Exception as e:  # a forged, expired or foreign token: nobody
-        if time.time() - _logged.get("refused", 0) > 60:
-            _logged["refused"] = time.time()
+        if once("refused", 60):
             authlog.warning("Cloudflare Access token refused (%s): treated as not signed in", str(e)[:200])
         return None
     return (claims.get("email") or claims.get("common_name") or "").strip() or None
@@ -211,8 +219,7 @@ def identity(headers_in, peer: str):
     if m == "cloudflare":
         team, aud = cf_settings()
         if not team:  # a bare email header is never believed for Cloudflare: the signed token is what makes it safe
-            if time.time() - _logged.get("cf-unset", 0) > 3600:
-                _logged["cf-unset"] = time.time()
+            if once("cf-unset"):
                 log.warning("AUTH_PROXY=cloudflare without CF_ACCESS_TEAM and CF_ACCESS_AUD: nobody is signed in through the proxy")
             return None
         token = headers_in.get(CF_JWT_HEADER) or ""
@@ -233,7 +240,7 @@ def identity(headers_in, peer: str):
 def deny_unknown() -> bool:
     """AUTH_PROXY_CREATE=deny: someone the proxy lets in who has no account here gets no access at all (not even
     the sign-in screen)."""
-    return (_opt("AUTH_PROXY_CREATE") or "").strip().lower() == "deny"
+    return (opt("AUTH_PROXY_CREATE") or "").strip().lower() == "deny"
 
 
 def user_for(ident: str):
@@ -249,8 +256,8 @@ def user_for(ident: str):
     finally:
         con.close()
     if r:
-        return users._row(r)
-    role = (_opt("AUTH_PROXY_CREATE") or "").strip().lower()
+        return users.row(r)
+    role = (opt("AUTH_PROXY_CREATE") or "").strip().lower()
     if role not in ("viewer", "editor"):
         return None
     name = ident.strip()[:64]
@@ -280,8 +287,7 @@ def user(request):
         return hit[0]
     u = user_for(ident)
     _cache[ident] = (u, now + 30)
-    if now - _logged.get(ident, 0) > 3600:  # once an hour per person, not per request
-        _logged[ident] = now
+    if once(ident):  # once an hour per person, not per request
         how = "Cloudflare Access" if mode() == "cloudflare" else f"the proxy ({mode()})"
         if u:
             authlog.info("signed in by %s: %s as %s (%s) from %s", how, ident, u["name"], u["role"], source(request))
@@ -295,10 +301,10 @@ def user(request):
 def status() -> dict:
     """For Settings and diagnostics: how proxy sign-in is set up (no secrets)."""
     team, aud = cf_settings()
-    return {"values": {k: (_opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if os.environ.get(k) not in (None, "")],
+    return {"values": {k: (opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if os.environ.get(k) not in (None, "")],
             "mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
             "team": team, "aud": aud,
-            "cloudflareVerified": bool(team), "create": (_opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}
+            "cloudflareVerified": bool(team), "create": (opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}
 
 
 def remember_peer():

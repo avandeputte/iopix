@@ -127,11 +127,8 @@ def _wanted(con) -> list:
 
 
 def _have() -> set:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM ai_face_ages")}
-    finally:
-        con.close()
 
 
 def coverage() -> tuple:
@@ -167,7 +164,7 @@ def _job(gen: int):
                 return
             _, path, pw, ph = faces[0][:4]
             try:
-                im, _ = thumbs._open_oriented(path, 2400, 2400)
+                im, _ = thumbs.open_oriented(path, 2400, 2400)
             except OSError as e:
                 log.warning("ages: cannot read %s (%s)", path, e)
                 progress["done"] += len(faces)
@@ -209,12 +206,8 @@ def start():
 
 def reset():
     _run["gen"] += 1
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         con.execute("DELETE FROM ai_face_ages")
-        con.commit()
-    finally:
-        con.close()
 
 
 # --------------------------------------------------------------------------
@@ -222,23 +215,16 @@ def reset():
 # --------------------------------------------------------------------------
 
 def births() -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {int(r[0]): int(r[1]) for r in con.execute("SELECT tag_id, birth_year FROM person_births")}
-    finally:
-        con.close()
 
 
 def set_birth(tag: int, year):
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         if year is None:
             con.execute("DELETE FROM person_births WHERE tag_id = ?", (tag,))
         else:
             con.execute("INSERT OR REPLACE INTO person_births (tag_id, birth_year, ts) VALUES (?,?,?)", (tag, int(year), int(time.time())))
-        con.commit()
-    finally:
-        con.close()
 
 
 # --------------------------------------------------------------------------
@@ -246,11 +232,8 @@ def set_birth(tag: int, year):
 # --------------------------------------------------------------------------
 
 def _ages() -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return {(r[0], r[1], r[2], r[3], r[4]): r[5] for r in con.execute("SELECT photo_id, x, y, w, h, age FROM ai_face_ages WHERE age IS NOT NULL")}
-    finally:
-        con.close()
 
 
 def _wmedian(values, weights) -> float:

@@ -23,9 +23,9 @@ def _photo(lib, ext=(".jpg", ".jpeg")):
     finally:
         con.close()
     pid = next(i for i, n in rows if n.lower().endswith(ext))
-    p = {"id": pid, "path": dict(dbsync._photo_paths([pid]))[pid]}
+    p = {"id": pid, "path": dict(dbsync.photo_paths([pid]))[pid]}
     edits.forget([pid])
-    edits._prepare(p["path"])
+    edits.prepare(p["path"])
     importer.sidecars_from_db([pid])
     return p
 

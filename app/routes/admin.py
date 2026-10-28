@@ -102,8 +102,8 @@ async def api_proxy_set(request: Request):
     if changes.get("AUTH_PROXY_CREATE", "").lower() not in ("", "viewer", "editor", "deny"):
         raise HTTPException(400, "Someone with no account: the sign-in screen, deny, or a viewer or editor account")
     if (m or proxyauth.mode()).lower() == "cloudflare" and ("CF_ACCESS_TEAM" in changes or "CF_ACCESS_AUD" in changes or m):
-        team = changes.get("CF_ACCESS_TEAM", proxyauth._opt("CF_ACCESS_TEAM") or "")
-        aud = changes.get("CF_ACCESS_AUD", proxyauth._opt("CF_ACCESS_AUD") or "")
+        team = changes.get("CF_ACCESS_TEAM", proxyauth.opt("CF_ACCESS_TEAM") or "")
+        aud = changes.get("CF_ACCESS_AUD", proxyauth.opt("CF_ACCESS_AUD") or "")
         if bool(team) != bool(aud):
             raise HTTPException(400, "Cloudflare needs both the team domain and the AUD tag (or neither)")
     proxyauth.save(changes)
@@ -123,7 +123,7 @@ async def api_settings(request: Request):
         if body["update_check"]:
             threading.Thread(target=updates.check, daemon=True).start()
         else:
-            updates._checked.clear()
+            updates.forget_check()
     if "file_scanner" in body:  # watch the album folders for files added, changed or removed outside the viewer
         appstate.set_setting("file_scanner", "1" if body["file_scanner"] else "0")
         if body["file_scanner"]:
@@ -179,7 +179,7 @@ async def api_settings(request: Request):
             raise HTTPException(400, "Unknown map provider")
         appstate.set_setting("map_provider", body["map_provider"])
         maps.reset_session()
-        geocode._cache.clear()
+        geocode.clear_cache()
     if "google_maps_key" in body:  # stored, never shown back
         appstate.set_setting("google_maps_key", str(body["google_maps_key"]).strip())
     if "google_server_key" in body:  # a second key, restricted to this server's address, for the APIs called from here
@@ -207,7 +207,7 @@ async def api_settings(request: Request):
             if not dlmodels.local(key)["installed"]:
                 raise HTTPException(400, f"{dlmodels.REGISTRY[key]['label']} is not installed; download it first")
             appstate.set_setting(group, key)
-            await run_in_threadpool(dlmodels._reset, key)  # the next use loads the new model (its locks may be held by a loading job)
+            await run_in_threadpool(dlmodels.reset, key)  # the next use loads the new model (its locks may be held by a loading job)
             if group == "face_vectors":
                 await run_in_threadpool(facevecs.start)  # every face is embedded again with the new model
             elif group in ("object_model", "caption_model"):
@@ -647,7 +647,7 @@ async def api_location_landmark(request: Request):
 
     def work():
         import io
-        im, _ = thumbs._open_oriented(row["path"], 1024, 1024)
+        im, _ = thumbs.open_oriented(row["path"], 1024, 1024)
         im = im.convert("RGB")
         im.thumbnail((1024, 1024))
         buf = io.BytesIO()
@@ -928,7 +928,7 @@ def api_backup(which: str, request: Request):
                            "captions, consistency report; embeddings*.npz: the content-search index). digiKam's own database is a separate download.\n")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
-        dkdb._prune("viewer-backup-*.zip")
+        dkdb.prune("viewer-backup-*.zip")
         return FileResponse(dst, media_type="application/zip", filename=f"iopix-backup-{stamp}.zip", content_disposition_type="attachment")
     if which != "digikam":
         raise HTTPException(404, "backup is 'digikam' or 'app'")
@@ -944,5 +944,5 @@ def api_backup(which: str, request: Request):
         return FileResponse(dst, media_type="application/sql", filename=dst.name, content_disposition_type="attachment")
     dst = dkdb.BACKUP_DIR / f"digikam4-download-{stamp}.db"
     snapshot(dkdb.sqlite_path(), dst)  # a consistent copy even while digiKam writes
-    dkdb._prune("digikam4-download-*.db")
+    dkdb.prune("digikam4-download-*.db")
     return FileResponse(dst, media_type="application/vnd.sqlite3", filename=f"digikam4-{stamp}.db", content_disposition_type="attachment")

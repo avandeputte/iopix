@@ -28,7 +28,7 @@ FIELD_LABEL = {"rating": "Rating", "pick": "Pick label", "color": "Colour label"
 PRECISION_TEXT = {"exact": "exactly", "month": "month and year", "year": "year only", "unknown": "unknown"}
 
 
-def _who() -> str:
+def actor() -> str:
     return user.get() or "system"
 
 
@@ -64,18 +64,14 @@ def record(rows: list):
     records the backed-up original of the photo's image file (file_copy) when one exists."""
     if not rows:
         return
-    now, who = int(time.time()), _who()
+    now, who = int(time.time()), actor()
     try:
-        con = vdb.connect()
-        try:
+        with vdb.writer() as con:
             con.executemany("INSERT INTO photo_history (photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy) VALUES (?,?,?,?,?,?,?,?,?,?)",
                             [(int(r["photo_id"]), now, r.get("user") or who, r["action"], r["summary"][:500],
                               json.dumps(r.get("details")) if r.get("details") is not None else None,
                               json.dumps(r.get("undo")) if r.get("undo") is not None else None,
                               r.get("sidecar") or None, r.get("path"), r.get("file_copy") or _file_copy(r.get("path"))) for r in rows])
-            con.commit()
-        finally:
-            con.close()
     except Exception as e:  # the change itself stands; the log entry is what is lost
         log.warning("history: %d entries were not recorded: %s", len(rows), e)
 
@@ -123,11 +119,8 @@ def _photos_of_person(tag_id: int) -> list:
 
 
 def users() -> list:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return [r[0] for r in con.execute("SELECT DISTINCT user_name FROM photo_history WHERE user_name IS NOT NULL ORDER BY user_name")]
-    finally:
-        con.close()
 
 
 def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
@@ -140,8 +133,7 @@ def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str
         if not ids:
             return {"total": 0, "entries": []}
         where.append(f"photo_id IN ({','.join(str(int(i)) for i in ids)})")
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         if photo_id is not None:
             where.append("photo_id = ?"); params.append(int(photo_id))
         if action:
@@ -159,8 +151,6 @@ def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str
         total = con.execute(f"SELECT count(*) FROM photo_history{w}", params).fetchone()[0]
         rows = con.execute(f"SELECT id, photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM photo_history{w} "
                            f"ORDER BY id DESC LIMIT ? OFFSET ?", params + [int(limit), int(offset)]).fetchall()
-    finally:
-        con.close()
     from app.photos import edits
     from app.faces import facemgr
     known_paths = _paths([r[1] for r in rows if not r[9]])
@@ -193,7 +183,7 @@ def _paths(ids: list) -> dict:
         return {}
     try:
         from app.digikam import dbsync
-        return dict(dbsync._photo_paths(list(set(ids))))
+        return dict(dbsync.photo_paths(list(set(ids))))
     except Exception:
         return {}
 
@@ -208,11 +198,8 @@ def _deleted_backup(details_json):
 
 
 def get(entry_id: int) -> dict:
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         r = con.execute("SELECT id, photo_id, action, details, undo_values, sidecar_copy, path, file_copy FROM photo_history WHERE id = ?", (int(entry_id),)).fetchone()
-    finally:
-        con.close()
     if not r:
         return None
     return {"id": r[0], "photo": r[1], "action": r[2], "details": json.loads(r[3]) if r[3] else {}, "undo": json.loads(r[4]) if r[4] else None,
@@ -290,12 +277,12 @@ def restore(entry_id: int, kind: str) -> dict:
         from app.digikam import dbsync, dkdb
         db_path = dkdb.sqlite_path()
         dbsync.preflight(db_path, True, "the photo")  # the row changes too: refused while digiKam runs, before the file is touched
-        keep = lossless._copy_before(photo["path"])  # what the file is now (rotations and crops since), kept with this entry
+        keep = lossless.copy_before(photo["path"])  # what the file is now (rotations and crops since), kept with this entry
         shutil.copy2(b, photo["path"])
         # the row says "look at this file again": digiKam (and the scanner) read its size, dimensions and orientation back
         with dbsync.write_transaction(db_path, True) as con:
             con.execute("UPDATE Images SET fileSize = ?, modificationDate = NULL WHERE id = ?", (os.stat(photo["path"]).st_size, pid))
-        lossless._forget_checksum(pid)
+        lossless.forget_checksum(pid)
         record([{"photo_id": pid, "action": "restore", "summary": "Image file put back as it was before the viewer first wrote into it", "path": photo["path"],
                  "file_copy": keep, "details": {"kept": keep}}])
         index.build()  # digiKam rescans the file on its own (its time and size changed) and reads it back
@@ -322,13 +309,13 @@ def _pending_from_sidecar(photo: dict):
     from app.faces import facemgr
     from app.data import index
     side = edits.sidecar_path(photo["path"])
-    vals = consistency._exif_read([side]).get(side) or {}
+    vals = consistency.exif_read([side]).get(side) or {}
     con = index.open_index()
     try:
         people = {r[0] for r in con.execute("SELECT full FROM tags WHERE person = 1")}
     finally:
         con.close()
-    with edits._lock:
+    with edits.lock:
         db_tags = set(edits.digikam_tag_paths([photo["id"]]).get(photo["id"], []))
         ch = dict(edits.pending().get(photo["id"], {}))
         if vals.get("_present"):
@@ -336,8 +323,8 @@ def _pending_from_sidecar(photo: dict):
                 ch["rating"] = int(vals.get("rating") or 0)
             for f in ("title", "caption"):
                 if vals.get(f) is not None:
-                    ch[f] = consistency._norm(f, vals.get(f)) or ""
-            want = {t for t in consistency._norm("tags", vals.get("tags")) if t not in people and not t.startswith("People/")}
+                    ch[f] = consistency.norm(f, vals.get(f)) or ""
+            want = {t for t in consistency.norm("tags", vals.get("tags")) if t not in people and not t.startswith("People/")}
             have = {t for t in db_tags if t not in people and not t.startswith("People/")}
             ch["add_tags"], ch["remove_tags"] = sorted(want - have), sorted(have - want)
             if not ch["add_tags"]:

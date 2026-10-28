@@ -26,6 +26,7 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.data import index
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger("app.faces.facequality")
 NEAR = 3          # pixels: regions of one person this close on every coordinate are the same face
@@ -59,16 +60,13 @@ def _groups(rects: list) -> list:
 
 def scan() -> dict:
     """Every face region in digiKam's database (or the library with sync off), checked."""
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         tags = dkdb.tag_tree(con)
         special = {r[0] for r in con.execute("SELECT tagid FROM TagProperties WHERE property IN ('unknownPerson', 'ignoredPerson', 'unconfirmedPerson')")}
         rows = con.execute(
             "SELECT p.imageid, p.tagid, p.property, p.value, ii.width, ii.height, ii.orientation FROM ImageTagProperties p "
             "JOIN Images i ON i.id = p.imageid AND i.status = 1 LEFT JOIN ImageInformation ii ON ii.imageid = p.imageid "
             "WHERE p.property IN ('tagRegion', 'autodetectedFace', 'autodetectedPerson', 'ignoredFace')").fetchall()
-    finally:
-        con.close()
     by, invalid = {}, []
     faces_of = {}  # photo -> [named faces, unnamed faces] (ignored ones do not count)
     for img, tag, prop, val, w, h, orient in rows:
@@ -99,18 +97,18 @@ def scan() -> dict:
         if len(groups) > 1:
             separate.append({"photo": img, "name": name, "rects": [list(g[0][1]) for g in groups]})
     bad_dates = _baddate()
-    acc_d = _accepted("baddate")
+    acc_d = accepted_ids("baddate")
     bad_shown = [u for u in bad_dates if acc_d.get(u["photo"]) != u["signature"]]
-    wrong = _wrongfolder()
-    acc_w = _accepted("wrongfolder")
+    wrong = wrongfolder()
+    acc_w = accepted_ids("wrongfolder")
     wrong_shown = [u for u in wrong if acc_w.get(u["photo"]) != u["signature"]]
     noloc = _nolocation()
-    acc_l = _accepted("nolocation")
+    acc_l = accepted_ids("nolocation")
     noloc_shown = [u for u in noloc if acc_l.get(u["photo"]) != u["signature"]]
     untagged = _untagged()
-    acc_u = _accepted("untagged")
+    acc_u = accepted_ids("untagged")
     untagged_shown = [u for u in untagged if acc_u.get(u["photo"]) != u["signature"]]
-    accepted = _accepted("unnamed")
+    accepted = accepted_ids("unnamed")
     unnamed = [{"photo": img, "faces": n[1], "signature": f"{n[0]}:{n[1]}"} for img, n in sorted(faces_of.items()) if n[1] and not n[0]]
     shown = [u for u in unnamed if accepted.get(u["photo"]) != u["signature"]]
     return {"checked": len(rows), "near": near, "separate": separate, "invalid": invalid, "unnamed": shown,
@@ -164,7 +162,7 @@ def folder_date(path: str):
     return found
 
 
-def _folder_span(fd):
+def folder_span(fd):
     """The dates a folder's own date covers: a day and the month after it, a month, or a year; a day of slack on
     each side for clocks and time zones."""
     y, mo, d = fd
@@ -180,7 +178,7 @@ def _folder_span(fd):
     return start - dt.timedelta(days=1), end + dt.timedelta(days=1)
 
 
-def _wrongfolder() -> list:
+def wrongfolder() -> list:
     """Photos and videos whose date is outside the date their folder is named for (2005-01-01 in 2020/202001): the
     date or the folder is wrong. [{photo, ts, name, taken, folder, folder_id, expect, suggest, signature}], the
     furthest off first. suggest is the existing folder named for the photo's own date, when there is one."""
@@ -196,7 +194,7 @@ def _wrongfolder() -> list:
         fd = folder_date(path)
         if not fd:
             continue
-        span = _folder_span(fd)
+        span = folder_span(fd)
         if span:
             spans[aid] = (span, fd, path)
             by_date.setdefault(fd, []).append((n or 0, aid, path))
@@ -263,34 +261,28 @@ def _baddate() -> list:
     return out
 
 
-def _accepted(check: str) -> dict:
+def accepted_ids(check: str) -> dict:
     """{photo: signature} the owner accepted for this check."""
     from app.data import vdb
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         return dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = ?", (check,)).fetchall())
-    finally:
-        con.close()
 
 
 def ignore_unnamed(photos: list) -> dict:
     """Mark every unnamed face on these photos as not a face to name (digiKam's Ignored), through the normal
     face operations (change log, undo). Returns {ignored, failed}."""
     from app.faces import facemgr
-    con = dkdb.connect()
-    try:
+    with dkdb.reader() as con:
         ops = []
-        for i in range(0, len(photos), 500):
-            chunk = ",".join(str(int(p)) for p in photos[i:i + 500])
+        for part in chunked(photos, 500):
+            chunk = ",".join(str(int(p)) for p in part)
             for img, val in con.execute(f"SELECT imageid, value FROM ImageTagProperties WHERE property = 'autodetectedFace' AND imageid IN ({chunk})"):
                 r = _rect(val)
                 if r:
                     ops.append({"op": "ignore", "image": img, "rect": list(r)})
-    finally:
-        con.close()
     out = {"ignored": 0, "failed": 0}
-    for i in range(0, len(ops), 200):
-        for r in facemgr.apply_many(ops[i:i + 200], background=True):
+    for chunk in chunked(ops, 200):
+        for r in facemgr.apply_many(chunk, background=True):
             out["failed" if "error" in r else "ignored"] += 1
     return out
 
@@ -303,20 +295,16 @@ def accept(photos: list, check: str = "unnamed", on: bool = True) -> int:
         raise ValueError("Unknown check")
     want = {int(p) for p in photos}
     current = {u["photo"]: u["signature"] for u in scan()[check]} if on else {}
-    con = vdb.connect()
-    try:
+    with vdb.writer() as con:
         if on:
             sig = current.copy()
             missing = want - set(sig)
             if missing:  # already accepted, or not a finding (any more): keep what is there
                 want -= missing
             con.executemany("INSERT OR REPLACE INTO quality_accepted (photo_id, check_name, signature, user_name, ts) VALUES (?,?,?,?,?)",
-                            [(p, check, sig[p], history._who(), int(time.time())) for p in want])
+                            [(p, check, sig[p], history.actor(), int(time.time())) for p in want])
         else:
             con.executemany("DELETE FROM quality_accepted WHERE photo_id = ? AND check_name = ?", [(p, check) for p in want])
-        con.commit()
-    finally:
-        con.close()
     return len(want)
 
 
@@ -404,13 +392,10 @@ def fix_files(after=None) -> int:
     from app.data import vdb
     if progress["running"]:
         raise dbsync.SyncError("The clean-up is still running; the image files follow when it has finished.")
-    con = vdb.connect()
-    try:
+    with vdb.reader() as con:
         cleaned = [r[0] for r in con.execute("SELECT DISTINCT photo_id FROM photo_history WHERE action = 'face' AND summary LIKE 'Duplicate face regions removed:%'")]
         done = {r[0] for r in con.execute("SELECT DISTINCT photo_id FROM photo_history WHERE summary = ?", (FILE_DONE,))}
-    finally:
-        con.close()
-    todo = [(pid, p) for pid, p in dbsync._photo_paths([p for p in cleaned if p not in done]) if edits.can_write_file(p)]
+    todo = [(pid, p) for pid, p in dbsync.photo_paths([p for p in cleaned if p not in done]) if edits.can_write_file(p)]
     if not todo:
         return 0
     import shutil
@@ -437,8 +422,7 @@ def fix_files(after=None) -> int:
 def _run_files(todo: list):
     from app.faces import facemgr
     from app.photos import history
-    for i in range(0, len(todo), 50):
-        batch = todo[i:i + 50]
+    for batch in chunked(todo, 50):
         regions = _file_regions([p for _i, p in batch])
         dirty = [(pid, p) for pid, p in batch if p in regions and _has_duplicates(*regions[p])]
         status = facemgr.write_regions_many([pid for pid, _p in dirty], files=True, sidecars=False) if dirty else {}
@@ -475,9 +459,9 @@ def fit_inside(photos: list = None) -> dict:
                 continue
         ops.append({"op": "remove", "image": it["photo"], "rect": [x, y, w, h]})
     out = {"fitted": 0, "removed": 0, "failed": 0}
-    for i in range(0, len(ops), 200):
-        res = facemgr.apply_many(ops[i:i + 200], background=True)
-        for o, r in zip(ops[i:i + 200], res):
+    for part in chunked(ops, 200):
+        res = facemgr.apply_many(part, background=True)
+        for o, r in zip(part, res):
             if "error" in r:
                 out["failed"] += 1
             else:
@@ -519,12 +503,11 @@ def _run(todo: dict, db_path: Path, check_running: bool):
     backup = dkdb.backup(db_path, force=True)  # thousands of regions removed in one go: one full copy first
     progress["backup"] = str(backup) if backup else None
     photos = list(todo)
-    paths = dict(dbsync._photo_paths(photos))
-    for i in range(0, len(photos), 100):
-        batch = photos[i:i + 100]
+    paths = dict(dbsync.photo_paths(photos))
+    for batch in chunked(photos, 100):
         snaps = {pid: history.snapshot(pid, paths[pid] + ".xmp") for pid in batch if pid in paths}
         removed = {}
-        with facemgr._lock:
+        with facemgr.lock:
             with dbsync.write_transaction(db_path, check_running) as con:
                 for pid in batch:
                     for n in todo[pid]:

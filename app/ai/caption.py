@@ -19,7 +19,13 @@ def repo() -> str:
     return models.REGISTRY[models.chosen("caption_model")]["repos"][0]
 
 _lock = threading.Lock()
-_state = {}  # model, processor, device and the torch module once loaded; models.py clears it after a re-download
+_state = {}  # model, processor, device and the torch module once loaded; reset() clears it after a re-download
+
+
+def reset():
+    """Drop the loaded model so the next describe() reads the files again (after a download or a switch)."""
+    with _lock:
+        _state.clear()
 
 
 def _florence() -> bool:
@@ -64,7 +70,7 @@ def describe(paths: list) -> list:
     images, keep = [], []
     for i, p in enumerate(paths):
         try:
-            im, _ = thumbs._open_oriented(p, 640, 640)  # the processor resizes to 384 px anyway
+            im, _ = thumbs.open_oriented(p, 640, 640)  # the processor resizes to 384 px anyway
             images.append(im.convert("RGB"))
             keep.append(i)
         except Exception as e:

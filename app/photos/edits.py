@@ -30,6 +30,7 @@ from pathlib import Path
 from app import config
 from app.digikam import dkdb
 from app.data import state as appstate
+from app.digikam.dkdb import chunked
 
 BACKUP_DIR = config.DATA_DIR / "sidecar-backups"
 FILE_BACKUP_DIR = config.DATA_DIR / "file-backups"  # originals of image files before their metadata is rewritten
@@ -39,7 +40,7 @@ SKELETON = ('<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta x
             ' </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>\n')
 # Re-entrant: apply() and revert() hold it while they read and update the remembered edits,
 # and run_exiftool() takes it too so two exiftool processes never rewrite the same file at once
-_lock = threading.RLock()
+lock = threading.RLock()
 
 
 def _find_exiftool():
@@ -96,7 +97,7 @@ def save_pending(rows: list):
         def go(c):
             ts = _next_ts(c)
             c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", [(int(pid), json.dumps(e), ts) for pid, e in rows])
-        appstate._write(go)
+        appstate.write(go)
 
 
 def pending() -> dict:
@@ -156,7 +157,7 @@ def forget(photo_ids):
     """Drop remembered edits (digiKam has caught up, or they were undone)."""
     ids = [(int(i),) for i in photo_ids]
     if ids:
-        appstate._write(lambda c: c.executemany("DELETE FROM pending_edits WHERE photo_id = ?", ids))
+        appstate.write(lambda c: c.executemany("DELETE FROM pending_edits WHERE photo_id = ?", ids))
 
 
 def remap_pending_tags(mapping: dict) -> list:
@@ -167,7 +168,7 @@ def remap_pending_tags(mapping: dict) -> list:
         return []
     def follow(t):
         return mapping[t] if t in mapping else t
-    with _lock:
+    with lock:
         cur, rows, touched = pending(), [], []
         for pid, e in cur.items():
             if not (set(e.get("add_tags", [])) | set(e.get("remove_tags", []))) & set(mapping):
@@ -188,7 +189,7 @@ def remap_pending_tags(mapping: dict) -> list:
 def drop_pending_fields(photo_ids, fields):
     """Give up these fields of the photos' pending edits (tags: the tag additions and removals)."""
     keys = set(fields) | ({"add_tags", "remove_tags"} if "tags" in fields else set()) | ({"caption_date"} if "caption" in fields else set())
-    with _lock:
+    with lock:
         cur = pending()
         rows, gone = [], []
         for pid in photo_ids:
@@ -209,7 +210,7 @@ def resolved(photo_ids, snapshot: dict = None):
     from app.data import index  # index imports this module; only needed here
     ids = [int(i) for i in photo_ids]
     if snapshot is not None:
-        with _lock:
+        with lock:
             now = pending()
             ids = [i for i in ids if i in snapshot and now.get(i) == snapshot[i]]
             return _resolved(ids, index)
@@ -226,7 +227,7 @@ def _resolved(ids, index):
         finally:
             con.close()
         for (path,) in rows:
-            b = _backup_path(path)
+            b = backup_path(path)
             b.unlink(missing_ok=True)
             Path(str(b) + ".created").unlink(missing_ok=True)
     except (sqlite3.Error, OSError):
@@ -234,7 +235,7 @@ def _resolved(ids, index):
     forget(ids)
 
 
-def _rel(path: str) -> Path:
+def rel(path: str) -> Path:
     """Where a library file sits below PHOTOS_ROOT (or below the filesystem root, for
     files outside it): the layout both backup folders mirror."""
     try:
@@ -243,12 +244,12 @@ def _rel(path: str) -> Path:
         return Path(*Path(path).resolve().parts[1:])
 
 
-def _backup_path(photo_path: str) -> Path:
-    return BACKUP_DIR / (str(_rel(photo_path)) + ".xmp")
+def backup_path(photo_path: str) -> Path:
+    return BACKUP_DIR / (str(rel(photo_path)) + ".xmp")
 
 
 def file_backup_path(photo_path: str) -> Path:
-    return FILE_BACKUP_DIR / _rel(photo_path)
+    return FILE_BACKUP_DIR / rel(photo_path)
 
 
 def backup_original(photo_path: str) -> Path:
@@ -273,9 +274,9 @@ def move_backups(old_path: str, new_path: str):
     for root in (BACKUP_DIR, FILE_BACKUP_DIR):
         suffix = ".xmp" if root == BACKUP_DIR and not os.path.isdir(new_path) else ""
         for tail in ("", ".created") if suffix else ("",):
-            src = root / (str(_rel(old_path)) + suffix + tail)
+            src = root / (str(rel(old_path)) + suffix + tail)
             if src.exists():
-                dst = root / (str(_rel(new_path)) + suffix + tail)
+                dst = root / (str(rel(new_path)) + suffix + tail)
                 try:
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(src), str(dst))
@@ -285,7 +286,7 @@ def move_backups(old_path: str, new_path: str):
 
 def _photo_of_sidecar(side: str) -> str:
     """The photo a sidecar belongs to: photo.jpg for photo.jpg.xmp; for photo.xmp (the compatible naming) the
-    image file beside it with that stem, so the backup is named like _backup_path(photo) everywhere."""
+    image file beside it with that stem, so the backup is named like backup_path(photo) everywhere."""
     stem = side[:-4]
     if os.path.isfile(stem):
         return stem
@@ -304,7 +305,7 @@ def ensure_backup(target: str, photo_path: str = None):
     sidecar-backups (once, before the viewer's first change), image files under file-backups."""
     if target.endswith(".xmp"):
         photo = photo_path or _photo_of_sidecar(target)
-        backup = _backup_path(photo)
+        backup = backup_path(photo)
         if not backup.exists() and not Path(str(backup) + ".created").exists() and os.path.exists(target):
             backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(target, backup)
@@ -352,11 +353,11 @@ def sidecar_path(photo_path: str) -> str:
     return b if compat_naming() else a
 
 
-def _prepare(photo_path: str) -> str:
+def prepare(photo_path: str) -> str:
     """Back the sidecar up before the viewer's first change, creating an empty
     sidecar if the photo has none. Returns the sidecar path."""
     side = sidecar_path(photo_path)
-    backup = _backup_path(photo_path)
+    backup = backup_path(photo_path)
     created = Path(str(backup) + ".created")
     if not os.path.exists(side) and not backup.exists() and not created.exists():
         backup.parent.mkdir(parents=True, exist_ok=True)
@@ -557,8 +558,8 @@ def digikam_tag_paths(image_ids: list) -> dict:
         tags = dkdb.tag_tree(src)
         internal = {r[0] for r in src.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'")}
         out = {}
-        for i in range(0, len(image_ids), 500):
-            chunk = [int(x) for x in image_ids[i:i + 500]]
+        for part in chunked(image_ids, 500):
+            chunk = [int(x) for x in part]
             for iid, tid in src.execute(f"SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({','.join(map(str, chunk))})"):
                 if tid in tags and tid not in internal:
                     out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
@@ -578,7 +579,7 @@ def run_exiftool(jobs: list) -> list:
     they could not be backed up)."""
     if not jobs:
         return []
-    with _lock:
+    with lock:
         return _run_exiftool(jobs)
 
 
@@ -699,7 +700,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
     ok, failed = [], []
     before = _current_values([p["id"] for p in photos])  # for the change log: what each field was
     snaps = {}
-    with _lock:
+    with lock:
         old = pending()
         if shift:  # each photo's own date moved, from its latest value (a pending one, else digiKam's), under the lock
             from datetime import datetime, timedelta
@@ -724,7 +725,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
             try:
                 if not os.path.isfile(p["path"]):
                     raise FileNotFoundError(p["path"])
-                side = _prepare(p["path"])
+                side = prepare(p["path"])
             except OSError as e:
                 failed.append({"id": p["id"], "error": str(e)})
                 continue
@@ -746,7 +747,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
         ok = [i for i in dict.fromkeys(owner.values()) if i not in bad]
         if ok:
             save_pending([(pid, merged[pid]) for pid in ok])
-            _recheck(ok)
+            recheck(ok)
     _log_edits(ok, photos, mine, before, snaps, in_files)
     return {"edited": len(ok), "failed": failed, "files": in_files}
 
@@ -759,8 +760,8 @@ def _current_values(ids: list) -> dict:
         return out
     con = index.open_index()
     try:
-        for i in range(0, len(ids), 500):
-            chunk = ",".join(str(int(x)) for x in ids[i:i + 500])
+        for part in chunked(ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, rating, title, caption, taken, lat, lon, alt, pick, color in con.execute(
                     f"SELECT id, rating, title, caption, taken, lat, lon, alt, pick, color FROM photos WHERE id IN ({chunk})"):
                 out[pid] = {"rating": max(rating or 0, 0), "title": title or "", "caption": caption or "", "taken": taken,
@@ -797,7 +798,7 @@ def _log_edits(ok: list, photos: list, mine: dict, before: dict, snaps: dict, in
     history.record(rows)
 
 
-def _recheck(ids: list):
+def recheck(ids: list):
     """The metadata consistency results of these photos are out of date: compare them again."""
     try:
         from app.photos import consistency
@@ -811,7 +812,7 @@ def rewrite_tags(photos: list) -> list:
     pending viewer edits) to its sidecar, and to the file if enabled. Used after a
     tag was renamed, moved or deleted. Returns the ids that failed."""
     in_files = writes_files()
-    with _lock:  # pending edits and digiKam's tags read and written as one step: an edit made meanwhile is not lost
+    with lock:  # pending edits and digiKam's tags read and written as one step: an edit made meanwhile is not lost
         old = pending()
         db_tags = digikam_tag_paths([p["id"] for p in photos])
         jobs, owner = [], {}
@@ -839,8 +840,8 @@ def db_state(image_ids: list) -> dict:
     except Exception:
         return vals
     try:  # the position at full precision (db_values rounds it for comparing)
-        for i in range(0, len(image_ids), 500):
-            chunk = ",".join(str(int(x)) for x in image_ids[i:i + 500])
+        for part in chunked(image_ids, 500):
+            chunk = ",".join(str(int(x)) for x in part)
             for pid, lat, lon, alt in src.execute(f"SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({chunk})"):
                 if pid in vals and lat is not None and lon is not None:
                     vals[pid]["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(alt) if alt is not None else None}
@@ -867,13 +868,13 @@ def revert(photos: list) -> dict:
     tag list are rewritten from the database, so face changes made since (which are in the database) stay."""
     done, failed = [], []
     from app.faces import facemgr
-    with _lock:
+    with lock:
         edits = pending()
         db = db_state([p["id"] for p in photos])
         in_files = writes_files()
         for p in photos:
             pid, side = p["id"], sidecar_path(p["path"])
-            backup = _backup_path(p["path"])
+            backup = backup_path(p["path"])
             created = Path(str(backup) + ".created")
             e = edits.get(pid)
             if e is None and not backup.exists() and not created.exists():
