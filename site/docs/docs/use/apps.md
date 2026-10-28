@@ -34,3 +34,5 @@ Native apps are in testing:
 | **Apple TV** | slideshows, favorites, On this day, Then and now and random photos on the big screen |
 
 They connect to your own iopix server; there is no account to create anywhere else.
+
+On iPad and Mac the photo viewer keeps its **info pane** beside the photo, as in the browser. Its text can be selected and copied. **Edit** at the top of the pane (for accounts that can change photos) turns the pane into the editor, and **✕** goes back to the details. On iPhone, editing opens as a sheet.
