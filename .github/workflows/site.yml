@@ -1,0 +1,47 @@
+# Builds iopix.net (site/) and publishes it to Cloudflare Pages on every push to main that
+# touches the site, the README screenshots or the version (for the What's new page).
+# The Cloudflare key lives only in the repository secret CLOUDFLARE_API_TOKEN; pull requests
+# and forks never run this workflow, so the secret is never handed to code from outside.
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/screenshots/**"
+      - "pyproject.toml"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # What's new is built from the version history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install -q mkdocs==1.6.1 mkdocs-material==9.7.7
+          site/build.sh
+      - name: Publish to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets not set; built but not published"
+            exit 0
+          fi
+          npx -y wrangler@4 pages deploy site/dist --project-name iopix --branch main --commit-dirty=true

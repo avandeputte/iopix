@@ -8,6 +8,7 @@ cp -R home/. dist/
 # the screenshots are the README's, from docs/screenshots in this repository
 mkdir -p dist/img && cp ../docs/screenshots/*.jpg dist/img/
 cp 404.html robots.txt _headers dist/
+python3 whatsnew.py
 (cd docs && mkdocs build --quiet)
 # docs pages show the home page's screenshots: make /img/ links relative so any host or subfolder works
 python3 - <<'PY'
