@@ -607,8 +607,125 @@ def _same_time(a, b) -> bool:
         return False
 
 
+def _snapshot():
+    """What digiKam's database knows: the album roots, the albums, and every visible file keyed by (root, folder, name)."""
+    with dkdb.reader() as con:
+        roots = dkdb.root_paths(con)
+        version = hash_version(con)
+        albums = {(r[1], r[2]): r[0] for r in con.execute("SELECT id, albumRoot, relativePath FROM Albums")}
+        known = {}
+        for iid, album, name, mdate, size, root, rel in con.execute(
+                "SELECT i.id, i.album, i.name, i.modificationDate, i.fileSize, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.status = 1"):
+            known[(root, rel, name)] = (iid, mdate, size, album)
+    return roots, version, albums, known
+
+
+def _discover(roots: dict, known: dict):
+    """Walk every album root and compare it with the snapshot. Returns (new files, modified, vanished):
+    new files as (root id, folder, name, path), modified as (id, path), vanished as (id, album, name, path)."""
+    new_files, modified, vanished = [], [], []
+    for root_id, root_dir in roots.items():
+        rd = Path(root_dir)
+        mine = {k: v for k, v in known.items() if k[0] == root_id}
+        if not rd.is_dir() or (mine and not any(rd.iterdir())):
+            progress["skipped"].append(f"{root_dir}: not there or empty (unmounted?); left alone")
+            continue
+        disk = _walk(rd)
+        unreadable = disk.pop("__unreadable__")
+        if unreadable:
+            progress["skipped"].append(f"{root_dir}: {len(unreadable)} folder(s) could not be listed ({unreadable[0]}); nothing counted as gone there")
+        gone = [] if unreadable else [k for k in mine if _nfc(k[2]) not in disk.get(_nfc(k[1]), (set(), []))[0]]
+        if len(gone) > 20 and len(gone) > 0.3 * len(mine):
+            progress["skipped"].append(f"{root_dir}: {len(gone)} of {len(mine)} photos would be removed; left alone (a disk not fully mounted?)")
+            continue
+        # (id, album, name, path) as snapshotted: checked again before the row changes
+        vanished += [(mine[k][0], mine[k][3], k[2], str(rd / k[1].strip("/") / k[2]) if k[1] != "/" else str(rd / k[2])) for k in gone]
+        for rel, (_names, files) in disk.items():
+            for name in files:
+                path = str(rd / rel.strip("/") / name) if rel != "/" else str(rd / name)
+                k = (root_id, rel, name)
+                if k not in mine:
+                    new_files.append((root_id, rel, name, path))
+                    continue
+                iid, mdate, size, _album = mine[k]
+                if mdate is None:
+                    continue  # registered by the viewer: completed below, not "modified"
+                st = dkdb.file_stamp(path)
+                if st and (not _same_time(st[0], mdate) or st[1] != size):
+                    modified.append((iid, path))
+    return new_files, modified, vanished
+
+
+def _add_folders(new_files: list, albums: dict, check_running: bool) -> dict:
+    """Album rows for the folders the new files are in (parents before children). Returns the ones made."""
+    made = {}
+    for root_id, rel, name, path in sorted(new_files):
+        key = (root_id, rel)
+        if key in albums or key in made:
+            continue
+        root_row = importer.root_folder(root_id, check_running)
+        made[key] = root_row["id"] if rel == "/" else importer.ensure_folder(rel, root_row, check_running)
+    albums.update(made)
+    return made
+
+
+def _add_files(new_files: list, albums: dict, check_running: bool) -> list:
+    """Register the new files with digiKam, album by album, and read their metadata. Returns their ids."""
+    added_ids = []
+    by_album = {}
+    for root_id, rel, name, path in new_files:
+        by_album.setdefault(albums[(root_id, rel)], []).append(Path(path))
+    for album_id, paths in by_album.items():
+        staged = []
+        for p in paths:
+            try:
+                staged.append(folders.staged_entry(p))
+            except (SyncError, OSError) as e:
+                log.warning("scanner: skipped %s (%s)", p, e)
+        if staged:
+            regs = folders.register(album_id, staged, check_running)
+            added_ids += [a["id"] for a in regs]
+    if added_ids:
+        complete(added_ids, check_running)
+        history.record([{"photo_id": i, "action": "added", "summary": "Found by the file scanner"} for i in added_ids])
+    return added_ids
+
+
+def _reread_modified(modified: list, version: int, check_running: bool):
+    """Files changed on disk since digiKam last saw them: their metadata rows are read again."""
+    meta = read([p for _i, p in modified])
+    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+        cats = dict(con.execute(f"SELECT id, category FROM Images WHERE id IN ({','.join(str(i) for i, _p in modified)})").fetchall())
+        for iid, path in modified:
+            if not meta.get(path):  # unreadable right now: left as it is, tried again on the next pass
+                log.warning("scanner: %s could not be read; its rows are left as they are", path)
+                continue
+            r = rows_for(path, meta[path], cats.get(iid, 1))
+            write_rows(con, iid, r, None, {}, full=False)
+            st = dkdb.file_stamp(path)
+            con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",
+                        (unique_hash(path, version), st[1] if st else None, st[0] if st else None, iid))
+
+
+def _remove_vanished(vanished: list, check_running: bool) -> list:
+    """Files no longer on disk (CoreDB::removeItems: status Trashed, no album; digiKam's own cleanup later marks
+    them obsolete). The walk took a while: a photo moved, renamed or trashed meanwhile (its row changed) or whose
+    file is back is left alone; only a row still as snapshotted, with nothing on disk, is marked."""
+    still = []
+    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+        for iid, album, name, path in vanished:
+            row = con.execute("SELECT album, name FROM Images WHERE id = ? AND status = 1", (iid,)).fetchone()
+            if not row or row[0] != album or row[1] != name or os.path.exists(path):
+                continue
+            con.execute("UPDATE Images SET status = 3, album = NULL WHERE id = ?", (iid,))
+            still.append((iid, path))
+    history.record([{"photo_id": i, "action": "deleted", "summary": "No longer on disk (found by the file scanner)", "path": p, "details": {"path": p}} for i, p in still])
+    return still
+
+
 def scan(check_running: bool = True) -> dict:
-    """One pass over every album root. Returns the summary (also kept in progress)."""
+    """One pass over every album root: snapshot the database, walk the disk, then add, reread and remove.
+    Returns the summary (also kept in progress)."""
     if not _lock.acquire(blocking=False):
         raise SyncError("A scan is already running")
     progress.update(running=True, started=int(time.time()), finished=None, added=0, modified=0, removed=0, folders=0, skipped=[], error=None)
@@ -616,101 +733,18 @@ def scan(check_running: bool = True) -> dict:
         if check_running and dbsync.digikam_running():
             progress["skipped"].append("digiKam is running; it scans the collection itself")
             return progress
+        roots, version, albums, known = _snapshot()
+        new_files, modified, vanished = _discover(roots, known)
+        made = _add_folders(new_files, albums, check_running)
         with dkdb.reader() as con:
-            roots = dkdb.root_paths(con)
-            version = hash_version(con)
-            albums = {(r[1], r[2]): r[0] for r in con.execute("SELECT id, albumRoot, relativePath FROM Albums")}
-            albums_before = dict(albums)
-            known = {}
-            for iid, album, name, mdate, size, root, rel in con.execute(
-                    "SELECT i.id, i.album, i.name, i.modificationDate, i.fileSize, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.status = 1"):
-                known[(root, rel, name)] = (iid, mdate, size, album)
-        new_files, modified, vanished = [], [], []
-        for root_id, root_dir in roots.items():
-            rd = Path(root_dir)
-            mine = {k: v for k, v in known.items() if k[0] == root_id}
-            if not rd.is_dir() or (mine and not any(rd.iterdir())):
-                progress["skipped"].append(f"{root_dir}: not there or empty (unmounted?); left alone")
-                continue
-            disk = _walk(rd)
-            unreadable = disk.pop("__unreadable__")
-            if unreadable:
-                progress["skipped"].append(f"{root_dir}: {len(unreadable)} folder(s) could not be listed ({unreadable[0]}); nothing counted as gone there")
-            gone = [] if unreadable else [k for k in mine if _nfc(k[2]) not in disk.get(_nfc(k[1]), (set(), []))[0]]
-            if len(gone) > 20 and len(gone) > 0.3 * len(mine):
-                progress["skipped"].append(f"{root_dir}: {len(gone)} of {len(mine)} photos would be removed; left alone (a disk not fully mounted?)")
-                continue
-            # (id, album, name, path) as snapshotted: checked again before the row changes
-            vanished += [(mine[k][0], mine[k][3], k[2], str(rd / k[1].strip("/") / k[2]) if k[1] != "/" else str(rd / k[2])) for k in gone]
-            for rel, (_names, files) in disk.items():
-                for name in files:
-                    path = str(rd / rel.strip("/") / name) if rel != "/" else str(rd / name)
-                    k = (root_id, rel, name)
-                    if k not in mine:
-                        new_files.append((root_id, rel, name, path))
-                        continue
-                    iid, mdate, size, _album = mine[k]
-                    if mdate is None:
-                        continue  # registered by the viewer: completed below, not "modified"
-                    st = dkdb.file_stamp(path)
-                    if st and (not _same_time(st[0], mdate) or st[1] != size):
-                        modified.append((iid, path))
-        # new folders first (parents before children), then the files in them
-        made = {}
-        for root_id, rel, name, path in sorted(new_files):
-            key = (root_id, rel)
-            if key in albums or key in made:
-                continue
-            root_row = importer.root_folder(root_id, check_running)
-            made[key] = root_row["id"] if rel == "/" else importer.ensure_folder(rel, root_row, check_running)
-        albums.update(made)
-        with dkdb.reader() as con:
-            progress["folders"] = con.execute("SELECT count(*) FROM Albums").fetchone()[0] - len(albums_before)
-        added_ids = []
-        by_album = {}
-        for root_id, rel, name, path in new_files:
-            by_album.setdefault(albums[(root_id, rel)], []).append(Path(path))
-        for album_id, paths in by_album.items():
-            staged = []
-            for p in paths:
-                try:
-                    staged.append(folders.staged_entry(p))
-                except (SyncError, OSError) as e:
-                    log.warning("scanner: skipped %s (%s)", p, e)
-            if staged:
-                regs = folders.register(album_id, staged, check_running)
-                added_ids += [a["id"] for a in regs]
-        if added_ids:
-            complete(added_ids, check_running)
-            history.record([{"photo_id": i, "action": "added", "summary": "Found by the file scanner"} for i in added_ids])
+            progress["folders"] = con.execute("SELECT count(*) FROM Albums").fetchone()[0] - (len(albums) - len(made))
+        added_ids = _add_files(new_files, albums, check_running)
         progress["added"] = len(added_ids)
         if modified:
-            meta = read([p for _i, p in modified])
-            with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-                cats = dict(con.execute(f"SELECT id, category FROM Images WHERE id IN ({','.join(str(i) for i, _p in modified)})").fetchall())
-                for iid, path in modified:
-                    if not meta.get(path):  # unreadable right now: left as it is, tried again on the next pass
-                        log.warning("scanner: %s could not be read; its rows are left as they are", path)
-                        continue
-                    r = rows_for(path, meta[path], cats.get(iid, 1))
-                    write_rows(con, iid, r, None, {}, full=False)
-                    st = dkdb.file_stamp(path)
-                    con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",
-                                (unique_hash(path, version), st[1] if st else None, st[0] if st else None, iid))
+            _reread_modified(modified, version, check_running)
             progress["modified"] = len(modified)
-        if vanished:  # CoreDB::removeItems: status Trashed, no album; digiKam's own cleanup later marks them obsolete
-            # the walk took a while: a photo moved, renamed or trashed meanwhile (its row changed) or whose file is
-            # back is left alone; only a row still as snapshotted, with nothing on disk, is marked
-            still = []
-            with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-                for iid, album, name, path in vanished:
-                    row = con.execute("SELECT album, name FROM Images WHERE id = ? AND status = 1", (iid,)).fetchone()
-                    if not row or row[0] != album or row[1] != name or os.path.exists(path):
-                        continue
-                    con.execute("UPDATE Images SET status = 3, album = NULL WHERE id = ?", (iid,))
-                    still.append((iid, path))
-            history.record([{"photo_id": i, "action": "deleted", "summary": "No longer on disk (found by the file scanner)", "path": p, "details": {"path": p}} for i, p in still])
-            progress["removed"] = len(still)
+        if vanished:
+            progress["removed"] = len(_remove_vanished(vanished, check_running))
         if added_ids or modified or vanished or made:
             log.info("scanner: %d added, %d modified, %d removed, %d folders", len(added_ids), len(modified), progress["removed"], progress["folders"])
     except Exception as e:
