@@ -873,14 +873,16 @@ def _build(dst_path: Path, source: tuple) -> dict:
     last_source.update(kind=kind, version=ver)
     phases = {"read": time.time() - t0}
 
-    albums = _album_rows(raw, root_path)
+    all_albums = _album_rows(raw, root_path)
     if kind == "digikam":
-        full_paths = {r[0]: root_path[albums[r[1]]["root"]] + albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
-                      for r in all_images if r[1] in albums and albums[r[1]]["root"] in root_path}
+        full_paths = {r[0]: root_path[all_albums[r[1]]["root"]] + all_albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
+                      for r in all_images if r[1] in all_albums and all_albums[r[1]]["root"] in root_path}
         try:
             sync_photo_ids(all_images, full_paths)
         except Exception as e:  # bookkeeping only; the index must still be built
             log.warning("photo_ids were not updated: %s", e)
+    # sync tools' folders (GoodSync's _gsdata_ backups, a NAS's @eaDir...) are not the library: left out with their photos
+    albums = {aid: a for aid, a in all_albums.items() if not config.is_system_folder(a["rel"])}
     tags, props, internal, special, hidden = _tag_rows(raw)
     side = _side_tables(raw, tags, props, internal, special, hidden)
     rows = _photo_rows(raw, albums, root_path, tags, hidden, side, geo, phases)

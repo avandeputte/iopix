@@ -82,3 +82,16 @@ if DIGIKAM_CHECK == "ask":
     DIGIKAM_CHECK = "none"
 # Describe every photo in a sentence with a local captioning model (BLIP base), for search.
 CAPTIONS = os.environ.get("CAPTIONS", "1") not in ("0", "false", "no")
+
+
+# Folders that sync tools, NAS systems and operating systems keep beside the photos: their contents (GoodSync's
+# backup copies in _gsdata_/_saved_, a Synology's @eaDir thumbnails, recycle bins...) are not the library. iopix
+# leaves them out of every listing, the index and its jobs, and its file scanner does not go into them; nothing in
+# them is changed or deleted. Folders whose name starts with a dot are skipped as well.
+SYSTEM_DIRS = frozenset({"_gsdata_", "@eaDir", "#recycle", "@Recycle", "@Recently-Snapshot", "#snapshot", "lost+found",
+                         "$RECYCLE.BIN", "System Volume Information"})
+
+
+def is_system_folder(rel: str) -> bool:
+    """A library-relative folder path ("/2017/_gsdata_/_saved_") inside one of SYSTEM_DIRS or a dot folder."""
+    return any(seg in SYSTEM_DIRS or seg.startswith(".") for seg in (rel or "").split("/") if seg)

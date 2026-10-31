@@ -19,6 +19,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from app import config
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history, scanner
 from app.digikam.dbsync import SyncError
@@ -59,7 +60,7 @@ def list_all() -> list:
     by_path = {(r[1], r[2]): r[0] for r in rows}
     out = []
     for aid, root, rel, caption, adate, collection, icon in rows:
-        if root not in roots:
+        if root not in roots or config.is_system_folder(rel):  # a sync tool's or NAS's folder (config.SYSTEM_DIRS)
             continue
         if rel == "/":
             pid, name = None, roots[root] or "Library"

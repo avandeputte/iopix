@@ -14,6 +14,8 @@ iopix shows three kinds of collections. They are easy to mix up, so here is the 
 
 The folder tree as it is on disk. Each folder can have a caption, a date, a category and a cover photo, stored in digiKam's own album record so digiKam shows the same. Editors can create, rename and move folders, and import photos into them.
 
+Folders that sync tools and NAS systems keep beside your photos are left out, with everything in them: GoodSync's `_gsdata_` (its backup copies of changed and deleted files are in `_gsdata_/_saved_`), a Synology's `@eaDir`, recycle bins such as `#recycle` and `$RECYCLE.BIN`, snapshot folders, and folders whose name starts with a dot. iopix does not show, search, analyse or scan them, and leaves them as they are on disk and in digiKam.
+
 ## Albums
 
 Your own groupings, which never move or copy a file.

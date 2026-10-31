@@ -43,7 +43,7 @@ from app.faces.facemgr import _unrotate, rect_xml
 
 log = logging.getLogger("app.photos.scanner")
 
-SKIP_DIRS = {"@eaDir", "#recycle", "#snapshot", "lost+found", "$RECYCLE.BIN", "System Volume Information"}
+SKIP_DIRS = config.SYSTEM_DIRS  # sync tools' and NAS folders beside the photos (config.py)
 COLOR_MODEL = {"JPG": 5}  # DImg::ColorModel: YCbCr for JPEG, RGB (1) otherwise
 INTERNAL = "_Digikam_Internal_Tags_/"
 TAG_KEYS = ("TagsList", "LastKeywordXMP", "HierarchicalSubject", "CatalogSets")
