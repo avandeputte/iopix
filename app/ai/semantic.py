@@ -130,6 +130,7 @@ class Engine:
         self._todo_ids = set()
         self.failed = set()   # ids that could not be embedded (no thumbnail, unreadable file); they never block a switch-over
         self.lock = threading.Lock()
+        self._image_lock = threading.Lock()  # one image model load at a time (the indexing job and clothing matches share it)
         self._run = 0
         self._text_cache = {}
 
@@ -231,9 +232,10 @@ class Engine:
             self._finished_ok = False
             from fastembed import ImageEmbedding
             n = jobs.threads()
-            if self._image is None or self._image_threads != n:  # the thread budget is a session option
-                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
-                self._image_threads = n
+            with self._image_lock:
+                if self._image is None or self._image_threads != n:  # the thread budget is a session option
+                    self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
+                    self._image_threads = n
             last_save = time.time()
             done = 0
             for todo_batch in chunked(todo, BATCH):
@@ -283,6 +285,17 @@ class Engine:
                     self.on_finish(self)
 
         jobs.submit("embeddings", work)  # one background job at a time
+
+    def embed_images(self, images: list):
+        """Unit embeddings (rows) for PIL images, with the image model other jobs may use (clothing matches): the same
+        model the photos are indexed with, so crops and photos compare."""
+        from fastembed import ImageEmbedding
+        n = jobs.threads()
+        with self._image_lock:
+            if self._image is None or self._image_threads != n:
+                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
+                self._image_threads = n
+            return _unit(list(self._image.embed([im.convert("RGB") for im in images], batch_size=BATCH)))
 
     # ---- search
     def _rank(self, query_vec, k: int, exclude=None) -> list:

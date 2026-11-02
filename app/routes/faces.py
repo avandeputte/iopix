@@ -315,6 +315,18 @@ def api_jerseys(request: Request, offset: int = 0, limit: int = 200, ids: str = 
                            "players": out["players"], "read": out["read"], "named": out["named"], "ready": jerseys.available(), "coverage": list(jerseys.coverage())})
 
 
+@router.get("/api/clothing", dependencies=[access.editor])
+def api_clothing(request: Request, offset: int = 0, limit: int = 200, ids: str = ""):
+    """Clothing matches (clothing.py): {total, items: [{id, tag, name, n, score, lead, box, event, text}], ready, coverage}.
+    Each item is a person without a named face dressed like a named person in the same event; using one is
+    /api/edit {add_tags: [tag]} on the photo. Nothing is written here."""
+    from app.ai import clothing
+    want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
+    items = clothing.suggestions(want)["items"]
+    return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 2000))],
+                           "ready": clothing.available(), "coverage": list(clothing.coverage())})
+
+
 @router.post("/api/people/birth", dependencies=[access.signed_in])
 async def api_people_birth(request: Request):
     """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.

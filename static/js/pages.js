@@ -99,6 +99,7 @@ export async function showExplore() {
       S.EDITING ? h('a', { class: 'pill', href: '#/datesuggest' }, 'Date suggestions') : null,
       S.EDITING ? h('a', { class: 'pill', href: '#/placesuggest' }, 'Place suggestions') : null,
       S.EDITING ? h('a', { class: 'pill', href: '#/jerseys' }, 'Jersey numbers') : null,
+      S.EDITING ? h('a', { class: 'pill', href: '#/clothing' }, 'Clothing matches') : null,
       S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
@@ -926,6 +927,53 @@ export async function showJerseys() {
     h('div', { class: 'muted intro' }, `The number on each detected person’s shirt is read. Where a named face wears a number, that player is learnt for the folder and the year; a number on someone whose face is not named, seen from behind or too small for a face, then suggests the player. Tagging adds the person to the photo without a face region, with undo in the edit log; nothing is tagged until you do. ${nf.format(d.read)} numbers read, ${nf.format(d.named)} on named people.`),
     waiting, d.players.length ? [h('h3', null, 'Players and their numbers'), players] : null,
     items.length ? sections : h('div', { class: 'empty' }, d.ready ? 'No suggestions: every number read is on a named person, or belongs to nobody known in that folder or year.' : 'No suggestions yet.')));
+  sections.forEach((s) => badgeTiles(s));
+  syncLightbox();
+}
+
+/** Explore › Clothing matches: people probably present in a photo, matched by what they wear to the photos of the same
+ * event where their face is named (clothing.py), grouped by person. Nothing is tagged until a suggestion is used. */
+export async function showClothing() {
+  main.replaceChildren(loadingBox('Matching clothes…'));
+  let d;
+  try { d = await api('/api/clothing?limit=2000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
+  if (S.route.view !== 'clothing') return;
+  const items = d.items;
+  const use = async (list, btn) => {
+    btn.disabled = true;
+    const byTag = new Map();
+    list.forEach((x) => { if (!byTag.has(x.tag)) byTag.set(x.tag, []); byTag.get(x.tag).push(x.id); });
+    for (const [tag, ids] of byTag) { if (!(await editPhotos(ids, { add_tags: [tag] }))) { btn.disabled = false; return false; } }
+    return true;
+  };
+  const card = (x) => {
+    const el = h('div', { class: 'dupitem', style: 'width:220px' },
+      h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
+        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+      h('div', null, h('b', null, x.event), h('span', { class: 'muted' }, ` · ${Math.round(x.score * 100)}%`)),
+      h('div', { class: 'sb' }, x.text),
+      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Tag ${x.name} on this photo (undo from the edit log)`,
+        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`) : null);
+    return el;
+  };
+  const groups = new Map();
+  items.forEach((x) => { if (!groups.has(x.tag)) groups.set(x.tag, { name: x.name, list: [] }); groups.get(x.tag).list.push(x); });
+  const sections = [...groups.entries()].map(([tag, g]) => {
+    const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, g.list.map(card));
+    return h('div', { class: 'jgroup' },
+      h('h3', { style: 'display:flex;gap:12px;align-items:center' }, h('img', { class: 'avatar', src: faceUrl(tag), alt: '' }), `${g.name} `, h('span', { class: 'muted' }, nf.format(g.list.length)),
+        S.EDITING && g.list.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
+          if (!(await confirmDialog(`Tag ${g.name} on these ${nf.format(g.list.length)} photos? Each is in the edit log with undo.`, { ok: 'Tag them' }))) return;
+          if (await use(g.list, e.currentTarget)) showClothing();
+        } }, 'Tag all') : null),
+      grid);
+  });
+  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install a content-search model and an object detection model under Maintenance › AI analysis and models to match people by their clothes.')
+    : d.coverage[0] < d.coverage[1] ? h('div', { class: 'enote' }, `Looking at the people: ${nf.format(d.coverage[0])} of ${nf.format(d.coverage[1])} photos so far.`) : null;
+  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Clothing matches', null]]),
+    pageTitle('people', 'purple', 'Clothing matches ', h('span', { class: 'muted' }, nf.format(items.length))),
+    h('div', { class: 'muted intro' }, 'At an event everyone wears the same clothes all day. Within the photos of one folder on one day, each detected person whose face is not named (from behind, too far, too small) is compared with the people whose face is named, and a clear match suggests that person is in the photo too. Tagging adds the person to the photo without a face region, with undo in the edit log; nothing is tagged until you do.'),
+    waiting, items.length ? sections : h('div', { class: 'empty' }, d.ready ? 'No suggestions: nobody dressed like a named person stands unnamed in the same event.' : 'No suggestions yet.')));
   sections.forEach((s) => badgeTiles(s));
   syncLightbox();
 }

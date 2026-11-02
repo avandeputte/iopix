@@ -554,6 +554,8 @@ def start(photos: list):
     jobs.submit("looks", lambda: _looks_job(photos, gen))
     from app.ai import jerseys
     jerseys.start(photos)  # numbers on shirts, after object detection has found the people
+    from app.ai import clothing
+    clothing.start(photos)  # what each detected person wears, for matches within an event
 
 
 def results() -> dict:

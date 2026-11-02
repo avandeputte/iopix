@@ -923,10 +923,22 @@ def jersey_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200
             "read": out["read"], "named": out["named"], "coverage": list(jerseys.coverage())}
 
 
+@server.tool(annotations=READ_ONLY)
+def clothing_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
+    """Clothing matches (Explore > Clothing matches): people probably present in a photo, matched by what they wear to the
+    photos of the same event (one folder, one day) where their face is named: {total, items: [{id, tag, name, n, score,
+    lead, box, event, text}], coverage}. Read-only: using one adds the person's tag to the photo (edit_photos / the page's
+    Tag button). Needs the admin token."""
+    _need_token(token)
+    from app.ai import clothing
+    items = clothing.suggestions(photo_ids)["items"]
+    return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "coverage": list(clothing.coverage())}
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
     """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
-    captions, looks, faces, ages, jerseys or facedetect (facedetect writes faces into digiKam's database). Without reset only
+    captions, looks, faces, ages, jerseys, clothing or facedetect (facedetect writes faces into digiKam's database). Without reset only
     new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Needs the
     admin token."""
     _need_token(token, writes=(job == "facedetect"))

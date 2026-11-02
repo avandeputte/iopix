@@ -14,6 +14,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Date suggestions**: a year for photos whose date is unknown, from how old the people in them look, when those people are photographed, what the photo looks like and the camera.
 - **Place suggestions**: where photos without a position were probably taken, from the photos around them that have one.
 - **Jersey numbers**: the number on each player's shirt, searchable, and the player it suggests for someone whose face is not named.
+- **Clothing matches**: within one event, who is probably in a photo by what they wear, when their face is not named.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 
@@ -29,7 +30,7 @@ AI results are guesses, and iopix treats them that way:
 
 ## Background jobs
 
-New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers. The damaged-files check runs only when you start it.
+New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers, clothing matches. The damaged-files check runs only when you start it.
 
 Each job may use half the machine's cores by default (**Settings › AI and search**, or `BG_THREADS`), so iopix and everything else on the server stay responsive.
 

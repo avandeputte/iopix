@@ -23,4 +23,4 @@ Explore has one setting: the size of the photos in its rows, **S**, **M** or **L
 
 ## For admins
 
-Admins also see pills for **Duplicate files** (byte-identical copies, from digiKam's own fingerprints) and **Edited here, not yet in digiKam**. Editors also see **Date suggestions**, **Place suggestions** and **Jersey numbers**.
+Admins also see pills for **Duplicate files** (byte-identical copies, from digiKam's own fingerprints) and **Edited here, not yet in digiKam**. Editors also see **Date suggestions**, **Place suggestions**, **Jersey numbers** and **Clothing matches**.

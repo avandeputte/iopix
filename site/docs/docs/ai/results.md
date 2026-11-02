@@ -60,6 +60,10 @@ Every suggestion says how far off it may be. **Use** saves it as an approximate 
 
 On each detected person, text recognition reads the number on the shirt. Photos are searchable by it (**Jersey number 10** as a filter chip, `jersey=10` in the address), and the info panel lists the numbers read. Where the person wearing a number has a named face, that player is learnt for the folder and the year. A number on someone whose face is not named, seen from behind or too small for a face, then suggests the player on **Explore › Jersey numbers** (for editors), when one player clearly wears it in the same folder (else the same year). **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that.
 
+## Clothing matches
+
+At an event everyone wears the same clothes all day. The content-search model turns each detected person into an embedding that mostly describes what they wear. Within the photos of one folder on one day, a person whose face is not named (from behind, too far, too small for a face) is compared with the people whose face is named; when the closest match is clear, **Explore › Clothing matches** (for editors) suggests that person is in the photo too, and the info panel shows it under *Probably here, by the clothes*. **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that. The embeddings are computed again when you switch the search model.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.

@@ -463,6 +463,9 @@ def api_photo(photo_id: int, request: Request):
         d["jerseys"] = jerseys.for_photo(photo_id)  # numbers read on shirts, with the player suggested for an unnamed one (editors)
         if d["jerseys"] and users.can_write(request.state.user):
             d["jerseySuggestions"] = jerseys.suggestions([photo_id])["items"]
+        if not d.get("video") and users.can_write(request.state.user):  # people probably present, by their clothes (clothing.py)
+            from app.ai import clothing
+            d["clothingSuggestions"] = clothing.suggestions([photo_id])["items"] if clothing.for_photo(photo_id) else []
         if d.get("lat") is None and not d.get("video") and users.can_write(request.state.user):  # where it was probably taken (placeguess.py), editors only
             from app.geo import placeguess
             hit = placeguess.suggestions([photo_id])["items"]

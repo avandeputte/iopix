@@ -4,7 +4,7 @@ from app import config, jobs as bgjobs
 from app.ai import analysis, caption, detector, looks, models as dlmodels
 from app.ai.semantic import enabled as semantic_enabled, ENGINES, semantic
 from app.core import prewarmer
-from app.ai import jerseys
+from app.ai import clothing, jerseys
 from app.faces import ages, facedetect, facevecs
 
 
@@ -49,8 +49,10 @@ def rows(total: int, stills: int, signed_in: bool) -> list:
          "enabled": config.ANALYSIS and caption.available(), "rerun": True},
         {"key": "jerseys", "label": "Jersey numbers", "detail": "Reads the number on the shirt of each detected person (text recognition on the upper part of each person box). A number on someone whose face is named teaches who wears it in that folder and that year; a number on someone without a named face then suggests the player (Explore › Jersey numbers), and nothing is tagged until you accept it. Photos are searchable by number.",
          "done": jerseys.coverage()[0], "total": jerseys.coverage()[1], "running": jerseys.progress["running"], "enabled": config.ANALYSIS and jerseys.available(), "rerun": True},
+        {"key": "clothing", "label": "Clothing matches", "detail": f"An embedding of each detected person ({mname('search_model')}, the content-search model) describing what they wear. Within the photos of one folder on one day, a person whose face is not named is matched to the people whose face is, and a clear match suggests them as present (Explore › Clothing matches); nothing is tagged until you accept it. Computed again when the search model changes.",
+         "done": clothing.coverage()[0], "total": clothing.coverage()[1], "running": clothing.progress["running"], "enabled": config.ANALYSIS and clothing.available(), "rerun": True},
     ]
-    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages", "jerseys": "jerseys"}
+    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages", "jerseys": "jerseys", "clothing": "clothing"}
     for j in jobs:
         j["queued"] = bgjobs.is_queued(queue_key[j["key"]])
     return jobs

@@ -6,6 +6,7 @@
  "GET /api/backup/{which}": "admin",
  "GET /api/badges": "public",
  "GET /api/bursts": "public",
+ "GET /api/clothing": "editor",
  "GET /api/concepts": "public",
  "GET /api/consistency": "editor",
  "GET /api/datesuggest": "editor",
