@@ -778,6 +778,16 @@ function libraryTab(c) {
         + (q.invalid.count ? `${plural(q.invalid.count, 'box is', 'boxes are')} outside the photo or empty.` : ''))).catch(() => fill(line, ''));
       return row('Metadata quality', h('span', null, line, ' Photos without a location, with an implausible date or in a folder for another date; duplicate faces, the same person twice, and boxes outside the photo.'), h('a', { class: 'pillbtn on', href: '#/quality' }, 'Open'));
     })(),
+    // the suggestion pages, each summarised in a line from a one-item read of its list (the total comes with it)
+    ...[['datesuggest', 'Date suggestions', 'A year for each photo marked Date unknown, from the ages of the people in it, the photos they appear in, the camera and the look of the file; folder hints bound the guesses.', 'suggestion'],
+      ['placesuggest', 'Place suggestions', 'A position for each photo without one, from where the photos around it in time were taken.', 'suggestion'],
+      ['jerseys', 'Jersey numbers', 'Players read from shirt numbers where the face is not named, when one player clearly wears the number in the same folder or year.', 'suggestion'],
+      ['clothing', 'Clothing matches', 'People recognised by what they wear in the same event, where their face is not named or not visible.', 'suggestion'],
+      ['rotation', 'Wrongly rotated', 'Photos that read as on their side or upside down, each shown the way it would look after the turn.', 'photo']].map(([view, label, text, noun]) => {
+      const line = h('span', null, '');
+      api(`/api/${view}?limit=1`).then((d) => fill(line, d.ready === false ? 'Not analysed yet. ' : `${d.total ? plural(d.total, noun) : `No ${noun}s`}${d.coverage && d.coverage[1] ? ` (${nf.format(d.coverage[0])} / ${nf.format(d.coverage[1])} analysed)` : ''}. `)).catch(() => fill(line, ''));
+      return row(label, h('span', null, line, text), h('a', { class: 'pillbtn on', href: `#/${view}` }, 'Open'));
+    }),
     (() => {  // damaged files, summarized in one line; the page has the list and the repair
       const line = h('span', null, '');
       api('/api/filecheck').then((d) => fill(line, d.progress.running ? `Checking… ${nf.format(d.progress.done)} / ${nf.format(d.progress.total)} files. `

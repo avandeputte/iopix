@@ -36,7 +36,7 @@ The **Photo quality** job adds:
 
 ## Date suggestions
 
-For photos marked **Date unknown**, **Explore › Date suggestions** (for editors) proposes a year from every clue the library has about them:
+For photos marked **Date unknown**, **Maintenance › Library › Date suggestions** (also a pill on Explore, for editors) proposes a year from every clue the library has about them:
 
 - **how old the named people look**: each person's photos with a known date teach the age model how that person ages; photos dated only to the year or month count too, with less weight. A birth year you enter on the page helps someone with few dated photos, and no suggestion is ever earlier than an entered birth year;
 - **when the same people are photographed**: the years with a date in which the photo's named people appear, together when they are photographed together often enough, else each on their own;
@@ -47,7 +47,7 @@ Each clue gives a year with an uncertainty; the suggestion is their weighted mea
 
 ## Place suggestions
 
-For photos without a position, **Explore › Place suggestions** (for editors) proposes where they were taken, from the photos around them that have one: a camera without GPS shot among phone photos with it. In order of confidence:
+For photos without a position, **Maintenance › Library › Place suggestions** (also a pill on Explore, for editors) proposes where they were taken, from the photos around them that have one: a camera without GPS shot among phone photos with it. In order of confidence:
 
 - **between** a photo with a position taken shortly before and one shortly after, close to each other: the position is interpolated by time;
 - **near** one photo with a position taken within the hour;
@@ -58,15 +58,15 @@ Every suggestion says how far off it may be. **Use** saves it as an approximate 
 
 ## Jersey numbers
 
-On each detected person, text recognition reads the number on the shirt. Photos are searchable by it (**Jersey number 10** as a filter chip, `jersey=10` in the address), and the info panel lists the numbers read. Where the person wearing a number has a named face, that player is learnt for the folder and the year. A number on someone whose face is not named, seen from behind or too small for a face, then suggests the player on **Explore › Jersey numbers** (for editors), when one player clearly wears it in the same folder (else the same year). **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that.
+On each detected person, text recognition reads the number on the shirt. Photos are searchable by it (**Jersey number 10** as a filter chip, `jersey=10` in the address), and the info panel lists the numbers read. Where the person wearing a number has a named face, that player is learnt for the folder and the year. A number on someone whose face is not named, seen from behind or too small for a face, then suggests the player on **Maintenance › Library › Jersey numbers** (also a pill on Explore, for editors), when one player clearly wears it in the same folder (else the same year). **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that.
 
 ## Clothing matches
 
-At an event everyone wears the same clothes all day. The content-search model turns each detected person into an embedding that mostly describes what they wear. Within the photos of one folder on one day, a person whose face is not named (from behind, too far, too small for a face) is compared with the people whose face is named; when the closest match is clear, **Explore › Clothing matches** (for editors) suggests that person is in the photo too, and the info panel shows it under *Probably here, by the clothes*. **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that. The embeddings are computed again when you switch the search model.
+At an event everyone wears the same clothes all day. The content-search model turns each detected person into an embedding that mostly describes what they wear. Within the photos of one folder on one day, a person whose face is not named (from behind, too far, too small for a face) is compared with the people whose face is named; when the closest match is clear, **Maintenance › Library › Clothing matches** (also a pill on Explore, for editors) suggests that person is in the photo too, and the info panel shows it under *Probably here, by the clothes*. **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that. The embeddings are computed again when you switch the search model.
 
 ## Wrongly rotated
 
-Scans and old files are often stored on their side or upside down. No extra model is needed: your own photos teach a small classifier on the content-search embeddings what upright looks like (a sample is embedded as it is and turned three ways). Every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed under **Maintenance › Wrongly rotated**, each shown the way it would look after the turn. **Rotate** is the ordinary lossless rotate (the file is turned, the metadata kept, digiKam's row updated, undo in the edit log); **It's fine** leaves a photo out until its file changes. The info panel shows the finding too. The classifier is learnt again when you switch the search model.
+Scans and old files are often stored on their side or upside down. No extra model is needed: your own photos teach a small classifier on the content-search embeddings what upright looks like (a sample is embedded as it is and turned three ways). Every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed under **Maintenance › Library › Wrongly rotated**, each shown the way it would look after the turn. **Rotate** is the ordinary lossless rotate (the file is turned, the metadata kept, digiKam's row updated, undo in the edit log); **It's fine** leaves a photo out until its file changes. The info panel shows the finding too. The classifier is learnt again when you switch the search model.
 
 ## Smart crop
 

@@ -84,9 +84,11 @@ export const NAV_LIBRARY = 'favorites';  // the first link of the sidebar's "Lib
 // the sidebar's "Manage" group: library management, for admins only
 export const NAV_MANAGE = [
   ['import', 'Import', 'add'], ['trash', 'Trash', 'trash'], ['duplicates', 'Duplicate files', 'dup'], ['bursts', 'Bursts & best shots', 'dup'],
-  ['detected', 'Detected content', 'spark'], ['quality', 'Metadata quality', 'check'], ['datesuggest', 'Date suggestions', 'calendar'], ['placesuggest', 'Place suggestions', 'map'], ['jerseys', 'Jersey numbers', 'text'], ['clothing', 'Clothing matches', 'people'], ['rotation', 'Wrongly rotated', 'rotate'],
-  ['damaged', 'Damaged files', 'photo'], ['history', 'Edit log', 'edit'],
+  ['detected', 'Detected content', 'spark'], ['quality', 'Metadata quality', 'check'], ['history', 'Edit log', 'edit'],
 ];
+// The suggestion and check pages (date and place suggestions, jersey numbers, clothing matches, wrongly rotated, damaged
+// files) are reached from Maintenance › Library, each summarised there in a line, not from the sidebar: they are
+// occasional clean-up work, not browsing.
 // hash S.route name -> page renderer (function declarations are hoisted, so this can sit above them)
 export const VIEW_FNS = { photos: showPhotos, explore: showExplore, people: showPeople, places: showPlaces, folders: showFolders, albums: showAlbums, tags: showTags, map: showMap, duplicates: showDuplicates,
   detected: showDetected, bursts: showBursts, events: showEvents, history: showHistory, analysis: showAnalysis, settings: showSettings, maintenance: showMaintenance, consistency: showConsistency, quality: showQuality, trash: showTrash, import: showImport, faces: showFaces, datesuggest: showDateSuggest, placesuggest: showPlaceSuggest, jerseys: showJerseys, clothing: showClothing, rotation: showRotation, damaged: showDamaged };

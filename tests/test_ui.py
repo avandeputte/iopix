@@ -686,7 +686,8 @@ def test_folders_and_albums_are_separate_pages(page, server, lib):
     assert page.locator("#nav a[data-v=folders]").count() == 1 and page.locator("#nav a[data-v=albums]").count() == 1
     # the sidebar's groups: Library for everyone, Manage for admins only
     assert page.locator("#nav .navsec", has_text="Library").count() == 1
-    assert page.locator("#nav .navmanage a[data-v=damaged]").count() == 1 and page.locator("#nav a[data-v=events]").count() == 1
+    assert page.locator("#nav .navmanage a[data-v=quality]").count() == 1 and page.locator("#nav a[data-v=events]").count() == 1
+    assert page.locator("#nav .navmanage a[data-v=damaged]").count() == 0, "the check pages live under Maintenance › Library, not in the sidebar"
     assert page.locator(".tree .trow").count() >= 1, "a tree of folders"
     assert page.locator(".tree .tact[title^='Upload photos']").count() >= 1, "editors can upload"
     assert page.locator(".tree .tact[title^='New folder']").count() >= 1

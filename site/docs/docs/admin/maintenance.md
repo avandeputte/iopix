@@ -16,6 +16,11 @@
 | Rescan the library now | rebuild the search index |
 | Metadata consistency | compare database, sidecar and file, and fix what disagrees |
 | Metadata quality | missing locations, face problems, and more |
+| Date suggestions | a year for each photo marked Date unknown, from every clue the library has about it; **Use** sets the date (see [AI results](../ai/results.md#date-suggestions)) |
+| Place suggestions | a position for each photo without one, from the photos around it in time; **Use** sets it |
+| Jersey numbers | the player a shirt number points to where the face is not named; **Tag** adds the person |
+| Clothing matches | who is probably in a photo by what they wear, within one event; **Tag** adds the person |
+| Wrongly rotated | photos that read as on their side or upside down, each shown righted; **Rotate** turns the file losslessly |
 | Damaged files | read every file and find JPEGs that stop early, lack their end marker or hold damaged data, damaged PNGs, and pictures that cannot be decoded; a repair where there is one: adding a missing end marker, or cropping a photo whose bottom is missing to the part above the damage (the file copied first, undo in the edit log) |
 | Pick labels | how many photos carry digiKam's Rejected, Pending and Accepted labels (iopix never sets them), and **Clear…** to take the chosen ones off every photo: digiKam's database backed up first, sidecars cleaned too, undo in the edit log |
 | Edits waiting for digiKam | changes in sidecars not yet in digiKam's database, with **Apply to digiKam database** |
