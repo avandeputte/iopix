@@ -83,11 +83,11 @@ export const NAV = [
 export const NAV_LIBRARY = 'favorites';  // the first link of the sidebar's "Library" group (everyone)
 // the sidebar's "Manage" group: library management, for admins only
 export const NAV_MANAGE = [
-  ['import', 'Import', 'add'], ['trash', 'Trash', 'trash'], ['duplicates', 'Duplicate files', 'dup'], ['bursts', 'Bursts & best shots', 'dup'],
+  ['import', 'Import', 'add'], ['trash', 'Trash', 'trash'], ['bursts', 'Bursts & best shots', 'dup'],
   ['detected', 'Detected content', 'spark'], ['quality', 'Metadata quality', 'check'], ['history', 'Edit log', 'edit'],
 ];
 // The suggestion and check pages (date and place suggestions, jersey numbers, clothing matches, wrongly rotated, damaged
-// files) are reached from Maintenance › Library, each summarised there in a line, not from the sidebar: they are
+// files, duplicate files) are reached from Maintenance › Library, each summarised there in a line, not from the sidebar: they are
 // occasional clean-up work, not browsing.
 // hash S.route name -> page renderer (function declarations are hoisted, so this can sit above them)
 export const VIEW_FNS = { photos: showPhotos, explore: showExplore, people: showPeople, places: showPlaces, folders: showFolders, albums: showAlbums, tags: showTags, map: showMap, duplicates: showDuplicates,

@@ -778,6 +778,12 @@ function libraryTab(c) {
         + (q.invalid.count ? `${plural(q.invalid.count, 'box is', 'boxes are')} outside the photo or empty.` : ''))).catch(() => fill(line, ''));
       return row('Metadata quality', h('span', null, line, ' Photos without a location, with an implausible date or in a folder for another date; duplicate faces, the same person twice, and boxes outside the photo.'), h('a', { class: 'pillbtn on', href: '#/quality' }, 'Open'));
     })(),
+    (() => {  // duplicate files, summarised in one line; the page lists the sets
+      const line = h('span', null, '');
+      api('/api/duplicates').then((d) => fill(line, d.groups.length ? `${plural(d.groups.length, 'set')} of byte-identical files, ${fmtBytes(d.wasted)} that could be freed. ` : 'No byte-identical copies. ')).catch(() => fill(line, ''));
+      return row('Duplicate files', h('span', null, line, `Copies of the same file, from digiKam’s own fingerprints. ${S.APP_NAME} never deletes anything; remove the extras in digiKam.`),
+        h('a', { class: 'pillbtn on', href: '#/duplicates' }, 'Open'));
+    })(),
     // the suggestion pages, each summarised in a line from a one-item read of its list (the total comes with it)
     ...[['datesuggest', 'Date suggestions', 'A year for each photo marked Date unknown, from the ages of the people in it, the photos they appear in, the camera and the look of the file; folder hints bound the guesses.', 'suggestion'],
       ['placesuggest', 'Place suggestions', 'A position for each photo without one, from where the photos around it in time were taken.', 'suggestion'],

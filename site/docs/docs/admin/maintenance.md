@@ -16,6 +16,7 @@
 | Rescan the library now | rebuild the search index |
 | Metadata consistency | compare database, sidecar and file, and fix what disagrees |
 | Metadata quality | missing locations, face problems, and more |
+| Duplicate files | sets of byte-identical files, from digiKam's fingerprints, and the space the extras take |
 | Date suggestions | a year for each photo marked Date unknown, from every clue the library has about it; **Use** sets the date (see [AI results](../ai/results.md#date-suggestions)) |
 | Place suggestions | a position for each photo without one, from the photos around it in time; **Use** sets it |
 | Jersey numbers | the player a shirt number points to where the face is not named; **Tag** adds the person |
