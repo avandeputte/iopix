@@ -22,9 +22,10 @@ def test_read_numbers_keeps_one_or_two_digit_numbers_per_person():
         def boxes(self, crop):
             calls.append(crop.size)
             w, h = crop.size
-            return [("10", 0.97, (w * 0.3, h * 0.3, w * 0.6, h * 0.5)), ("GOALS", 0.9, (w * 0.3, h * 0.6, w * 0.7, h * 0.7)),
+            return [("10", 0.97, (w * 0.3, h * 0.3, w * 0.6, h * 0.55)), ("GOALS", 0.9, (w * 0.3, h * 0.6, w * 0.7, h * 0.7)),
                     ("7", 0.4, (w * 0.4, h * 0.4, w * 0.6, h * 0.5)), ("2024", 0.95, (w * 0.3, h * 0.1, w * 0.6, h * 0.2)),
-                    ("3", 0.99, (w * 0.01, h * 0.5, w * 0.08, h * 0.6))]  # a small "3" at the edge: a banner behind, not the shirt
+                    ("3", 0.99, (w * 0.01, h * 0.5, w * 0.08, h * 0.6)),   # a small "3" at the edge: a banner behind, not the shirt
+                    ("3", 0.99, (w * 0.4, h * 0.4, w * 0.55, h * 0.47))]  # a tiny "3" in the middle: a fold or a logo
     ocr = Ocr()
     boxes = [(0.1, 0.1, 0.2, 0.6), (0.5, 0.2, 0.01, 0.02)]  # the second is too small to crop
     found = jerseys.read_numbers(im, boxes, ocr)

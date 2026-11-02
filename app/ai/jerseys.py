@@ -27,6 +27,9 @@ CROP_WIDTH = 320      # the crop is enlarged to at least this width for the reco
 MIN_CONF = 0.75
 CENTRE = (0.12, 0.88)   # the number's box must sit within this part of the torso crop's width (not the background beside the person)
 MIN_WIDTH = 0.1         # and be at least this wide, as a fraction of the crop: a shirt number is big
+MIN_HEIGHT_FRAC = 0.1   # and this tall; folds, logos and texture read as small digits
+SINGLE_CONF = 0.9       # a lone digit is what a fold or a seam reads as most: it needs to be read with more certainty
+SINGLE_HEIGHT = 0.15    # and to be taller
 MAX_BOXES = 12
 NUMBER = re.compile(r"\d{1,2}")
 VERSION = "2"         # ai_scans.detail: 2 reads the shirt colour too; older rows are read again
@@ -98,7 +101,12 @@ def read_numbers(im, boxes: list, ocr) -> list:
                 continue
             if bx is not None:  # where it was read: on the shirt, not on a sign or a banner beside the person
                 cx = (bx[0] + bx[2]) / 2 / rgb.width
-                if not (CENTRE[0] <= cx <= CENTRE[1]) or (bx[2] - bx[0]) < MIN_WIDTH * rgb.width or bx[1] < 0.08 * rgb.height:
+                bw, bh = bx[2] - bx[0], bx[3] - bx[1]
+                if not (CENTRE[0] <= cx <= CENTRE[1]) or bw < MIN_WIDTH * rgb.width or bh < MIN_HEIGHT_FRAC * rgb.height or bx[1] < 0.08 * rgb.height:
+                    continue
+                if not (0.3 <= bw / max(bh, 1) <= (1.6 if len(t) == 1 else 2.6)):  # the shape of one or two digits
+                    continue
+                if len(t) == 1 and (conf < SINGLE_CONF or bh < SINGLE_HEIGHT * rgb.height):
                     continue
             if best is None or conf > best[1]:
                 best = (t, conf)

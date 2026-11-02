@@ -246,7 +246,8 @@ class _OCR:
             r = self.engine(image)
             if r is None or not getattr(r, "txts", None):
                 return []
-            bx = list(getattr(r, "boxes", None) or [])
+            bx = getattr(r, "boxes", None)
+            bx = list(bx) if bx is not None else []  # an ndarray: never tested for truth
             return [(t, c, box(bx[i]) if i < len(bx) else None) for i, (t, c) in enumerate(zip(r.txts, r.scores or [1.0] * len(r.txts)))]
         res, _elapsed = self.engine(image)
         return [(x[1], x[2], box(x[0]) if x[0] is not None else None) for x in (res or []) if len(x) > 2]

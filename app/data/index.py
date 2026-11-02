@@ -783,7 +783,7 @@ def _clean_ocr(out: SimpleNamespace, tags: dict, albums: dict):
     known = ocrwords.known_words(ocrwords.words_of(named) | ocrwords.corpus(texts))
     cleaned = {r[0]: ocrwords.clean(r[_OCR_COL], known) for r in out.photos if r[_OCR_COL]}
     out.photos[:] = [r if r[0] not in cleaned else (*r[:_OCR_COL], cleaned[r[0]], *r[_OCR_COL + 1:]) for r in out.photos]
-    out.fts_rows[:] = [f if f[0] not in cleaned else (*f[:9], cleaned[f[0]], f[10]) for f in out.fts_rows]
+    out.fts_rows[:] = [f if f[0] not in cleaned else (*f[:9], cleaned[f[0]], *f[10:]) for f in out.fts_rows]
 
 
 def _rank(dst, rows: SimpleNamespace, col: str, k: int):
