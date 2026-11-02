@@ -271,9 +271,10 @@ _cache = {"key": None, "value": None}
 
 def _all_sightings(con, rows: list) -> list:
     """_sightings over every number read, cached while neither the index nor the numbers change (the info panel asks per photo)."""
-    key = (config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, len(rows), rows[-1] if rows else None)
-    if _cache["key"] != key:
-        _cache.update(key=key, value=_sightings(con, rows))
+    import time
+    key = (len(rows), rows[-1] if rows else None)
+    if _cache["key"] != key or time.time() - _cache.get("at", 0) > 120:  # the index's faces change rarely: two minutes is fresh enough
+        _cache.update(key=key, value=_sightings(con, rows), at=time.time())
     return _cache["value"]
 
 

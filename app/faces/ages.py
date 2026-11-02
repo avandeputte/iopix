@@ -229,9 +229,18 @@ def set_birth(tag: int, year):
 # the suggestions
 # --------------------------------------------------------------------------
 
+_ages_cache = {"at": 0.0, "n": -1, "value": None}
+
+
 def _ages() -> dict:
+    """Every stored age; kept for two minutes (the info panel asks per photo, and the table only grows while the job runs)."""
     with vdb.reader() as con:
-        return {(r[0], r[1], r[2], r[3], r[4]): r[5] for r in con.execute("SELECT photo_id, x, y, w, h, age FROM ai_face_ages WHERE age IS NOT NULL")}
+        n = con.execute("SELECT count(*) FROM ai_face_ages").fetchone()[0]
+        if _ages_cache["value"] is not None and _ages_cache["n"] == n and time.time() - _ages_cache["at"] < 120:
+            return _ages_cache["value"]
+        value = {(r[0], r[1], r[2], r[3], r[4]): r[5] for r in con.execute("SELECT photo_id, x, y, w, h, age FROM ai_face_ages WHERE age IS NOT NULL")}
+    _ages_cache.update(at=time.time(), n=n, value=value)
+    return value
 
 
 def _wmedian(values, weights) -> float:

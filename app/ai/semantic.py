@@ -207,7 +207,9 @@ class Engine:
                 keep.sort()
                 self.ids, self.vecs = self.ids[keep], self.vecs[keep]
         have = set(self.ids.tolist())
-        todo = [p for p in photos if p["id"] not in have]
+        # a photo that could not be embedded (no thumbnail) is not tried again at every start: that retried, saved the
+        # file, and the saved file counted as a change that rebuilt the index, which started it again, every 20 seconds
+        todo = [p for p in photos if p["id"] not in have and p["id"] not in self.failed]
         if self.running and {p["id"] for p in todo} <= self._todo_ids:
             return  # nothing new to embed: the running job carries on (its run number untouched, so it never sees a bump and stops)
         self._run += 1
@@ -238,6 +240,7 @@ class Engine:
                     self._image_threads = n
             last_save = time.time()
             done = 0
+            added = 0
             for todo_batch in chunked(todo, BATCH):
                 if run != self._run:
                     return
@@ -270,14 +273,16 @@ class Engine:
                                 return
                             self.ids = np.concatenate([self.ids, np.asarray(batch, np.int32)])
                             self.vecs = np.concatenate([self.vecs, vecs])
+                            added += len(batch)
                 done += len(todo_batch)
                 self.done = done
                 if time.time() - last_save > 60:
                     with self.lock:
                         self._save()
                     last_save = time.time()
-            with self.lock:
-                self._save()
+            if added:  # nothing new embedded: the file (and its time, part of the index version) is left alone
+                with self.lock:
+                    self._save()
             if run == self._run:
                 self._finished_ok = True
                 self.running = False

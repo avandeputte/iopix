@@ -28,6 +28,7 @@ _started = None      # when it started
 _thread = None
 _last_submit = 0.0  # jobs submitted close together (a start, a library change) are picked in ORDER, not arrival order
 GRACE = 3.0
+MAX_SETTLE = 30.0  # a queue that never goes quiet (rebuild after rebuild) still gets its jobs run
 _progress = {}       # name -> Progress, every background job that reports one
 
 
@@ -127,10 +128,11 @@ def _worker():
     while True:
         # wait until the queue has been quiet for GRACE seconds, so a burst of submissions
         # (startup, a library change) settles before the first job is picked by ORDER
+        waited_since = time.time()
         while True:
             with _lock:
                 settle = GRACE - (time.time() - _last_submit)
-                if not _queue or settle <= 0:
+                if not _queue or settle <= 0 or time.time() - waited_since > MAX_SETTLE:
                     break
             _wake.wait(timeout=settle)
             _wake.clear()

@@ -60,8 +60,10 @@ export async function showMap(fp) {
   const bar = h('div', { class: 'mapbar' });
   main.replaceChildren(el, bar);
   let d;
-  try { [d] = await Promise.all([api('/api/map?' + fp.toString()), loadLeaflet(true)]); } catch {
-    if (token === M.token && S.route.view === 'map') main.replaceChildren(h('div', { class: 'empty' }, 'The map needs an internet connection for map tiles. Everything else works offline.'));
+  try { [d] = await Promise.all([api('/api/map?' + fp.toString()), loadLeaflet(true)]); } catch (e) {
+    if (token !== M.token || S.route.view !== 'map') return;
+    // the map library not loading is the one case the notice is about; a failing server answer says what it said
+    main.replaceChildren(e?.message === 'offline' ? h('div', { class: 'empty' }, 'The map needs an internet connection for map tiles. Everything else works offline.') : errorBox(e));
     return;
   }
   if (token !== M.token || S.route.view !== 'map') return;

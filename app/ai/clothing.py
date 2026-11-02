@@ -175,6 +175,17 @@ def reset():
 
 def _events(con, ids: list = None) -> dict:
     """{(album, day): [photo ids]} for the photos with embedded people (or those among `ids` and their event mates)."""
+    if ids is not None:  # one photo's event: its folder and day, and the photos of that day with embedded people
+        keys = {(r[0], r[1]) for r in con.execute(f"SELECT album_id, day FROM photos WHERE dprec IS NULL AND id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})")}
+        events = defaultdict(list)
+        for album, day in keys:
+            mates = [r[0] for r in con.execute("SELECT id FROM photos WHERE album_id = ? AND day = ? AND dprec IS NULL", (album, day))]
+            if not mates:
+                continue
+            with vdb.reader() as vcon:
+                have = {r[0] for part in chunked(mates, 500) for r in vcon.execute(f"SELECT DISTINCT photo_id FROM ai_person_looks WHERE photo_id IN ({','.join(str(i) for i in part)})")}
+            events[(album, day)] = [i for i in mates if i in have]
+        return events
     with vdb.reader() as vcon:
         have = sorted({r[0] for r in vcon.execute("SELECT DISTINCT photo_id FROM ai_person_looks")})
     meta = {}
@@ -184,9 +195,6 @@ def _events(con, ids: list = None) -> dict:
     events = defaultdict(list)
     for pid, key in meta.items():
         events[key].append(pid)
-    if ids is not None:
-        keys = {meta[i] for i in ids if i in meta}
-        events = {k: v for k, v in events.items() if k in keys}
     return events
 
 
