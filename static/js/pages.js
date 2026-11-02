@@ -918,9 +918,9 @@ export async function showJerseys() {
       h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
       h('div', null, h('b', null, `Number ${x.number}`), h('span', { class: 'muted' }, x.basis === 'folder' ? ` · ${x.n} named in this folder` : ` · ${x.n} named this year`)),
-      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap' },
         h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`),
+          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Tag'),
         h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
           onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
     return el;
@@ -975,9 +975,9 @@ export async function showClothing() {
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
       h('div', null, h('b', null, x.event), h('span', { class: 'muted' }, ` · ${Math.round(x.score * 100)}%`)),
       h('div', { class: 'sb' }, x.text),
-      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap' },
         h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`),
+          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Tag'),
         h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
           onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
     return el;
