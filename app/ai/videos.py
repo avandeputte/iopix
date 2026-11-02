@@ -39,6 +39,7 @@ SCENE = 0.3          # ffmpeg scene-change score that counts as a cut
 MAX_SPEECH_S = 20 * 60  # a transcript covers at most this much of a video
 VERSION = 1          # bump when the cover or chapter rules change meaning
 progress = jobs.Progress("videos", phase="")
+_running_todo = set()
 _asr = {}
 _lock = threading.Lock()
 _PTS = re.compile(r"pts_time:([0-9.]+)")
@@ -266,6 +267,8 @@ def _job(photos: list, gen: int):
     speech = speech_available()
     key = _key(models.chosen("speech_model") if speech else "")
     todo = _todo(photos, key)
+    _running_todo.clear()
+    _running_todo.update(p["id"] for p in todo)
     progress.update(running=bool(todo), done=0, total=len(todo), phase="")
     if not todo:
         return
@@ -322,6 +325,11 @@ def _job(photos: list, gen: int):
 def start(photos: list):
     if not config.ANALYSIS or not available():
         return
+    if progress["running"]:
+        from app.ai import models
+        key = _key(models.chosen("speech_model") if speech_available() else "")
+        if {p["id"] for p in _todo([p for p in photos if p["video"]], key)} <= _running_todo:
+            return  # nothing new for the running job
     gen = progress.cancel()
     jobs.submit("videos", lambda: _job([p for p in photos if p["video"]], gen))
 

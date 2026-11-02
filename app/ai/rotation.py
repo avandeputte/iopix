@@ -223,6 +223,8 @@ def _job(gen: int):
 def start():
     if not config.ANALYSIS or not available():
         return
+    if progress["running"]:
+        return  # it screens every embedding anyway; a new start would only make it begin again
     gen = progress.cancel()
     jobs.submit("rotation", lambda: _job(gen))
 

@@ -39,6 +39,7 @@ LEARN_MIN_FOLDER = 2  # named sightings of a number in one folder before it name
 LEARN_MIN_YEAR = 3    # and in one year
 AGREE = 0.8           # the share of sightings the leading player needs
 progress = jobs.Progress("jerseys")
+_running_todo = set()  # the photos the running job is working through: a new start with nothing more to do leaves it alone
 
 
 def available() -> bool:
@@ -150,13 +151,15 @@ def _job(photos: list, gen: int):
     if ocr is None:
         return
     todo = _todo(photos)
+    _running_todo.clear()
+    _running_todo.update(p["id"] for p in todo)
     progress.update(running=bool(todo), done=0, total=len(todo))
     if not todo:
         return
     try:
         n = max(1, min(4, jobs.threads()))
         with ThreadPoolExecutor(n, thread_name_prefix="jerseys") as pool:
-            for chunk in chunked(todo, 32):
+            for chunk in chunked(todo, 8):  # small batches: progress is written often, so a restart loses little
                 if progress.cancelled(gen):
                     return
                 boxes = _person_boxes([p["id"] for p in chunk])
@@ -192,6 +195,8 @@ def start(photos: list):
     """Read the numbers still missing. photos: index rows with id, path, video, hash, size, modified."""
     if not config.ANALYSIS or not available():
         return
+    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running_todo:
+        return  # nothing new: the running job carries on (an index rebuild must not restart it every few minutes)
     gen = progress.cancel()
     jobs.submit("jerseys", lambda: _job(photos, gen))
 

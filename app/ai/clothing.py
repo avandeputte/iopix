@@ -33,6 +33,7 @@ MIN_SIM = 0.78       # an unnamed person box must look at least this much like o
 MARGIN = 0.05        # and lead the next-best person by this much (on named faces, the lead alone kept 9 in 10 right)
 ALONE = 0.88         # with a single person named in the event there is nobody to lead: a high bar instead
 progress = jobs.Progress("clothing")
+_running_todo = set()
 _lock = threading.Lock()
 
 
@@ -104,6 +105,8 @@ def _job(photos: list, gen: int):
     if not available():
         return
     todo = _todo(photos)
+    _running_todo.clear()
+    _running_todo.update(p["id"] for p in todo)
     progress.update(running=bool(todo), done=0, total=len(todo))
     if not todo:
         return
@@ -111,7 +114,7 @@ def _job(photos: list, gen: int):
     model = engine.name
     try:
         with ThreadPoolExecutor(max(1, min(4, jobs.threads())), thread_name_prefix="clothing") as pool:
-            for chunk in chunked(todo, 16):
+            for chunk in chunked(todo, 8):
                 if progress.cancelled(gen):
                     return
                 boxes = _person_boxes([p["id"] for p in chunk])
@@ -153,6 +156,8 @@ def _job(photos: list, gen: int):
 def start(photos: list):
     if not config.ANALYSIS or not available():
         return
+    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running_todo:
+        return  # nothing new for the running job
     gen = progress.cancel()
     jobs.submit("clothing", lambda: _job(photos, gen))
 
