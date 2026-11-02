@@ -45,6 +45,17 @@ For photos marked **Date unknown**, **Explore › Date suggestions** (for editor
 
 Each clue gives a year with an uncertainty; the suggestion is their weighted mean, shown as a range with the clues it came from, and the closest ranges come first. A photo without named people still gets a suggestion from how it looks or the camera. **Use** saves it as a year-only date, with undo in the edit log; nothing is written before that. The info panel of an undated photo shows its suggestion and clues too.
 
+## Place suggestions
+
+For photos without a position, **Explore › Place suggestions** (for editors) proposes where they were taken, from the photos around them that have one: a camera without GPS shot among phone photos with it. In order of confidence:
+
+- **between** a photo with a position taken shortly before and one shortly after, close to each other: the position is interpolated by time;
+- **near** one photo with a position taken within the hour;
+- **that day**: the places photographed that day, grouped within a couple of kilometres. One place takes the photo; among several, the one it looks most like (from the content-search model), else the one nearest in time;
+- **a stay**: no position that day at all, but photos at one place both the day before and the day after.
+
+Every suggestion says how far off it may be. **Use** saves it as an approximate position (the accuracy is written with it), with undo in the edit log; nothing is written before that. The info panel of a photo without a position shows its suggestion too, and the location editor still lists the nearest photos with a position.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.

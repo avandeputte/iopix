@@ -12,6 +12,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Faces**: look-alike groups, "looks like" suggestions, and finding unmarked faces.
 - **Photo quality**: sharpness, exposure, focus, an aesthetic score and closed eyes, to find the best shots and suggest rejects.
 - **Date suggestions**: a year for photos whose date is unknown, from how old the people in them look, when those people are photographed, what the photo looks like and the camera.
+- **Place suggestions**: where photos without a position were probably taken, from the photos around them that have one.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 
@@ -23,7 +24,7 @@ AI results are guesses, and iopix treats them that way:
 - detected content is a filter, not stored tags,
 - descriptions are shown with the AI analysis at the end of the info panel, never in place of your own caption,
 - a likely reject is only a suggestion: no label is ever set on a photo,
-- a suggested year is only saved when you click **Use**.
+- a suggested year or place is only saved when you click **Use**.
 
 ## Background jobs
 

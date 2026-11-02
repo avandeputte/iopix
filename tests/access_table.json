@@ -41,6 +41,7 @@
  "GET /api/photos": "public",
  "GET /api/photos/trash/{job}": "public",
  "GET /api/picklabels": "admin",
+ "GET /api/placesuggest": "editor",
  "GET /api/placetags": "signed_in",
  "GET /api/quality": "admin",
  "GET /api/quality/accepted": "admin",

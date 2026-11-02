@@ -97,6 +97,7 @@ export async function showExplore() {
       h('a', { class: 'pill', href: '#/events' }, 'Events & trips'), pill('Contains text', null, { hastext: 1 }), pill('Blurry', null, { blurry: 1 }),
       pill('Best looking', null, { looks: 'top', sort: 'looks' }), pill('Likely rejects', null, { rejects: 1 }),
       S.EDITING ? h('a', { class: 'pill', href: '#/datesuggest' }, 'Date suggestions') : null,
+      S.EDITING ? h('a', { class: 'pill', href: '#/placesuggest' }, 'Place suggestions') : null,
       S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
@@ -835,3 +836,45 @@ function proxySection() {
   return box;
 }
 export function showAnalysis() { go('maintenance', null, true); }  // the old #/analysis page now lives in Maintenance; keep bookmarks working
+
+/** Explore › Place suggestions: where each photo without a position was probably taken, from the photos around it that
+ * have one (placeguess.py). Nothing is written until a suggestion is used: it is then a GPS edit with its accuracy. */
+export async function showPlaceSuggest() {
+  main.replaceChildren(loadingBox('Working out the places…'));
+  let d;
+  try { d = await api('/api/placesuggest?limit=1000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
+  if (S.route.view !== 'placesuggest') return;
+  const items = d.items;
+  const where = (x) => [x.place, x.region, x.country].filter(Boolean).join(', ') || `${x.lat.toFixed(4)}, ${x.lon.toFixed(4)}`;
+  const within = (x) => x.km < 1 ? `within ${Math.round(x.km * 1000)} m` : `within ${x.km.toFixed(1)} km`;
+  const use = async (list, btn) => {
+    btn.disabled = true;
+    for (const x of list) {
+      if (!(await editPhotos([x.id], { gps: { lat: x.lat, lon: x.lon, accuracy: Math.round(x.km * 1000) } }))) { btn.disabled = false; return false; }
+    }
+    return true;
+  };
+  const card = (x) => {
+    const el = h('div', { class: 'dupitem', style: 'width:220px' },
+      h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
+        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+      h('div', null, h('b', null, where(x)), h('span', { class: 'muted' }, ` (${within(x)})`)),
+      h('div', { class: 'sb' }, x.text),
+      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Save this position, marked as approximate (undo from the edit log)`,
+        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Use') : null);
+    return el;
+  };
+  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const close = items.filter((x) => x.km <= 0.5);
+  const useClose = S.EDITING && close.length ? h('button', { class: 'pillbtn', onclick: async (e) => {
+    if (!(await confirmDialog(`Use the suggested position for the ${nf.format(close.length)} ${close.length === 1 ? 'photo' : 'photos'} placed within 500 m? Each is saved as an approximate position, with undo in the edit log.`, { ok: 'Use them' }))) return;
+    if (await use(close, e.currentTarget)) showPlaceSuggest();
+  } }, `Use the ${nf.format(close.length)} closest suggestions`) : null;
+  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Place suggestions', null]]),
+    pageTitle('map', 'green', 'Place suggestions ', h('span', { class: 'muted' }, nf.format(items.length))),
+    h('div', { class: 'muted intro' }, 'Where each photo without a position was probably taken, from the photos around it that have one: between two taken shortly before and after, the one nearest in time, the places photographed that day (the one it looks most like, when there are several), or a stay with positions the day before and after. Each suggestion says how far off it may be. Nothing is saved until you use one: it is then saved as an approximate position, with undo in the edit log.'),
+    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
+      : h('div', { class: 'empty' }, 'No suggestions: no photo without a position has photos with one around it.')));
+  badgeTiles(grid);
+  syncLightbox();
+}

@@ -459,6 +459,10 @@ def api_photo(photo_id: int, request: Request):
             from app.ai import dateclues
             hit = dateclues.suggestions([photo_id])["items"]
             d["dateSuggestion"] = hit[0] if hit else None
+        if d.get("lat") is None and not d.get("video") and users.can_write(request.state.user):  # where it was probably taken (placeguess.py), editors only
+            from app.geo import placeguess
+            hit = placeguess.suggestions([photo_id])["items"]
+            d["placeSuggestion"] = hit[0] if hit else None
         if d.get("burst"):
             d["burst_size"] = con.execute("SELECT count(*) FROM photos WHERE burst = ?", (d["burst"],)).fetchone()[0]
             best = con.execute("SELECT id, name FROM photos WHERE burst = ? AND burst_best = 1", (d["burst"],)).fetchone()

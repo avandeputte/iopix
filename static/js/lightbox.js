@@ -900,6 +900,18 @@ function suggestRow(d) {
       ' · ', h('a', { class: 'lnk', href: '#/datesuggest' }, 'All suggestions'))));
 }
 
+/** Where a photo without a position was probably taken (placeguess.py): the place, how far off it may be, the clue, and Use. */
+function placeSuggestRow(d) {
+  const g = d.placeSuggestion;
+  const where = [g.place, g.region, g.country].filter(Boolean).join(', ') || `${g.lat.toFixed(4)}, ${g.lon.toFixed(4)}`;
+  const within = g.km < 1 ? `within ${Math.round(g.km * 1000)} m` : `within ${g.km.toFixed(1)} km`;
+  return h('div', { class: 'irow' }, icon('spark'), h('div', null,
+    h('div', { class: 'a' }, `Probably ${where}`, h('span', { class: 'muted' }, ` (${within})`)),
+    h('div', { class: 'b' }, `${g.text.charAt(0).toUpperCase()}${g.text.slice(1)}. `,
+      S.EDITING ? h('button', { type: 'button', class: 'lnk', title: 'Save this position, marked as approximate (undo from the edit log)', onclick: () => editPhotos([d.id], { gps: { lat: g.lat, lon: g.lon, accuracy: Math.round(g.km * 1000) } }) }, 'Use') : null,
+      ' · ', h('a', { class: 'lnk', href: '#/placesuggest' }, 'All suggestions'))));
+}
+
 /** The photo quality row of the info panel: focus and look as ranks in the library, closed eyes, and why it looks like a reject. */
 function qualityRow(d) {
   const q = d.quality, pct = (v) => Math.round(v * 100);
@@ -1008,6 +1020,7 @@ function infoLocation(c, mapEl) {
   const { d, show, lnk, ex } = c;
   return [
     show('location') && S.EDITING && d.lat == null ? h('div', { class: 'irow' }, icon('place'), h('div', null, h('button', { type: 'button', class: 'lnk', onclick: () => locationDialog([d.id], null) }, 'Set location on the map'))) : null,
+    show('location') && d.lat == null && d.placeSuggestion ? placeSuggestRow(d) : null,
     show('location') && d.lat != null ? [h('h4', null, 'Location', S.EDITING ? h('button', { type: 'button', class: 'lnk', style: 'margin-left:10px;text-transform:none;letter-spacing:0;font-weight:400', onclick: () => locationDialog([d.id], { lat: d.lat, lon: d.lon, alt: d.alt, accuracy: ex.gpsAccuracy }) }, 'Change') : null),
       d.place ? h('div', { class: 'a', style: 'margin-bottom:6px' }, lnk(d.place, { place: d.place, ...(d.region ? { region: d.region } : {}) }),
         d.region ? [', ', lnk(d.region, { region: d.region })] : null, d.country ? [', ', lnk(d.country, { country: d.country })] : null) : null,

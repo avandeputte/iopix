@@ -898,6 +898,17 @@ def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, 
             "sources": {"ages": ages.available(), "look": semantic_enabled()}, "faces": list(ages.coverage())}
 
 
+@server.tool(annotations=READ_ONLY)
+def place_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
+    """Where the photos without a position were probably taken (Explore > Place suggestions), surest first: {total, items:
+    [{id, lat, lon, km (how far off it may be), place, region, country, basis: between|near|day|day-time|stay, text, from}]}.
+    Read-only: using one is a GPS edit with that accuracy (the page's Use button). Needs the admin token."""
+    _need_token(token)
+    from app.geo import placeguess
+    items = placeguess.suggestions(photo_ids)["items"]
+    return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 1000))]}
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
     """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
