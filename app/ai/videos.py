@@ -37,6 +37,7 @@ MAX_CHAPTERS = 12
 MIN_CHAPTER_GAP = 3.0  # seconds between chapters
 SCENE = 0.3          # ffmpeg scene-change score that counts as a cut
 MAX_SPEECH_S = 20 * 60  # a transcript covers at most this much of a video
+CHUNK_S = 60            # seconds of sound given to the speech model at a time
 VERSION = 1          # bump when the cover or chapter rules change meaning
 progress = jobs.Progress("videos", phase="")
 _running_todo = set()
@@ -187,7 +188,25 @@ def transcribe(src: str, duration: float) -> dict:
         p = subprocess.run(cmd, capture_output=True, timeout=600)
         if p.returncode or not os.path.exists(wav) or os.path.getsize(wav) < 32000:  # no sound track, or under a second of it
             return {"text": "", "segments": [], "lang": None}
-        r = rec.recognize(wav)
+        # the sound is given to the model a minute at a time: the whole of a long video at once needs memory in
+        # proportion to its length squared (a 20-minute clip took more than 9 GB and the kernel killed the server)
+        import wave
+        with wave.open(wav, "rb") as w:
+            rate, n = w.getframerate(), w.getnframes()
+            pcm = np.frombuffer(w.readframes(n), dtype=np.int16).astype(np.float32) / 32768.0
+        texts, tokens, ts, lang = [], [], [], None
+        step = CHUNK_S * rate
+        for off in range(0, len(pcm), step):
+            part = pcm[off:off + step]
+            if len(part) < rate // 2:
+                break
+            r = rec.recognize(part, sample_rate=rate)
+            texts.append(getattr(r, "text", r if isinstance(r, str) else "") or "")
+            rt, rk = getattr(r, "timestamps", None), getattr(r, "tokens", None)
+            if rt and rk:
+                tokens += list(rk)
+                ts += [t + off / rate for t in rt]
+            lang = lang or getattr(r, "lang", None)
     except Exception as e:
         log.warning("videos: speech failed on %s (%s)", src, e)
         return None
@@ -197,8 +216,7 @@ def transcribe(src: str, duration: float) -> dict:
         except OSError:
             pass
     segments = []
-    text = getattr(r, "text", r if isinstance(r, str) else "") or ""
-    ts, tokens = getattr(r, "timestamps", None), getattr(r, "tokens", None)
+    text = " ".join(t.strip() for t in texts if t and t.strip())
     if ts and tokens:  # word-level times from the recogniser, grouped into lines of about ten seconds
         cur, start, last = [], None, None
         for tok, t in zip(tokens, ts):
@@ -213,7 +231,7 @@ def transcribe(src: str, duration: float) -> dict:
             segments.append({"t": round(start, 2), "end": round(last, 2), "text": "".join(cur).strip()})
     text = clean_text(text)
     segments = [s for s in segments if clean_text(s["text"])]
-    return {"text": text, "segments": segments, "lang": getattr(r, "lang", None)}
+    return {"text": text, "segments": segments, "lang": lang}
 
 
 _REPEAT = re.compile(r"\b(\w+)(?:\W+\1\b){4,}", re.IGNORECASE)
