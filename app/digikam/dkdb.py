@@ -441,12 +441,26 @@ def _sample_count(folder: str, limit: int = 2000) -> int:
 # did digiKam change something?
 # --------------------------------------------------------------------------
 
+_sv = {"cheap": None, "full": None, "at": 0.0}
+FULL_CHECK_S = 120  # the checksum scans run at most this often while the cheap check sees nothing
+
+
 def source_version() -> str:
-    """Changes whenever digiKam writes to its database."""
+    """Changes whenever digiKam writes to its database. On MySQL the full answer sums checksums over every row of ten
+    tables; polled every 20 s that was a steady load on the database server, so a cheap look (counts, latest ids and
+    dates) goes first and the sums are only recomputed when it changed or every two minutes."""
     if not is_mysql():
         st = os.stat(sqlite_path())
         return f"{st.st_mtime_ns}-{st.st_size}"
     with connect(real=True) as con:
+        cheap = ",".join(str(_norm_value(v)) for sql in (
+            "SELECT count(*), max(id), max(modificationDate) FROM Images",
+            "SELECT count(*), max(modificationDate) FROM Albums",
+            "SELECT count(*) FROM ImageTags", "SELECT count(*), max(id) FROM Tags", "SELECT count(*) FROM ImageTagProperties",
+            "SELECT count(*), max(id) FROM ImageComments", "SELECT count(*) FROM ImagePositions", "SELECT count(*) FROM ImageCopyright")
+            for v in con.execute(sql).fetchone())
+        if _sv["full"] is not None and cheap == _sv["cheap"] and time.time() - _sv["at"] < FULL_CHECK_S:
+            return _sv["full"]
         scanned = con.execute("SELECT value FROM Settings WHERE keyword = 'Scanned'").fetchone()
         parts = [str(scanned[0]) if scanned else "-"]
         # counts catch additions and removals; the CRC sums catch edits in place (a caption, a rating, a
@@ -464,7 +478,9 @@ def source_version() -> str:
                     "SELECT count(*), SUM(CRC32(CONCAT(imageid,'|',COALESCE(rating,''),'|',COALESCE(creationDate,''),'|',COALESCE(orientation,'')))) FROM ImageInformation",
                     "SELECT count(*), SUM(CRC32(CONCAT(imageid,'|',property,'|',COALESCE(value,'')))) FROM ImageCopyright"):
             parts.append(",".join(str(_norm_value(v)) for v in con.execute(sql).fetchone()))
-        return "|".join(parts)
+        full = "|".join(parts)
+    _sv.update(cheap=cheap, full=full, at=time.time())
+    return full
 
 
 def file_stamp(path: str):

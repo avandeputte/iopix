@@ -15,7 +15,7 @@ from app.photos import consistency, edits, metaedit, placetags, tagmanager
 from app.digikam import dbsync, dkdb
 from app.geo import gpx
 from app.data import state as appstate
-from app.core import _form_items, db, DB_ERRORS, resolve
+from app.core import _form_items, db, DB_ERRORS, resolve, json_body
 from app.digikam.dkdb import chunked
 
 
@@ -40,7 +40,7 @@ async def api_metadata_write(photo_id: int, request: Request):
     photo's database rows again from its metadata."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Editing is turned off")
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(metaedit.write, photo_id, list(body.get("changes") or [])[:200])
     except dbsync.SyncError as e:
@@ -84,7 +84,7 @@ async def api_edit(request: Request):
     add_tags: [tag ids], remove_tags: [tag ids]}}"""
     if not edits.available():
         raise HTTPException(503, "Editing is not available")
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids", [])][:20000]
     raw = body.get("changes") or {}
     ch = {}
@@ -190,7 +190,7 @@ def _current_dates(ids: list) -> dict:
 @router.post("/api/edit/revert", dependencies=[access.editor_write])
 async def api_edit_revert(request: Request):
     """Undo the viewer's edits to these photos by restoring the sidecar backup."""
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids", [])][:20000]
     # edited in the index, or edited a moment ago and not in the index yet (an undo right after the edit)
     fresh = [i for i in ids if edits.pending_one(i)] if len(ids) <= 200 else list(set(ids) & set(edits.pending()))
@@ -240,7 +240,7 @@ async def api_consistency_scan(request: Request):
 @router.post("/api/consistency/sync", dependencies=[access.editor_write])
 async def api_consistency_sync(request: Request):
     """Body: {ids, source: db|sidecar|file, targets: [...], fields: [...]}."""
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids", [])][:20000]
     try:
         res = await run_in_threadpool(consistency.sync, ids, body.get("source"), body.get("targets") or [], body.get("fields"))
@@ -333,7 +333,7 @@ async def api_gpx_preview(request: Request):
 async def api_gpx_apply(request: Request):
     """Body: {token, ids, utc_offset, clock_shift, max_gap, only_missing}. Writes the matched
     positions as GPS edits (sidecar, file if enabled; database on the next apply)."""
-    body = await request.json()
+    body = await json_body(request)
     points = (_gpx_tracks.get(str(body.get("token"))) or (None, None))[1]
     if not points:
         raise HTTPException(409, "The track preview has expired; load the GPX file again")
@@ -377,7 +377,7 @@ async def api_placetags_run(request: Request):
         raise HTTPException(403, "Needs editing and database writes enabled")
     if placetags.progress["running"]:
         raise HTTPException(409, "Already running")
-    body = await request.json()
+    body = await json_body(request)
     sel = [int(i) for i in body.get("ids", [])] or None
     p = await run_in_threadpool(placetags.plan, sel)
     if p["missing_tags"] and dbsync.digikam_running():
@@ -389,7 +389,7 @@ async def api_placetags_run(request: Request):
 @router.post("/api/tags/recent", dependencies=[access.signed_in])
 async def api_tags_recent(request: Request):
     """Remember the tags just assigned, newest first (shown as a quick row like digiKam's)."""
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids", [])][:20]
     old = [int(i) for i in json.loads(appstate.get_setting("recent_tags", "[]"))]
     new = ids + [i for i in old if i not in ids]

@@ -322,12 +322,24 @@ def _cached_image(kind: str, photo_id: int, dl: bool = False) -> FileResponse:
     except FileNotFoundError:
         raise HTTPException(404, "Original file is not available")
     except OSError as e:
-        raise HTTPException(503, f"The file could not be read right now: {e}")
+        raise HTTPException(503, f"The file could not be read right now ({type(e).__name__})")
     if dl:  # a download of the resized JPEG, named after the photo (sharing a smaller file)
         return FileResponse(path, media_type="image/jpeg", filename=os.path.splitext(row["name"])[0] + "-preview.jpg",
                             content_disposition_type="attachment", headers=IMG_CACHE)
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
+
+
+async def json_body(request) -> dict:
+    """The request's JSON body, which must be an object: anything else (a list, a string, bad JSON) is the client's
+    mistake and answers 400 instead of an AttributeError further down."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "The body is not valid JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "The body must be a JSON object")
+    return body
 
 
 def _face_detect_allowed():

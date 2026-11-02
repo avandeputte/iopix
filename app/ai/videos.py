@@ -40,7 +40,7 @@ MAX_SPEECH_S = 20 * 60  # a transcript covers at most this much of a video
 CHUNK_S = 60            # seconds of sound given to the speech model at a time
 VERSION = 1          # bump when the cover or chapter rules change meaning
 progress = jobs.Progress("videos", phase="")
-_running_todo = set()
+_running = {"todo": set()}
 _asr = {}
 _lock = threading.Lock()
 _PTS = re.compile(r"pts_time:([0-9.]+)")
@@ -285,8 +285,7 @@ def _job(photos: list, gen: int):
     speech = speech_available()
     key = _key(models.chosen("speech_model") if speech else "")
     todo = _todo(photos, key)
-    _running_todo.clear()
-    _running_todo.update(p["id"] for p in todo)
+    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
     progress.update(running=bool(todo), done=0, total=len(todo), phase="")
     if not todo:
         return
@@ -332,7 +331,8 @@ def _job(photos: list, gen: int):
                 con.execute("INSERT INTO video_info (photo_id, stamp, cover_t, chapters, transcript, segments, lang, speech_model, ts) VALUES (?,?,?,?,?,?,?,?,?)",
                             (p["id"], _stamp(p), cover_t, json.dumps(chapters), (tr or {}).get("text") or None, json.dumps((tr or {}).get("segments") or []),
                              (tr or {}).get("lang"), models.chosen("speech_model") if (speech and tr is not None) else None, int(time.time())))
-                con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'videos',?,?)", (p["id"], _stamp(p), key))
+                # speech wanted but failed (a model that would not load, a broken file): recorded as "no speech", so it is tried again
+                con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'videos',?,?)", (p["id"], _stamp(p), key if not (speech and tr is None) else _key("")))
             if not (same_file and old[1] == cover_t):
                 thumbs.forget(p["id"])  # the thumbnail, preview and embedding are made again from the chosen frame
             progress.step()
@@ -346,7 +346,7 @@ def start(photos: list):
     if progress["running"]:
         from app.ai import models
         key = _key(models.chosen("speech_model") if speech_available() else "")
-        if {p["id"] for p in _todo([p for p in photos if p["video"]], key)} <= _running_todo:
+        if {p["id"] for p in _todo([p for p in photos if p["video"]], key)} <= _running["todo"]:
             return  # nothing new for the running job
     gen = progress.cancel()
     jobs.submit("videos", lambda: _job([p for p in photos if p["video"]], gen))
@@ -354,6 +354,7 @@ def start(photos: list):
 
 def reset():
     progress.cancel()
+    _running["todo"] = set()
     with vdb.writer() as con:
         con.execute("DELETE FROM video_info")
         con.execute("DELETE FROM ai_scans WHERE job = 'videos'")

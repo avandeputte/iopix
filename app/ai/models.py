@@ -466,6 +466,9 @@ def reset(key: str):
         elif group == "face_detector":
             from app.faces import facedetect
             facedetect.reset_session()
+        elif group == "speech_model":
+            from app.ai import videos
+            videos.reset_sessions()
         elif key in ("aesthetic", "eyes"):
             from app.ai import looks
             looks.reset_sessions()
@@ -540,10 +543,14 @@ def _download_here(key: str):
             subprocess.run(cmd, check=True)
         import onnx_asr
         d = asr_dir(key)
-        if d.exists():  # a folder that exists means "offline" to onnx-asr: a half-done download is swept so the files are fetched
-            shutil.rmtree(d, ignore_errors=True)
+        part = d.with_name(d.name + ".part")  # downloaded beside the installed copy, which stays usable until the new one is complete
+        if part.exists():  # a folder that exists means "offline" to onnx-asr: a half-done download is swept so the files are fetched
+            shutil.rmtree(part, ignore_errors=True)
         d.parent.mkdir(parents=True, exist_ok=True)
-        onnx_asr.load_model(m["asr"], str(d), quantization=m.get("quantization"), providers=["CPUExecutionProvider"])  # downloads into d
+        onnx_asr.load_model(m["asr"], str(part), quantization=m.get("quantization"), providers=["CPUExecutionProvider"])  # downloads into part
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+        os.replace(part, d)
         from app.ai import videos
         videos.reset_sessions()
     elif key == "geonames":

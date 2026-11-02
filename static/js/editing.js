@@ -89,7 +89,8 @@ export async function copyMetadata(ids) {
   const F = [['rating', 'Rating'], ['labels', 'Pick and color labels'], ['title', 'Title'], ['caption', 'Caption'], ['tags', 'Keywords (added)'], ['gps', 'Location'], ['taken', 'Date and time taken'], ['rights', 'Creator and copyright']];
   const boxes = Object.fromEntries(F.map(([k]) => [k, h('input', { type: 'checkbox', checked: ['tags', 'gps', 'rights'].includes(k) })]));
   const go_ = h('button', { class: 'pillbtn on', onclick: async () => {
-    const s = await getDetail(src);
+    let s;
+    try { s = await getDetail(src); } catch (e) { toastError(e); return; }
     const ch = {};
     if (boxes.rating.checked) ch.rating = Math.max(0, s.rating || 0);
     if (boxes.labels.checked) { ch.pick = s.pick || 0; ch.color = s.color || 0; }
@@ -112,7 +113,7 @@ export async function editPhotos(ids, changes) {
   let r;
   try { r = await post('/api/edit', { ids, changes }); } catch (e) { toast('Could not save the change: ' + e.message); return false; }
   // a time shift lands differently on each photo, so those are re-fetched rather than patched locally
-  for (const id of ids) { if ('shift' in changes) details.delete(id); else details.get(id)?.then((d) => applyLocal(d, changes)); }
+  for (const id of ids) { if ('shift' in changes) details.delete(id); else details.get(id)?.then((d) => applyLocal(d, changes)).catch(() => details.delete(id)); }
   // the location and face badges of their thumbnails change at once
   if ('gps' in changes) setBadges(ids, { geo: !!changes.gps });
   if ('date_precision' in changes && G.data) {  // the grid's headers and titles say "1992" / "Date unknown" at once

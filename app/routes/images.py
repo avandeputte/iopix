@@ -26,9 +26,19 @@ router = APIRouter()
 
 
 @router.get("/thumb/{photo_id}")
-def thumb(photo_id: int, fit: str = ""):
+def thumb(photo_id: int, fit: str = "", h: int = 0):
     """The grid thumbnail; fit=square (or fit=WxH, an aspect such as 16x9) crops it to that shape around the photo's
-    subject (smartcrop.py: the faces, else the people, else the middle), for tiles that would otherwise crop the centre."""
+    subject (smartcrop.py: the faces, else the people, else the middle), for tiles that would otherwise crop the centre;
+    h=120 (60 to 240) a smaller copy for strips and tiny tiles."""
+    if h and not fit:
+        row = _photo_row(photo_id)
+        try:
+            path = thumbs.make_small(row, max(60, min(int(h), 240)))
+        except FileNotFoundError:
+            raise HTTPException(404, "Original file is not available")
+        except OSError as e:
+            raise HTTPException(503, f"The file could not be read right now ({type(e).__name__})")
+        return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
     if not fit:
         return _cached_image("t", photo_id)
     try:
@@ -43,7 +53,7 @@ def thumb(photo_id: int, fit: str = ""):
     except FileNotFoundError:
         raise HTTPException(404, "Original file is not available")
     except OSError as e:
-        raise HTTPException(503, f"The file could not be read right now: {e}")
+        raise HTTPException(503, f"The file could not be read right now ({type(e).__name__})")
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 

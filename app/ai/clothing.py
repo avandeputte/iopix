@@ -33,7 +33,7 @@ MIN_SIM = 0.78       # an unnamed person box must look at least this much like o
 MARGIN = 0.05        # and lead the next-best person by this much (on named faces, the lead alone kept 9 in 10 right)
 ALONE = 0.88         # with a single person named in the event there is nobody to lead: a high bar instead
 progress = jobs.Progress("clothing")
-_running_todo = set()
+_running = {"todo": set()}
 _lock = threading.Lock()
 
 
@@ -105,8 +105,7 @@ def _job(photos: list, gen: int):
     if not available():
         return
     todo = _todo(photos)
-    _running_todo.clear()
-    _running_todo.update(p["id"] for p in todo)
+    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
     progress.update(running=bool(todo), done=0, total=len(todo))
     if not todo:
         return
@@ -156,7 +155,7 @@ def _job(photos: list, gen: int):
 def start(photos: list):
     if not config.ANALYSIS or not available():
         return
-    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running_todo:
+    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running["todo"]:
         return  # nothing new for the running job
     gen = progress.cancel()
     jobs.submit("clothing", lambda: _job(photos, gen))
@@ -164,6 +163,7 @@ def start(photos: list):
 
 def reset():
     progress.cancel()
+    _running["todo"] = set()
     with vdb.writer() as con:
         con.execute("DELETE FROM ai_person_looks")
         con.execute("DELETE FROM ai_scans WHERE job = 'clothing'")

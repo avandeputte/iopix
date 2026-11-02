@@ -9,7 +9,7 @@ from app import access, config, events
 from app.digikam import dbsync
 from app.photos import filecheck, history, picklabels
 from app.data import state as appstate
-from app.core import DB_ERRORS
+from app.core import DB_ERRORS, json_body
 from app.faces import facequality
 
 
@@ -40,7 +40,7 @@ def api_rotation(request: Request, offset: int = 0, limit: int = 200, ids: str =
 async def api_rotation_dismiss(request: Request):
     """Body {photos: [ids], on: true}: these photos are the right way up; they leave the list until the file changes."""
     from app.ai import rotation
-    body = await request.json()
+    body = await json_body(request)
     n = await run_in_threadpool(rotation.dismiss, body.get("photos") or [], bool(body.get("on", True)))
     return {"dismissed": n}
 
@@ -48,7 +48,7 @@ async def api_rotation_dismiss(request: Request):
 @router.post("/api/quality/accept", dependencies=[access.admin])
 async def api_quality_accept(request: Request):
     """Body {photos: [ids], check: "unnamed", on: true}: accept these findings as they are (on: false takes it back)."""
-    body = await request.json()
+    body = await json_body(request)
     try:
         n = await run_in_threadpool(facequality.accept, body.get("photos") or [], body.get("check", "unnamed"), bool(body.get("on", True)))
     except ValueError as e:
@@ -71,12 +71,12 @@ def api_quality_accepted(check: str = "unnamed"):
     return {"photos": sorted(facequality.accepted_ids(check))}
 
 
-@router.post("/api/quality/ignore", dependencies=[access.admin])
+@router.post("/api/quality/ignore", dependencies=[access.admin_write])
 async def api_quality_ignore(request: Request):
     """Body {photos: [ids]}: every unnamed face on them becomes "not a face to name"."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(facequality.ignore_unnamed, [int(p) for p in body.get("photos") or []])
     except dbsync.SyncError as e:
@@ -85,12 +85,12 @@ async def api_quality_ignore(request: Request):
     return r
 
 
-@router.post("/api/quality/fit", dependencies=[access.admin])
+@router.post("/api/quality/fit", dependencies=[access.admin_write])
 async def api_quality_fit(request: Request):
     """Body {photos?: [ids]}: trim face rectangles that stick out of their photo to its edges, remove empty ones."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
-    body = await request.json() if (await request.body()) else {}
+    body = await json_body(request) if (await request.body()) else {}
     try:
         r = await run_in_threadpool(facequality.fit_inside, body.get("photos"))
     except dbsync.SyncError as e:
@@ -99,13 +99,13 @@ async def api_quality_fit(request: Request):
     return r
 
 
-@router.post("/api/quality/fix", dependencies=[access.admin])
+@router.post("/api/quality/fix", dependencies=[access.admin_write])
 async def api_quality_fix(request: Request):
     """Body {files: false}: remove the near-duplicate face regions (one kept per group) and rewrite those sidecars;
     {files: true}: then the image files that still carry the duplicates. In the background."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to digiKam's database is turned off")
-    files = bool((await request.json() if (await request.body()) else {}).get("files"))
+    files = bool((await json_body(request) if (await request.body()) else {}).get("files"))
     try:
         n = await run_in_threadpool(facequality.fix_files if files else facequality.fix_near_duplicates, events.after_write)
     except dbsync.SyncError as e:
@@ -122,7 +122,7 @@ def api_filecheck():
 @router.post("/api/filecheck/run", dependencies=[access.admin])
 async def api_filecheck_run(request: Request):
     """Body {redo: false}: check the files not checked yet (or changed since); redo: every file again. In the background."""
-    body = await request.json() if (await request.body()) else {}
+    body = await json_body(request) if (await request.body()) else {}
     return {"queued": await run_in_threadpool(filecheck.start, bool(body.get("redo")))}
 
 
@@ -131,7 +131,7 @@ async def api_filecheck_repair(request: Request):
     """Body {ids: [...]}: add the missing end marker to those JPEGs (backed up first, undoable from the edit log)."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(filecheck.repair, [int(i) for i in body.get("ids") or []])
     except dbsync.SyncError as e:
@@ -147,7 +147,7 @@ async def api_filecheck_keep(request: Request):
     first, undoable from the edit log)."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(filecheck.keep_intact, [int(i) for i in body.get("ids") or []])
     except dbsync.SyncError as e:
@@ -169,7 +169,7 @@ async def api_picklabels_clear(request: Request):
     database now (after a full backup) and in the sidecars in the background; each photo's change is in the edit log."""
     if not config.DB_WRITE or appstate.read_only():
         raise HTTPException(403, "Writing to the library is turned off")
-    body = await request.json()
+    body = await json_body(request)
     try:
         n = await run_in_threadpool(picklabels.clear, body.get("levels") or [], True, events.kick)
     except ValueError as e:
@@ -194,7 +194,7 @@ def api_history(photo: int = None, limit: int = 100, offset: int = 0, action: st
 @router.post("/api/history/{entry_id}/restore", dependencies=[access.editor_write])
 async def api_history_restore(entry_id: int, request: Request):
     """Body: {kind: undo|sidecar|original|deleted}: bring back what that change log entry allows."""
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(history.restore, entry_id, str(body.get("kind", "")))
     except (LookupError, FileNotFoundError, FileExistsError, ValueError) as e:

@@ -5,8 +5,10 @@ from fastapi import HTTPException
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from starlette.concurrency import run_in_threadpool
+
 from app import access, proxyauth, users
-from app.core import db
+from app.core import db, json_body
 
 
 
@@ -15,20 +17,21 @@ router = APIRouter()
 
 @router.post("/api/auth/login", dependencies=[access.public])
 async def api_login(request: Request):
-    body = await request.json()
+    body = await json_body(request)
     name, src = str(body.get("name", ""))[:64], proxyauth.source(request)
     key = f"{proxyauth.visitor_of(request)}|{name.strip().lower()}"  # the visitor's address (a header only from a trusted proxy)
     nkey = f"name|{name.strip().lower()}"
-    wait = max(users.login_wait(key), users.login_wait(nkey))
+    akey = f"addr|{proxyauth.visitor_of(request)}"  # and the address on its own: cycling through names earns no free tries
+    wait = max(users.login_wait(key), users.login_wait(nkey), users.login_wait(akey))
     if wait:
         proxyauth.authlog.warning("sign-in as %r from %s refused: %d s to wait after repeated failures", name, src, wait)
         raise HTTPException(429, f"Too many attempts; try again in {wait} seconds", headers={"Retry-After": str(wait)})
-    u = users.authenticate(name, str(body.get("password", ""))[:1024])
+    u = await run_in_threadpool(users.authenticate, name, str(body.get("password", ""))[:1024])  # scrypt: ~0.1 s off the event loop
     if not u:
-        wait = max(users.login_failed(key), users.login_failed(nkey, users.LOCK_AFTER_NAME))
+        wait = max(users.login_failed(key), users.login_failed(nkey, users.LOCK_AFTER_NAME), users.login_failed(akey, users.LOCK_AFTER_NAME * 4))
         proxyauth.authlog.warning("failed sign-in as %r from %s (wrong user name or password%s)", name, src, f"; {wait} s wait" if wait else "")
         raise HTTPException(401, "Wrong user name or password")
-    users.login_succeeded(key); users.login_succeeded(nkey)
+    users.login_succeeded(key); users.login_succeeded(nkey); users.login_succeeded(akey)
     if u.get("passwordless") and proxyauth.external(request.headers, proxyauth.peer_of(request)):
         proxyauth.authlog.warning("one-click sign-in as %s refused from %s (outside: a password is required)", u["name"], src)
         raise HTTPException(403, "From outside your network, sign in with an account that has a password")
@@ -69,7 +72,7 @@ def api_logout_all(request: Request):
     users.end_all_sessions(u["id"])
     proxyauth.authlog.info("signed out everywhere: %s from %s", u["name"], proxyauth.source(request))
     resp = JSONResponse({"ok": True})
-    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password")
+    users.set_session(resp, u["id"], request.cookies.get(users.VIA_COOKIE) or "password", users.over_https(request))
     return resp
 
 
@@ -98,7 +101,7 @@ async def api_my_settings(request: Request):
     u = request.state.user
     if not u:
         raise HTTPException(401, "Sign in first")
-    return users.set_settings(u["id"], await request.json())
+    return users.set_settings(u["id"], await json_body(request))
 
 
 @router.post("/api/auth/password", dependencies=[access.signed_in])
@@ -106,12 +109,18 @@ async def api_my_password(request: Request):
     u = request.state.user
     if not u:
         raise HTTPException(401, "Sign in first")
-    body = await request.json()
+    body = await json_body(request)
     if u.get("passwordless"):  # shared by whoever clicks it: a password set from one browser would lock the others out
         raise HTTPException(403, "This account signs in with one click; an admin can give it a password under Settings › Users")
-    if not users.authenticate(u["name"], str(body.get("current", ""))):
+    pkey = f"pw|{u['id']}"
+    wait = users.login_wait(pkey)
+    if wait:
+        raise HTTPException(429, f"Too many attempts; try again in {wait} seconds", headers={"Retry-After": str(wait)})
+    if not await run_in_threadpool(users.authenticate, u["name"], str(body.get("current", ""))[:1024]):
+        users.login_failed(pkey)
         proxyauth.authlog.warning("password change for %s refused from %s (wrong current password)", u["name"], proxyauth.source(request))
         raise HTTPException(403, "The current password is wrong")
+    users.login_succeeded(pkey)
     try:
         users.update(u["id"], password=str(body.get("password", "")))
     except ValueError as e:
@@ -130,7 +139,7 @@ async def api_setup(request: Request):
     if proxyauth.external(request.headers, proxyauth.peer_of(request)):  # a fresh install is open: the first account is made from inside the network
         proxyauth.authlog.warning("first-account setup refused from outside (%s)", proxyauth.source(request))
         raise HTTPException(403, "The first account is created from inside your network (or on the server itself)")
-    body = await request.json()
+    body = await json_body(request)
     try:
         u = users.create(str(body.get("name", ""))[:64], str(body.get("password", ""))[:1024], "admin")
     except ValueError as e:
@@ -153,7 +162,7 @@ def person_tag(tag_id) -> bool:
         con.close()
 
 
-@router.post("/api/auth/person", dependencies=[access.public])
+@router.post("/api/auth/person", dependencies=[access.admin])
 async def api_my_person(request: Request):
     """Link the signed-in admin's own account to a person from People: {person: tag id or null}. Admins only:
     a linked person's face is shown on the sign-in screen, so who is who is the admin's call (other accounts
@@ -163,7 +172,7 @@ async def api_my_person(request: Request):
         raise HTTPException(401, "Sign in first")
     if not users.is_admin(u):
         raise HTTPException(403, "Only an admin can link an account to a person")
-    body = await request.json()
+    body = await json_body(request)
     if not person_tag(body.get("person")):
         raise HTTPException(400, "That tag is not a person")
     users.set_person(u["id"], body.get("person"))

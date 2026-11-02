@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import access, thumbs, users
 from app.geo import geocode, maps
-from app.core import db, jresp
+from app.core import db, jresp, json_body
 
 
 
@@ -67,7 +67,7 @@ def api_placesuggest(request: Request, offset: int = 0, limit: int = 100, ids: s
 @router.post("/api/location/landmark", dependencies=[access.editor_write])
 async def api_location_landmark(request: Request):
     """Body: {id}. Google Cloud Vision looks for a famous landmark in the photo (a preview is sent, not the original)."""
-    body = await request.json()
+    body = await json_body(request)
     pid = int(body.get("id") or 0)
     if not maps.key():
         raise HTTPException(409, "Landmark recognition uses Google Cloud Vision: add a Google API key in Settings › Map provider")

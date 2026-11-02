@@ -14,7 +14,7 @@ from app import access, config, events, thumbs, users
 from app.digikam import dbsync, dkdb
 from app.photos import deletion, edits, folders, importer, lossless, organize, versions
 from app.data import index, state as appstate
-from app.core import _organize_allowed, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE
+from app.core import _organize_allowed, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE, json_body
 import secrets
 import threading
 from app.digikam.dkdb import chunked
@@ -35,7 +35,7 @@ async def api_photos_transform(request: Request):
     _organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in (body.get("ids") or [])][:500]
     op = str(body.get("op") or "")
     if not ids or op not in lossless.OPS:
@@ -56,7 +56,7 @@ async def api_photo_adjust(request: Request):
     _organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(versions.adjust, int(body.get("id") or 0), body)
     except dbsync.SyncError as e:
@@ -74,7 +74,7 @@ async def api_photos_crop(request: Request):
     _organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
-    body = await request.json()
+    body = await json_body(request)
     rect = body.get("rect")
     if not body.get("id") or not isinstance(rect, list) or len(rect) != 4:
         raise HTTPException(400, "id and rect [x, y, w, h] are needed")
@@ -92,7 +92,7 @@ async def api_photos_crop(request: Request):
 async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids") or []][:20000]
     if not ids:
         raise HTTPException(400, "Choose photos")
@@ -190,7 +190,7 @@ def api_trash_thumb(request: Request, info: str):
 async def api_trash_restore(request: Request):
     """Body {infos: [.dtrashinfo paths]}: put those photos back where they were."""
     _organize_allowed()
-    infos = [str(i) for i in (await request.json()).get("infos") or []][:20000]
+    infos = [str(i) for i in (await json_body(request)).get("infos") or []][:20000]
     r = await run_in_threadpool(_run_organize, organize.restore, infos)
     await run_in_threadpool(events.after_write)
     return r
@@ -200,7 +200,7 @@ async def api_trash_restore(request: Request):
 async def api_trash_empty(request: Request):
     """Body {infos: [...]} or {all: true}: delete those trash entries for good."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     infos = None if body.get("all") is True else [str(i) for i in body.get("infos") or []][:20000]
     if infos is not None and not infos:
         raise HTTPException(400, "Choose what to delete")
@@ -213,7 +213,7 @@ async def api_trash_empty(request: Request):
 async def api_photos_move(request: Request):
     """Body {ids, album}: move the photos (and their sidecars) into that folder; ids and everything attached stay."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in body.get("ids") or []][:20000]
     if not ids or body.get("album") is None:
         raise HTTPException(400, "Choose photos and a folder")
@@ -226,7 +226,7 @@ async def api_photos_move(request: Request):
 async def api_photos_rename(request: Request):
     """Body {id, name}: a new file name (the extension stays)."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     r = await run_in_threadpool(_run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
     await run_in_threadpool(events.after_write)
     return r
@@ -236,7 +236,7 @@ async def api_photos_rename(request: Request):
 async def api_folder_properties(album_id: int, request: Request):
     """Body {caption?, date?, category?, icon?}: digiKam's folder properties (Albums caption, date, collection, icon)."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     try:
         r = await run_in_threadpool(folders.set_properties, album_id, {k: body[k] for k in ("caption", "date", "category", "icon") if k in body})
     except dbsync.SyncError as e:
@@ -249,7 +249,7 @@ async def api_folder_properties(album_id: int, request: Request):
 async def api_photos_rename_pattern(request: Request):
     """Body {ids, pattern: date|date-name|date-seq}: rename the files by the date they were taken (ids kept, undo per photo)."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     ids = [int(i) for i in (body.get("ids") or [])][:2000]
     if not ids:
         raise HTTPException(400, "No photos")
@@ -262,7 +262,7 @@ async def api_photos_rename_pattern(request: Request):
 async def api_folder_rename(album_id: int, request: Request):
     """Body {name}: rename the folder on disk and in the database (subfolders follow)."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     r = await run_in_threadpool(_run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
     await run_in_threadpool(events.after_write)
     return r
@@ -272,7 +272,7 @@ async def api_folder_rename(album_id: int, request: Request):
 async def api_folder_move(album_id: int, request: Request):
     """Body {parent}: move the folder (with everything in it) under another folder of the same album root."""
     _organize_allowed()
-    body = await request.json()
+    body = await json_body(request)
     r = await run_in_threadpool(_run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
     await run_in_threadpool(events.after_write)
     return r
@@ -283,7 +283,7 @@ async def api_photos_delete(request: Request):
     """Body: {ids, confirm: true}. Deletes the photos for good: a backup of the files, sidecars and
     database first (data/deleted-photos, db-backups), then the database rows, the files and sidecars,
     and everything the viewer keeps about them. Editors and admins only; refused in read-only mode."""
-    body = await request.json()
+    body = await json_body(request)
     if body.get("confirm") is not True:
         raise HTTPException(400, "Deleting needs confirmation")
     if not config.DB_WRITE:
@@ -338,7 +338,7 @@ async def api_folder_create(request: Request):
     """Body: {parent: folder id, name}. A new digiKam folder: the directory and its Albums row (digiKam closed)."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Creating folders is turned off (needs DB_WRITE and EDITING)")
-    body = await request.json()
+    body = await json_body(request)
     try:
         result = await run_in_threadpool(folders.create, int(body.get("parent") or 0), str(body.get("name", "")))
     except dbsync.SyncError as e:
@@ -397,7 +397,7 @@ async def api_import_now(request: Request):
 async def api_import_check(request: Request):
     """Body {files: [{size, sha256}]}: which of them the library already has, by the import's duplicate test (the
     same size, then the same SHA-256 of the whole file). Returns {present: [{sha256, id}]}."""
-    body = await request.json()
+    body = await json_body(request)
     files = body.get("files") if isinstance(body, dict) else None
     if not isinstance(files, list) or len(files) > 5000:
         raise HTTPException(400, "Send {files: [{size, sha256}]}, at most 5000")
@@ -448,7 +448,7 @@ async def api_import_run(token: str, request: Request):
     files. `pattern` (apps): a folder pattern of their own instead of a layout, see importer.check_pattern."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Imports are turned off (needs DB_WRITE and EDITING)")
-    body = await request.json() if (await request.body()) else {}
+    body = await json_body(request) if (await request.body()) else {}
     try:
         key = _layout_or_pattern(str(body.get("layout") or ""), str(body.get("pattern") or ""))
     except ValueError as e:

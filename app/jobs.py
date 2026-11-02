@@ -79,8 +79,11 @@ class Progress(dict):
                 traceback.print_exc()
 
     def cancel(self) -> int:
-        """Stop the running job at its next batch (a reset, a model switch). Returns the new generation."""
+        """Stop the running job at its next batch (a reset, a model switch). Returns the new generation. The run is
+        no longer "running" from here on: the old run's finish(gen) is a no-op, and a start() that checks the flag
+        must not take the dying run for a live one."""
         self.gen += 1
+        self["running"] = False
         return self.gen
 
     def cancelled(self, gen: int) -> bool:

@@ -115,7 +115,7 @@ export async function shareNow() {
 /** The picture a share attaches (the screen-size JPEG, named after the photo); null for a video, or when it cannot be fetched (the link is shared then). */
 async function shareFile(id, d) {
   if (!d || d.video) return null;
-  try { const blob = await (await fetch(`/preview/${id}`)).blob(); return new File([blob], d.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }); } catch { return null; }
+  try { const r = await fetch(`/preview/${id}`); if (!r.ok) return null; const blob = await r.blob(); return new File([blob], d.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }); } catch { return null; }
 }
 
 /** The fallback menu: a link to the photo here, the original or a smaller JPEG as a download,
@@ -175,7 +175,7 @@ export function renderStrip() {
     const kids = [];
     for (let k = lo; k <= hi; k++) {
       const ar = src.w ? Math.max(0.6, Math.min(2.2, src.w[k] / (src.h[k] || 1))) : 1;
-      kids.push(h('img', { src: `/thumb/${src.id[k]}`, alt: '', loading: 'lazy', draggable: 'false', 'data-i': k, style: `width:${Math.round(56 * ar)}px`,
+      kids.push(h('img', { src: `/thumb/${src.id[k]}?h=120`, alt: '', loading: 'lazy', draggable: 'false', 'data-i': k, style: `width:${Math.round(56 * ar)}px`,
         onpointerenter: (ev) => { if (ev.pointerType === 'mouse' && k !== LB.i) peek(src.id[k]); else unpeek(); },
         onclick: () => { unpeek(); if (LB.i === k) return; LB.i = k; setPhotoParam(src.id[k], false); showItem(); } }));
     }
@@ -420,9 +420,11 @@ export function dropIndex(src, k) {
 export function deleteCurrent() {
   if (!S.CAN_MANAGE || !LB.open) return;
   const id = LB.src.id[LB.i];
+  const wasGrid = LB.src === G.data;  // the grid replaces its data while trashing: the viewer must follow it, not a copy
   trashPhotos([id], () => {  // drop it from the sequence and show the next one (or close when it was the last)
     const k = LB.src.id.indexOf(id);
-    if (k >= 0) LB.src = dropIndex(LB.src, k);
+    if (wasGrid && G.data) LB.src = G.data;
+    else if (k >= 0) LB.src = dropIndex(LB.src, k);
     if (!LB.src.id.length) { closeLightbox(true); return; }
     LB.i = Math.min(LB.i, LB.src.id.length - 1); setPhotoParam(LB.src.id[LB.i], false); showItem();
   });
@@ -510,12 +512,12 @@ export function showItem() {
     el.editBtn.style.display = S.CAN_MANAGE && S.LOSSLESS && !d.video ? '' : 'none';
     el.objectsBtn.style.display = d.boxes?.length ? '' : 'none';
     renderFaces();
-    if (LB.info) renderInfo();
-  }).catch((e) => {
+    if (LB.info) { try { renderInfo(); } catch (e) { console.error('info panel', e); } }
+  }, (e) => {
     if (token !== LB.token) return;
     el.frame.replaceChildren(h('div', { class: 'empty error', style: 'color:#fff' }, /404/.test(e.message) ? 'This photo is no longer in the library.' : e.message));
     [el.facesBtn, el.addFaceBtn, el.delBtn, el.editBtn, el.objectsBtn].forEach((b) => { b.style.display = 'none'; });
-  });
+  }).catch((e) => console.error('viewer', e));
   // warm the neighbors so stepping feels instant
   for (const j of [i + 1, i - 1, i + 2]) {
     if (j < 0 || j >= src.id.length) continue;
@@ -775,7 +777,7 @@ export function faceOp(op, undo, said) {
     if (FACE_Q.get(id) !== mine) return;
     FACE_Q.delete(id);
     details.delete(id);
-    if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id && !FACE_Q.has(id)) { LB.detail = fresh; redrawPhoto(id); } });
+    if (LB.open && LB.src.id[LB.i] === id) getDetail(id).then((fresh) => { if (LB.src.id[LB.i] === id && !FACE_Q.has(id)) { LB.detail = fresh; redrawPhoto(id); } }).catch(() => {});
   });
 }
 export function personPicker(onPick, photoId) {

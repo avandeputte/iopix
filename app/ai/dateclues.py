@@ -220,7 +220,7 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
             dated[pid] = year
             if dprec:
                 approx.add(pid)
-        key = (semantic.key, len(semantic.ids) if semantic.ids is not None else 0, len(dated), len(approx), sum(dated.values()), min(dated) if dated else 0, max(dated) if dated else 0)
+        key = (semantic.key, len(semantic.ids) if semantic.ids is not None else 0, hash(tuple(sorted(dated.items()))), hash(tuple(sorted(approx))))
     except Exception:
         return {}
     with _lock:

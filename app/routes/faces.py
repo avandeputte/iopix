@@ -14,7 +14,7 @@ from app.photos import edits
 from app.faces import ages, facedetect, facemgr, facevecs
 from app.ai import neardups
 from app.data import state as appstate
-from app.core import _face_detect_allowed, _photo_row, db, DB_ERRORS, IMG_CACHE, jresp
+from app.core import _face_detect_allowed, _photo_row, db, DB_ERRORS, IMG_CACHE, jresp, json_body
 
 
 router = APIRouter()
@@ -23,7 +23,7 @@ router = APIRouter()
 async def api_faces_detect(request: Request):
     """Body: {ids: [...]} | {album: id} | {all: true}, optional redo. Up to five photos are looked at now and
     the answer says what was found; a folder, the library or a larger selection runs in the background."""
-    body = await request.json()
+    body = await json_body(request)
     _face_detect_allowed()
     ids = [int(i) for i in body.get("ids") or []][:50000]
     if ids and len(ids) <= 5:
@@ -57,7 +57,7 @@ async def api_face_op(request: Request):
     """One face change (see facemgr.apply). Writes digiKam's database; digiKam must be closed."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Face management needs editing and database writes enabled")
-    op = await request.json()
+    op = await json_body(request)
     try:
         res = await run_in_threadpool(facemgr.apply, op, None, True, True)  # sidecar written after the answer
     except dbsync.SyncError as e:
@@ -90,26 +90,26 @@ def api_people_groups(request: Request):
     return {"groups": appstate.people_groups(), "canEdit": bool(users.can_write(request.state.user))}
 
 
-@router.post("/api/people/groups", dependencies=[access.public])
+@router.post("/api/people/groups", dependencies=[access.editor])
 async def api_people_group_create(request: Request):
     """Body {name}: a new group, last in the order."""
     _groups_writer(request)
-    return {"id": appstate.create_people_group(_group_name(await request.json()))}
+    return {"id": appstate.create_people_group(_group_name(await json_body(request)))}
 
 
-@router.post("/api/people/groups/order", dependencies=[access.public])
+@router.post("/api/people/groups/order", dependencies=[access.editor])
 async def api_people_groups_order(request: Request):
     """Body {ids: [group ids]}: the order of the groups on the People page."""
     _groups_writer(request)
-    appstate.order_people_groups([int(i) for i in (await request.json()).get("ids") or []])
+    appstate.order_people_groups([int(i) for i in (await json_body(request)).get("ids") or []])
     return {"ok": True}
 
 
-@router.post("/api/people/groups/{group_id}", dependencies=[access.public])
+@router.post("/api/people/groups/{group_id}", dependencies=[access.editor])
 async def api_people_group_update(group_id: int, request: Request):
     """Body {name?, members?: [person tag ids in order]}: rename the group and/or set who is in it."""
     _groups_writer(request)
-    body = await request.json()
+    body = await json_body(request)
     name = _group_name(body) if "name" in body else None
     members = body.get("members")
     if members is not None:
@@ -125,7 +125,7 @@ async def api_people_group_update(group_id: int, request: Request):
     return {"ok": True}
 
 
-@router.delete("/api/people/groups/{group_id}", dependencies=[access.public])
+@router.delete("/api/people/groups/{group_id}", dependencies=[access.editor])
 def api_people_group_delete(group_id: int, request: Request):
     """The group goes; the people in it stay where they are in digiKam."""
     _groups_writer(request)
@@ -159,7 +159,7 @@ async def api_face_batch(request: Request):
     """Many face changes in one transaction with one backup: {ops: [...]} (see facemgr.apply_many)."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Face management needs editing and database writes enabled")
-    body = await request.json()
+    body = await json_body(request)
     ops = [o for o in (body.get("ops") or []) if isinstance(o, dict)][:2000]
     if not ops:
         raise HTTPException(400, "No operations")
@@ -220,7 +220,7 @@ async def api_face_person(request: Request):
     """Create a new person tag: {name, parent} (parent = a People family tag id, or 0)."""
     if not (config.DB_WRITE and edits.available()):
         raise HTTPException(403, "Needs editing and database writes enabled")
-    body = await request.json()
+    body = await json_body(request)
     name = str(body.get("name", "")).strip()
     if not name:
         raise HTTPException(400, "A name is needed")
@@ -260,7 +260,7 @@ def api_neardups(request: Request):
 @router.post("/api/neardups", dependencies=[access.admin])
 async def api_neardups_run(request: Request):
     """Body: {level: strict|normal|loose}. Computes the pairs in the background (admin)."""
-    body = await request.json()
+    body = await json_body(request)
     try:
         neardups.start(str(body.get("level") or "normal"))
     except ValueError as e:
@@ -332,7 +332,7 @@ async def api_suggestions_dismiss(request: Request):
     """Body {kind: jersey|clothing, pairs: [[photo id, tag id]], on: true}: "Not them": the person is never suggested for
     that photo again (on: false takes it back). Viewer database only."""
     from app.ai import dismissed
-    body = await request.json()
+    body = await json_body(request)
     try:
         pairs = [(int(p), int(t)) for p, t in body.get("pairs") or []]
         n = await run_in_threadpool(dismissed.set_dismissed, str(body.get("kind", "")), pairs, bool(body.get("on", True)))
@@ -361,7 +361,7 @@ async def api_datehints_set(request: Request):
     """Body {album, not_before, not_after} (null or "" clears a bound; both clear: the hint is removed): nothing in
     this folder, subfolders included, was taken outside these years. Viewer database only."""
     from app.ai import dateclues
-    body = await request.json()
+    body = await json_body(request)
     try:
         album = int(body["album"])
     except (KeyError, TypeError, ValueError):
@@ -385,7 +385,7 @@ async def api_people_birth(request: Request):
     Kept in the viewer's own database only."""
     if not users.can_write(request.state.user):
         raise HTTPException(403, "Editors only")
-    body = await request.json()
+    body = await json_body(request)
     tag, year = int(body["tag"]), body.get("year")
     year = int(year) if year not in (None, "") else None
     if year is not None and not 1850 <= year <= time.localtime().tm_year:

@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.data import state as appstate
 from app import access, users
-from app.core import db, jresp
+from app.core import db, jresp, json_body
 
 
 router = APIRouter()
@@ -52,7 +52,7 @@ def api_state(request: Request):
 
 @router.post("/api/favorites", dependencies=[access.signed_in])
 async def api_favorites(request: Request):
-    body = await request.json()
+    body = await json_body(request)
     await run_in_threadpool(lambda: appstate.set_favorites(_with_hashes(body.get("ids", [])), bool(body.get("on", True))))  # the viewer database may be MySQL
     return {"ok": True}
 
@@ -61,7 +61,7 @@ async def api_favorites(request: Request):
 async def api_ualbum_create(request: Request):
     """Body: {name, shared: bool (default: shared when allowed), ids?}. Shared albums: editors and admins;
     private albums: any signed-in user, seen only by them."""
-    body = await request.json()
+    body = await json_body(request)
     user = request.state.user
     name = str(body.get("name", "")).strip()[:200]
     if not name:
@@ -83,7 +83,7 @@ async def api_ualbum_update(album_id: int, request: Request):
     """Body: {name} to rename, {ids, on} to add or remove photos, {shared: bool} to share it or make it
     private, {delete: true} to remove the album. A shared album is changed by editors and admins, a private
     one by its owner; sharing needs both (the owner, and editor or admin)."""
-    body = await request.json()
+    body = await json_body(request)
     user = request.state.user
     a = appstate.album(album_id)
     if not a or not (a["is_shared"] or (user and a["owner_id"] == user.get("id"))):
@@ -111,7 +111,7 @@ async def api_search_create(request: Request):
     """A smart album: {name, query} where query is the photo filter query string (as in #/photos?...)."""
     if not users.can_write(request.state.user):  # smart albums are shared by everyone: editors and admins keep them, as with shared albums
         raise HTTPException(403, "Only editors and admins can create smart albums")
-    body = await request.json()
+    body = await json_body(request)
     name = str(body.get("name", "")).strip()[:200]
     query = str(body.get("query", "")).strip().lstrip("?")[:4000]
     if not name or not query:
@@ -124,7 +124,7 @@ async def api_search_update(search_id: int, request: Request):
     """Body: {name} to rename, {delete: true} to remove."""
     if not users.can_write(request.state.user):
         raise HTTPException(403, "Only editors and admins can change smart albums")
-    body = await request.json()
+    body = await json_body(request)
     if body.get("delete"):
         appstate.delete_search(search_id)
     elif body.get("name"):

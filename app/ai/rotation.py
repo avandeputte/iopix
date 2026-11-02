@@ -136,7 +136,7 @@ def _thumb(con, pid: int):
 def _learn(engine, con, gen: int):
     """Train the classifier on a sample of the library in four turns, and save it."""
     rows = con.execute("SELECT id FROM photos WHERE video = 0 AND w >= 200 ORDER BY random() LIMIT ?", (SAMPLE,)).fetchall()
-    progress.update(phase="learning", done=0, total=len(rows))
+    progress.update(running=True, phase="learning", done=0, total=len(rows))
     X, Y, batch = [], [], []
     for (pid,) in rows:
         if progress.cancelled(gen):
@@ -169,6 +169,7 @@ def _job(gen: int):
         return
     engine = _engine()
     engine.load()
+    progress.update(running=True, phase="")
     con = index.open_index()
     con.row_factory = sqlite3.Row
     try:
@@ -186,7 +187,7 @@ def _job(gen: int):
         with vdb.reader() as v:
             done = {r[0]: r[1] for r in v.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'rotation'")}
         todo_pos = [i for i, pid in enumerate(ids.tolist()) if pid in stamps and done.get(pid) != f"{stamps[pid]}:{key}"]
-        progress.update(phase="screening", done=0, total=len(todo_pos))
+        progress.update(running=bool(todo_pos), phase="screening", done=0, total=len(todo_pos))
         if not todo_pos:
             return
         probs = predict(clf, vecs[todo_pos])
@@ -195,7 +196,7 @@ def _job(gen: int):
         with vdb.writer() as v:
             v.executemany("DELETE FROM ai_rotation WHERE photo_id = ?", [(p,) for p in clean])
             v.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'rotation',?,NULL)", [(p, f"{stamps[p]}:{key}") for p in clean])
-        progress.update(phase="checking", done=0, total=len(cand))
+        progress.update(running=True, phase="checking", done=0, total=len(cand))
         for pid, _cls, _p in cand:
             if progress.cancelled(gen):
                 return

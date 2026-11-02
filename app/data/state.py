@@ -84,7 +84,8 @@ def init():
 
 def write(fn):
     global rev
-    with lock:
+    from app.data import vdb
+    with lock, vdb.write_lock:  # one writer in the process, the jobs included: a request never waits out SQLite's busy timeout
         con = connect()
         try:
             out = fn(con)

@@ -148,7 +148,8 @@ def _notify(last: float, every: float) -> float:
 def _finish(*keys):
     for key in keys:
         progress[key]["running"] = False
-    bump()
+    if any(progress[key]["done"] for key in keys):  # a cancelled run that did nothing changes nothing
+        bump()
     if on_progress:
         on_progress()
 
@@ -340,9 +341,16 @@ def _portable_batch(batch: list) -> list:
     for p in batch:
         try:
             im, _ = thumbs.open_oriented(p["path"], 1600, 1600)
-        except Exception as e:
-            log.warning("vision: cannot read %s (%s)", p["path"], e)
+        except UnidentifiedImageError as e:
+            log.warning("vision: cannot decode %s (%s)", p["path"], e)
             rows.append((p["id"], stamp(p), "", 0, None))  # recorded so it is not retried forever
+            continue
+        except OSError as e:  # unreadable right now (a dropped mount): nothing recorded, tried again on the next pass
+            log.warning("vision: cannot read %s (%s)", p["path"], e)
+            continue
+        except Exception as e:
+            log.warning("vision: cannot analyse %s (%s)", p["path"], e)
+            rows.append((p["id"], stamp(p), "", 0, None))
             continue
         text = ""
         if ocr is not None:

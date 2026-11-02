@@ -270,7 +270,8 @@ export function renderGrid(force) {
       for (let i = it.s; i < it.e; i++) {
         const img = document.createElement('img');
         img.alt = ''; img.decoding = 'async'; img.draggable = false;
-        if (fast) img.dataset.src = `/thumb/${d.id[i]}`; else img.src = `/thumb/${d.id[i]}`;
+        const u = G.size === 'S' ? `/thumb/${d.id[i]}?h=160` : `/thumb/${d.id[i]}`;  // the smallest tiles get a smaller picture
+        if (fast) img.dataset.src = u; else img.src = u;
         const tile = h('div', { class: 'tile' + (G.sel.has(d.id[i]) ? ' sel' : ''), 'data-i': i, 'data-id': d.id[i], tabindex: 0, role: 'button', style: `width:${(G.ar[i] * it.h).toFixed(2)}px` }, img,
           h('span', { class: 'tcheck', title: 'Select' }, icon('check')), tileBadges(d.id[i], { video: d.video[i], faces: G.faces.has(i), geo: G.geo.has(i) }));
         el.append(tile);
@@ -361,7 +362,7 @@ export function buildScrubber(byDate) {
     const ids = [];
     for (let j = it.s; j < Math.min(d.count, it.s + 4); j++) ids.push(d.id[j]);
     fill(bubble, h('div', { class: 'bt' }, h('b', null, dfMonth.format(date(d.ts[it.s]))), h('span', { class: 'muted' }, plural(monthCount(it.s), 'photo'))),
-      h('div', { class: 'bth' }, ids.map((id) => h('img', { src: `/thumb/${id}`, alt: '', loading: 'eager', decoding: 'async' }))));
+      h('div', { class: 'bth' }, ids.map((id) => h('img', { src: `/thumb/${id}?h=120`, alt: '', loading: 'eager', decoding: 'async' }))));
   };
   let drag = false;
   sc.onpointerdown = (e) => { drag = true; sc.classList.add('drag'); sc.setPointerCapture(e.pointerId); main.scrollTop = at(e) * (G.total - main.clientHeight); label(at(e)); };

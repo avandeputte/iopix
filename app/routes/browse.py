@@ -1,5 +1,6 @@
 """Browsing: photos, metadata, facets, map, events, status, detected content and duplicates."""
 import gzip
+import os
 import hashlib
 import json
 import re
@@ -140,7 +141,8 @@ def api_photos(request: Request):
         # the prefix makes cached results expire when favorites, albums or embeddings change
         # an album filter depends on who asks (private albums), so the cached answer is kept per user then
         who = f".u{(request.state.user or {}).get('id')}" if "ualbum" in request.url.query else ""
-        key = f"{appstate.rev}.{semantic.key}{who}|{request.url.query}"
+        rev = appstate.rev if ("fav" in request.url.query or "ualbum" in request.url.query) else 0  # only those depend on the viewer's tables
+        key = f"{rev}.{semantic.key}{who}|{request.url.query}"
         # the answer is fixed by the index version and the cache key: their hash is its ETag (304 while unchanged)
         etag = 'W/"' + hashlib.blake2b(f"{state['version']}|{key}".encode(), digest_size=12).hexdigest() + '"'
         headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Accept-Encoding, Cookie"}
@@ -238,8 +240,20 @@ def api_status(request: Request):
 
 @router.get("/api/facets", dependencies=[access.public])
 def api_facets(request: Request):
-    """Counts of every metadata value within the current result set."""
-    where, params, _ = resolve(request.query_params.multi_items())
+    """Counts of every metadata value within the current result set (computed once per index version and query)."""
+    q = request.url.query
+    who = f".u{(request.state.user or {}).get('id')}" if "ualbum" in q else ""
+    rev = f".{appstate.rev}" if ("fav" in q or "ualbum" in q) else ""  # only those depend on the viewer's own tables
+    try:  # keyed by the index file's own time too: a rebuilt (or, in tests, patched) index is never answered from before
+        stamp = int(os.stat(config.INDEX_DB).st_mtime_ns) if config.INDEX_DB.exists() else 0
+        return jresp(request, _facets_cached(f"{state['version']}:{stamp}", f"{rev}{who}|{q}"))
+    except sqlite3.OperationalError as e:
+        raise HTTPException(400, f"Bad query: {e}")
+
+
+@lru_cache(maxsize=32)
+def _facets_cached(version: str, key: str) -> dict:
+    where, params, _ = resolve(parse_qsl(key.split("|", 1)[1], keep_blank_values=True))
     con = db()
     try:
         # keyed, so the twenty "id IN (SELECT id FROM sel)" probes below use the b-tree
@@ -265,7 +279,7 @@ def api_facets(request: Request):
                 "min(coalesce(focal35, focal)), max(coalesce(focal35, focal)), "
                 + ", ".join(f"coalesce(sum(CASE WHEN {cond} THEN 1 ELSE 0 END), 0)" for _k, cond in extras) +
                 " FROM photos WHERE id IN (SELECT id FROM sel)").fetchone()
-        return jresp(request, {
+        return {
             "count": rng[0], "tsMin": rng[1], "tsMax": rng[2], "bytes": rng[3] or 0,
             "videos": rng[4] or 0, "geotagged": rng[5] or 0,
             "iso": [rng[6], rng[7]], "aperture": [rng[8], rng[9]], "focal": [rng[10], rng[11]],
@@ -279,9 +293,7 @@ def api_facets(request: Request):
                 "SELECT place, region, country, count(*) FROM photos WHERE place IS NOT NULL AND id IN (SELECT id FROM sel) "
                 "GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 200")],
             "countries": [c for c in counts("country") if c[0]],
-        })
-    except sqlite3.OperationalError as e:
-        raise HTTPException(400, f"Bad query: {e}")
+        }
     finally:
         con.close()
 
@@ -543,4 +555,4 @@ def api_manifest():
     return JSONResponse(data, media_type="application/manifest+json")
 
 
-CACHES.extend([_photos_cached, _meta, _events])
+CACHES.extend([_photos_cached, _facets_cached, _meta, _events])

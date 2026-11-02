@@ -39,7 +39,7 @@ LEARN_MIN_FOLDER = 2  # named sightings of a number in one folder before it name
 LEARN_MIN_YEAR = 3    # and in one year
 AGREE = 0.8           # the share of sightings the leading player needs
 progress = jobs.Progress("jerseys")
-_running_todo = set()  # the photos the running job is working through: a new start with nothing more to do leaves it alone
+_running = {"todo": set()}  # the photos the running job is working through: a new start with nothing more to do leaves it alone
 
 
 def available() -> bool:
@@ -151,8 +151,7 @@ def _job(photos: list, gen: int):
     if ocr is None:
         return
     todo = _todo(photos)
-    _running_todo.clear()
-    _running_todo.update(p["id"] for p in todo)
+    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
     progress.update(running=bool(todo), done=0, total=len(todo))
     if not todo:
         return
@@ -173,6 +172,9 @@ def _job(photos: list, gen: int):
                     except OSError as e:  # unreadable now: tried again next time
                         log.warning("jerseys: cannot read %s (%s)", p["path"], e)
                         return None
+                    except Exception as e:  # cannot be decoded: recorded as read with nothing on it
+                        log.warning("jerseys: cannot decode %s (%s)", p["path"], e)
+                        return p, []
                     try:
                         return p, read_numbers(im, bs, ocr)
                     except Exception as e:
@@ -195,7 +197,7 @@ def start(photos: list):
     """Read the numbers still missing. photos: index rows with id, path, video, hash, size, modified."""
     if not config.ANALYSIS or not available():
         return
-    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running_todo:
+    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running["todo"]:
         return  # nothing new: the running job carries on (an index rebuild must not restart it every few minutes)
     gen = progress.cancel()
     jobs.submit("jerseys", lambda: _job(photos, gen))
@@ -203,6 +205,7 @@ def start(photos: list):
 
 def reset():
     progress.cancel()
+    _running["todo"] = set()
     with vdb.writer() as con:
         con.execute("DELETE FROM ai_jerseys")
         con.execute("DELETE FROM ai_scans WHERE job = 'jerseys'")

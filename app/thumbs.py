@@ -219,6 +219,25 @@ def make_fit(photo: dict, aspect: float) -> Path:
     return dst
 
 
+def make_small(photo: dict, height: int) -> Path:
+    """The grid thumbnail scaled down to `height` px, cached as kind 's': the film strip and the smallest tiles show
+    a 56-80 px picture, and a 360 px one is six times the bytes."""
+    stamp = stamp_for(photo["hash"], photo["size"], photo["modified"])
+    dst = config.CACHE_DIR / "s" / f"{photo['id'] % 256:02x}" / f"{photo['id']}-{stamp}-{height}.jpg"
+    if dst.exists():
+        return dst
+    with _building(dst):
+        if dst.exists():
+            return dst
+        src = make("t", photo)
+        with Image.open(src) as im:
+            im.load()
+            if im.height > height:
+                im = im.resize((max(1, round(im.width * height / im.height)), height), Image.Resampling.LANCZOS)
+            save(im, dst, config.THUMB_QUALITY, im.info.get("icc_profile"))
+    return dst
+
+
 def make_face(tag_id: int, photo: dict, rect: tuple, size: int = 256) -> Path:
     """Square crop around a face rectangle (given in upright full-size pixels)."""
     x, y, w, h = rect
@@ -296,7 +315,7 @@ class Prewarmer:
 def forget(photo_id: int):
     """Drop what was derived from a photo whose picture just changed: the cached thumbnail and preview, the face
     crops, and its content-search embedding (computed again from the new picture)."""
-    for kind in ("t", "p", "c"):
+    for kind in ("t", "p", "c", "s"):
         d = config.CACHE_DIR / kind / f"{photo_id % 256:02x}"
         try:
             for f in d.glob(f"{photo_id}-*.jpg"):

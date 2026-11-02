@@ -19,7 +19,7 @@ from app.photos import edits, paths, scanner
 from app.data import index, state as appstate, vdb
 from app.geo import maps
 from app.ai.semantic import _ready as semantic_ready, enabled as semantic_enabled, ENGINES, semantic
-from app.core import _compute_tag_covers, _face_detect_allowed, _start_prewarm, app_name, db, DB_ERRORS, state
+from app.core import _compute_tag_covers, _face_detect_allowed, _start_prewarm, app_name, db, DB_ERRORS, state, json_body
 
 from app.routes.settings import db_settings_public
 
@@ -103,7 +103,7 @@ async def api_models_check():
 @router.post("/api/models/download", dependencies=[access.admin])
 async def api_models_download(request: Request):
     """Body: {key}. Downloads (again) in the background; the server itself stays offline."""
-    key = (await request.json()).get("key")
+    key = (await json_body(request)).get("key")
     if key not in dlmodels.REGISTRY:
         raise HTTPException(400, "Unknown model")
     try:
@@ -123,7 +123,7 @@ def api_update(request: Request):
 async def api_update_run(request: Request):
     """Body: {action: check | run, ref?}. check asks GitHub (network); run starts update.sh
     (admin), optionally for a given commit or branch."""
-    body = await request.json()
+    body = await json_body(request)
     action = body.get("action")
     if action == "check":
         return await run_in_threadpool(updates.check)
@@ -194,6 +194,9 @@ def api_maintenance(request: Request):
     if not users.is_admin(request.state.user):
         for k in ("paths", "database", "storage", "albumRoots", "album_roots"):
             out.pop(k, None)
+        out["digikam"] = {k: v for k, v in out["digikam"].items() if k != "error"}  # the error names hosts and paths
+    if not users.can_write(request.state.user):
+        out["templates"], out["recentTags"] = [], []
     return out
 
 
@@ -206,7 +209,7 @@ def api_scan_status():
     return _scanner_state()
 
 
-@router.post("/api/scan", dependencies=[access.admin])
+@router.post("/api/scan", dependencies=[access.admin_write])
 async def api_scan_run():
     """Scan the album folders now (also when the setting is off): new, changed and vanished files and folders."""
     if not config.DB_WRITE:
@@ -222,7 +225,7 @@ async def api_maintenance_run(request: Request):
     """Body: {action}. reindex: rebuild the search index from digiKam's database now.
     thumbs: throw away all grid thumbnails and rebuild. previews / faces: clear those caches.
     covers: pick tag cover photos again."""
-    body = await request.json()
+    body = await json_body(request)
     action = body.get("action")
     if action == "reindex":
         await run_in_threadpool(index.build)
@@ -267,7 +270,7 @@ async def api_library_merge():
 async def api_analysis_run(request: Request):
     """Body: {job: all|embeddings|quality|vision|objects, reset: bool}. Without reset it only
     picks up photos that are new or changed; with reset that analysis starts over."""
-    body = await request.json()
+    body = await json_body(request)
     return await run_in_threadpool(start_analysis, body.get("job", "all"), bool(body.get("reset")))
 
 

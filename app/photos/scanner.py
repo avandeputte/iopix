@@ -725,6 +725,9 @@ def _remove_vanished(vanished: list, check_running: bool) -> list:
 def scan(check_running: bool = True) -> dict:
     """One pass over every album root: snapshot the database, walk the disk, then add, reread and remove.
     Returns the summary (also kept in progress)."""
+    from app.data import state as appstate
+    if appstate.read_only():
+        raise SyncError("The viewer is in read-only mode: the file scanner does not write to digiKam's database")
     if not _lock.acquire(blocking=False):
         raise SyncError("A scan is already running")
     progress.start(added=0, modified=0, removed=0, folders=0, skipped=[])

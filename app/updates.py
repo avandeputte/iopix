@@ -17,6 +17,7 @@ from app.data import state
 # IOPIX_*; the DIGIKAM_VIEWER_* names from before the rename are still honoured
 REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or "avandeputte/iopix"
 BRANCH = os.environ.get("IOPIX_BRANCH") or os.environ.get("DIGIKAM_VIEWER_BRANCH") or "main"
+_run_lock = threading.Lock()
 progress = jobs.Progress("update", log="", finished=None)
 _checked = {}
 
@@ -188,8 +189,10 @@ def run(ref: str = ""):
     already installed, and records its outcome in the data folder (see last_result)."""
     if in_docker():
         raise RuntimeError("In Docker, update by pulling the image: docker compose pull && docker compose up -d")
-    if progress["running"]:
-        raise RuntimeError("An update is already running")
+    with _run_lock:
+        if progress["running"]:
+            raise RuntimeError("An update is already running")
+        progress["running"] = True  # claimed here, so two calls at once cannot both start update.sh
     ref = (ref or "").strip()[:80]
     if ref and not re.fullmatch(r"[0-9a-f]{7,40}|[A-Za-z0-9][A-Za-z0-9._-]*", ref):  # a commit id or a plain branch name, nothing git could read as an option or a path
         raise RuntimeError("ref must be a commit id or a branch name")

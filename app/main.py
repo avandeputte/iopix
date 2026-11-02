@@ -12,6 +12,7 @@ import time
 from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -112,13 +113,13 @@ async def _auth_guard(request: Request, call_next):
     cross-site check on writes. What each route needs beyond that (an editor, an admin, an account) is declared
     on the route (app/access.py)."""
     session = request.cookies.get(users.COOKIE)
-    user = users.user_from_token(session) if session else None
+    user = (await run_in_threadpool(users.user_from_token, session)) if session else None  # a database lookup (cached 3 s): never on the event loop
     cookie_uid = user["id"] if user else None
     request.state.via_proxy = False
     if "cf-access-jwt-assertion" in request.headers and time.time() - proxyauth.seen.get("at", 0) > 60:
         proxyauth.note(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
     if proxyauth.mode() != "off":  # signed in at a reverse proxy (Cloudflare Access, Authelia...): that person, when vouched for
-        pu = proxyauth.user(request)
+        pu = await run_in_threadpool(proxyauth.user, request)
         if pu:
             user, request.state.via_proxy = pu, True
         elif getattr(request.state, "proxy_ident", None) and proxyauth.deny_unknown() and not request.url.path.startswith("/mcp"):

@@ -315,7 +315,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
                 stored[vid] = (dk, pth, nm, seen or 0)
                 if dk is not None:
                     by_dk[dk] = (vid, h, sz)
-            inserts, updates, rewritten, remap = [], [], [], {}
+            inserts, updates, rewritten, touched, remap = [], [], [], [], {}
             # only what changed is written: on MySQL every statement is a round trip, and a statement per photo
             # on every build (30,000 of them) made each rebuild seconds slower. last_seen is refreshed daily.
             for dk, (h, sz, path, name) in current.items():
@@ -330,8 +330,10 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
                     if old != dk and old is not None and old not in current:
                         remap[old] = dk  # the same file under a new number
                     was = stored.get(vid)
-                    if not was or was[0] != dk or was[1] != path or was[2] != name or now - was[3] > 86400:
+                    if not was or was[0] != dk or was[1] != path or was[2] != name:
                         updates.append((dk, path, name, now, vid))
+                    elif now - was[3] > 7 * 86400:  # seen again: a weekly touch, in bulk (30,000 single UPDATEs took tens of seconds on MySQL)
+                        touched.append(vid)
                 elif dk in by_dk and stored[by_dk[dk][0]][1] == path:
                     # the same file under the same number, rewritten in place (metadata written into it, a lossless
                     # rotate or crop, digiKam's rescan after one): the photo keeps its viewer id
@@ -349,6 +351,8 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
                 con.executemany("UPDATE photo_identity SET dk_id = NULL WHERE vid = ?", taken)
             if updates:
                 con.executemany("UPDATE photo_identity SET dk_id = ?, path = ?, name = ?, last_seen = ? WHERE vid = ?", updates)
+            for part in chunked(touched, 500):
+                con.execute(f"UPDATE photo_identity SET last_seen = ? WHERE vid IN ({','.join('?' * len(part))})", (now, *part))
             if inserts:
                 con.executemany("INSERT INTO photo_identity (dk_id, hash, size, path, name, first_seen, last_seen) VALUES (?,?,?,?,?,?,?)", inserts)
             con.commit()

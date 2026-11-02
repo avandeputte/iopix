@@ -17,7 +17,7 @@ from app.photos import edits, scanner
 from app.data import index, state as appstate, vdb
 from app.geo import geocode, maps
 from app.ai.semantic import _ready as semantic_ready, ENGINES, semantic
-from app.core import _start_prewarm
+from app.core import _start_prewarm, json_body
 
 
 from app.routes.browse import _photos_cached
@@ -72,7 +72,7 @@ def api_proxy_get(request: Request):
 @router.post("/api/settings/proxy", dependencies=[access.admin])
 async def api_proxy_set(request: Request):
     """Body: any of proxyauth.KEYS (an empty string clears one). Settings in iopix.env cannot be changed here."""
-    body = await request.json()
+    body = await json_body(request)
     changes = {k: str(v or "").strip() for k, v in body.items() if k in proxyauth.KEYS}
     fixed = [k for k in changes if os.environ.get(k) not in (None, "")]
     if fixed:
@@ -276,7 +276,7 @@ def _apply_settings(body: dict):
 async def api_settings(request: Request):
     """Body: any of the keys in SETTINGS (write_files: also write metadata into image files, not just sidecars;
     database and album_roots: where the library is; the model choices...). Returns the settings as they are now."""
-    body = await request.json()
+    body = await json_body(request)
     await run_in_threadpool(_apply_settings, body)
     return _settings_public()
 
@@ -295,7 +295,7 @@ async def api_roots(request: Request):
 @router.post("/api/db/test", dependencies=[access.admin])
 async def api_db_test(request: Request):
     """Try connection settings without saving them (admin). Body: the database fields; an empty password keeps the stored one."""
-    d = await request.json()
+    d = await json_body(request)
     try:
         return await run_in_threadpool(dkdb.test_connection, d)
     except Exception as e:
@@ -311,7 +311,7 @@ def api_viewerdb(request: Request):
 @router.post("/api/viewerdb/test", dependencies=[access.admin])
 async def api_viewerdb_test(request: Request):
     """Try the given viewer-database settings without saving (admin); an empty password keeps the stored one."""
-    d = await request.json()
+    d = await json_body(request)
     try:
         return await run_in_threadpool(vdb.test_connection, d)
     except Exception as e:
@@ -322,7 +322,7 @@ async def api_viewerdb_test(request: Request):
 async def api_viewerdb_switch(request: Request):
     """Body: the settings plus copy (default true: carry every row over) and drop (default true: drop
     and recreate the viewer's tables at the target first). Saves the configuration and restarts the viewer."""
-    d = await request.json()
+    d = await json_body(request)
     try:
         res = await run_in_threadpool(vdb.switch, d, bool(d.get("copy", True)), bool(d.get("drop", True)))
     except ValueError as e:

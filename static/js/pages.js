@@ -5,7 +5,7 @@ import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces, editPhotos } from './editing.js';
 import { downloadDialog } from './download.js';
-import { TRANSFORMS, faceOp, openLightbox, personPicker, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
+import { TRANSFORMS, details, faceOp, openLightbox, personPicker, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
 import { badgeTiles, setBadges, tileBadges } from './grid.js';
 import { boot, pollStatus } from './main.js';
 
@@ -596,6 +596,25 @@ export async function showBursts(vp) {
   await load();
 }
 
+/** A grid of cards shown 200 at a time, with a "Show more" button: the suggestion pages can hold thousands. */
+function pagedGrid(items, card, per = 200) {
+  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' });
+  const shown = new Set();  // the items with a card on the page (handled ones leave `items`, so a count would drift)
+  const more = h('button', { type: 'button', class: 'pillbtn', style: 'margin:12px 0', onclick: () => fill() });
+  const fill = () => {
+    const next = items.filter((x) => !shown.has(x)).slice(0, per);
+    next.forEach((x) => shown.add(x));
+    grid.append(...next.map(card));
+    more.textContent = `Show more (${nf.format(items.length - shown.size)} left)`;
+    more.hidden = shown.size >= items.length;
+    badgeTiles(grid);
+  };
+  /** A handled suggestion leaves the page and the list (never a neighbour: a second click finds nothing to remove). */
+  const drop = (x, el) => { el.remove(); shown.delete(x); const k = items.indexOf(x); if (k >= 0) items.splice(k, 1); };
+  fill();
+  return [grid, more, drop];
+}
+
 /** Explore › Date suggestions: a year for each photo marked "Date unknown", from every clue the library has (dateclues.py:
  * how old its named people look, the years those people are photographed in, dated look-alikes and the camera).
  * Nothing is written until a year is used; birth years entered here help people with few dated photos. */
@@ -610,7 +629,7 @@ export async function showDateSuggest() {
     const v = await promptDialog(`${p.name}’s year of birth (leave empty to work it out from photos with a date)`, { value: p.entered ? String(p.birth) : '', placeholder: 'e.g. 1942' });
     if (v === null || v === undefined) return;
     try { await post('/api/people/birth', { tag: p.tag, year: v || null }); } catch (e) { toastError(e); return; }
-    showDateSuggest();
+    if (S.route.view === 'datesuggest') showDateSuggest();
   } }, p.entered ? 'change' : 'enter birth year') : null;
   const people = h('div', { class: 'hlist' }, d.people.map((p) => h('div', { class: 'hrow' },
     h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
@@ -618,11 +637,12 @@ export async function showDateSuggest() {
   // folder hints: the earliest and latest year anything in a folder (subfolders included) can be from
   let hints = { folders: [] };
   try { hints = await api('/api/datehints'); } catch { /* shown without */ }
+  if (S.route.view !== 'datesuggest') return;
   const yearIn = (f, k) => h('input', { type: 'number', min: 1800, max: new Date().getFullYear(), value: f[k] ?? '', placeholder: k === 'not_before' ? 'earliest' : 'latest', style: 'width:84px', disabled: !S.EDITING });
   const hintRow = (f) => {
     const a = yearIn(f, 'not_before'), b = yearIn(f, 'not_after');
     const save = S.EDITING ? h('button', { type: 'button', class: 'lnk', onclick: async () => {
-      try { await post('/api/datehints', { album: f.album, not_before: a.value || null, not_after: b.value || null }); toast('Hint saved.'); showDateSuggest(); } catch (e) { toastError(e); }
+      try { await post('/api/datehints', { album: f.album, not_before: a.value || null, not_after: b.value || null }); toast('Hint saved.'); if (S.route.view === 'datesuggest') showDateSuggest(); } catch (e) { toastError(e); }
     } }, 'Save') : null;
     return h('div', { class: 'hrow' }, h('div', { class: 'hmain', style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
       h('b', null, f.path || '/'), h('span', { class: 'muted' }, f.n ? ` ${nf.format(f.n)} undated` : ''), ' not before ', a, ' not after ', b, save));
@@ -642,14 +662,14 @@ export async function showDateSuggest() {
       h('div', null, h('b', null, `About ${x.year}`), h('span', { class: 'muted' }, ` (${x.lo}–${x.hi})`)),
       h('div', { class: 'sb' }, x.clues.map((c) => c.text).join(' · ')),
       S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Save the date as the year ${x.year} only (undo from the edit log)`,
-        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Use ${x.year}`) : null);
+        onclick: async (e) => { if (await use([x], e.currentTarget)) drop(x, el); } }, `Use ${x.year}`) : null);
     return el;
   };
-  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const [grid, moreBtn, drop] = pagedGrid(items, card);
   const close = items.filter((x) => x.hi - x.lo <= 4);
   const useClose = S.EDITING && close.length ? h('button', { class: 'pillbtn', onclick: async (e) => {
     if (!(await confirmDialog(`Use the suggested year for the ${nf.format(close.length)} ${close.length === 1 ? 'photo' : 'photos'} whose range is four years or less? Each is saved as a year-only date, with undo in the edit log.`, { ok: 'Use them' }))) return;
-    if (await use(close, e.currentTarget)) showDateSuggest();
+    await use(close, e.currentTarget); if (S.route.view === 'datesuggest') showDateSuggest();
   } }, `Use the ${nf.format(close.length)} closest suggestions`) : null;
   const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” or a content-search model under Maintenance › AI analysis and models to get suggestions.')
     : d.sources && !d.sources.ages ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” under Maintenance › AI analysis and models for suggestions from how old the people look.')
@@ -659,7 +679,7 @@ export async function showDateSuggest() {
     h('div', { class: 'muted intro' }, 'A year for each photo marked “Date unknown”, from every clue the library has about it: how old the named people in it look, the years those people are photographed in (together, when they are), the photos with a date that look most like it, and the camera. Each person’s photos with a known date teach the age model how that person ages; a birth year you enter helps someone with few dated photos. Every suggestion is a range and lists its clues. Nothing is saved until you use a year: it is then saved as a year-only date, with undo in the edit log.'),
     waiting, hintList ? [h('h3', null, 'Folder hints'), h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'The earliest and latest year anything in a folder can be from, subfolders included: every suggestion in it keeps to those years, and dated photos outside them are not used as clues.'), hintList] : null,
     d.people.length ? [h('h3', null, 'People'), people] : null,
-    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
+    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid, moreBtn]
       : h('div', { class: 'empty' }, d.ready ? 'No suggestions: no photo marked “Date unknown” has a clue to go on.' : 'No suggestions yet.')));
   badgeTiles(grid);
   syncLightbox();
@@ -877,19 +897,19 @@ export async function showPlaceSuggest() {
       h('div', null, h('b', null, where(x)), h('span', { class: 'muted' }, ` (${within(x)})`)),
       h('div', { class: 'sb' }, x.text),
       S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Save this position, marked as approximate (undo from the edit log)`,
-        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Use') : null);
+        onclick: async (e) => { if (await use([x], e.currentTarget)) drop(x, el); } }, 'Use') : null);
     return el;
   };
-  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const [grid, moreBtn, drop] = pagedGrid(items, card);
   const close = items.filter((x) => x.km <= 0.5);
   const useClose = S.EDITING && close.length ? h('button', { class: 'pillbtn', onclick: async (e) => {
     if (!(await confirmDialog(`Use the suggested position for the ${nf.format(close.length)} ${close.length === 1 ? 'photo' : 'photos'} placed within 500 m? Each is saved as an approximate position, with undo in the edit log.`, { ok: 'Use them' }))) return;
-    if (await use(close, e.currentTarget)) showPlaceSuggest();
+    await use(close, e.currentTarget); if (S.route.view === 'placesuggest') showPlaceSuggest();
   } }, `Use the ${nf.format(close.length)} closest suggestions`) : null;
   main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Place suggestions', null]]),
     pageTitle('map', 'green', 'Place suggestions ', h('span', { class: 'muted' }, nf.format(items.length))),
     h('div', { class: 'muted intro' }, 'Where each photo without a position was probably taken, from the photos around it that have one: between two taken shortly before and after, the one nearest in time, the places photographed that day (the one it looks most like, when there are several), or a stay with positions the day before and after. Each suggestion says how far off it may be. Nothing is saved until you use one: it is then saved as an approximate position, with undo in the edit log.'),
-    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
+    items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid, moreBtn]
       : h('div', { class: 'empty' }, 'No suggestions: no photo without a position has photos with one around it.')));
   badgeTiles(grid);
   syncLightbox();
@@ -910,6 +930,7 @@ export async function showJerseys() {
     try { r = await post('/api/faces/batch', { ops: list.map((x) => ({ op: 'tagonly', image: x.id, tag: x.tag })) }); } catch (e) { toastError(e); btn.disabled = false; return false; }
     if (r.failed?.length) { toast(`${plural(r.failed.length, 'photo')} not tagged: ${r.failed[0].error}`, null, null, 8000); btn.disabled = false; return false; }
     setBadges(list.map((x) => x.id), { faces: true });
+    list.forEach((x) => details.delete(x.id));  // a photo open in the viewer shows the person at its next draw
     toast(list.length === 1 ? `Added ${list[0].name}.` : `${plural(list.length, 'photo')} tagged.`);
     return true;
   };
@@ -920,22 +941,22 @@ export async function showJerseys() {
       h('div', null, h('b', null, `Number ${x.number}`), h('span', { class: 'muted' }, x.basis === 'folder' ? ` · ${x.n} named in this folder` : ` · ${x.n} named this year`)),
       S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap' },
         h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Tag'),
+          onclick: async (e) => { if (await use([x], e.currentTarget)) drop(x, el); } }, 'Tag'),
         h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
-          onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
+          onclick: async (e) => { e.currentTarget.disabled = true; try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (err) { toastError(err); e.currentTarget.disabled = false; return; } drop(x, el); } }, 'Not them')) : null);
     return el;
   };
   const groups = new Map();
   items.forEach((x) => { if (!groups.has(x.tag)) groups.set(x.tag, { name: x.name, list: [] }); groups.get(x.tag).list.push(x); });
   const sections = [...groups.entries()].map(([tag, g]) => {
-    const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, g.list.map(card));
+    const [grid, moreBtn, drop] = pagedGrid(g.list, card);
     return h('div', { class: 'jgroup' },
       h('h3', { style: 'display:flex;gap:12px;align-items:center' }, h('img', { class: 'avatar', src: faceUrl(tag), alt: '' }), `${g.name} `, h('span', { class: 'muted' }, nf.format(g.list.length)),
         S.EDITING && g.list.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
           if (!(await confirmDialog(`Tag ${g.name} on these ${nf.format(g.list.length)} photos? Each is in the edit log with undo.`, { ok: 'Tag them' }))) return;
-          if (await use(g.list, e.currentTarget)) showJerseys();
+          if (await use(g.list, e.currentTarget) && S.route.view === 'jerseys') showJerseys();
         } }, 'Tag all') : null),
-      grid);
+      grid, moreBtn);
   });
   const players = d.players.length ? h('div', { class: 'hlist' }, d.players.map((p) => h('div', { class: 'hrow' },
     h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
@@ -966,6 +987,7 @@ export async function showClothing() {
     try { r = await post('/api/faces/batch', { ops: list.map((x) => ({ op: 'tagonly', image: x.id, tag: x.tag })) }); } catch (e) { toastError(e); btn.disabled = false; return false; }
     if (r.failed?.length) { toast(`${plural(r.failed.length, 'photo')} not tagged: ${r.failed[0].error}`, null, null, 8000); btn.disabled = false; return false; }
     setBadges(list.map((x) => x.id), { faces: true });
+    list.forEach((x) => details.delete(x.id));  // a photo open in the viewer shows the person at its next draw
     toast(list.length === 1 ? `Added ${list[0].name}.` : `${plural(list.length, 'photo')} tagged.`);
     return true;
   };
@@ -977,22 +999,22 @@ export async function showClothing() {
       h('div', { class: 'sb' }, x.text),
       S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap' },
         h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, 'Tag'),
+          onclick: async (e) => { if (await use([x], e.currentTarget)) drop(x, el); } }, 'Tag'),
         h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
-          onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
+          onclick: async (e) => { e.currentTarget.disabled = true; try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (err) { toastError(err); e.currentTarget.disabled = false; return; } drop(x, el); } }, 'Not them')) : null);
     return el;
   };
   const groups = new Map();
   items.forEach((x) => { if (!groups.has(x.tag)) groups.set(x.tag, { name: x.name, list: [] }); groups.get(x.tag).list.push(x); });
   const sections = [...groups.entries()].map(([tag, g]) => {
-    const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, g.list.map(card));
+    const [grid, moreBtn, drop] = pagedGrid(g.list, card);
     return h('div', { class: 'jgroup' },
       h('h3', { style: 'display:flex;gap:12px;align-items:center' }, h('img', { class: 'avatar', src: faceUrl(tag), alt: '' }), `${g.name} `, h('span', { class: 'muted' }, nf.format(g.list.length)),
         S.EDITING && g.list.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
           if (!(await confirmDialog(`Tag ${g.name} on these ${nf.format(g.list.length)} photos? Each is in the edit log with undo.`, { ok: 'Tag them' }))) return;
-          if (await use(g.list, e.currentTarget)) showClothing();
+          if (await use(g.list, e.currentTarget) && S.route.view === 'clothing') showClothing();
         } }, 'Tag all') : null),
-      grid);
+      grid, moreBtn);
   });
   const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install a content-search model and an object detection model under Maintenance › AI analysis and models to match people by their clothes.')
     : d.coverage[0] < d.coverage[1] ? h('div', { class: 'enote' }, `Looking at the people: ${nf.format(d.coverage[0])} of ${nf.format(d.coverage[1])} photos so far.`) : null;
@@ -1020,21 +1042,21 @@ export async function showRotation() {
     for (const [op, ids] of byOp) { if (!(await transformPhotos(ids, op))) { btn.disabled = false; return false; } }
     return true;
   };
-  const dismiss = async (x, el) => { try { await post('/api/rotation/dismiss', { photos: [x.id], on: true }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); };
+  const dismiss = async (x, el, btn) => { btn.disabled = true; try { await post('/api/rotation/dismiss', { photos: [x.id], on: true }); } catch (e) { toastError(e); btn.disabled = false; return; } drop(x, el); };
   const card = (x) => {
     const el = h('div', { class: 'dupitem', style: 'width:220px' },
       h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:200px;display:flex;align-items:center;justify-content:center;overflow:hidden', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '', style: `max-width:180px;max-height:180px;object-fit:contain;transform:rotate(${angle[x.op] || 0}deg)`, title: 'Shown the way it would look after the turn' })),
       h('div', null, h('b', null, x.text), h('span', { class: 'muted' }, ` · ${Math.round(x.score * 100)}%`)),
-      S.CAN_MANAGE && S.LOSSLESS ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
-        h('button', { type: 'button', class: 'pillbtn', title: 'Lossless rotate (undo from the edit log)', onclick: async (e) => { if (await fix([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, TRANSFORMS.find((t) => t[0] === x.op)?.[1] || 'Rotate'),
-        h('button', { type: 'button', class: 'pillbtn', title: 'It is the right way up: leave it out of this list', onclick: () => dismiss(x, el) }, 'It’s fine')) : null);
+      S.CAN_MANAGE ? h('div', { style: 'display:flex;gap:6px;margin-top:4px;flex-wrap:wrap' },
+        S.LOSSLESS ? h('button', { type: 'button', class: 'pillbtn', title: 'Lossless rotate (undo from the edit log)', onclick: async (e) => { if (await fix([x], e.currentTarget)) drop(x, el); } }, TRANSFORMS.find((t) => t[0] === x.op)?.[1] || 'Rotate') : null,
+        h('button', { type: 'button', class: 'pillbtn', title: 'It is the right way up: leave it out of this list', onclick: (e) => dismiss(x, el, e.currentTarget) }, 'It’s fine')) : null);
     return el;
   };
-  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const [grid, moreBtn, drop] = pagedGrid(items, card);
   const fixAll = S.CAN_MANAGE && S.LOSSLESS && items.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
     if (!(await confirmDialog(`Rotate all ${nf.format(items.length)} photos the way shown? Each turn is lossless and in the edit log with undo.`, { ok: 'Rotate them' }))) return;
-    if (await fix(items, e.currentTarget)) showRotation();
+    await fix(items, e.currentTarget); if (S.route.view === 'rotation') showRotation();
   } }, `Rotate all ${nf.format(items.length)}`) : null;
   const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install a content-search model under Maintenance › AI analysis and models: the check learns what upright looks like from its embeddings of your own photos.')
     : d.phase && d.running ? h('div', { class: 'enote' }, `${d.phase === 'learning' ? 'Learning what upright looks like from your photos' : d.phase === 'checking' ? 'Checking the photos that read as turned' : 'Reading every photo'}: ${nf.format(d.coverage[0])} of ${nf.format(d.coverage[1])} so far.`)
@@ -1042,7 +1064,7 @@ export async function showRotation() {
   main.replaceChildren(h('div', { class: 'page' }, crumbs([['Maintenance', '#/maintenance'], ['Wrongly rotated', null]]),
     pageTitle('rotate', 'amber', 'Wrongly rotated ', h('span', { class: 'muted' }, nf.format(items.length))),
     h('div', { class: 'muted intro' }, `Photos stored on their side or upside down, usually scans and old files. Your own photos teach the content-search model what upright looks like; every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed, each shown the way it would look after the turn. Rotating is the lossless rotate (the file is turned, the metadata kept, undo in the edit log); nothing is changed until you do.${d.dismissed ? ` ${nf.format(d.dismissed)} marked as fine are left out.` : ''}`),
-    waiting, items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', fixAll), grid]
+    waiting, items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', fixAll), grid, moreBtn]
       : h('div', { class: 'empty' }, d.ready ? 'Nothing looks turned.' : 'Nothing checked yet.')));
   badgeTiles(grid);
   syncLightbox();

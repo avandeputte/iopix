@@ -386,7 +386,7 @@ function qualityContext(q, body, refreshQuality) {
   /** The accept action of one check: the photos leave the list (or come back with on = false), and a word says what happened. */
   const accepter = (check, said) => async (ids, on = true, ev) => { try { await post('/api/quality/accept', { photos: ids, check, on }); toast(on ? said(ids.length) : 'Shown again.'); } catch (e) { toastError(e); return; } if (!gone(ev)) showQuality(); };
   /** The button that brings a check's accepted photos back, when there are any. */
-  const showAccepted = (check, accept, n) => n ? h('button', { class: 'pillbtn', onclick: async () => { const acc = await api(`/api/quality/accepted?check=${check}`); if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
+  const showAccepted = (check, accept, n) => n ? h('button', { class: 'pillbtn', onclick: async () => { let acc; try { acc = await api(`/api/quality/accepted?check=${check}`); } catch (e) { toastError(e); return; } if (acc.photos.length) accept(acc.photos, false); } }, 'Show the accepted ones again') : null;
   return { q, p, body, refreshQuality, size, thumb, gone, goneMany, sec, accepter, showAccepted };
 }
 /** Stored twice: the same person's region kept twice a few pixels apart, with the clean-up that removes the copies. */

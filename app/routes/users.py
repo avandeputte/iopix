@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
 
+from app.core import json_body
 from app import access, users
 
 from app.routes.auth import person_tag
@@ -18,7 +19,7 @@ def api_users(request: Request):
 
 @router.post("/api/users", dependencies=[access.admin])
 async def api_users_create(request: Request):
-    body = await request.json()
+    body = await json_body(request)
     try:
         return users.create(str(body.get("name", "")), str(body.get("password", "")), str(body.get("role", "viewer")), str(body.get("email") or ""))
     except ValueError as e:
@@ -29,7 +30,7 @@ async def api_users_create(request: Request):
 async def api_users_update(user_id: int, request: Request):
     """{role} and/or {password} and/or {name} and/or {email} (optional; "" clears it) and/or {listed} (on the sign-in
     screen's account list); {delete: true} removes the user."""
-    body = await request.json()
+    body = await json_body(request)
     if not users.get(user_id):
         raise HTTPException(404, "No such user")
     try:
