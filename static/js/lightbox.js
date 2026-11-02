@@ -293,11 +293,12 @@ export async function undoLast(id) {
 }
 export async function transformPhotos(ids, op) {
   let r;
-  try { r = await post('/api/photos/transform', { ids, op }); } catch (e) { toastError(e); return; }
+  try { r = await post('/api/photos/transform', { ids, op }); } catch (e) { toastError(e); return false; }
   for (const d of r.done) await afterFileChange(d.id, d);
   const label = TRANSFORMS.find((t) => t[0] === op)[1].toLowerCase();
   if (r.failed.length) toast(`${r.done.length ? `${plural(r.done.length, 'photo')} ${label.replace('rotate', 'rotated').replace('flip', 'flipped').replace('turn', 'turned')}; ` : ''}${plural(r.failed.length, 'photo')} not: ${r.failed[0].error}`, null, null, 10000);
   else toast(ids.length > 1 ? `${plural(r.done.length, 'photo')}: ${label}.` : `${label[0].toUpperCase()}${label.slice(1)}.`, r.done.length === 1 ? 'Undo' : null, () => undoLast(r.done[0].id));
+  return r.done.length > 0;
 }
 /** Adjust: exposure, contrast, saturation, warmth, straighten and auto levels, previewed live on screen and saved
  *  as a new version next to the original (digiKam's "save as new version"); the original stays as it is. */
@@ -1076,6 +1077,10 @@ function infoAi(c) {
       (d.jerseySuggestions || []).map((x) => h('div', { class: 'b', style: 'margin-top:4px' }, `Number ${x.number} is probably ${x.name} (${x.n} named ${x.basis === 'folder' ? 'in this folder' : 'this year'}). `,
         S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Tag ${x.name} on this photo (undo from the edit log)`, onclick: () => editPhotos([d.id], { add_tags: [x.tag] }) }, `Tag ${x.name}`) : null,
         ' · ', h('a', { class: 'lnk', href: '#/jerseys' }, 'All suggestions'))))) : null,
+    d.rotationSuggestion ? h('div', { class: 'irow' }, icon('rotate'), h('div', null, h('div', { class: 'a' }, d.rotationSuggestion.text, h('span', { class: 'muted' }, ` (${Math.round(d.rotationSuggestion.score * 100)}% sure)`)),
+      h('div', { class: 'b' }, S.CAN_MANAGE && S.LOSSLESS ? h('button', { type: 'button', class: 'lnk', title: 'Lossless rotate (undo from the edit log)', onclick: () => transformPhotos([d.id], d.rotationSuggestion.op) }, TRANSFORMS.find((t) => t[0] === d.rotationSuggestion.op)?.[1] || 'Rotate') : null,
+        S.CAN_MANAGE ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/rotation/dismiss', { photos: [d.id], on: true }); toast('Marked as the right way up.'); } catch (e) { toastError(e); } } }, 'It’s fine')] : null,
+        ' · ', h('a', { class: 'lnk', href: '#/rotation' }, 'All findings')))) : null,
     d.clothingSuggestions?.length ? h('div', { class: 'irow' }, icon('people'), h('div', null, h('div', { class: 'b' }, 'Probably here, by the clothes'),
       d.clothingSuggestions.map((x) => h('div', { class: 'a small' }, `${x.name} (${Math.round(x.score * 100)}% like ${x.n} named ${x.n === 1 ? 'photo' : 'photos'} of this event). `,
         S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Tag ${x.name} on this photo (undo from the edit log)`, onclick: () => editPhotos([d.id], { add_tags: [x.tag] }) }, `Tag ${x.name}`) : null,

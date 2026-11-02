@@ -5,7 +5,7 @@ import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces, editPhotos } from './editing.js';
 import { downloadDialog } from './download.js';
-import { openLightbox, personPicker, popMenu, syncLightbox } from './lightbox.js';
+import { TRANSFORMS, openLightbox, personPicker, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
 import { badgeTiles, tileBadges } from './grid.js';
 import { boot, pollStatus } from './main.js';
 
@@ -975,5 +975,49 @@ export async function showClothing() {
     h('div', { class: 'muted intro' }, 'At an event everyone wears the same clothes all day. Within the photos of one folder on one day, each detected person whose face is not named (from behind, too far, too small) is compared with the people whose face is named, and a clear match suggests that person is in the photo too. Tagging adds the person to the photo without a face region, with undo in the edit log; nothing is tagged until you do.'),
     waiting, items.length ? sections : h('div', { class: 'empty' }, d.ready ? 'No suggestions: nobody dressed like a named person stands unnamed in the same event.' : 'No suggestions yet.')));
   sections.forEach((s) => badgeTiles(s));
+  syncLightbox();
+}
+
+/** Manage › Wrongly rotated: photos the library's own photos say are on their side or upside down (rotation.py), each
+ * shown righted, with the lossless rotate that would fix it and a way to say it is fine as it is. */
+export async function showRotation() {
+  main.replaceChildren(loadingBox('Checking which way up…'));
+  let d;
+  try { d = await api('/api/rotation?limit=1000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
+  if (S.route.view !== 'rotation') return;
+  const items = d.items;
+  const angle = { left: -90, right: 90, 180: 180 };
+  const fix = async (list, btn) => {
+    btn.disabled = true;
+    const byOp = new Map();
+    list.forEach((x) => { if (!byOp.has(x.op)) byOp.set(x.op, []); byOp.get(x.op).push(x.id); });
+    for (const [op, ids] of byOp) { if (!(await transformPhotos(ids, op))) { btn.disabled = false; return false; } }
+    return true;
+  };
+  const dismiss = async (x, el) => { try { await post('/api/rotation/dismiss', { photos: [x.id], on: true }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); };
+  const card = (x) => {
+    const el = h('div', { class: 'dupitem', style: 'width:220px' },
+      h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:200px;display:flex;align-items:center;justify-content:center;overflow:hidden', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
+        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '', style: `max-width:180px;max-height:180px;object-fit:contain;transform:rotate(${angle[x.op] || 0}deg)`, title: 'Shown the way it would look after the turn' })),
+      h('div', null, h('b', null, x.text), h('span', { class: 'muted' }, ` · ${Math.round(x.score * 100)}%`)),
+      S.CAN_MANAGE && S.LOSSLESS ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+        h('button', { type: 'button', class: 'pillbtn', title: 'Lossless rotate (undo from the edit log)', onclick: async (e) => { if (await fix([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, TRANSFORMS.find((t) => t[0] === x.op)?.[1] || 'Rotate'),
+        h('button', { type: 'button', class: 'pillbtn', title: 'It is the right way up: leave it out of this list', onclick: () => dismiss(x, el) }, 'It’s fine')) : null);
+    return el;
+  };
+  const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, items.map(card));
+  const fixAll = S.CAN_MANAGE && S.LOSSLESS && items.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
+    if (!(await confirmDialog(`Rotate all ${nf.format(items.length)} photos the way shown? Each turn is lossless and in the edit log with undo.`, { ok: 'Rotate them' }))) return;
+    if (await fix(items, e.currentTarget)) showRotation();
+  } }, `Rotate all ${nf.format(items.length)}`) : null;
+  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install a content-search model under Maintenance › AI analysis and models: the check learns what upright looks like from its embeddings of your own photos.')
+    : d.phase && d.running ? h('div', { class: 'enote' }, `${d.phase === 'learning' ? 'Learning what upright looks like from your photos' : d.phase === 'checking' ? 'Checking the photos that read as turned' : 'Reading every photo'}: ${nf.format(d.coverage[0])} of ${nf.format(d.coverage[1])} so far.`)
+    : !S.LOSSLESS ? h('div', { class: 'enote' }, 'Rotating needs jpegtran on the server (libjpeg-turbo); until then the list is only shown.') : null;
+  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Maintenance', '#/maintenance'], ['Wrongly rotated', null]]),
+    pageTitle('rotate', 'amber', 'Wrongly rotated ', h('span', { class: 'muted' }, nf.format(items.length))),
+    h('div', { class: 'muted intro' }, `Photos stored on their side or upside down, usually scans and old files. Your own photos teach the content-search model what upright looks like; every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed, each shown the way it would look after the turn. Rotating is the lossless rotate (the file is turned, the metadata kept, undo in the edit log); nothing is changed until you do.${d.dismissed ? ` ${nf.format(d.dismissed)} marked as fine are left out.` : ''}`),
+    waiting, items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', fixAll), grid]
+      : h('div', { class: 'empty' }, d.ready ? 'Nothing looks turned.' : 'Nothing checked yet.')));
+  badgeTiles(grid);
   syncLightbox();
 }

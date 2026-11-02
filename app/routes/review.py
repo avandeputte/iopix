@@ -24,6 +24,27 @@ def api_quality():
         raise HTTPException(503, f"Could not read the face regions: {str(e)[:200]}")
 
 
+@router.get("/api/rotation", dependencies=[access.editor])
+def api_rotation(request: Request, offset: int = 0, limit: int = 200, ids: str = ""):
+    """Photos that read as on their side or upside down (rotation.py): {total, items: [{id, turn, op, text, score}],
+    dismissed, ready, running, phase, coverage}. op is the lossless rotate that rights it (/api/photos/transform)."""
+    from app.ai import rotation
+    want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
+    out = rotation.findings(want)
+    items = out["items"]
+    return {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 2000))], "dismissed": out["dismissed"],
+            "ready": rotation.available(), "running": rotation.progress["running"], "phase": rotation.progress.get("phase"), "coverage": list(rotation.coverage())}
+
+
+@router.post("/api/rotation/dismiss", dependencies=[access.editor_write])
+async def api_rotation_dismiss(request: Request):
+    """Body {photos: [ids], on: true}: these photos are the right way up; they leave the list until the file changes."""
+    from app.ai import rotation
+    body = await request.json()
+    n = await run_in_threadpool(rotation.dismiss, body.get("photos") or [], bool(body.get("on", True)))
+    return {"dismissed": n}
+
+
 @router.post("/api/quality/accept", dependencies=[access.admin])
 async def api_quality_accept(request: Request):
     """Body {photos: [ids], check: "unnamed", on: true}: accept these findings as they are (on: false takes it back)."""

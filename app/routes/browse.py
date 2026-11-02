@@ -463,6 +463,10 @@ def api_photo(photo_id: int, request: Request):
         d["jerseys"] = jerseys.for_photo(photo_id)  # numbers read on shirts, with the player suggested for an unnamed one (editors)
         if d["jerseys"] and users.can_write(request.state.user):
             d["jerseySuggestions"] = jerseys.suggestions([photo_id])["items"]
+        if not d.get("video") and users.can_write(request.state.user):  # on its side or upside down? (rotation.py)
+            from app.ai import rotation
+            hit = rotation.findings([photo_id])["items"]
+            d["rotationSuggestion"] = hit[0] if hit else None
         if not d.get("video") and users.can_write(request.state.user):  # people probably present, by their clothes (clothing.py)
             from app.ai import clothing
             d["clothingSuggestions"] = clothing.suggestions([photo_id])["items"] if clothing.for_photo(photo_id) else []

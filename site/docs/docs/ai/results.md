@@ -64,6 +64,10 @@ On each detected person, text recognition reads the number on the shirt. Photos 
 
 At an event everyone wears the same clothes all day. The content-search model turns each detected person into an embedding that mostly describes what they wear. Within the photos of one folder on one day, a person whose face is not named (from behind, too far, too small for a face) is compared with the people whose face is named; when the closest match is clear, **Explore › Clothing matches** (for editors) suggests that person is in the photo too, and the info panel shows it under *Probably here, by the clothes*. **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that. The embeddings are computed again when you switch the search model.
 
+## Wrongly rotated
+
+Scans and old files are often stored on their side or upside down. No extra model is needed: your own photos teach a small classifier on the content-search embeddings what upright looks like (a sample is embedded as it is and turned three ways). Every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed under **Maintenance › Wrongly rotated**, each shown the way it would look after the turn. **Rotate** is the ordinary lossless rotate (the file is turned, the metadata kept, digiKam's row updated, undo in the edit log); **It's fine** leaves a photo out until its file changes. The info panel shows the finding too. The classifier is learnt again when you switch the search model.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.

@@ -935,10 +935,24 @@ def clothing_suggestions(token: str, photo_ids: list[int] = None, limit: int = 2
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "coverage": list(clothing.coverage())}
 
 
+@server.tool(annotations=READ_ONLY)
+def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
+    """Photos that read as stored on their side or upside down (Maintenance > Wrongly rotated): {total, items: [{id, turn
+    (quarter turns clockwise the file is off by), op (the lossless rotate that rights it: left|180|right), text, score}],
+    dismissed, coverage, phase}. Read-only: righting one is the web app's Rotate button (POST /api/photos/transform).
+    Needs the admin token."""
+    _need_token(token)
+    from app.ai import rotation
+    out = rotation.findings(photo_ids)
+    items = out["items"]
+    return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "dismissed": out["dismissed"],
+            "coverage": list(rotation.coverage()), "phase": rotation.progress.get("phase")}
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
     """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
-    captions, looks, faces, ages, jerseys, clothing or facedetect (facedetect writes faces into digiKam's database). Without reset only
+    captions, looks, faces, ages, jerseys, clothing, rotation or facedetect (facedetect writes faces into digiKam's database). Without reset only
     new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Needs the
     admin token."""
     _need_token(token, writes=(job == "facedetect"))

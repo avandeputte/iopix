@@ -556,6 +556,8 @@ def start(photos: list):
     jerseys.start(photos)  # numbers on shirts, after object detection has found the people
     from app.ai import clothing
     clothing.start(photos)  # what each detected person wears, for matches within an event
+    from app.ai import rotation
+    rotation.start()  # photos stored on their side, from the search embeddings
 
 
 def results() -> dict:

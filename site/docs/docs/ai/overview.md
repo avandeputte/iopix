@@ -15,6 +15,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Place suggestions**: where photos without a position were probably taken, from the photos around them that have one.
 - **Jersey numbers**: the number on each player's shirt, searchable, and the player it suggests for someone whose face is not named.
 - **Clothing matches**: within one event, who is probably in a photo by what they wear, when their face is not named.
+- **Wrongly rotated**: photos stored on their side or upside down, with the lossless rotate that rights them.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 
@@ -26,11 +27,11 @@ AI results are guesses, and iopix treats them that way:
 - detected content is a filter, not stored tags,
 - descriptions are shown with the AI analysis at the end of the info panel, never in place of your own caption,
 - a likely reject is only a suggestion: no label is ever set on a photo,
-- a suggested year, place or player is only saved when you click **Use** or **Tag**.
+- a suggested year, place or player is only saved when you click **Use** or **Tag**, and a photo that reads as turned is only rotated when you click **Rotate**.
 
 ## Background jobs
 
-New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers, clothing matches. The damaged-files check runs only when you start it.
+New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers, clothing matches, wrongly rotated photos. The damaged-files check runs only when you start it.
 
 Each job may use half the machine's cores by default (**Settings › AI and search**, or `BG_THREADS`), so iopix and everything else on the server stay responsive.
 
