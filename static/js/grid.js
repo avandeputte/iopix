@@ -222,12 +222,28 @@ export function setBadges(ids, patch = {}) {
 export async function badgeTiles(root) {
   const tiles = [...root.querySelectorAll('.tile[data-id]:not(.badged)')];
   tiles.forEach((t) => t.classList.add('badged'));
-  for (let k = 0; k < tiles.length; k += 300) {
-    const part = tiles.slice(k, k + 300);
-    let r; try { r = await api(`/api/badges?ids=${[...new Set(part.map((t) => t.dataset.id))].join(',')}`); } catch { continue; }
+  // images that crop to their box (cards' covers, tiles) are positioned on the photo's subject (data-focus = photo id)
+  const imgs = [...root.querySelectorAll('img[data-focus]:not(.focused)')];
+  imgs.forEach((i) => i.classList.add('focused'));
+  const all = [...tiles, ...imgs];
+  for (let k = 0; k < all.length; k += 300) {
+    const part = all.slice(k, k + 300);
+    let r; try { r = await api(`/api/badges?ids=${[...new Set(part.map((t) => t.dataset.id || t.dataset.focus))].join(',')}`); } catch { continue; }
     const geo = new Set(r.geo), faces = new Set(r.faces);
-    for (const t of part) { const id = +t.dataset.id; t.append(...tileBadges(id, { video: r.video[id], faces: faces.has(id), geo: geo.has(id) })); }
+    for (const t of part) {
+      if (t.dataset.focus) { focusImage(t, r.focus?.[t.dataset.focus]); continue; }
+      const id = +t.dataset.id;
+      t.append(...tileBadges(id, { video: r.video[id], faces: faces.has(id), geo: geo.has(id) }));
+      focusImage(t.querySelector('img'), r.focus?.[id]);
+    }
   }
+}
+
+/** Keep the photo's subject in a cropping box: object-position from the focus point ("x,y" fractions). */
+export function focusImage(img, focus) {
+  if (!img || !focus) return;
+  const [x, y] = focus.split(',').map(Number);
+  if (Number.isFinite(x) && Number.isFinite(y)) img.style.objectPosition = `${Math.round(x * 100)}% ${Math.round(y * 100)}%`;
 }
 
 export function renderGrid(force) {

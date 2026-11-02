@@ -194,6 +194,25 @@ def make(kind: str, photo: dict) -> Path:
     return dst
 
 
+def make_fit(photo: dict, aspect: float) -> Path:
+    """The grid thumbnail cropped to `aspect` (w / h) around the photo's focus point (smartcrop.py), cached as kind
+    'c' with the aspect in the name. `photo` needs the THUMB_COLS plus `focus`."""
+    from app.ai import smartcrop
+    stamp = stamp_for(photo["hash"], photo["size"], photo["modified"])
+    dst = config.CACHE_DIR / "c" / f"{photo['id'] % 256:02x}" / f"{photo['id']}-{stamp}-{aspect:.3f}.jpg"
+    if dst.exists():
+        return dst
+    with _building(dst):
+        if dst.exists():
+            return dst
+        src = make("t", photo)
+        with Image.open(src) as im:
+            im.load()
+            box = smartcrop.crop_box(im.width, im.height, aspect, smartcrop.parse(photo.get("focus")))
+            save(im.crop(box), dst, config.THUMB_QUALITY, im.info.get("icc_profile"))
+    return dst
+
+
 def make_face(tag_id: int, photo: dict, rect: tuple, size: int = 256) -> Path:
     """Square crop around a face rectangle (given in upright full-size pixels)."""
     x, y, w, h = rect
@@ -271,7 +290,7 @@ class Prewarmer:
 def forget(photo_id: int):
     """Drop what was derived from a photo whose picture just changed: the cached thumbnail and preview, the face
     crops, and its content-search embedding (computed again from the new picture)."""
-    for kind in ("t", "p"):
+    for kind in ("t", "p", "c"):
         d = config.CACHE_DIR / kind / f"{photo_id % 256:02x}"
         try:
             for f in d.glob(f"{photo_id}-*.jpg"):

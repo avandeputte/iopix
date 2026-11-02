@@ -26,8 +26,25 @@ router = APIRouter()
 
 
 @router.get("/thumb/{photo_id}")
-def thumb(photo_id: int):
-    return _cached_image("t", photo_id)
+def thumb(photo_id: int, fit: str = ""):
+    """The grid thumbnail; fit=square (or fit=WxH, an aspect such as 16x9) crops it to that shape around the photo's
+    subject (smartcrop.py: the faces, else the people, else the middle), for tiles that would otherwise crop the centre."""
+    if not fit:
+        return _cached_image("t", photo_id)
+    try:
+        aw, ah = (1, 1) if fit == "square" else (int(v) for v in fit.lower().split("x"))
+        if not (0.2 <= aw / ah <= 5):
+            raise ValueError
+    except (ValueError, ZeroDivisionError):
+        raise HTTPException(400, "fit is square or WxH")
+    row = _photo_row(photo_id, THUMB_COLS + ", focus")
+    try:
+        path = thumbs.make_fit(row, aw / ah)
+    except FileNotFoundError:
+        raise HTTPException(404, "Original file is not available")
+    except OSError as e:
+        raise HTTPException(503, f"The file could not be read right now: {e}")
+    return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 
 @router.get("/preview/{photo_id}")

@@ -16,6 +16,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Jersey numbers**: the number on each player's shirt, searchable, and the player it suggests for someone whose face is not named.
 - **Clothing matches**: within one event, who is probably in a photo by what they wear, when their face is not named.
 - **Wrongly rotated**: photos stored on their side or upside down, with the lossless rotate that rights them.
+- **Smart crop**: tiles and cards that crop a photo keep its subject (the faces, else the people) in the frame.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 

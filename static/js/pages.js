@@ -9,12 +9,12 @@ import { TRANSFORMS, openLightbox, personPicker, popMenu, syncLightbox, transfor
 import { badgeTiles, tileBadges } from './grid.js';
 import { boot, pollStatus } from './main.js';
 
-export function card({ img, fallback, name, sub, onclick }) {
-  const im = img ? h('img', { src: img, alt: '', loading: 'lazy' }) : null;
+export function card({ img, fallback, name, sub, onclick, focus }) {
+  const im = img ? h('img', { src: img, alt: '', loading: 'lazy', 'data-focus': focus || null }) : null;
   if (im && fallback) im.onerror = () => { im.onerror = null; im.src = fallback; };
   return h('div', { class: 'card', tabindex: 0, role: 'button', onclick }, h('span', { class: 'cv' }, im), h('div', { class: 'nm', title: name }, name), sub ? h('div', { class: 'sb' }, sub) : null);
 }
-export const thumbCard = (cover, name, sub, params) => card({ img: cover ? `/thumb/${cover}` : null, name, sub, onclick: () => go('photos', photosWith(params)) });
+export const thumbCard = (cover, name, sub, params) => card({ img: cover ? `/thumb/${cover}` : null, name, sub, focus: cover, onclick: () => go('photos', photosWith(params)) });
 export const personCard = (t) => card({ img: faceUrl(t.id), fallback: t.cover ? `/thumb/${t.cover}` : null, name: t.name, sub: nf.format(t.nAll), onclick: () => go('photos', photosWith({ tag: t.id })) });
 /** Leaf person tags with photos (a person tag with children is a family/group). */
 export const people = () => S.META.tags.filter((t) => t.person && t.n > 0 && !t.hasKids).sort((a, b) => b.nAll - a.nAll);
@@ -449,7 +449,7 @@ export function showAlbums() {
   draw('');
 }
 
-export const placeCard = ([city, region, country, n, cover]) => card({ img: `/thumb/${cover}`, name: city, sub: `${[region, country].filter(Boolean).join(', ')} · ${nf.format(n)}`,
+export const placeCard = ([city, region, country, n, cover]) => card({ img: `/thumb/${cover}`, focus: cover, name: city, sub: `${[region, country].filter(Boolean).join(', ')} · ${nf.format(n)}`,
   onclick: () => go('photos', photosWith({ place: city, ...(region ? { region } : {}), ...(country ? { country } : {}) })) });
 export function showPlaces(vp) {
   if (!S.META.places.length) {

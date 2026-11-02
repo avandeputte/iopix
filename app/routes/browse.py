@@ -48,7 +48,7 @@ def _photos_cached(version: str, key: str) -> bytes:
     con = db()
     try:
         rows = con.execute(
-            f"SELECT id, ts, w, h, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, dprec FROM photos WHERE {where} ORDER BY {sort}", params).fetchall()
+            f"SELECT id, ts, w, h, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, dprec, focus FROM photos WHERE {where} ORDER BY {sort}", params).fetchall()
     finally:
         con.close()
     if rank and "sort" not in d:
@@ -64,6 +64,8 @@ def _photos_cached(version: str, key: str) -> bytes:
         "faces": [i for i, r in enumerate(rows) if r[7]],
         # approximate dates, as {index: 1 month and year known, 2 year only, 3 unknown}
         "dp": {str(i): r[8] for i, r in enumerate(rows) if r[8]},
+        # where the subject is, as {index: "x,y"} fractions, for tiles that crop (smartcrop.py); missing = the middle
+        "focus": {str(i): r[9] for i, r in enumerate(rows) if r[9]},
     }
     return gzip.compress(orjson.dumps(data), compresslevel=3)
 
@@ -88,22 +90,22 @@ def api_random(request: Request, n: int = 12):
 @router.get("/api/badges", dependencies=[access.public])
 def api_badges(request: Request, ids: str = ""):
     """The marks on a thumbnail outside the Photos grid (Rediscover, On this day, bursts, duplicates...), for up to
-    500 photo ids: {geo: [id], faces: [id], video: {id: seconds}}, as /api/photos gives them by position."""
+    500 photo ids: {geo: [id], faces: [id], video: {id: seconds}, focus: {id: "x,y"}}, as /api/photos gives them by position."""
     try:
         want = list(dict.fromkeys(int(x) for x in ids.split(",") if x.strip()))[:500]
     except ValueError:
         raise HTTPException(400, "ids must be numbers")
     if not want:
-        return {"geo": [], "faces": [], "video": {}}
+        return {"geo": [], "faces": [], "video": {}, "focus": {}}
     con = db()
     try:
         rows = con.execute(
-            f"SELECT id, video, duration, lat IS NOT NULL, {HAS_PEOPLE} "
+            f"SELECT id, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, focus "
             f"FROM photos WHERE id IN ({','.join('?' * len(want))})", want).fetchall()
     finally:
         con.close()
     return {"geo": [r[0] for r in rows if r[3]], "faces": [r[0] for r in rows if r[4]],
-            "video": {str(r[0]): (round(r[2]) if r[2] else 0) for r in rows if r[1]}}
+            "video": {str(r[0]): (round(r[2]) if r[2] else 0) for r in rows if r[1]}, "focus": {str(r[0]): r[5] for r in rows if r[5]}}
 
 
 @router.get("/api/thenandnow", dependencies=[access.public])

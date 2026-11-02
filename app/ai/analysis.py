@@ -580,6 +580,8 @@ def results() -> dict:
         from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
         for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
             out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
+        for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
+            out.setdefault(pid, {}).setdefault("persons", []).append((x, y, w, h))  # for the focus point of a cropped thumbnail (smartcrop.py)
         for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):
             d = out.setdefault(pid, {})
             d.setdefault("objects", {})[cls] = n

@@ -24,7 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
 
-from app.ai import analysis, jerseys, moments
+from app.ai import analysis, jerseys, moments, smartcrop
 from app import config
 from app.digikam import dkdb, library
 from app.photos import dateprecision, edits
@@ -53,7 +53,7 @@ CREATE TABLE photos (
     hash TEXT, modified TEXT, mts INTEGER, ntags INTEGER, extra TEXT, edited INTEGER,
     sharp REAL, sharpn REAL, bright REAL, clip_lo REAL, clip_hi REAL, faceq REAL,
     npeople INTEGER, objects TEXT, ocr TEXT, burst INTEGER, burst_best INTEGER, caption_ai TEXT,
-    dprec INTEGER, aesth REAL, aesthn REAL, focusn REAL, eyes_checked INTEGER, eyes_closed INTEGER, reject TEXT, jerseys TEXT
+    dprec INTEGER, aesth REAL, aesthn REAL, focusn REAL, eyes_checked INTEGER, eyes_closed INTEGER, reject TEXT, jerseys TEXT, focus TEXT
 );
 CREATE INDEX photos_ts ON photos (ts);
 CREATE INDEX photos_day ON photos (day);
@@ -84,7 +84,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "15"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects); 14: text in photos kept to words (ocrwords); 15: jersey numbers
+SCHEMA_VERSION = "16"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects); 14: text in photos kept to words (ocrwords); 15: jersey numbers; 16: focus point for cropped thumbnails
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -645,6 +645,10 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
     for pid, nums in jerseys.results().items():  # the numbers read on shirts, searchable as jersey=10
         seen.setdefault(pid, {})["jerseys"] = nums
     phases["analysis"] = time.time() - t1
+    faces_by = defaultdict(list)  # the faces that place a cropped thumbnail (smartcrop.py): not the ones marked ignored
+    for f in side["faces"]:
+        if f[6] != "ignored":
+            faces_by[f[0]].append(f[2:6])
     tag_by_full = {t["full"]: tid for tid, t in tags.items() if tid not in hidden}
     # approximate dates (dateprecision.py): the tag that says how much of a photo's date is known
     prec_tags = {tag_by_full[full]: dateprecision.LEVELS[k] for k, full in dateprecision.TAGS.items() if full in tag_by_full}
@@ -739,6 +743,7 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
             an.get("npeople"), ("," + ",".join(sorted(an["objects"])) + ",") if an.get("objects") else None,
             an.get("ocr"), None, None, an.get("caption_ai"), dprec,
             an.get("aesth"), None, None, an.get("eyes_checked"), an.get("eyes_closed"), None, an.get("jerseys"),
+            "%s,%s" % smartcrop.focus(w, h, faces_by.get(iid, ()), an.get("persons", ())) if (faces_by.get(iid) or an.get("persons")) else None,
         ))
         out.album_n[album_id] += 1
         people_names, tag_names = [], []
@@ -790,7 +795,7 @@ def _rank(dst, rows: SimpleNamespace, col: str, k: int):
 def _fill(dst, rows: SimpleNamespace, albums: dict, root_path: dict, tags: dict, hidden: set, faces: list):
     """Every table of a new index file, from the rows computed above."""
     dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
-    dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 65)})", rows.photos)
+    dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 66)})", rows.photos)
     dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows.fts_rows)
     _rank(dst, rows, "sharpn", 4)

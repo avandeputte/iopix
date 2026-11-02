@@ -68,6 +68,10 @@ At an event everyone wears the same clothes all day. The content-search model tu
 
 Scans and old files are often stored on their side or upside down. No extra model is needed: your own photos teach a small classifier on the content-search embeddings what upright looks like (a sample is embedded as it is and turned three ways). Every photo whose embedding reads as turned is then checked in all four turns, and only the ones the four readings agree on are listed under **Maintenance › Wrongly rotated**, each shown the way it would look after the turn. **Rotate** is the ordinary lossless rotate (the file is turned, the metadata kept, digiKam's row updated, undo in the edit log); **It's fine** leaves a photo out until its file changes. The info panel shows the finding too. The classifier is learnt again when you switch the search model.
 
+## Smart crop
+
+A square or wide tile crops the photo to its own shape, and a centre crop cuts heads off portraits. Each photo has a focus point, the centre of its subject: the faces digiKam knows, else the people object detection found, else the middle of the frame. The Explore tiles, the covers of folders, albums, people and places, and the apps' tiles keep that point in view, and `/thumb/<id>?fit=square` (or `fit=16x9`) serves a thumbnail cropped around it. Nothing is written to any photo; the point lives in the search index and moves with the faces.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.
