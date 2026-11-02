@@ -19,6 +19,7 @@ import math
 import os
 import subprocess
 import time
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -31,6 +32,8 @@ from app.data import index
 PICK_TAGS = ["Pick Label None", "Pick Label Rejected", "Pick Label Pending", "Pick Label Accepted"]
 COLOR_TAGS = [f"Color Label {n}" for n in ("None", "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "Gray", "Black", "White")]
 SUPPORTED_DB_VERSIONS = range(10, 18)  # schema generations with the tables used below
+
+log = logging.getLogger(__name__)
 
 
 SyncError = dkdb.SyncError  # one error type for every refusal to write digiKam's database
@@ -114,6 +117,15 @@ def write_transaction(db_path: Path = None, check_running: bool = True):
         dkdb.write_lock.release()
 
 
+class AfterList(list):
+    """The `after` list a batch hands each item: callables to run once the transaction is through, plus `revert`,
+    callables that put the item's file back as it was should the whole transaction be refused at commit."""
+
+    def __init__(self):
+        super().__init__()
+        self.revert = []
+
+
 def batch(items: list, per_item, check_running: bool = True, holds: str = None, db_path: Path = None, backup: bool = False) -> dict:
     """A batch endpoint's loop as one guarded write: preflight once, one backup (when asked), one transaction, and
     per_item(con, item, after) for each item inside it. An item that raises is rolled back to its savepoint and
@@ -128,21 +140,32 @@ def batch(items: list, per_item, check_running: bool = True, holds: str = None, 
     done, failed = [], []
     if not items:
         return {"done": done, "failed": failed}
-    later = []
-    with write_transaction(db_path, check_running) as con:
-        for n, item in enumerate(items):
-            con.execute(f"SAVEPOINT item{n}")
-            after = []
-            try:
-                per_item(con, item, after)
-            except Exception as e:
-                con.execute(f"ROLLBACK TO SAVEPOINT item{n}")
+    later, reverts = [], []
+    try:
+        with write_transaction(db_path, check_running) as con:
+            for n, item in enumerate(items):
+                con.execute(f"SAVEPOINT item{n}")
+                after = AfterList()
+                try:
+                    per_item(con, item, after)
+                except Exception as e:
+                    con.execute(f"ROLLBACK TO SAVEPOINT item{n}")
+                    con.execute(f"RELEASE SAVEPOINT item{n}")
+                    for fn in after.revert:  # the item's file, if it was already replaced
+                        fn()
+                    failed.append({"id": item.get("id") if isinstance(item, dict) else item, "error": str(e)[:300]})
+                    continue
                 con.execute(f"RELEASE SAVEPOINT item{n}")
-                failed.append({"id": item.get("id") if isinstance(item, dict) else item, "error": str(e)[:300]})
-                continue
-            con.execute(f"RELEASE SAVEPOINT item{n}")
-            done.append(item)
-            later.extend(after)
+                done.append(item)
+                later.extend(after)
+                reverts.extend(after.revert)
+    except BaseException:  # the transaction was refused at commit (integrity, digiKam started): the files follow the rows back
+        for fn in reversed(reverts):
+            try:
+                fn()
+            except Exception as e:
+                log.warning("batch: a file could not be put back after the refused transaction: %s", e)
+        raise
     for fn in later:
         fn()
     return {"done": done, "failed": failed}

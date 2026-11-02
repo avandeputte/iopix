@@ -103,8 +103,12 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
     with pixelguard.Guard([p["path"]] if in_file else []) as g:
         bad = edits.run_exiftool(jobs)
         undone = g.verify()
-    if bad or undone:
+    if undone or any(b.endswith(".xmp") for b in bad):
         raise SyncError("exiftool could not write " + ("the image data would have changed; the file is as it was" if undone else ", ".join(os.path.basename(b) for b in bad)))
+    file_error = None
+    if bad:  # the sidecar (the copy digiKam reads) carries the change; only the image file could not be written: the edit stands and says so
+        file_error = "saved in the sidecar, but the image file could not be written"
+        in_file = False
     _mirror_gps_and_date(p["path"], changes, in_file)
     # the files carry the change now: it goes in the log (with its way back) before the database is read back,
     # which can fail on its own (digiKam started meanwhile) without undoing what exiftool wrote
@@ -112,7 +116,10 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
                      "summary": "Metadata edited: " + ", ".join(f"{c['group']}:{c['tag']}" for c in changes)[:400],
                      "details": {f"{c['group']}:{c['tag']}": {"from": before.get(f"{c['group']}:{c['tag']}"), "to": c.get("value") or None} for c in changes}}])
     reread(p["id"], check_running)
-    return {"id": p["id"], "changed": len(changes), "file": in_file}
+    out = {"id": p["id"], "changed": len(changes), "file": in_file}
+    if file_error:
+        out["fileError"] = file_error
+    return out
 
 
 def _mirror_gps_and_date(path: str, changes: list, in_file: bool):

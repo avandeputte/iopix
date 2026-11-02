@@ -439,6 +439,8 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
     detail = {"lossless": "crop", "box": list(box), "faces_dropped": len(dropped), "how": how}
     if after is not None:  # inside a batch: the sidecar and the log entry wait for the commit
         after.append(lambda: _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, detail))
+        if hasattr(after, "revert"):  # and a refused commit puts the file back as it was
+            after.revert.append(lambda: shutil.copy2(copy, p["path"]))
         return {"id": p["id"], **detail}
     r = _finish(p, 1, f"Cropped to {nw} x {nh} ({how})", before, copy, nw, nh, detail)
     r["box"] = list(box)
