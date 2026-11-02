@@ -32,6 +32,7 @@ _secret = None
 
 
 def init():
+    """Create the admin account named by ADMIN_USER / ADMIN_PASSWORD on a first start with no users yet."""
     # the users table (and its person / email columns) is part of the schema vdb.ensure_schema keeps; state.init ran it
     name, pw = config.ADMIN_USER, config.ADMIN_PASSWORD
     if name and pw and not any_users():
@@ -73,6 +74,7 @@ _DUMMY_HASH = None  # a hash to check an unknown name against (made once, so a m
 
 
 def check_password(pw: str, stored: str) -> bool:
+    """Whether pw matches the stored scrypt hash (either format); False, never an exception, for a malformed hash."""
     try:
         parts = stored.split("$")
         if parts[0] == "scrypt2":
@@ -97,6 +99,7 @@ COLS = "id, name, role, created, last_login, hash, person, email, listed"
 
 
 def row(r) -> dict:
+    """One user_accounts row (selected as COLS) as the dict the API serves; the hash itself is never in it."""
     return {"id": r[0], "name": r[1], "role": r[2], "created": r[3], "last_login": r[4], "passwordless": not r[5], "person": r[6], "email": r[7] or "", "listed": r[8] != 0}
 
 
@@ -134,6 +137,7 @@ def invalidate():
 
 
 def any_users() -> bool:
+    """Whether any account exists (then sign-in is required); cached for CACHE_S seconds, it is asked on every request."""
     if _cache["any"] is not None and time.time() - _cache["any_at"] < CACHE_S:
         return _cache["any"]
     con = state.connect()
@@ -146,6 +150,7 @@ def any_users() -> bool:
 
 
 def list_users() -> list:
+    """Every account, oldest first, as row() dicts."""
     con = state.connect()
     try:
         return [row(r) for r in con.execute(f"SELECT {COLS} FROM user_accounts ORDER BY id")]
@@ -154,6 +159,7 @@ def list_users() -> list:
 
 
 def get(user_id: int):
+    """One account as a row() dict, or None."""
     con = state.connect()
     try:
         r = con.execute(f"SELECT {COLS} FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
@@ -163,6 +169,7 @@ def get(user_id: int):
 
 
 def create(name: str, password: str, role: str, email: str = "") -> dict:
+    """A new account; returns it as a row() dict. ValueError with the message to show for a bad name, role, password or email."""
     invalidate()
     name = name.strip()
     email = clean_email(email)
@@ -189,6 +196,7 @@ def create(name: str, password: str, role: str, email: str = "") -> dict:
 
 
 def update(user_id: int, role: str = None, password: str = None, name: str = None, email: str = None, listed: bool = None):
+    """Change the given fields of an account (None: unchanged). A new password signs the user's other sessions out. ValueError with the message to show."""
     invalidate()
     con = state.connect()
     try:
@@ -232,6 +240,7 @@ def update(user_id: int, role: str = None, password: str = None, name: str = Non
 
 
 def delete(user_id: int):
+    """Remove an account; ValueError when it is the only admin."""
     invalidate()
     con = state.connect()
     try:
@@ -252,6 +261,7 @@ def _forget_proxy_identities():
 
 
 def authenticate(name: str, password: str):
+    """The account as a row() dict when the password is right, else None; takes the same time for an unknown name as for a wrong password."""
     con = state.connect()
     try:
         r = con.execute("SELECT id, hash FROM user_accounts WHERE name = ?", (name.strip(),)).fetchone()
@@ -294,8 +304,10 @@ def set_person(user_id: int, tag_id):
         con.close()
 
 
-# ---- per-user settings (display preferences the browser used to keep in localStorage)
+# ---- per-user settings: display preferences (sort order, theme, grid size...) stored with the account, so they
+# follow the user to every browser and app instead of living in one browser's localStorage
 def get_settings(user_id: int) -> dict:
+    """The user's own display preferences (a free-form JSON object the apps read and write)."""
     con = state.connect()
     try:
         r = con.execute("SELECT settings FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
@@ -305,6 +317,7 @@ def get_settings(user_id: int) -> dict:
 
 
 def set_settings(user_id: int, changes: dict) -> dict:
+    """Merge changes into the user's preferences (None removes a key; keys and values are limited in size) and return the result."""
     cur = get_settings(user_id)
     for k, v in changes.items():
         if not isinstance(k, str) or len(k) > 64:
@@ -361,6 +374,7 @@ def login_failed(key: str, free: int = LOCK_AFTER) -> int:
 
 
 def login_succeeded(key: str):
+    """Forget the failed attempts counted against this name or address (the throttle resets on a right password)."""
     with _attempts_lock:
         _attempts.pop(key, None)
 
@@ -390,6 +404,7 @@ def end_all_sessions(user_id: int):
 
 
 def make_token(user_id: int) -> str:
+    """A session token: user id, expiry and an HMAC over both with the user's session salt, so a password change (new salt) ends every session."""
     payload = f"{user_id}.{int(time.time()) + SESSION_DAYS * 86400}"
     sig = hmac.new(_key(), (payload + "|" + _session_salt(user_id)).encode(), hashlib.sha256).hexdigest()
     return payload + "." + sig
@@ -427,6 +442,7 @@ def renew_due(token: str) -> bool:
 
 
 def user_from_token(token: str):
+    """The account a session token stands for, or None; cached briefly, the cookie is checked on every request."""
     hit = _cache["tokens"].get(token)
     if hit and time.time() - hit[0] < CACHE_S:
         return hit[1]
@@ -456,10 +472,12 @@ def can_write(user) -> bool:
 
 
 def is_admin(user) -> bool:
+    """Whether this user may administer; with no accounts at all, everyone may."""
     return not any_users() or (user is not None and user["role"] == "admin")
 
 
 def is_signed_in(user) -> bool:
+    """Whether this request counts as signed in; with no accounts at all, every request does."""
     return not any_users() or user is not None
 
 

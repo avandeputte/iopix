@@ -240,7 +240,7 @@ def _new_values(regions: list, fn) -> tuple:
 INVERSE = {"right": "left", "left": "right", "180": "180", "fliph": "fliph", "flipv": "flipv"}
 
 
-def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list, dropped: list, check_running: bool, restore_regions: list = None,
+def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list, dropped: list, require_digikam_closed: bool, restore_regions: list = None,
               add_regions: list = (), con=None):
     """The photo's rows after a pixel change: in its own guarded transaction, or inside a batch's (con given)."""
     if con is not None:
@@ -248,7 +248,7 @@ def _write_db(pid: int, w: int, h: int, orientation: int, size: int, kept: list,
         return
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_regions, add_regions)
 
 
@@ -287,12 +287,12 @@ def _finish(p: dict, orientation: int, summary: str, before: dict, copy: str, w:
 
 
 # ---- rotate and flip
-def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
+def transform_one(pid: int, op: str, require_digikam_closed: bool = True) -> dict:
     if op not in OPS:
         raise SyncError("Unknown transform")
     p = photo(pid)
     check(p)
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+    dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the photo")
     W, H = upright_size(p["w"], p["h"], p["orientation"])
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
     copy = copy_before(p["path"])
@@ -326,25 +326,25 @@ def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
         how = "orientation flag"
     size = os.stat(p["path"]).st_size
     try:
-        _write_db(p["id"], w, h, orientation, size, kept, dropped, check_running)
+        _write_db(p["id"], w, h, orientation, size, kept, dropped, require_digikam_closed)
     except BaseException:  # the database refused: the file goes back as it was
         shutil.copy2(copy, p["path"])
         raise
     return _finish(p, orientation, f"{OPS[op]} ({how})", before, copy, w, h, {"lossless": op, "how": how})
 
 
-def transform(ids: list, op: str, check_running: bool = True) -> dict:
+def transform(ids: list, op: str, require_digikam_closed: bool = True) -> dict:
     done, failed = [], []
     for pid in ids:
         try:
-            done.append(transform_one(int(pid), op, check_running))
+            done.append(transform_one(int(pid), op, require_digikam_closed))
         except (SyncError, OSError, ValueError, subprocess.SubprocessError) as e:
             failed.append({"id": pid, "error": str(e)})
     return {"done": done, "failed": failed}
 
 
 # ---- crop
-def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: bool = False, con=None, after: list = None) -> dict:
+def crop(pid: int, rect: list, require_digikam_closed: bool = True, reencode_damaged: bool = False, con=None, after: list = None) -> dict:
     """Crop a photo to the upright rectangle rect. JPEGs through jpegtran, without re-encoding. With reencode_damaged,
     a damaged JPEG whose structure jpegtran refuses is decoded as far as it goes and saved again at the quality it had
     (only for keeping the intact part of a damaged photo). con and after: a batch's transaction (dbsync.batch) to write the
@@ -370,7 +370,7 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
     if p["ext"] not in JPEG_EXT and p["ext"] not in PIL_CROP_EXT and p["ext"] not in HEIF_EXT:
         raise SyncError("Cropping here works for JPEG, PNG, TIFF, WebP and HEIC files")
     if con is None:
-        dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+        dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the photo")
     before = {"width": p["w"], "height": p["h"], "orientation": p["orientation"], "fileSize": p["size"], "regions": p["regions"]}
     copy = copy_before(p["path"])
     lossless_jpeg = p["ext"] in JPEG_EXT
@@ -430,7 +430,7 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
     kept, dropped = _new_values(p["regions"], lambda r: crop_rect(r, box))
     size = os.stat(p["path"]).st_size
     try:
-        _write_db(p["id"], nw, nh, 1, size, kept, dropped, check_running, con=con)
+        _write_db(p["id"], nw, nh, 1, size, kept, dropped, require_digikam_closed, con=con)
     except BaseException:  # the database refused: the file goes back as it was
         shutil.copy2(copy, p["path"])
         raise
@@ -449,7 +449,7 @@ def crop(pid: int, rect: list, check_running: bool = True, reencode_damaged: boo
 
 
 # ---- undo
-def undo(entry: dict, check_running: bool = True) -> dict:
+def undo(entry: dict, require_digikam_closed: bool = True) -> dict:
     """The file, digiKam's rows and the regions as they were before this edit."""
     u = (entry.get("undo") or {}).get("lossless")
     if not u:
@@ -459,7 +459,7 @@ def undo(entry: dict, check_running: bool = True) -> dict:
         raise FileNotFoundError("The copy of the file from before this edit is gone")
     p = photo(entry["photo"])
     check(p)
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+    dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the photo")
     # the face boxes as they are now, turned back: face changes made since the edit (a face named, removed...) stay,
     # instead of the boxes saved at the time coming back over them
     d = entry.get("details") or {}
@@ -480,9 +480,9 @@ def undo(entry: dict, check_running: bool = True) -> dict:
     shutil.copy2(copy, p["path"])
     size = os.stat(p["path"]).st_size
     if restore is not None and op not in INVERSE and op != "crop":
-        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, [], [], check_running, restore_regions=restore)
+        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, [], [], require_digikam_closed, restore_regions=restore)
     else:
-        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, kept, dropped, check_running, add_regions=restore or [])
+        _write_db(p["id"], u["width"], u["height"], u["orientation"], size, kept, dropped, require_digikam_closed, add_regions=restore or [])
     _sidecar(p["path"], u["orientation"])
     facemgr.write_regions_many([p["id"]])
     thumbs.forget(p["id"])

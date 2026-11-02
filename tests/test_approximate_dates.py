@@ -130,22 +130,23 @@ def test_bad_precision_is_refused(client, lib):
 
 
 def test_the_mcp_tool_counts_then_marks_by_year(client, lib):
-    from app import mcp_server, updates
+    from app import updates
+    from app.mcp import admin
     tok = updates.admin_token()
     con = index.open_index()
     pid, taken = con.execute("SELECT id, taken FROM photos WHERE video = 0 AND taken IS NOT NULL ORDER BY id LIMIT 1").fetchone()
     n_year = con.execute("SELECT count(*) FROM photos WHERE substr(taken, 1, 4) = ?", (taken[:4],)).fetchone()[0]
     con.close()
-    r = mcp_server.set_date_precision(tok, "unknown", years=[int(taken[:4])])
+    r = admin.set_date_precision(tok, "unknown", years=[int(taken[:4])])
     assert r["photos"] == n_year and r["per_year"] == {taken[:4]: n_year} and "started" not in r, r
     try:
-        r = mcp_server.set_date_precision(tok, "unknown", ids=[pid], dry_run=False)
+        r = admin.set_date_precision(tok, "unknown", ids=[pid], dry_run=False)
         assert r["started"] == 1, r
         for _ in range(100):
-            if not mcp_server._precision_job["running"]:
+            if not admin.precision_job["running"]:
                 break
             time.sleep(0.1)
-        assert mcp_server._precision_job["done"] == 1 and not mcp_server._precision_job["error"], mcp_server._precision_job
+        assert admin.precision_job["done"] == 1 and not admin.precision_job["error"], admin.precision_job
         assert edits.pending()[pid]["date_precision"] == "unknown" and edits.pending()[pid]["taken"] == taken[:19]
     finally:
         client.post("/api/edit/revert", json={"ids": [pid]})

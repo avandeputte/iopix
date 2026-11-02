@@ -306,7 +306,7 @@ OPS = {"add": _op_add, "rename": _op_tree, "move": _op_tree, "delete": _op_tree,
        "icon": _op_icon, "notperson": _op_notperson, "person": _op_person, "merge": _op_merge}
 
 
-def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: bool = True, backup: bool = True) -> dict:
+def apply(op: dict, db_path: Path = None, require_digikam_closed: bool = True, queue: bool = True, backup: bool = True) -> dict:
     """op: {op: add, parent, name} | {op: rename, id, name} | {op: move, id, parent} | {op: delete, id}
        | {op: icon, id, photo} | {op: notperson, id} | {op: person, id} | {op: merge, id, into}. Returns a summary including how many sidecar files will be updated.
     `backup=False` is for callers that run several operations in a row and took one
@@ -315,13 +315,13 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
     kind = op.get("op")
     if kind not in OPS:
         raise SyncError("Unknown tag operation.")
-    dbsync.preflight(db_path, check_running, "tags")
+    dbsync.preflight(db_path, require_digikam_closed, "tags")
     if queue and pending_jobs():
         raise SyncError("Sidecar files from the previous tag change are still being updated. Try again in a moment.")
     backup_file = dkdb.backup(db_path, force=(kind in ("delete", "merge"))) if backup else None  # deleting or merging a tag is destructive
     stamp = time.strftime("%Y%m%d-%H%M%S")
 
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         c = _Change(con, stamp)
         c.summary["op"] = kind
         OPS[kind](c, op)
@@ -346,13 +346,13 @@ def apply(op: dict, db_path: Path = None, check_running: bool = True, queue: boo
     return summary
 
 
-def add_tags(full_paths: list, check_running: bool = True, db_path: Path = None) -> dict:
+def add_tags(full_paths: list, require_digikam_closed: bool = True, db_path: Path = None) -> dict:
     """Create every tag path that does not exist yet ("Places/France/Paris" makes the missing parents too), as one
     guarded write: one preflight, one transaction. Returns {full path: tag id} for every path, existing ones included."""
     db_path = Path(db_path or dkdb.sqlite_path())
-    dbsync.preflight(db_path, check_running, "tags")
+    dbsync.preflight(db_path, require_digikam_closed, "tags")
     out = {}
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         tree = _Tree(con)
         by_path = {tree.full(t): t for t in tree.rows}
         for full in sorted(set(full_paths)):  # parents before children

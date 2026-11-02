@@ -65,6 +65,7 @@ def settings() -> dict:
 
 
 def sqlite_path() -> Path:
+    """Where digiKam's SQLite database file is (or would be, for a MySQL library's local copies)."""
     return Path(settings()["sqlite_dir"]) / "digikam4.db"
 
 
@@ -98,6 +99,7 @@ def test_connection(c: dict = None) -> dict:
 
 
 def is_mysql() -> bool:
+    """Whether digiKam's database is MySQL (SQLite otherwise)."""
     return settings()["type"] == "mysql"
 
 
@@ -108,6 +110,7 @@ def no_digikam() -> bool:
 
 
 def describe() -> str:
+    """The database's location for status pages: the SQLite path, the MySQL user@host/database, or none."""
     c = settings()
     if c["type"] == "none":
         return "none"
@@ -129,6 +132,7 @@ _dates = {"utc": None}
 
 
 def mysql_dates_utc() -> bool:
+    """Whether digiKam stores its dates in UTC in this MySQL database (detected once, or forced by MYSQL_DATES); SQLite is always local time."""
     forced = config.mysql_dates_env()
     if forced in ("local", "utc"):
         return forced == "utc"
@@ -316,6 +320,7 @@ def sync_enabled() -> bool:
 
 
 def standalone() -> bool:
+    """Whether the viewer runs without syncing to a digiKam database (its own library tables are the source then)."""
     return not sync_enabled()
 
 
@@ -550,7 +555,7 @@ def stamp_files(items: list):
                 import logging
                 logging.getLogger("app.digikam.dkdb").info("file dates left to digiKam's rescan (digiKam is running)")
                 return 0
-            with dbsync.write_transaction(sqlite_path(), check_running=False) as wcon:
+            with dbsync.write_transaction(sqlite_path(), require_digikam_closed=False) as wcon:
                 wcon.executemany("UPDATE Images SET modificationDate = ? WHERE id = ?", rows)
     except Exception as e:  # digiKam then rescans these files once; nothing is lost
         import logging
@@ -565,6 +570,7 @@ write_lock = _threading.RLock()  # the viewer's own writes to digiKam's database
 
 
 def note_own_write():
+    """Remember that the viewer just wrote digiKam's database, so the next change seen there is not taken for digiKam's own."""
     _own_write["at"] = time.time()
 
 
@@ -666,5 +672,6 @@ def backup(db_path=None, force: bool = False):
 
 
 def prune(pattern: str):
+    """Delete all but the newest KEEP_BACKUPS database backups matching the glob."""
     for old in sorted(BACKUP_DIR.glob(pattern))[:-KEEP_BACKUPS]:
         old.unlink(missing_ok=True)

@@ -14,6 +14,7 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def fts_query(text: str):
+    """The FTS5 MATCH expression for free text: each word (up to 12) as a quoted prefix; None when there is no word."""
     words = WORD_RE.findall(text or "")
     return " ".join(f'"{w}"*' for w in words[:12]) if words else None
 

@@ -15,7 +15,7 @@ from app.photos import consistency, dateprecision, edits, metaedit, placetags, t
 from app.digikam import dbsync, dkdb
 from app.geo import gpx
 from app.data import state as appstate
-from app.http import form_items, json_body
+from app.http import MAX_IDS, form_items, json_body
 from app.runtime import DB_ERRORS, db, resolve
 from app.digikam.dkdb import in_chunks
 
@@ -77,17 +77,22 @@ def _current_tag_paths(tag_ids: list, fallback: dict) -> list:
         return [fallback[t] for t in tag_ids]
 
 
-@router.post("/api/edit", dependencies=[access.editor_write])
-async def api_edit(request: Request):
-    """Change metadata for one or more photos. Written to XMP sidecars (and into the image
-    files when that setting is on); digiKam's database only on a later explicit apply.
-    Body: {ids: [...], changes: {rating, pick, color, title, caption, taken, shift, gps, template,
-    add_tags: [tag ids], remove_tags: [tag ids]}}"""
-    if not edits.available():
-        raise HTTPException(503, "Editing is not available")
-    body = await json_body(request)
-    ids = [int(i) for i in body.get("ids", [])][:20000]
-    raw = body.get("changes") or {}
+# what one edit may carry: a title or caption longer than this is a document, not a field (digiKam shows a
+# few hundred characters); a template field is one line; the TEMPLATE_FIELDS keys say which fields exist
+MAX_TEXT = 4000
+MAX_TEMPLATE_FIELD = 1000
+MAX_GPS_ACCURACY_M = 1_000_000  # "somewhere in this country" is the vaguest position worth storing
+TAKEN_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+KNOWN_DATE_RE = re.compile(r"^\d{4}(-\d{2}(-\d{2}T\d{2}:\d{2}:\d{2})?)?$")  # "YYYY", "YYYY-MM" or a full date
+
+
+def parse_changes(raw: dict) -> dict:
+    """The `changes` of an edit request as edits.apply takes them: ratings and labels clamped to their ranges,
+    texts trimmed and cut, dates checked, a GPS position rounded and range-checked, template fields limited to
+    the known ones; keys it does not know are ignored. Tags (add_tags / remove_tags) need the index and are
+    resolved by the route. A date precision comes back as "date_precision" and "date_known" (the part of the date
+    that is known), which the route hands to dateprecision.prepare; "taken" is left out then, as prepare sets the
+    placeholder date per photo. Raises HTTPException(400) with the message the user sees for a malformed value."""
     ch = {}
     if "rating" in raw:
         ch["rating"] = max(0, min(5, int(raw["rating"])))
@@ -97,11 +102,10 @@ async def api_edit(request: Request):
         ch["color"] = max(0, min(9, int(raw["color"])))
     for k in ("title", "caption"):
         if k in raw:
-            ch[k] = str(raw[k] or "").strip()[:4000]
-    per_photo = {}
+            ch[k] = str(raw[k] or "").strip()[:MAX_TEXT]
     if raw.get("taken") and raw.get("date_precision") is None:
         t = str(raw["taken"])[:19]
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", t):
+        if not TAKEN_RE.match(t):
             raise HTTPException(400, "Date must be YYYY-MM-DDTHH:MM:SS")
         ch["taken"] = t
     prec = raw.get("date_precision")
@@ -111,9 +115,10 @@ async def api_edit(request: Request):
         if raw.get("shift"):
             raise HTTPException(400, "A date shift and a change of how well the date is known go in separate edits")
         known = str(raw.get("taken") or "")[:19]  # "YYYY", "YYYY-MM" or a full date: the part that is known
-        if known and not re.match(r"^\d{4}(-\d{2}(-\d{2}T\d{2}:\d{2}:\d{2})?)?$", known):
+        if known and not KNOWN_DATE_RE.match(known):
             raise HTTPException(400, "Date must be YYYY, YYYY-MM or YYYY-MM-DDTHH:MM:SS")
         ch.pop("taken", None)
+        ch["date_precision"], ch["date_known"] = prec, known
     if raw.get("shift"):  # seconds, applied to each photo's own latest date inside edits.apply (under its lock)
         try:
             ch["shift"] = int(raw["shift"])
@@ -135,11 +140,28 @@ async def api_edit(request: Request):
             except (TypeError, ValueError):
                 raise HTTPException(400, "accuracy is a number of metres")
             if acc > 0:
-                ch["gps"]["accuracy"] = round(min(acc, 1_000_000), 1)
+                ch["gps"]["accuracy"] = round(min(acc, MAX_GPS_ACCURACY_M), 1)
         else:
             ch["gps"] = None
     if isinstance(raw.get("template"), dict):
-        ch["template"] = {k: str(v or "").strip()[:1000] for k, v in raw["template"].items() if k in edits.TEMPLATE_FIELDS}
+        ch["template"] = {k: str(v or "").strip()[:MAX_TEMPLATE_FIELD] for k, v in raw["template"].items() if k in edits.TEMPLATE_FIELDS}
+    return ch
+
+
+@router.post("/api/edit", dependencies=[access.editor_write])
+async def api_edit(request: Request):
+    """Change metadata for one or more photos. Written to XMP sidecars (and into the image
+    files when that setting is on); digiKam's database only on a later explicit apply.
+    Body: {ids: [...], changes: {rating, pick, color, title, caption, taken, shift, gps, template,
+    add_tags: [tag ids], remove_tags: [tag ids]}}"""
+    if not edits.available():
+        raise HTTPException(503, "Editing is not available")
+    body = await json_body(request)
+    ids = [int(i) for i in body.get("ids", [])][:MAX_IDS]
+    raw = body.get("changes") or {}
+    ch = parse_changes(raw)
+    prec, known = ch.pop("date_precision", None), ch.pop("date_known", "")  # dateprecision.prepare puts them in the edit's own form
+    per_photo = {}
     con = db()
     try:
         for k in ("add_tags", "remove_tags"):
@@ -189,7 +211,7 @@ def current_dates(ids: list) -> dict:
 async def api_edit_revert(request: Request):
     """Undo the viewer's edits to these photos by restoring the sidecar backup."""
     body = await json_body(request)
-    ids = [int(i) for i in body.get("ids", [])][:20000]
+    ids = [int(i) for i in body.get("ids", [])][:MAX_IDS]
     # edited in the index, or edited a moment ago and not in the index yet (an undo right after the edit)
     fresh = [i for i in ids if edits.pending_one(i)] if len(ids) <= 200 else list(set(ids) & set(edits.pending()))
     con = db()
@@ -239,7 +261,7 @@ async def api_consistency_scan(request: Request):
 async def api_consistency_sync(request: Request):
     """Body: {ids, source: db|sidecar|file, targets: [...], fields: [...]}."""
     body = await json_body(request)
-    ids = [int(i) for i in body.get("ids", [])][:20000]
+    ids = [int(i) for i in body.get("ids", [])][:MAX_IDS]
     try:
         res = await run_in_threadpool(consistency.sync, ids, body.get("source"), body.get("targets") or [], body.get("fields"))
     except dbsync.SyncError as e:
@@ -303,7 +325,7 @@ async def api_gpx_preview(request: Request):
         raise HTTPException(400, f"Could not read the GPX file: {e}")
     if not points:
         raise HTTPException(400, "The GPX file has no timed track points")
-    ids = [int(x) for x in str(form.get("ids", "")).split(",") if x.strip().isdigit()][:20000]
+    ids = [int(x) for x in str(form.get("ids", "")).split(",") if x.strip().isdigit()][:MAX_IDS]
     utc_offset, clock_shift = int(form.get("utc_offset") or 0), int(form.get("clock_shift") or 0)
     max_gap = max(10, min(int(form.get("max_gap") or 600), 86400))
     only_missing = str(form.get("only_missing", "1")) == "1"
@@ -335,7 +357,7 @@ async def api_gpx_apply(request: Request):
     points = (_gpx_tracks.get(str(body.get("token"))) or (None, None))[1]
     if not points:
         raise HTTPException(409, "The track preview has expired; load the GPX file again")
-    ids = [int(i) for i in body.get("ids", [])][:20000]
+    ids = [int(i) for i in body.get("ids", [])][:MAX_IDS]
     con = db()
     try:
         rows = list(in_chunks(con, "SELECT id, ts, lat, path FROM photos WHERE video = 0 AND id IN ({ids})", ids))

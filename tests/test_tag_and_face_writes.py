@@ -29,25 +29,25 @@ def test_ordinary_changes_take_no_backup_destructive_ones_do_and_are_capped(dk, 
     """A full copy of digiKam's database on every change made changes slow (seconds on MariaDB): ordinary
     changes take none; deleting a tag (destructive) does, and at most KEEP_BACKUPS copies are kept."""
     before = _backups()
-    ids = [tagmanager.apply({"op": "add", "parent": 0, "name": f"zz-backup-probe-{i}"}, check_running=False)["id"] for i in range(12)]
-    tagmanager.apply({"op": "rename", "id": ids[0], "name": "zz-backup-probe-renamed"}, check_running=False)
+    ids = [tagmanager.apply({"op": "add", "parent": 0, "name": f"zz-backup-probe-{i}"}, require_digikam_closed=False)["id"] for i in range(12)]
+    tagmanager.apply({"op": "rename", "id": ids[0], "name": "zz-backup-probe-renamed"}, require_digikam_closed=False)
     assert _backups() == before, "adding and renaming tags take no full backup"
     for tid in ids:
-        tagmanager.apply({"op": "delete", "id": tid}, check_running=False)
+        tagmanager.apply({"op": "delete", "id": tid}, require_digikam_closed=False)
     after = _backups()
     assert len(after) == min(dkdb.KEEP_BACKUPS, len(before) + len(ids)), "deleting a tag takes one; at most KEEP_BACKUPS are kept"
 
 
 def test_add_rename_move_delete_plain_tag(dk):
-    r = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-probe"}, check_running=False)
+    r = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-probe"}, require_digikam_closed=False)
     tid = r["id"]
     assert _tags(dkdb.connect())[tid] == (0, "zz-probe")
-    tagmanager.apply({"op": "rename", "id": tid, "name": "zz-probe2"}, check_running=False)
+    tagmanager.apply({"op": "rename", "id": tid, "name": "zz-probe2"}, require_digikam_closed=False)
     assert _tags(dkdb.connect())[tid][1] == "zz-probe2"
-    r2 = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-parent"}, check_running=False)
-    tagmanager.apply({"op": "move", "id": tid, "parent": r2["id"]}, check_running=False)
+    r2 = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-parent"}, require_digikam_closed=False)
+    tagmanager.apply({"op": "move", "id": tid, "parent": r2["id"]}, require_digikam_closed=False)
     assert _tags(dkdb.connect())[tid][0] == r2["id"]
-    tagmanager.apply({"op": "delete", "id": r2["id"]}, check_running=False)
+    tagmanager.apply({"op": "delete", "id": r2["id"]}, require_digikam_closed=False)
     t = _tags(dkdb.connect())
     assert r2["id"] not in t and tid not in t, "deleting a tag removes its sub-tags too (digiKam's delete_tagstree)"
 
@@ -65,13 +65,13 @@ def test_person_can_be_created_under_people_root(dk):
 def test_people_root_and_internal_tags_are_protected(dk):
     root = _people_root(dk)
     with pytest.raises(Exception):
-        tagmanager.apply({"op": "rename", "id": root, "name": "Nope"}, check_running=False)
+        tagmanager.apply({"op": "rename", "id": root, "name": "Nope"}, require_digikam_closed=False)
     with pytest.raises(Exception):
-        tagmanager.apply({"op": "delete", "id": root}, check_running=False)
+        tagmanager.apply({"op": "delete", "id": root}, require_digikam_closed=False)
     person = dk.execute("SELECT t.id FROM Tags t JOIN TagProperties p ON p.tagid = t.id WHERE p.property = 'person' LIMIT 1").fetchone()
     if person:
         with pytest.raises(Exception):
-            tagmanager.apply({"op": "delete", "id": person[0]}, check_running=False)
+            tagmanager.apply({"op": "delete", "id": person[0]}, require_digikam_closed=False)
 
 
 def test_face_ignore_and_unknown_roundtrip(dk, lib):
@@ -153,7 +153,7 @@ def test_a_keyword_tag_marked_as_a_person_can_be_unmarked(lib, client):
     import sqlite3
     from app.digikam.dbsync import SyncError
     dk = sqlite3.connect(lib["db"])
-    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-food-probe"}, check_running=False)["id"]
+    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-food-probe"}, require_digikam_closed=False)["id"]
     dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', 'zz-food-probe')", (tid,))
     dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'faceEngineId', 'zz-food-probe')", (tid,))
     img = dk.execute("SELECT id FROM Images WHERE status = 1 LIMIT 1").fetchone()[0]
@@ -161,16 +161,16 @@ def test_a_keyword_tag_marked_as_a_person_can_be_unmarked(lib, client):
     dk.commit()
     try:
         with pytest.raises(SyncError, match="face box"):
-            tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+            tagmanager.apply({"op": "notperson", "id": tid}, require_digikam_closed=False)
         dk.execute("DELETE FROM ImageTagProperties WHERE tagid = ?", (tid,)); dk.commit()
-        tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+        tagmanager.apply({"op": "notperson", "id": tid}, require_digikam_closed=False)
         assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property IN ('person', 'faceEngineId')", (tid,)).fetchone()
         assert dk.execute("SELECT 1 FROM Tags WHERE id = ?", (tid,)).fetchone(), "the tag stays"
         with pytest.raises(SyncError, match="not marked"):
-            tagmanager.apply({"op": "notperson", "id": tid}, check_running=False)
+            tagmanager.apply({"op": "notperson", "id": tid}, require_digikam_closed=False)
     finally:
         dk.close()
-        tagmanager.apply({"op": "delete", "id": tid}, check_running=False)
+        tagmanager.apply({"op": "delete", "id": tid}, require_digikam_closed=False)
 
 
 def test_a_person_tagged_without_a_face_box_can_be_taken_off_the_photo(lib, client):
@@ -183,15 +183,15 @@ def test_a_person_tagged_without_a_face_box_can_be_taken_off_the_photo(lib, clie
         person = dk.execute("SELECT tagid FROM TagProperties WHERE property = 'person' AND value != '' LIMIT 1").fetchone()[0]
         img = dk.execute("SELECT id FROM Images WHERE status = 1 AND id NOT IN (SELECT imageid FROM ImageTagProperties WHERE tagid = ?) LIMIT 1", (person,)).fetchone()[0]
         dk.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (img, person)); dk.commit()
-        r = facemgr.apply({"op": "untag", "image": img, "tag": person}, check_running=False)
+        r = facemgr.apply({"op": "untag", "image": img, "tag": person}, require_digikam_closed=False)
         assert r["tag"] == person and not dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (img, person)).fetchone()
         assert facemgr.inverse_ops({"op": "untag", "tag": person}) == [{"op": "tagonly", "tag": person}]
-        facemgr.apply({"op": "tagonly", "image": img, "tag": person}, check_running=False)
+        facemgr.apply({"op": "tagonly", "image": img, "tag": person}, require_digikam_closed=False)
         assert dk.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (img, person)).fetchone(), "undo puts them back"
-        facemgr.apply({"op": "untag", "image": img, "tag": person}, check_running=False)
+        facemgr.apply({"op": "untag", "image": img, "tag": person}, require_digikam_closed=False)
         boxed = dk.execute("SELECT imageid, tagid FROM ImageTagProperties WHERE property = 'tagRegion' LIMIT 1").fetchone()
         with pytest.raises(SyncError, match="face box"):
-            facemgr.apply({"op": "untag", "image": boxed[0], "tag": boxed[1]}, check_running=False)
+            facemgr.apply({"op": "untag", "image": boxed[0], "tag": boxed[1]}, require_digikam_closed=False)
     finally:
         dk.close()
 
@@ -204,9 +204,9 @@ def test_merging_two_entries_of_one_person(lib, client):
     from app.digikam.dbsync import SyncError
     dk = sqlite3.connect(lib["db"])
     try:
-        a = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Hwang"}, check_running=False)["id"]
-        b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Wang"}, check_running=False)["id"]
-        kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-keyword"}, check_running=False)["id"]
+        a = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Hwang"}, require_digikam_closed=False)["id"]
+        b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Cynthia Wang"}, require_digikam_closed=False)["id"]
+        kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-keyword"}, require_digikam_closed=False)["id"]
         for t, n in ((a, "zz-Cynthia Hwang"), (b, "zz-Cynthia Wang")):
             dk.execute("INSERT INTO TagProperties (tagid, property, value) VALUES (?, 'person', ?)", (t, n))
         imgs = [r[0] for r in dk.execute("SELECT id FROM Images WHERE status = 1 LIMIT 3")]
@@ -224,8 +224,8 @@ def test_merging_two_entries_of_one_person(lib, client):
         gid = appstate.create_people_group("zz-merge")
         appstate.update_people_group(gid, members=[a])
         with pytest.raises(SyncError, match="person"):
-            tagmanager.apply({"op": "merge", "id": a, "into": kw}, check_running=False)
-        r = tagmanager.apply({"op": "merge", "id": a, "into": b}, check_running=False)
+            tagmanager.apply({"op": "merge", "id": a, "into": kw}, require_digikam_closed=False)
+        r = tagmanager.apply({"op": "merge", "id": a, "into": b}, require_digikam_closed=False)
         assert r["photos"] == 3 and r["backup"], r
         assert not dk.execute("SELECT 1 FROM Tags WHERE id = ?", (a,)).fetchone() and not dk.execute("SELECT 1 FROM ImageTags WHERE tagid = ?", (a,)).fetchone()
         assert {x[0] for x in dk.execute("SELECT imageid FROM ImageTags WHERE tagid = ?", (b,))} == set(imgs)
@@ -244,7 +244,7 @@ def test_merging_two_entries_of_one_person(lib, client):
                 break
             time.sleep(0.1)
         for t in (b, kw):
-            tagmanager.apply({"op": "delete", "id": t}, check_running=False, queue=False)
+            tagmanager.apply({"op": "delete", "id": t}, require_digikam_closed=False, queue=False)
 
 
 def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
@@ -262,7 +262,7 @@ def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
         dk.close()
     path = dict(__import__("app.digikam.dbsync", fromlist=["photo_paths"]).photo_paths([img]))[img]
     full = edits.digikam_tag_paths([img])[img]
-    r = facemgr.apply({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": person}, check_running=False)
+    r = facemgr.apply({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": person}, require_digikam_closed=False)
     try:
         assert r["sidecar"] == "written", r
         out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", "-XMP-lr:HierarchicalSubject", "-XMP-mwg-rs:RegionName", path + ".xmp"], capture_output=True, text=True).stdout
@@ -273,7 +273,7 @@ def test_naming_a_face_writes_the_person_into_the_sidecar_tag_list(lib, client):
         assert want and all(w in tags for w in want), (want, d)
         assert d.get("RegionName"), d
     finally:
-        facemgr.apply({"op": "remove", "image": img, "rect": [5, 5, 40, 40]}, check_running=False)
+        facemgr.apply({"op": "remove", "image": img, "rect": [5, 5, 40, 40]}, require_digikam_closed=False)
     out = subprocess.run([edits.EXIFTOOL, "-j", "-XMP-digiKam:TagsList", path + ".xmp"], capture_output=True, text=True).stdout
     tags = _json.loads(out)[0].get("TagsList") or []
     assert not any(w in (tags if isinstance(tags, list) else [tags]) for w in want), "removing the face takes the tag out of the sidecar too"
@@ -291,8 +291,8 @@ def test_people_on_a_video_and_one_person_per_name(lib, client):
     dk = sqlite3.connect(lib["db"])
     people = dk.execute("SELECT id FROM Tags WHERE name = 'People' AND pid = 0").fetchone()[0]
     dk.close()
-    fam = tagmanager.apply({"op": "add", "parent": people, "name": "Zz Fam"}, check_running=False)["id"]
-    kid = tagmanager.apply({"op": "add", "parent": fam, "name": "Zz Kid Person"}, check_running=False)["id"]  # a keyword, not marked
+    fam = tagmanager.apply({"op": "add", "parent": people, "name": "Zz Fam"}, require_digikam_closed=False)["id"]
+    kid = tagmanager.apply({"op": "add", "parent": fam, "name": "Zz Kid Person"}, require_digikam_closed=False)["id"]  # a keyword, not marked
     try:
         assert facemgr.create_person("zz kid person", 0) == kid, "the existing one, whatever the letter case"
         dk = sqlite3.connect(lib["db"])
@@ -322,18 +322,18 @@ def test_people_on_a_video_and_one_person_per_name(lib, client):
 
 def test_the_tag_manager_marks_a_tag_as_a_person_and_back(lib, client):
     import sqlite3
-    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-person-switch"}, check_running=False)["id"]
+    tid = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-person-switch"}, require_digikam_closed=False)["id"]
     try:
-        tagmanager.apply({"op": "person", "id": tid}, check_running=False, queue=False)
+        tagmanager.apply({"op": "person", "id": tid}, require_digikam_closed=False, queue=False)
         dk = sqlite3.connect(lib["db"])
         assert dk.execute("SELECT value FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone()[0] == "zz-person-switch"
         dk.close()
-        tagmanager.apply({"op": "notperson", "id": tid}, check_running=False, queue=False)
+        tagmanager.apply({"op": "notperson", "id": tid}, require_digikam_closed=False, queue=False)
         dk = sqlite3.connect(lib["db"])
         assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (tid,)).fetchone()
         dk.close()
     finally:
-        tagmanager.apply({"op": "delete", "id": tid}, check_running=False, queue=False)
+        tagmanager.apply({"op": "delete", "id": tid}, require_digikam_closed=False, queue=False)
 
 
 def test_a_face_refuses_a_keyword_tag_as_its_person(lib, client):
@@ -341,16 +341,16 @@ def test_a_face_refuses_a_keyword_tag_as_its_person(lib, client):
     tag elsewhere is refused and stays a keyword tag."""
     import sqlite3
     from app.digikam.dbsync import SyncError
-    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Activity-probe"}, check_running=False)["id"]
+    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Activity-probe"}, require_digikam_closed=False)["id"]
     dk = sqlite3.connect(lib["db"])
     try:
         img = dk.execute("SELECT id FROM Images WHERE status = 1 AND category = 1 LIMIT 1").fetchone()[0]
         for op in ({"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": kw}, {"op": "tagonly", "image": img, "tag": kw}):
             with pytest.raises(SyncError, match="keyword tag"):
-                facemgr.apply(op, check_running=False)
+                facemgr.apply(op, require_digikam_closed=False)
         assert not dk.execute("SELECT 1 FROM TagProperties WHERE tagid = ? AND property = 'person'", (kw,)).fetchone()
         r = client.post("/api/faces/op", json={"op": "add", "image": img, "rect": [5, 5, 40, 40], "tag": kw})
         assert r.status_code in (400, 409) and "keyword tag" in r.text, r.text
     finally:
         dk.close()
-        tagmanager.apply({"op": "delete", "id": kw}, check_running=False)
+        tagmanager.apply({"op": "delete", "id": kw}, require_digikam_closed=False)

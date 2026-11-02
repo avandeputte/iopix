@@ -1,5 +1,5 @@
 /** The timeline grid: layout, virtual rendering, selection by click and keyboard. */
-import { $, BREAK_PHONE, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtKnown, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
+import { $, BREAK_PHONE, MONTHS, PREF, api, date, dfDay, dfMonth, fill, fmtDur, fmtKnown, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
 import { S, ST, applyFilter, filterParams, loadState, onRoute, savedSearchFor, toast, toastError } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
@@ -9,7 +9,7 @@ import { LB, dropIndexes, openLightbox, sizeFrame, syncLightbox } from './lightb
 const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM
 export const G = { sel: new Set(), lastSel: -1, data: null, items: [], ar: null, total: 0, top0: 0, restore: 0, anchor: null, keepAt: -1, rendered: new Map(), token: 0,
-  size: store.get('tile', 'M') in SIZES ? store.get('tile', 'M') : 'M', group: store.get('group', 'day') === 'month' ? 'month' : 'day', lastTop: 0, lastT: 0, settle: 0, scrub: null };
+  size: store.get(PREF.tile, 'M') in SIZES ? store.get(PREF.tile, 'M') : 'M', group: store.get(PREF.group, 'day') === 'month' ? 'month' : 'day', lastTop: 0, lastT: 0, settle: 0, scrub: null };
 /** The section a timestamp belongs to in the chronological grid: its day, or its month. */
 function groupKey(ts) {
   if (G.group === 'month') { const dt = date(ts); return dt.getUTCFullYear() * 12 + dt.getUTCMonth(); }
@@ -154,11 +154,11 @@ function layoutGrid() {
     } }, icon('album'), h('span', null, 'Save search')) : null,
     byDate ? h('select', { title: 'Group the photos by day or by month', class: 'groupsel', onchange: (e) => {
       const anchor = firstVisibleIndex();
-      G.group = e.target.value; store.set('group', G.group); layoutGrid(); scrollToIndex(anchor, true); renderGrid(true);
+      G.group = e.target.value; store.set(PREF.group, G.group); layoutGrid(); scrollToIndex(anchor, true); renderGrid(true);
     } }, h('option', { value: 'day', selected: G.group === 'day' }, 'By day'), h('option', { value: 'month', selected: G.group === 'month' }, 'By month')) : null,
     h('span', { class: 'seg', title: 'Thumbnail size' }, ...Object.keys(SIZES).map((k) => h('button', { class: k === G.size ? 'on' : '', onclick: () => {
       const anchor = firstVisibleIndex();
-      G.size = k; store.set('tile', k); layoutGrid(); scrollToIndex(anchor, true); renderGrid(true);
+      G.size = k; store.set(PREF.tile, k); layoutGrid(); scrollToIndex(anchor, true); renderGrid(true);
     } }, k)))));
   buildScrubber(byDate);
 }

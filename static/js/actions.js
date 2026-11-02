@@ -1,12 +1,13 @@
 /** Selection bar actions and app-side state: favorites, albums, trash, move, rename, the edit log entries. */
-import { $, TOAST_LONG, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, send, store } from './core.js';
+import { $, PREF, TOAST_LONG, act, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, send, store } from './core.js';
 import { S, ST, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError, ualbumById } from './state.js';
 import { crumbs } from './search.js';
 import { G, dropPhotos, renderGrid, setBadges } from './grid.js';
 import { copyMetadata, dateEditor, editDialog, editPhotos, locationDialog, tagDialog } from './editing.js';
 import { downloadDialog } from './download.js';
 import { pageTitle } from './pages.js';
-import { LB, details, editMenu, openLightbox, showItem, toggleFaces, updateFavBtn } from './lightbox.js';
+import { LB, details, editMenu, openLightbox, showItem, updateFavBtn } from './lightbox.js';
+import { toggleFaces } from './faces.js';
 import { pollStatus } from './main.js';
 
 function redrawTiles() {
@@ -94,7 +95,7 @@ export function histEntry(e, onDone, withPhoto) {
 }
 export async function showHistory(params) {
   const photo = params.get('photo'), more = h('button', { class: 'pillbtn my14', hidden: true }, 'Show more');
-  let size = store.get('hsize', 'list');
+  let size = store.get(PREF.hsize, 'list');
   const list = h('div', { class: 'hlist qitems ' + size });
   let action = params.get('action') || '', offset = 0, timer = 0, token = 0;  // token: a slow earlier search must not land after a newer one
   const sel = h('select', { onchange: (e) => { action = e.target.value; reload(); } }, h('option', { value: '' }, 'Every change'), ...Object.entries(HIST_ACTION).map(([k, l]) => h('option', { value: k, selected: k === action }, l)));
@@ -106,7 +107,7 @@ export async function showHistory(params) {
   const from = h('input', { type: 'date', class: 'einput', style: 'width:150px', title: 'From', onchange: () => reload() });
   const to = h('input', { type: 'date', class: 'einput', style: 'width:150px', title: 'Until', onchange: () => reload() });
   const sizes = h('div', { class: 'eseg', title: 'Thumbnail size' }, [['list', 'List'], ['large', 'Large'], ['huge', 'Larger']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
-    size = k; store.set('hsize', k); list.className = 'hlist qitems ' + k; sizes.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+    size = k; store.set(PREF.hsize, k); list.className = 'hlist qitems ' + k; sizes.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
   const count = h('span', { class: 'muted' });
   const query = () => {
     const u = new URLSearchParams({ limit: 100, offset });
@@ -173,16 +174,26 @@ export async function trashPhotos(ids, after) {
     comeBack();
   }).catch((e) => toastError(e));
 }
+/** A dialog with a filter box over a list: rows(filter, pick) returns the .frow elements for what is typed, pick(x) closes
+ *  the dialog and hands x on; opts: placeholder, maxHeight, onEnter(filter) (Enter in the box, with the normalised text).
+ *  Returns {back, inp, draw}, so a caller can redraw when more arrives. */
+export function listPicker(title, rows, onPick, { placeholder = 'Type to filter…', maxHeight = '45vh', onEnter } = {}) {
+  const inp = h('input', { class: 'pagefilter wfull', placeholder });
+  const list = h('div', { class: 'alist', style: `max-height:${maxHeight};margin-top:8px` });
+  const pick = (x) => { back.remove(); onPick(x); };
+  const draw = () => fill(list, rows(norm(inp.value), pick));
+  inp.oninput = draw;
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter' && onEnter) onEnter(norm(inp.value), pick); };
+  const back = modal(title, inp, list, { buttons: ['Cancel'] });
+  draw(); inp.focus();
+  return { back, inp, draw };
+}
 /** Pick a folder of the library; onPick(folder) with {id, path}. */
 export async function folderPicker(title, onPick, exclude) {
   let d; try { d = await api('/api/folders'); } catch (e) { toastError(e); return; }
   const all = d.folders.map((f) => ({ ...f, _n: norm(f.path) })).filter((f) => !exclude || !exclude(f)).sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
-  const inp = h('input', { class: 'pagefilter wfull', placeholder: 'Type part of a folder name…' });
-  const list = h('div', { class: 'alist', style: 'max-height:45vh;margin-top:8px' });
-  const draw = () => { const f = norm(inp.value); fill(list, all.filter((x) => !f || x._n.includes(f)).slice(0, 200).map((x) => h('div', { class: 'frow', onclick: () => { back.remove(); onPick(x); } }, icon('folder'), h('span', { class: 'nm' }, x.path), x.nAll ? h('span', { class: 'ct' }, nf.format(x.nAll)) : null))); };
-  inp.oninput = draw; inp.onkeydown = (e) => e.stopPropagation();
-  const back = modal(title, inp, list, h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel')));
-  draw(); inp.focus();
+  listPicker(title, (f, pick) => all.filter((x) => !f || x._n.includes(f)).slice(0, 200).map((x) => h('div', { class: 'frow', onclick: () => pick(x) }, icon('folder'), h('span', { class: 'nm' }, x.path), x.nAll ? h('span', { class: 'ct' }, nf.format(x.nAll)) : null)),
+    onPick, { placeholder: 'Type part of a folder name…' });
 }
 export function movePhotos(ids, after) {
   folderPicker(`Move ${plural(ids.length, 'photo')} to…`, async (f) => {
@@ -211,7 +222,7 @@ function renameByDate(ids) {
   } }, 'Rename');
   const back = modal(`Rename ${plural(ids.length, 'file')} by date`, h('div', { class: 'stack',}, pat, eg,
     h('p', { class: 'muted', style: 'font-size:12.5px;margin:0' }, 'The files are renamed in their folders, with their sidecars. Extensions stay. A name already taken gets -2, -3. digiKam sees the same files under their new names.')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), go_));
+    { buttons: ['Cancel', go_] });
 }
 export async function renamePhoto(d) {
   const n = await promptDialog('New file name (the extension stays)', d.name);
@@ -230,9 +241,17 @@ export async function setFavorite(ids, on) {
   if (LB.open) updateFavBtn();
   if (ids.length > 1) toast(`${on ? 'Added' : 'Removed'} ${nf.format(ids.length)} ${on ? 'to' : 'from'} favorites.`);
 }
+/** The app's dialog: a title, the body (kids, as for h()) and, as the last argument, an optional { buttons } for the
+ *  .modal-btns row, so no dialog builds its own Cancel: a button is a label alone (it only closes the dialog), [label,
+ *  onclick, cls] (cls 'on' marks the main one, which the tests click) or a ready element; null entries are skipped. */
 export function modal(title, ...kids) {
+  const last = kids[kids.length - 1];
+  const opts = last && typeof last === 'object' && !last.nodeType && !Array.isArray(last) && 'buttons' in last ? kids.pop() : null;
+  const button = (b) => b == null ? null : typeof b === 'string' ? h('button', { class: 'pillbtn', onclick: () => back.remove() }, b)
+    : Array.isArray(b) ? h('button', { class: 'pillbtn' + (b[2] ? ' ' + b[2] : ''), onclick: b[1] }, b[0]) : b;
   const back = h('div', { class: 'modal-back', onclick: (e) => { if (e.target === back) back.remove(); } },
-    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': typeof title === 'string' ? title : null, tabindex: '-1' }, h('h3', null, title), ...kids));
+    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': typeof title === 'string' ? title : null, tabindex: '-1' }, h('h3', null, title), ...kids,
+      opts ? h('div', { class: 'modal-btns' }, opts.buttons.map(button)) : null));
   // Escape closes it whatever has focus (fields stop keydown from bubbling, so this listens on the way down);
   // the one that must be answered (sign-in required) stays
   back.addEventListener('keydown', (e) => {
@@ -261,7 +280,7 @@ export function confirmDialog(message, opts = {}) {
     const finish = (v) => { if (settled) return; settled = true; resolve(v); };
     const ok = h('button', { class: 'pillbtn ' + (opts.danger ? 'danger' : 'on'), onclick: () => { finish(true); back.remove(); } }, opts.ok || 'OK');
     const cancel = h('button', { class: 'pillbtn', onclick: () => { finish(false); back.remove(); } }, opts.cancel || 'Cancel');
-    const back = modal(opts.title || (paras.length > 1 ? paras.shift().textContent : 'Confirm'), ...paras, h('div', { class: 'modal-btns' }, cancel, ok));
+    const back = modal(opts.title || (paras.length > 1 ? paras.shift().textContent : 'Confirm'), ...paras, { buttons: [cancel, ok] });
     const remove = back.remove; back.remove = () => { remove(); finish(false); };  // closed any other way (Escape, the backdrop): no
     back.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !opts.danger && e.target !== cancel) { e.preventDefault(); ok.click(); } });  // Enter on Cancel cancels
     setTimeout(() => (opts.danger ? cancel : ok).focus(), 0);
@@ -277,7 +296,7 @@ export function promptDialog(message, opts = {}) {
     const done = () => { finish(input.value.trim()); back.remove(); };
     input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); done(); } };
     const back = modal(opts.title || message, opts.title ? h('p', null, message) : null, input,
-      h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => { finish(null); back.remove(); } }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: done }, opts.ok || 'OK')));
+      { buttons: [['Cancel', () => { finish(null); back.remove(); }], [opts.ok || 'OK', done, 'on']] });
     const remove = back.remove; back.remove = () => { remove(); finish(null); };  // closed any other way: cancelled
     setTimeout(() => { input.focus(); if (opts.value) input.select(); }, 0);
   });
@@ -348,7 +367,7 @@ function qualityContext(q, body, refreshQuality) {
     openLightbox({ id: ids }, Math.max(0, ids.indexOf(x.photo)), true);
     setTimeout(() => { if (LB.open && !LB.faces) toggleFaces(); }, 600);
   } });
-  const size = store.get('qsize', 'large');
+  const size = store.get(PREF.qsize, 'large');
   // one entry handled: it folds away where it is, its list's count goes down, and the page stays where it was
   const gone = (ev) => {
     const row = ev?.target?.closest('.hrow'), sec = row?.closest('.qsec');
@@ -605,7 +624,7 @@ export async function showQuality() {
   const again = h('button', { class: 'pillbtn', onclick: () => showQuality() }, icon('spark'), 'Check again');
   const busy = p.running ? h('div', { class: 'enote' }, p.files ? `Fixing the image files… ${nf.format(p.done)} / ${nf.format(p.total)}.` : `Removing duplicate faces… ${nf.format(p.done)} / ${nf.format(p.total)} photos.`) : null;
   if (p.running) refreshQuality(4000);
-  const sizes = h('div', { class: 'eseg', title: 'Thumbnail size' }, [['list', 'List'], ['large', 'Large'], ['huge', 'Larger']].map(([k, l]) => h('button', { class: k === c.size ? 'on' : '', onclick: () => { store.set('qsize', k); showQuality(); } }, l)));
+  const sizes = h('div', { class: 'eseg', title: 'Thumbnail size' }, [['list', 'List'], ['large', 'Large'], ['huge', 'Larger']].map(([k, l]) => h('button', { class: k === c.size ? 'on' : '', onclick: () => { store.set(PREF.qsize, k); showQuality(); } }, l)));
   const reports = REPORTS.map(([key, build]) => [key, () => build(c)]);  // [key, build]: each check is its own report, opened from the tab bar or the overview
   const COUNTS = { near: q.near.extra, separate: q.separate.count, unnamed: q.unnamed.count, untagged: (q.untagged || {}).count || 0, nolocation: (q.nolocation || {}).count || 0, baddate: (q.baddate || {}).count || 0, wrongfolder: (q.wrongfolder || {}).count || 0, invalid: q.invalid.count };
   const TITLES = { near: 'Stored twice', separate: 'Same person in two places', unnamed: 'Faces without a name', untagged: 'People, but nobody tagged', nolocation: 'No location', baddate: 'Implausible date', wrongfolder: 'Date doesn’t match the folder', invalid: 'Outside the photo or empty' };
@@ -620,13 +639,13 @@ export async function showQuality() {
     fill(view, built.get(k));
     document.body.classList.toggle('cbulk-open', !!view.querySelector('.cbulk:not([hidden])'));
     [...bar.children].forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); b.setAttribute('aria-selected', b.dataset.tab === k); });
-    store.set('qcheck', k);
+    store.set(PREF.qcheck, k);
     if ((S.route.params.get('check') || 'overview') !== k) { if (k === 'overview') S.route.params.delete('check'); else S.route.params.set('check', k); history.replaceState(null, '', hashFor('quality', S.route.params)); }
   };
   bar.append(h('button', { class: 'pillbtn', role: 'tab', 'data-tab': 'overview', onclick: () => show('overview') }, 'Overview'),
     ...reports.map(([k]) => h('button', { class: 'pillbtn', role: 'tab', 'data-tab': k, onclick: () => show(k) }, TITLES[k], COUNTS[k] ? h('span', { class: 'muted' }, ` ${nf.format(COUNTS[k])}`) : null)));
   fill(body, h('div', { style: 'display:flex;gap:10px;align-items:center;margin:4px 0 6px;flex-wrap:wrap' }, again, h('span', { class: 'muted' }, `${nf.format(q.checked)} face regions checked ${fmtWhen(q.at)}.`), h('span', { style: 'flex:1' }), sizes), busy, bar, view);
-  show(S.route.params.get('check') || store.get('qcheck', 'overview'));
+  show(S.route.params.get('check') || store.get(PREF.qcheck, 'overview'));
 }
 /** Import: photos and videos from this device (or shared to the installed app) go into folders by date,
  *  duplicates are left out, each new file gets a sidecar. */
@@ -710,13 +729,13 @@ export async function showTrash() {
   let d; try { d = await api('/api/trash'); } catch (e) { fill(body, errorBox(e)); return; }
   if (S.route.view !== 'trash') return;
   const sel = new Set();
-  const act = async (path, payload, msg) => { try { const r = await post(path, payload); toast(msg(r), null, null, TOAST_LONG); } catch (e) { toastError(e); return; } pollSoon(600); showTrash(); };
+  const trashOp = (path, payload, msg) => act(() => post(path, payload), { toast: msg, ms: TOAST_LONG, after: () => { pollSoon(600); showTrash(); } });
   const chosen = () => (sel.size ? d.items.filter((t) => sel.has(t.info)) : d.items);
   const bar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 12px' });
   const drawBar = () => fill(bar,
     h('span', { class: 'muted' }, d.items.length ? `${plural(d.items.length, 'photo')} · ${fmtBytes(d.bytes)}${sel.size ? ` · ${nf.format(sel.size)} selected` : ''}` : 'The trash is empty.'),
-    d.items.length ? h('button', { class: 'pillbtn', onclick: () => act('/api/trash/restore', { infos: chosen().map((t) => t.info) }, (r) => `${plural(r.restored.length, 'photo')} restored${r.failed.length ? `, ${r.failed.length} not (${r.failed[0].error})` : ''}.`) }, sel.size ? `Restore ${nf.format(sel.size)}` : 'Restore all') : null,
-    d.items.length ? h('button', { class: 'pillbtn danger', onclick: async () => { const c = chosen(); if (!await confirmDialog(`Delete ${plural(c.length, 'photo')} for good? The files and sidecars are removed from the disk; this cannot be undone.`, { ok: 'Delete for good', danger: true })) return; act('/api/trash/empty', sel.size ? { infos: c.map((t) => t.info) } : { all: true }, (r) => `${plural(r.deleted, 'photo')} deleted for good.`); } }, sel.size ? `Delete ${nf.format(sel.size)} for good` : 'Empty the trash') : null,
+    d.items.length ? h('button', { class: 'pillbtn', onclick: () => trashOp('/api/trash/restore', { infos: chosen().map((t) => t.info) }, (r) => `${plural(r.restored.length, 'photo')} restored${r.failed.length ? `, ${r.failed.length} not (${r.failed[0].error})` : ''}.`) }, sel.size ? `Restore ${nf.format(sel.size)}` : 'Restore all') : null,
+    d.items.length ? h('button', { class: 'pillbtn danger', onclick: async () => { const c = chosen(); if (!await confirmDialog(`Delete ${plural(c.length, 'photo')} for good? The files and sidecars are removed from the disk; this cannot be undone.`, { ok: 'Delete for good', danger: true })) return; trashOp('/api/trash/empty', sel.size ? { infos: c.map((t) => t.info) } : { all: true }, (r) => `${plural(r.deleted, 'photo')} deleted for good.`); } }, sel.size ? `Delete ${nf.format(sel.size)} for good` : 'Empty the trash') : null,
     sel.size ? h('button', { type: 'button', class: 'lnk', onclick: () => { sel.clear(); drawBar(); draw(); } }, 'Select none') : null);
   const grid = h('div', { class: 'cards' });
   const draw = () => fill(grid, d.items.map((t) => h('div', { class: 'card' + (sel.has(t.info) ? ' sel' : ''), tabindex: 0, role: 'button', onclick: () => { sel.has(t.info) ? sel.delete(t.info) : sel.add(t.info); drawBar(); draw(); } },
@@ -745,7 +764,7 @@ export function logDialog() {
       h('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer' }, reqs, 'Page requests'),
       h('button', { class: 'pillbtn', onclick: load }, 'Refresh')),
     pre, info,
-    h('div', { class: 'modal-btns' }, h('a', { class: 'pillbtn', href: '/api/log/download', download: '' }, 'Download the log'), h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
+    { buttons: [h('a', { class: 'pillbtn', href: '/api/log/download', download: '' }, 'Download the log'), 'Close'] });
   back.firstChild.classList.add('wide');
   load();
 }
@@ -775,7 +794,7 @@ export function albumDialog(ids) {
   const back = modal(`Add ${plural(ids.length, 'photo')} to an album`,
     h('div', { class: 'alist' }, editable.map((a) => h('div', { class: 'frow', onclick: () => add(a.id, a.name) }, icon(a.shared ? 'folder' : 'lock'), h('span', { class: 'nm' }, a.name), h('span', { class: 'ct' }, nf.format(a.n))))),
     ST.canShare || ST.canPrivate ? h('div', { style: 'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center' }, name, share, h('button', { class: 'pillbtn on', onclick: () => add(null) }, icon('add'), 'Create')) : h('p', { class: 'muted' }, 'Sign in to make albums.'),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel')));
+    { buttons: ['Cancel'] });
   name.onkeydown = (e) => { if (e.key === 'Enter') add(null); };
   if (!editable.length) name.focus();
 }

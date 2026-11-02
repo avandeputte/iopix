@@ -38,8 +38,8 @@ def test_near_duplicates_are_found_and_removed(client, lib):
     assert any(x_["photo"] == pid for x_ in s["separate"]), "the region three widths away is a separate one: reported only"
     # the viewer will not make one itself
     with pytest.raises(dkdb.SyncError, match="already has a face there"):
-        facemgr.apply({"op": "add", "image": pid, "rect": [x, y + 2, w, h], "tag": tag}, check_running=False)
-    n = facequality.fix_near_duplicates(check_running=False)
+        facemgr.apply({"op": "add", "image": pid, "rect": [x, y + 2, w, h], "tag": tag}, require_digikam_closed=False)
+    n = facequality.fix_near_duplicates(require_digikam_closed=False)
     assert n >= 1
     for _ in range(200):
         if not facequality.progress["running"]:
@@ -91,7 +91,7 @@ def test_image_files_with_the_duplicates_are_rewritten_too(client, lib):
     assert facemgr.write_regions_many([pid], files=True, sidecars=False)[pid] == "written"  # the file now carries the pair, as digiKam wrote it
     mwg, mp = facequality._file_regions([path])[path]
     assert facequality._has_duplicates(mwg, mp)
-    assert facequality.fix_near_duplicates(check_running=False) >= 1
+    assert facequality.fix_near_duplicates(require_digikam_closed=False) >= 1
     for _ in range(200):
         if not facequality.progress["running"]:
             break

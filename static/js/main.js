@@ -1,11 +1,12 @@
 /** Startup: metadata, state, the first route. */
-import { $, DOCK_MIN, NET, NO_CONNECTION, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
+import { $, DOCK_MIN, NET, NO_CONNECTION, PREF, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
 import { FILTER_VIEWS, NAV, NAV_LIBRARY, NAV_MANAGE, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toastError } from './state.js';
 import { initSearch } from './search.js';
 import { confirmDialog } from './actions.js';
 import { G } from './grid.js';
 import { dbDialog } from './editing.js';
-import { loadUser, loginDialog, moreSheet, renderUserMenu, showAlbums } from './pages.js';
+import { moreSheet, showAlbums } from './pages.js';
+import { loadUser, loginDialog, renderUserMenu } from './users.js';
 import { M } from './map.js';
 import { toggleFilters } from './filters.js';
 import { LB, details } from './lightbox.js';
@@ -79,7 +80,7 @@ export function dkBanner(d) {  // exported for test_ui.py, which calls it throug
 export function updateBanner(u) {  // exported for test_ui.py, which calls it through import()
   let b = $('#updbanner');
   let gone = '';
-  try { gone = localStorage.getItem('iopix.updateDismissed') || ''; } catch { /* private mode */ }
+  gone = store.local.get(PREF.updateDismissed, '');
   if (!u || gone === u.remote) { b?.remove(); return; }
   if (b && b.dataset.remote === u.remote) return;
   b?.remove();
@@ -95,7 +96,7 @@ export function updateBanner(u) {  // exported for test_ui.py, which calls it th
   } }, 'Update now');
   const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Details');
   b = h('div', { id: 'updbanner', 'data-remote': u.remote }, h('span', { class: 'ic-wrap' }, icon('spark')), text, run, more,
-    h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { try { localStorage.setItem('iopix.updateDismissed', u.remote); } catch { /* ignore */ } b.remove(); } }, icon('close')));
+    h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { store.local.set(PREF.updateDismissed, u.remote); b.remove(); } }, icon('close')));
   banners().prepend(b);
 }
 /** Run update.sh on the server (POST /api/update run), then watch for the new version: /api/status every 5 s until its
@@ -236,15 +237,15 @@ function initSidebar() {
   const canDock = () => innerWidth >= DOCK_MIN;
   const setOpen = (on) => { body.classList.toggle('side-open', on); $('#navscrim').hidden = !on; };
   const apply = () => {
-    const docked = canDock() && store.get('sidebar', '1') === '1';
+    const docked = canDock() && store.get(PREF.sidebar, '1') === '1';
     body.classList.toggle('side-docked', docked);
     if (docked) setOpen(false);
     const [ic, title] = docked ? ['menuOpen', 'Hide the sidebar'] : canDock() ? ['pin', 'Keep the sidebar open'] : ['close', 'Close the sidebar'];
     btn.replaceChildren(icon(ic)); btn.title = title; btn.setAttribute('aria-label', title);
   };
   btn.onclick = () => {
-    if (body.classList.contains('side-docked')) store.set('sidebar', '0');
-    else if (canDock()) store.set('sidebar', '1');
+    if (body.classList.contains('side-docked')) store.set(PREF.sidebar, '0');
+    else if (canDock()) store.set(PREF.sidebar, '1');
     else { setOpen(false); return; }
     apply();
   };
@@ -261,7 +262,7 @@ export async function boot() {
   S.BOOTED = true; document.body.classList.remove('locked');
   // (a search typed before the metadata arrived draws its list once it is here)
   try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); S.BOOTED = false; setTimeout(boot, 5000); return; }  // tried again until it answers (the index may not be readable yet after a first start)
-  if (store.get('filters', '0') === '1' && innerWidth >= DOCK_MIN && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
+  if (store.get(PREF.filters, '0') === '1' && innerWidth >= DOCK_MIN && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
   await pollStatus();
   onRoute();
 }

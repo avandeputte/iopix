@@ -39,7 +39,7 @@ def _diff(p):
 
 
 def _apply(p):
-    res = dbsync.apply_pending(pending={p["id"]: edits.pending()[p["id"]]}, check_running=False) if p["id"] in edits.pending() else None
+    res = dbsync.apply_pending(pending={p["id"]: edits.pending()[p["id"]]}, require_digikam_closed=False) if p["id"] in edits.pending() else None
     assert res is None or not res["skipped"], res
     edits.forget([p["id"]])
 
@@ -62,7 +62,7 @@ def pid_tag(lib):
 def test_caption_title_rating_tags_date_location_round_trip(client, lib):
     p = _photo(lib)
     assert _diff(p) == {}, _diff(p)
-    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-roundtrip-kw"}, check_running=False)["id"]
+    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-roundtrip-kw"}, require_digikam_closed=False)["id"]
     index.build()
     try:
         r = client.post("/api/edit", json={"ids": [p["id"]], "changes": {"caption": "Round trip ünïcode", "title": "A title", "rating": 4,
@@ -94,7 +94,7 @@ def test_caption_title_rating_tags_date_location_round_trip(client, lib):
     finally:
         client.post("/api/edit", json={"ids": [p["id"]], "changes": {"remove_tags": [kw], "gps": None}})
         _apply(p)
-        tagmanager.apply({"op": "delete", "id": kw}, check_running=False, queue=False)
+        tagmanager.apply({"op": "delete", "id": kw}, require_digikam_closed=False, queue=False)
 
 
 def test_faces_and_person_tags_round_trip(client, lib, pid_tag):
@@ -108,7 +108,7 @@ def test_faces_and_person_tags_round_trip(client, lib, pid_tag):
     con = sqlite3.connect(lib["db"])
     old = con.execute("SELECT name FROM Tags WHERE id = ?", (pid_tag,)).fetchone()[0]
     con.close()
-    tagmanager.apply({"op": "rename", "id": pid_tag, "name": old + " Zz"}, check_running=False, queue=False)
+    tagmanager.apply({"op": "rename", "id": pid_tag, "name": old + " Zz"}, require_digikam_closed=False, queue=False)
     try:
         facemgr.write_regions_many([p["id"]])
         side = _read(p["path"] + ".xmp", "-RegionName", "-TagsList")
@@ -119,8 +119,8 @@ def test_faces_and_person_tags_round_trip(client, lib, pid_tag):
         con.close()
         assert _diff(p) == {}, _diff(p)
     finally:
-        tagmanager.apply({"op": "rename", "id": pid_tag, "name": old}, check_running=False, queue=False)
-        facemgr.apply({"op": "remove", "image": p["id"], "rect": rect}, check_running=False)
+        tagmanager.apply({"op": "rename", "id": pid_tag, "name": old}, require_digikam_closed=False, queue=False)
+        facemgr.apply({"op": "remove", "image": p["id"], "rect": rect}, require_digikam_closed=False)
     assert _diff(p) == {}, _diff(p)
 
 
@@ -130,7 +130,7 @@ def test_a_sync_or_an_old_sidecar_never_takes_a_person_off(client, lib, pid_tag)
     p = _photo(lib)
     assert _diff(p) == {}, _diff(p)
     rect = [30, 30, 90, 90]
-    facemgr.apply({"op": "add", "image": p["id"], "rect": rect, "tag": pid_tag}, check_running=False)
+    facemgr.apply({"op": "add", "image": p["id"], "rect": rect, "tag": pid_tag}, require_digikam_closed=False)
     try:
         # the stale sidecar: regions but no people in the tag list
         subprocess.run([edits.EXIFTOOL, "-q", "-overwrite_original", "-XMP-digiKam:TagsList=", "-XMP-lr:HierarchicalSubject=",
@@ -149,19 +149,19 @@ def test_a_sync_or_an_old_sidecar_never_takes_a_person_off(client, lib, pid_tag)
         con.close()
         _ = con
     finally:
-        facemgr.apply({"op": "remove", "image": p["id"], "rect": rect}, check_running=False)
+        facemgr.apply({"op": "remove", "image": p["id"], "rect": rect}, require_digikam_closed=False)
     _ = history
 
 
 def test_pending_tag_edits_follow_a_renamed_tag(client, lib):
     p = _photo(lib)
     assert _diff(p) == {}, _diff(p)
-    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-rt-old"}, check_running=False)["id"]
+    kw = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-rt-old"}, require_digikam_closed=False)["id"]
     index.build()
     try:
         client.post("/api/edit", json={"ids": [p["id"]], "changes": {"add_tags": [kw]}})
         assert "zz-rt-old" in edits.pending()[p["id"]]["add_tags"]
-        tagmanager.apply({"op": "rename", "id": kw, "name": "zz-rt-new"}, check_running=False, queue=False)
+        tagmanager.apply({"op": "rename", "id": kw, "name": "zz-rt-new"}, require_digikam_closed=False, queue=False)
         assert edits.pending()[p["id"]]["add_tags"] == ["zz-rt-new"], "the pending edit follows the rename"
         _apply(p)
         con = sqlite3.connect(lib["db"])
@@ -170,21 +170,21 @@ def test_pending_tag_edits_follow_a_renamed_tag(client, lib):
     finally:
         client.post("/api/edit", json={"ids": [p["id"]], "changes": {"remove_tags": [kw]}})
         _apply(p)
-        tagmanager.apply({"op": "delete", "id": kw}, check_running=False, queue=False)
+        tagmanager.apply({"op": "delete", "id": kw}, require_digikam_closed=False, queue=False)
 
 
 def test_batched_face_changes_log_their_own_rectangles(lib, pid_tag):
     p = _photo(lib)
     assert _diff(p) == {}, _diff(p)
     a, b = [10, 10, 40, 40], [100, 100, 40, 40]
-    facemgr.apply_many([{"op": "detected", "image": p["id"], "rect": a}, {"op": "detected", "image": p["id"], "rect": b}], check_running=False)
+    facemgr.apply_many([{"op": "detected", "image": p["id"], "rect": a}, {"op": "detected", "image": p["id"], "rect": b}], require_digikam_closed=False)
     try:
-        facemgr.apply_many([{"op": "ignore", "image": p["id"], "rect": a}, {"op": "ignore", "image": p["id"], "rect": b}], check_running=False)
+        facemgr.apply_many([{"op": "ignore", "image": p["id"], "rect": a}, {"op": "ignore", "image": p["id"], "rect": b}], require_digikam_closed=False)
         rows = [e for e in history.entries(photo_id=p["id"], limit=2)["entries"]]
         rects = sorted(tuple(e["details"]["rect"]) for e in rows)
         assert rects == sorted([tuple(a), tuple(b)]), rows
     finally:
-        facemgr.apply_many([{"op": "remove", "image": p["id"], "rect": a}, {"op": "remove", "image": p["id"], "rect": b}], check_running=False)
+        facemgr.apply_many([{"op": "remove", "image": p["id"], "rect": a}, {"op": "remove", "image": p["id"], "rect": b}], require_digikam_closed=False)
     _ = dkdb
 
 

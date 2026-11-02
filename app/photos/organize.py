@@ -86,10 +86,10 @@ def _trash_base(info_dir: Path, name: str) -> str:
     return base
 
 
-def trash(ids: list, check_running: bool = True) -> dict:
+def trash(ids: list, require_digikam_closed: bool = True) -> dict:
     """Move these photos to their album root's trash, as digiKam does. Returns {trashed, failed}."""
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     with dkdb.reader() as con:
         rows = _rows(con, ids)
     moved, failed = [], []
@@ -126,7 +126,7 @@ def trash(ids: list, check_running: bool = True) -> dict:
             failed.append({"id": r["id"], "error": str(e)})
     if moved:
         try:
-            with dbsync.write_transaction(db_path, check_running) as con:
+            with dbsync.write_transaction(db_path, require_digikam_closed) as con:
                 for r in moved:
                     con.execute("UPDATE Images SET status = ?, album = NULL WHERE id = ?", (TRASHED, r["id"]))
         except BaseException:  # the database refused: the files go back where they were
@@ -205,10 +205,10 @@ def _by_info(infos: list) -> list:
     return [t for t in listing() if t["info"] in want]
 
 
-def restore(infos: list, check_running: bool = True) -> dict:
+def restore(infos: list, require_digikam_closed: bool = True) -> dict:
     """Put trashed photos back where they were (their record names the path). Returns {restored: [ids], failed}."""
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     items = _by_info(infos)
     done, failed = [], []
     for t in items:
@@ -222,7 +222,7 @@ def restore(infos: list, check_running: bool = True) -> dict:
                 parent = folders.album_for_dir(dest.parent.parent)
                 if parent is None:
                     raise SyncError(f"the folder {dest.parent} is not in the library any more")
-                album = folders.create(parent, dest.parent.name, check_running)["id"]
+                album = folders.create(parent, dest.parent.name, require_digikam_closed)["id"]
             if dest.exists():
                 dest = dest.parent / _free(dest.parent, dest.name)
             shutil.move(t["trash"], dest)
@@ -238,12 +238,12 @@ def restore(infos: list, check_running: bool = True) -> dict:
     ids = []
     if done:
         try:
-            _restore_rows(done, ids, db_path, check_running)
+            _restore_rows(done, ids, db_path, require_digikam_closed)
         except BaseException:  # the database refused: back into the trash, records kept
             for t in done:
                 _move_back([(dst, src) for src, dst in t["moves"]], None)
             raise
-        _restore_new(done, ids, check_running)
+        _restore_new(done, ids, require_digikam_closed)
         for t in done:  # the trash records go only now that the rows are back
             try:
                 os.remove(t["info"])
@@ -279,11 +279,11 @@ def _trash_sidecars(tf: Path) -> list:
     return [Path(x) for x in out]
 
 
-def _restore_rows(done: list, ids: list, db_path, check_running: bool):
+def _restore_rows(done: list, ids: list, db_path, require_digikam_closed: bool):
     """The one database write of a restore: rows marked visible again (a refusal leaves nothing half done).
     Only a row that is in the trash (status 3) is revived: SQLite reuses ids, so the number may since belong to a
     new photo, which is then left alone and the file registered anew."""
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         for t in done:
             row = con.execute("SELECT status FROM Images WHERE id = ?", (t["id"],)).fetchone() if t["id"] else None
             if row and row[0] == TRASHED:
@@ -293,31 +293,31 @@ def _restore_rows(done: list, ids: list, db_path, check_running: bool):
                 t["new"] = True
 
 
-def _restore_new(done: list, ids: list, check_running: bool):
+def _restore_new(done: list, ids: list, require_digikam_closed: bool):
     """After the rows are back: photos with no row any more are registered anew, and the edit log gets its lines."""
     if done:
         fresh = [t for t in done if t.get("new")]
         if fresh:
             for t in fresh:
-                added = folders.register(t["album"], [folders.staged_entry(t["dest"])], check_running)
+                added = folders.register(t["album"], [folders.staged_entry(t["dest"])], require_digikam_closed)
                 ids += [a["id"] for a in added]
-                scanner.complete([a["id"] for a in added], check_running)  # dates, position, tags, faces from file and sidecar
+                scanner.complete([a["id"] for a in added], require_digikam_closed)  # dates, position, tags, faces from file and sidecar
         history.record([{"photo_id": t["id"], "action": "restore", "summary": "Restored from the trash", "path": str(t["dest"])} for t in done if t["id"] and not t.get("new")])
     return ids
 
 
 
-def empty(infos: list = None, check_running: bool = True) -> dict:
+def empty(infos: list = None, require_digikam_closed: bool = True) -> dict:
     """Delete these trash entries for good (all of them when infos is None): files, records and database rows."""
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     items = _by_info(infos) if infos is not None else listing()
     # destructive and final: the database is backed up and its rows go first (a refused write then changes
     # nothing), the files only after the rows are gone
     ids = [t["id"] for t in items if t["id"]]
     if ids:
         dkdb.backup(db_path, force=True)
-        with dbsync.write_transaction(db_path, check_running) as con:
+        with dbsync.write_transaction(db_path, require_digikam_closed) as con:
             deletion.drop_rows(con, ids)
     gone, failed = [], []
     for t in items:
@@ -337,12 +337,12 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
 
 
 # ---- moving and renaming photos
-def move_photos(ids: list, album_id, check_running: bool = True, new_name: str = None, names: dict = None) -> dict:
+def move_photos(ids: list, album_id, require_digikam_closed: bool = True, new_name: str = None, names: dict = None) -> dict:
     """Move these photos into the folder album_id (their sidecars too); with new_name (one photo) rename it as well.
     album_id None keeps each photo in its own folder: a rename, with `names` {id: new name} naming several at once
     (one preflight, one transaction, one change-log batch). Returns {moved: [{id, name, path}], failed}."""
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     with dkdb.reader() as con:
         rows = _rows(con, ids)
         folders = {a: album_of(con, a) for a in ({int(album_id)} if album_id is not None else {r["album"] for r in rows})}
@@ -385,7 +385,7 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
             failed.append({"id": r["id"], "error": str(e)})
     if moved:
         try:
-            with dbsync.write_transaction(db_path, check_running) as con:
+            with dbsync.write_transaction(db_path, require_digikam_closed) as con:
                 for r in moved:
                     # a stale row at the destination (a file deleted outside digiKam, say): it goes with its child rows
                     stale = [x[0] for x in con.execute("SELECT id FROM Images WHERE album = ? AND name = ? AND id != ?", (r["to_album"], r["final"], r["id"]))]
@@ -403,12 +403,12 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
     return {"moved": [{"id": r["id"], "name": r["final"], "path": r["dst"]} for r in moved], "failed": failed}
 
 
-def rename_photo(photo_id: int, new_name: str, check_running: bool = True) -> dict:
+def rename_photo(photo_id: int, new_name: str, require_digikam_closed: bool = True) -> dict:
     with dkdb.reader() as con:
         rows = _rows(con, [int(photo_id)])
     if not rows:
         raise SyncError("That photo is not in the library.")
-    return move_photos([int(photo_id)], rows[0]["album"], check_running, new_name)
+    return move_photos([int(photo_id)], rows[0]["album"], require_digikam_closed, new_name)
 
 
 # ---- folders
@@ -416,7 +416,7 @@ def _folder(con, album_id: int) -> dict:
     return album_of(con, int(album_id))
 
 
-def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> dict:
+def rename_by_pattern(ids: list, pattern: str, require_digikam_closed: bool = True) -> dict:
     """Rename library files by a date pattern (export.name_for): the ids stay, sidecars move along, every one is in
     the change log with undo. The new names are worked out first, then every file is renamed in one batch (one
     preflight, one database transaction). Returns {renamed: [{id, name, was}], unchanged, failed}."""
@@ -443,21 +443,21 @@ def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> di
             continue
         names[iid], was[iid] = new, name
     if names:
-        r = move_photos(list(names), None, check_running, names=names)
+        r = move_photos(list(names), None, require_digikam_closed, names=names)
         out["renamed"] = [{"id": m["id"], "name": m["name"], "was": was.get(m["id"])} for m in r["moved"]]
         out["failed"] = r["failed"]
     return out
 
 
-def rename_folder(album_id: int, new_name: str, check_running: bool = True) -> dict:
+def rename_folder(album_id: int, new_name: str, require_digikam_closed: bool = True) -> dict:
     """Rename a folder on disk and in the database (its subfolders' paths follow)."""
-    return move_folder(album_id, None, check_running, new_name)
+    return move_folder(album_id, None, require_digikam_closed, new_name)
 
 
-def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_name: str = None) -> dict:
+def move_folder(album_id: int, new_parent_id, require_digikam_closed: bool = True, new_name: str = None) -> dict:
     """Move a folder under another (new_parent_id; None keeps its parent), optionally with a new name."""
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "folders")
+    dbsync.preflight(db_path, require_digikam_closed, "folders")
     with dkdb.reader() as con:
         src = _folder(con, album_id)
         if src["rel"] == "/":
@@ -486,7 +486,7 @@ def move_folder(album_id: int, new_parent_id, check_running: bool = True, new_na
     new_dir = parent["dir"] / name
     shutil.move(str(src["dir"]), str(new_dir))
     try:
-        with dbsync.write_transaction(db_path, check_running) as con:
+        with dbsync.write_transaction(db_path, require_digikam_closed) as con:
             for aid, rel in children:
                 con.execute("UPDATE Albums SET relativePath = ? WHERE id = ?", (new_rel + rel[len(src["rel"]):] if rel != src["rel"] else new_rel, aid))
     except BaseException:

@@ -84,7 +84,7 @@ def crops(im, boxes: list) -> list:
 def _work(gen: int, todo: list):
     engine = _engine()
     model = engine.name
-    with ThreadPoolExecutor(max(1, min(4, jobs.threads())), thread_name_prefix="clothing") as pool:
+    with ThreadPoolExecutor(jobs.batch_threads(), thread_name_prefix="clothing") as pool:
         for chunk in chunked(todo, 8):
             if progress.cancelled(gen):
                 return

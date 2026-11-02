@@ -246,7 +246,7 @@ def plan(token: str, key: str = None) -> dict:
 
 
 # ---- doing it
-def root_folder(root_id: int = None, check_running: bool = True) -> dict:
+def root_folder(root_id: int = None, require_digikam_closed: bool = True) -> dict:
     """The album root folder (relativePath '/') to import under: the given root, else the first mounted one.
     digiKam always has that row; if it is missing (a root digiKam has not scanned yet), it is added."""
     with dkdb.reader() as con:
@@ -263,21 +263,21 @@ def root_folder(root_id: int = None, check_running: bool = True) -> dict:
     root = sorted(roots)[0]
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         cur = con.execute("INSERT INTO Albums (albumRoot, relativePath, date, caption, collection) VALUES (?, '/', ?, NULL, NULL)",
                           (root, time.strftime("%Y-%m-%d")))
         return {"id": cur.lastrowid, "root": root, "dir": Path(roots[root])}
 
 
-def ensure_folder(rel: str, root: dict, check_running: bool) -> int:
+def ensure_folder(rel: str, root: dict, require_digikam_closed: bool) -> int:
     """The Albums id for /a/b under the root, creating a and a/b (directories and rows) when missing."""
     with dkdb.reader() as con:
         row = con.execute("SELECT id FROM Albums WHERE albumRoot = ? AND relativePath = ?", (root["root"], rel)).fetchone()
     if row:
         return row[0]
     parent_rel = rel.rsplit("/", 1)[0] or "/"
-    parent_id = root["id"] if parent_rel == "/" else ensure_folder(parent_rel, root, check_running)
-    return folders.create(parent_id, rel.rsplit("/", 1)[1], check_running)["id"]
+    parent_id = root["id"] if parent_rel == "/" else ensure_folder(parent_rel, root, require_digikam_closed)
+    return folders.create(parent_id, rel.rsplit("/", 1)[1], require_digikam_closed)["id"]
 
 
 def make_sidecar(path: str) -> bool:
@@ -321,14 +321,14 @@ def sidecars_from_db(ids: list):
     facemgr.write_regions_many(ids, files=False)  # tags and faces
 
 
-def run(token: str, key: str = None, include: list = None, skip_duplicates: bool = True, root_id: int = None, check_running: bool = True) -> dict:
+def run(token: str, key: str = None, include: list = None, skip_duplicates: bool = True, root_id: int = None, require_digikam_closed: bool = True) -> dict:
     """Import the staged files (all, or the names in include). Returns {added: [{id, name, path, folder}], skipped: [{name, reason}]}."""
     p = plan(token, key)
     want = set(include) if include is not None else None
     d = _dir(token)
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photo list")
-    root = root_folder(root_id, check_running)
+    dbsync.preflight(db_path, require_digikam_closed, "the photo list")
+    root = root_folder(root_id, require_digikam_closed)
     added, skipped = [], []
     by_folder = {}
     for it in p["items"]:
@@ -344,7 +344,7 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
             by_folder.setdefault(it["folder"], []).append(it)
     for rel, items in by_folder.items():
         try:
-            album_id = ensure_folder(rel, root, check_running)
+            album_id = ensure_folder(rel, root, require_digikam_closed)
         except SyncError as e:
             skipped += [{"name": it["name"], "reason": f"folder {rel}: {e}"} for it in items]
             continue
@@ -360,9 +360,9 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
             except (OSError, SyncError) as e:
                 skipped.append({"name": it["name"], "reason": str(e)})
         if staged:
-            regs = folders.register(album_id, staged, check_running)
+            regs = folders.register(album_id, staged, require_digikam_closed)
             from app.photos import scanner  # lazy: photos.scanner -> photos.importer would be an import cycle
-            scanner.complete([a["id"] for a in regs], check_running)  # the full rows digiKam's scan would write
+            scanner.complete([a["id"] for a in regs], require_digikam_closed)  # the full rows digiKam's scan would write
             sidecars_from_db([a["id"] for a in regs])
             for a, (final, _c, _e, dst, _i) in zip(regs, staged):
                 added.append({"id": a["id"], "name": final, "path": str(dst), "folder": rel})

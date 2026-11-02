@@ -70,7 +70,7 @@ def run(photo_ids: list = None):
                 if dbsync.digikam_running():
                     raise SyncError("digiKam is running. Quit digiKam first; new place tags are created in its database.")
                 # one transaction for every missing tag, parents before children
-                made = tagmanager.add_tags(p["missing_tags"], check_running=True)
+                made = tagmanager.add_tags(p["missing_tags"], require_digikam_closed=True)
                 progress["created"] = len([f for f in p["missing_tags"] if f in made])
                 # the index must know the new tags before edits can resolve them
                 index.build()

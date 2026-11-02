@@ -157,7 +157,7 @@ const MILE_REGIONS = ['US', 'PR', 'GU', 'VI', 'AS', 'MP', 'UM', 'GB', 'LR', 'MM'
 export function regionUsesMiles(lang) {
   try { const l = new Intl.Locale(lang || 'en-US'); return MILE_REGIONS.includes(l.region || l.maximize().region); } catch { return false; }
 }
-const useMiles = () => { const u = store.get('units', 'auto'); return u === 'mi' || (u !== 'km' && regionUsesMiles(navigator.language)); };
+const useMiles = () => { const u = store.get(PREF.units, 'auto'); return u === 'mi' || (u !== 'km' && regionUsesMiles(navigator.language)); };
 const FT = 3.28084, MI = 1609.344, nf1 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 /** A distance in metres in words: "350 m", "1.2 km"; "800 ft", "0.7 mi". */
 export function fmtDist(m) {
@@ -231,9 +231,26 @@ export const del = (path) => request(path, { method: 'DELETE' });
 /** The signed-in user's settings (synced to the server) behind `store`; kept here so core.js imports nothing. */
 export const SETTINGS = { user: null, pending: {}, flush: 0 };
 const KEY = 'iopix.';  // every key this app keeps in the browser starts with it
+/** Every preference the app remembers, declared once: the bare key store.get/set take (the browser adds KEY, the
+ *  account's settings keep it bare). A key is read in several modules, so a typo in one would silently split a
+ *  setting in two; index.html's inline script reads iopix.theme by name before any module loads. */
+export const PREF = {
+  theme: 'theme', units: 'units', badges: 'badges', infoHide: 'info_hide', filters: 'filters', sidebar: 'sidebar', info: 'info',
+  tile: 'tile', group: 'group', hsize: 'hsize', qsize: 'qsize', qcheck: 'qcheck', faceGroups: 'facegroups',
+  exploreSize: 'explore-size', peopleSort: 'people-sort', peopleSize: 'people-size', peopleWithin: 'people-within',
+  mapLayer: 'map-layer', traySize: 'tray-size', expSize: 'exp-size', expFmt: 'exp-fmt', expName: 'exp-name', expNoGps: 'exp-nogps', expFlat: 'exp-flat',
+  // this browser only, even when signed in (store.local): which tab Settings and Maintenance last showed, the update banner dismissed
+  settingsTab: 'settingsTab', maintenanceTab: 'maintenanceTab', updateDismissed: 'updateDismissed',
+};
+/** The browser's own copy, whoever is signed in; localStorage can be missing or full (a private window). */
+const local = {
+  get(k, d) { try { return localStorage.getItem(KEY + k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(KEY + k, v); } catch { /* private mode */ } },
+};
 export const store = {
+  local,
   // browser keys carry the app's prefix (iopix.theme, iopix.tile…); the server-side user settings keep the bare names
-  get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; try { return localStorage.getItem(KEY + k) ?? d; } catch { return d; } },
+  get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; return local.get(k, d); },
   set(k, v) {
     if (SETTINGS.user) {
       SETTINGS.user[k] = v; SETTINGS.pending[k] = v; clearTimeout(SETTINGS.flush);
@@ -244,8 +261,29 @@ export const store = {
       }, 400);
       return;
     }
-    try { localStorage.setItem(KEY + k, v); } catch { /* private mode */ }
+    local.set(k, v);
   },
 };
+
+export function toastError(e, ms = 9000) { toast((e && e.message) || String(e), null, null, ms); }
+export function toast(msg, action, fn, ms = 6000) {
+  const t = $('#toast');
+  fill(t, msg, action ? h('button', { type: 'button', class: 'lnk', onclick: () => { t.hidden = true; fn(); } }, action) : null);
+  t.hidden = false;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { t.hidden = true; }, ms);
+}
+/** One request and what it says: fn() runs (usually a post), a failure becomes a toast and the result false; success
+ *  shows `toast` (a string, or a function of the result; `ms` how long), calls after(result) and resolves the result.
+ *  The dozens of "try { await post(); toast() } catch (e) { toastError(e) }" blocks are this, so a failure is never silent. */
+export async function act(fn, { toast: said, after, ms } = {}) {
+  let r;
+  try { r = await fn(); } catch (e) { toastError(e); return false; }
+  if (said) toast(typeof said === 'function' ? said(r) : said, null, null, ms);
+  after?.(r);
+  return r ?? true;
+}
+/** An icon button on a row or a card that does one thing without opening the row (the click stays with it). */
+export const actBtn = (ic, title, fn, cls = 'iconbtn tact') => h('button', { class: cls, title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
 
 export const main = $('#main');

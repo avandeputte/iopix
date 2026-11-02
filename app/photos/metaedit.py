@@ -78,7 +78,7 @@ def _args(changes: list) -> list:
     return a
 
 
-def write(pid: int, changes: list, check_running: bool = True) -> dict:
+def write(pid: int, changes: list, require_digikam_closed: bool = True) -> dict:
     p = _photo(pid)
     changes = [c for c in changes if c.get("group") in EDITABLE and c.get("tag") and c["tag"] not in NOT_EDITABLE
                and all(ch.isalnum() or ch in "-_" for ch in c["tag"])]
@@ -91,7 +91,7 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
                         "(and this must be a JPEG, PNG, TIFF or WebP)")
     before = {f"{x['group']}:{x['tag']}": x["value"] for x in _dump(p["path"]) + _dump(edits.sidecar_path(p["path"]))}
     xmp = [c for c in changes if c["group"].startswith("XMP-")]
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
+    dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the photo's metadata")  # before the file is touched: the reread afterwards must be able to write
     side = edits.prepare(p["path"])
     snap = history.snapshot(p["id"], side)
     jobs = []
@@ -115,7 +115,7 @@ def write(pid: int, changes: list, check_running: bool = True) -> dict:
     history.record([{"photo_id": p["id"], "action": "edit", "path": p["path"], "sidecar": snap,
                      "summary": "Metadata edited: " + ", ".join(f"{c['group']}:{c['tag']}" for c in changes)[:400],
                      "details": {f"{c['group']}:{c['tag']}": {"from": before.get(f"{c['group']}:{c['tag']}"), "to": c.get("value") or None} for c in changes}}])
-    reread(p["id"], check_running)
+    reread(p["id"], require_digikam_closed)
     out = {"id": p["id"], "changed": len(changes), "file": in_file}
     if file_error:
         out["fileError"] = file_error
@@ -156,7 +156,7 @@ def _mirror_gps_and_date(path: str, changes: list, in_file: bool):
         edits.run_exiftool(jobs)
 
 
-def reread(pid: int, check_running: bool = True) -> dict:
+def reread(pid: int, require_digikam_closed: bool = True) -> dict:
     """The photo's rows filled again from its file and sidecar, as digiKam's Read Metadata From File does."""
     p = _photo(pid)
     facemgr.flush_sidecar(p["id"])  # a face change still waiting for its sidecar: written first, or the reread would undo it
@@ -167,7 +167,7 @@ def reread(pid: int, check_running: bool = True) -> dict:
         cat = con.execute("SELECT category FROM Images WHERE id = ?", (p["id"],)).fetchone()
         version = scanner.hash_version(con)
     rows = scanner.rows_for(p["path"], meta[p["path"]], cat[0] if cat else 1)
-    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+    with dbsync.write_transaction(dkdb.sqlite_path(), require_digikam_closed) as con:
         # what files and sidecars do not hold, and a reread must not lose: captions in other languages, and the faces
         # digiKam keeps in its database only (unknown, ignored and suggested ones)
         keep_comments = con.execute("SELECT type, language, author, date, comment FROM ImageComments WHERE imageid = ? AND language != 'x-default'",

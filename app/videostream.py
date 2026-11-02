@@ -17,7 +17,7 @@ PLAYABLE_VIDEO = {"", "h264", "avc1", "hevc", "h265", "hvc1"}
 PLAYABLE_AUDIO = {"", "none", "aac", "mp3", "alac", "ac3", "eac3", "pcm_s16le", "pcm_s24le"}
 
 _lock = threading.Lock()
-_running: set = set()
+_converting: set = set()
 _failed: dict = {}  # path of a copy that could not be made -> ffmpeg's last words
 
 
@@ -37,7 +37,7 @@ def status(row: dict) -> str:
     dst = copy_path(row)
     if dst.exists():
         return "ready"
-    if str(dst) in _running:
+    if str(dst) in _converting:
         return "converting"
     return "failed" if str(dst) in _failed else "missing"
 
@@ -50,7 +50,7 @@ def start(row: dict) -> str:
     if not thumbs.FFMPEG:
         _failed[str(copy_path(row))] = "ffmpeg is not installed"
         return "failed"
-    _running.add(str(copy_path(row)))
+    _converting.add(str(copy_path(row)))
     threading.Thread(target=_convert, args=(dict(row),), daemon=True).start()
     return "converting"
 
@@ -81,7 +81,7 @@ def _convert(row: dict):
         log.warning("video copy of %s failed: %s", row["path"], e)
     finally:
         tmp.unlink(missing_ok=True)
-        _running.discard(str(dst))
+        _converting.discard(str(dst))
 
 
 def _prune():

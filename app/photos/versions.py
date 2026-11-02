@@ -106,7 +106,7 @@ def _internal_tag(con, name: str) -> int:
     return tid
 
 
-def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
+def adjust(pid: int, params: dict, require_digikam_closed: bool = True) -> dict:
     p = clean(params)
     if not any(p[k] for k in ("exposure", "contrast", "saturation", "warmth", "angle")) and not p["autolevel"]:
         raise SyncError("Nothing to adjust")
@@ -122,7 +122,7 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
     src, name, album = row[1], row[2], row[3]
     if os.path.splitext(name)[1].lower() in (".heic", ".heif") and not HEIC:
         raise SyncError("Reading HEIC needs the pillow-heif package on the server")
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the photo")
+    dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the photo")
     directory = os.path.dirname(src)
     new_name = _version_name(directory, name)
     dst = os.path.join(directory, new_name)
@@ -149,8 +149,8 @@ def adjust(pid: int, params: dict, check_running: bool = True) -> dict:
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
     try:
-        with dbsync.write_transaction(db_path, check_running) as con:
-            vid = folders.register(album, [folders.staged_entry(Path(dst))], check_running, con=con)[0]["id"]
+        with dbsync.write_transaction(db_path, require_digikam_closed) as con:
+            vid = folders.register(album, [folders.staged_entry(Path(dst))], require_digikam_closed, con=con)[0]["id"]
             scanner.copy_attributes(con, int(pid), vid)
             con.execute("UPDATE ImageInformation SET width = ?, height = ?, orientation = 1, format = 'JPG', colorDepth = 8, colorModel = 5 WHERE imageid = ?", (w, h, vid))
             if p["angle"]:

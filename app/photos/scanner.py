@@ -65,10 +65,12 @@ _wake = threading.Event()
 
 # ---- settings
 def enabled() -> bool:
+    """Whether the file scanner runs (the setting; on by default only when there is no digiKam to find new photos)."""
     return state.get_setting("file_scanner", "1" if dkdb.no_digikam() else "0") == "1"  # with no digiKam, nothing else finds new photos
 
 
 def interval() -> int:
+    """Minutes between scans, from the setting, kept between 1 and a day."""
     try:
         return max(1, min(1440, int(state.get_setting("scan_interval", "15"))))
     except ValueError:
@@ -77,6 +79,7 @@ def interval() -> int:
 
 # ---- digiKam's unique hash
 def hash_version(con=None) -> int:
+    """digiKam's uniqueHashVersion setting (which hash it stores per file); 3 for the viewer's own library."""
     own = con is None
     con = con or dkdb.connect()
     try:
@@ -483,6 +486,7 @@ def write_rows(con, iid: int, r: dict, tags: Tags, special: dict, full: bool):
 
 
 def folders_rect(rect) -> str:
+    """A face rectangle [x, y, w, h] as digiKam's '<rect .../>' XML (the form ImageTagProperties stores)."""
     return rect_xml(*rect)
 
 
@@ -507,7 +511,7 @@ def copy_attributes(con, src: int, dst: int):
         con.execute(f"INSERT INTO {t} (imageid, {cols}) SELECT ?, {cols} FROM {t} WHERE imageid = ?", (dst, src))
 
 
-def complete(ids: list, check_running: bool = True) -> dict:
+def complete(ids: list, require_digikam_closed: bool = True) -> dict:
     """Full rows for photos the viewer registered itself (modificationDate NULL). Returns {completed, copied, failed}."""
     ids = [int(i) for i in ids]
     if not ids:
@@ -524,7 +528,7 @@ def complete(ids: list, check_running: bool = True) -> dict:
     hashes = {iid: unique_hash(p, version) for iid, _c, _a, p in items}
     done = copied = failed = 0
     db_path = dkdb.sqlite_path()
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         tags = Tags(con)
         try:
             special = special_tags(con)
@@ -653,20 +657,20 @@ def _discover(roots: dict, known: dict):
     return new_files, modified, vanished
 
 
-def _add_folders(new_files: list, albums: dict, check_running: bool) -> dict:
+def _add_folders(new_files: list, albums: dict, require_digikam_closed: bool) -> dict:
     """Album rows for the folders the new files are in (parents before children). Returns the ones made."""
     made = {}
     for root_id, rel, name, path in sorted(new_files):
         key = (root_id, rel)
         if key in albums or key in made:
             continue
-        root_row = importer.root_folder(root_id, check_running)
-        made[key] = root_row["id"] if rel == "/" else importer.ensure_folder(rel, root_row, check_running)
+        root_row = importer.root_folder(root_id, require_digikam_closed)
+        made[key] = root_row["id"] if rel == "/" else importer.ensure_folder(rel, root_row, require_digikam_closed)
     albums.update(made)
     return made
 
 
-def _add_files(new_files: list, albums: dict, check_running: bool) -> list:
+def _add_files(new_files: list, albums: dict, require_digikam_closed: bool) -> list:
     """Register the new files with digiKam, album by album, and read their metadata. Returns their ids."""
     added_ids = []
     by_album = {}
@@ -680,18 +684,18 @@ def _add_files(new_files: list, albums: dict, check_running: bool) -> list:
             except (SyncError, OSError) as e:
                 log.warning("scanner: skipped %s (%s)", p, e)
         if staged:
-            regs = folders.register(album_id, staged, check_running)
+            regs = folders.register(album_id, staged, require_digikam_closed)
             added_ids += [a["id"] for a in regs]
     if added_ids:
-        complete(added_ids, check_running)
+        complete(added_ids, require_digikam_closed)
         history.record([{"photo_id": i, "action": "added", "summary": "Found by the file scanner"} for i in added_ids])
     return added_ids
 
 
-def _reread_modified(modified: list, version: int, check_running: bool):
+def _reread_modified(modified: list, version: int, require_digikam_closed: bool):
     """Files changed on disk since digiKam last saw them: their metadata rows are read again."""
     meta = read([p for _i, p in modified])
-    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+    with dbsync.write_transaction(dkdb.sqlite_path(), require_digikam_closed) as con:
         cats = dict(dkdb.in_chunks(con, "SELECT id, category FROM Images WHERE id IN ({ids})", [i for i, _p in modified]))
         for iid, path in modified:
             if not meta.get(path):  # unreadable right now: left as it is, tried again on the next pass
@@ -704,12 +708,12 @@ def _reread_modified(modified: list, version: int, check_running: bool):
                         (unique_hash(path, version), st[1] if st else None, st[0] if st else None, iid))
 
 
-def _remove_vanished(vanished: list, check_running: bool) -> list:
+def _remove_vanished(vanished: list, require_digikam_closed: bool) -> list:
     """Files no longer on disk (CoreDB::removeItems: status Trashed, no album; digiKam's own cleanup later marks
     them obsolete). The walk took a while: a photo moved, renamed or trashed meanwhile (its row changed) or whose
     file is back is left alone; only a row still as snapshotted, with nothing on disk, is marked."""
     still = []
-    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+    with dbsync.write_transaction(dkdb.sqlite_path(), require_digikam_closed) as con:
         for iid, album, name, path in vanished:
             row = con.execute("SELECT album, name FROM Images WHERE id = ? AND status = 1", (iid,)).fetchone()
             if not row or row[0] != album or row[1] != name or os.path.exists(path):
@@ -720,7 +724,7 @@ def _remove_vanished(vanished: list, check_running: bool) -> list:
     return still
 
 
-def scan(check_running: bool = True) -> dict:
+def scan(require_digikam_closed: bool = True) -> dict:
     """One pass over every album root: snapshot the database, walk the disk, then add, reread and remove.
     Returns the summary (also kept in progress)."""
     if state.read_only():
@@ -729,21 +733,21 @@ def scan(check_running: bool = True) -> dict:
         raise SyncError("A scan is already running")
     progress.start(added=0, modified=0, removed=0, folders=0, skipped=[])
     try:
-        if check_running and dbsync.digikam_running():
+        if require_digikam_closed and dbsync.digikam_running():
             progress["skipped"].append("digiKam is running; it scans the collection itself")
             return progress
         roots, version, albums, known = _snapshot()
         new_files, modified, vanished = _discover(roots, known)
-        made = _add_folders(new_files, albums, check_running)
+        made = _add_folders(new_files, albums, require_digikam_closed)
         with dkdb.reader() as con:
             progress["folders"] = con.execute("SELECT count(*) FROM Albums").fetchone()[0] - (len(albums) - len(made))
-        added_ids = _add_files(new_files, albums, check_running)
+        added_ids = _add_files(new_files, albums, require_digikam_closed)
         progress["added"] = len(added_ids)
         if modified:
-            _reread_modified(modified, version, check_running)
+            _reread_modified(modified, version, require_digikam_closed)
             progress["modified"] = len(modified)
         if vanished:
-            progress["removed"] = len(_remove_vanished(vanished, check_running))
+            progress["removed"] = len(_remove_vanished(vanished, require_digikam_closed))
         if added_ids or modified or vanished or made:
             log.info("scanner: %d added, %d modified, %d removed, %d folders", len(added_ids), len(modified), progress["removed"], progress["folders"])
     except Exception as e:
@@ -757,6 +761,7 @@ def scan(check_running: bool = True) -> dict:
 
 
 def run_soon():
+    """Wake the scanner loop so a scan starts now instead of at the next interval."""
     _wake.set()
 
 

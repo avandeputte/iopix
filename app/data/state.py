@@ -138,6 +138,7 @@ def connect():
 
 
 def init():
+    """Fold the pre-v1.80 state.db / analysis.db into viewer.db if they are still there, then create or migrate every table."""
     park = migrate_legacy()
     if park:
         logging.getLogger("app.data.state").info("state.db and analysis.db were folded into viewer.db; the old files are in %s", park)
@@ -145,6 +146,7 @@ def init():
 
 
 def write(fn):
+    """Run fn(con) inside the one writer lock and commit; returns what fn returned and moves `rev` on (polls notice the change)."""
     global rev
     with lock, vdb.write_lock:  # one writer in the process, the jobs included: a request never waits out SQLite's busy timeout
         con = connect()
@@ -176,6 +178,7 @@ def _visible(user=..., alias: str = "") -> tuple:
 
 
 def summary(user=...) -> dict:
+    """Favorites, the viewer's albums (with size and cover), people groups and saved searches the user may see, in one call for the UI."""
     vis, vp = _visible(user, "a")
     con = connect()
     try:
@@ -219,6 +222,7 @@ def people_groups() -> list:
 
 
 def create_people_group(name: str) -> int:
+    """A new people group at the end of the order; returns its id."""
     def go(c):
         pos = (c.execute("SELECT max(position) FROM people_groups").fetchone()[0] or 0) + 1
         return c.execute("INSERT INTO people_groups (name, position, created) VALUES (?,?,?)", (name, pos, int(time.time()))).lastrowid
@@ -241,6 +245,7 @@ def update_people_group(group_id: int, name: str = None, members: list = None) -
 
 
 def delete_people_group(group_id: int):
+    """Remove a people group and its memberships (the people themselves are digiKam tags and stay)."""
     def go(c):
         c.execute("DELETE FROM people_group_members WHERE group_id = ?", (group_id,))
         c.execute("DELETE FROM people_groups WHERE id = ?", (group_id,))
@@ -248,10 +253,12 @@ def delete_people_group(group_id: int):
 
 
 def order_people_groups(ids: list):
+    """Store this order of group ids as their positions (the UI's drag order)."""
     write(lambda c: c.executemany("UPDATE people_groups SET position = ? WHERE id = ?", [(k, int(i)) for k, i in enumerate(ids)]))
 
 
 def create_album(name: str, owner_id: int = None, shared: bool = True) -> int:
+    """A new viewer album; returns its id. owner_id None: nobody's, visible to all; shared False: the owner's alone."""
     return write(lambda c: c.execute("INSERT INTO viewer_albums (name, created, owner_id, is_shared) VALUES (?,?,?,?)",
                                       (name, int(time.time()), owner_id, 1 if shared else 0)).lastrowid)
 
@@ -273,10 +280,12 @@ def set_album_sharing(album_id: int, shared: bool, owner_id: int = None):
 
 
 def rename_album(album_id: int, name: str):
+    """Set the album's name (the caller has checked the user may)."""
     write(lambda c: c.execute("UPDATE viewer_albums SET name = ? WHERE id = ?", (name, album_id)))
 
 
 def delete_album(album_id: int):
+    """Remove a viewer album and its memberships; the photos are untouched."""
     def run(c):
         c.execute("DELETE FROM viewer_album_photos WHERE album_id = ?", (album_id,))
         c.execute("DELETE FROM viewer_albums WHERE id = ?", (album_id,))
@@ -284,18 +293,22 @@ def delete_album(album_id: int):
 
 
 def create_search(name: str, query: str) -> int:
+    """Save a filter query string under a name; returns its id."""
     return write(lambda c: c.execute("INSERT INTO saved_searches (name, query, created) VALUES (?,?,?)", (name, query, int(time.time()))).lastrowid)
 
 
 def rename_search(search_id: int, name: str):
+    """Set a saved search's name."""
     write(lambda c: c.execute("UPDATE saved_searches SET name = ? WHERE id = ?", (name, search_id)))
 
 
 def delete_search(search_id: int):
+    """Remove a saved search."""
     write(lambda c: c.execute("DELETE FROM saved_searches WHERE id = ?", (search_id,)))
 
 
 def set_album_items(album_id: int, items: list, on: bool):
+    """Add (on) or remove the photos to an album. items: [(photo id, digiKam hash)]; the hash lets a renumbered photo be found again (index.remap)."""
     now = int(time.time())
     if on:
         write(lambda c: c.executemany("INSERT OR IGNORE INTO viewer_album_photos VALUES (?,?,?,?)",
@@ -349,12 +362,15 @@ def read_only() -> bool:
 
 
 def set_setting(key: str, value: str):
+    """Store one app setting (a known key, as a string); the UI and the index pick it up on their next poll."""
     _known(key)
     write(lambda c: c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)", (key, value)))
 
 
-# ---- what the index queries used to read through an attached copy of this database
+# ---- the viewer's own photo sets as id lists: favorites and album contents live in this database (SQLite or MySQL),
+# while the index is a separate SQLite file, so query.py inlines them as `id IN (...)` instead of joining
 def favorite_ids() -> list:
+    """Every favorite photo's id (favorites are shared by all users)."""
     con = connect()
     try:
         return [r[0] for r in con.execute("SELECT photo_id FROM favorite_photos")]
@@ -376,6 +392,7 @@ def album_item_ids(album_ids: list) -> list:
 
 
 def albums_of(photo_id: int) -> list:
+    """Ids of the viewer albums holding this photo that the current user may see."""
     vis, vp = _visible(alias="a")
     con = connect()
     try:
@@ -386,6 +403,7 @@ def albums_of(photo_id: int) -> list:
 
 
 def is_favorite(photo_id: int) -> bool:
+    """Whether the photo is a favorite."""
     con = connect()
     try:
         return con.execute("SELECT 1 FROM favorite_photos WHERE photo_id = ?", (photo_id,)).fetchone() is not None
@@ -394,6 +412,7 @@ def is_favorite(photo_id: int) -> bool:
 
 
 def album_id_by_name(name_or_id) -> int:
+    """The id of the viewer album with this name (any letter case) or id, among those the current user may see; None if none."""
     vis, vp = _visible()
     con = connect()
     try:

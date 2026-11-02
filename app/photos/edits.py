@@ -17,30 +17,35 @@ position, metadata template and keyword tags. Face regions are written by
 facemgr, through the same exiftool choke point (`run_exiftool`), which is the
 only place files are rewritten and therefore where every backup is taken.
 """
-import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import tempfile
-import threading
 import time
 from pathlib import Path
 
 from app import config
 from app.digikam import dkdb
-from app.data import index, state as appstate, vdb
+from app.data import index, state as appstate
 from app.digikam.dkdb import chunked, in_chunks
-from app.photos.paths import BACKUP_DIR, FILE_BACKUP_DIR, rel, backup_path, file_backup_path, sidecar_path  # the path helpers keep their edits.* names too
 from app.photos import consistency, dateprecision, pixelguard
+# the pending store, the backups and the path helpers were split out of this module; callers keep
+# using their edits.* names (facemgr takes edits.lock, routes edits.pending_count, importer edits.SKELETON...)
+from app.photos.paths import BACKUP_DIR, FILE_BACKUP_DIR, rel, backup_path, file_backup_path, sidecar_path
+from app.photos.backups import MIN_FREE_BYTES, SKELETON, backup_original, move_backups, ensure_backup, prepare
+from app.photos.pending import (lock, signature, save_pending, pending, pending_one, drop_pending_tag, pending_count,
+                                newest_pending, forget, remap_pending_tags, drop_pending_fields, resolved)
 
-MIN_FREE_BYTES = 2 * 1024 ** 3  # refuse to back up (and so to write) when the disk is nearly full
-SKELETON = ('<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
-            ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n  <rdf:Description rdf:about=""/>\n'
-            ' </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>\n')
-# Re-entrant: apply() and revert() hold it while they read and update the remembered edits,
-# and run_exiftool() takes it too so two exiftool processes never rewrite the same file at once
-lock = threading.RLock()
+__all__ = [  # this module's own API, then the names callers still reach through edits.* after the split
+    "EXIFTOOL", "TEMPLATE_FIELDS", "COLOR_TEXT", "MS_RATING", "INFILE_EXT", "exiftool_cmd", "available", "init",
+    "acdsee_categories", "write_args", "digikam_tag_paths", "run_exiftool", "writes_files", "can_write_file", "effective_tags",
+    "apply", "recheck", "rewrite_tags", "db_state", "revert",
+    "BACKUP_DIR", "FILE_BACKUP_DIR", "rel", "backup_path", "file_backup_path", "sidecar_path",
+    "MIN_FREE_BYTES", "SKELETON", "backup_original", "move_backups", "ensure_backup", "prepare",
+    "lock", "signature", "save_pending", "pending", "pending_one", "drop_pending_tag", "pending_count", "newest_pending",
+    "forget", "remap_pending_tags", "drop_pending_fields", "resolved",
+]
+
 
 
 def _find_exiftool():
@@ -67,260 +72,6 @@ def available() -> bool:
 
 def init():
     pass  # the edits table is part of the schema vdb.ensure_schema keeps (state.init)
-
-
-def signature() -> str:
-    """Changes whenever the set of remembered edits changes (part of the index version)."""
-    if not vdb.exists():
-        return "e0"
-    con = appstate.connect()
-    try:
-        n, ts = con.execute("SELECT count(*), coalesce(max(ts), 0) FROM pending_edits").fetchone()
-        return f"e{n}.{ts}"
-    except Exception:
-        return "e0"
-    finally:
-        con.close()
-
-
-def _next_ts(c) -> int:
-    """The stamp for a pending edit written now: never equal to the newest one, so two edits within the same second
-    still change signature() (and the index shows the second)."""
-    newest = c.execute("SELECT coalesce(max(ts), 0) FROM pending_edits").fetchone()[0] or 0
-    return max(int(time.time()), int(newest) + 1)
-
-
-def save_pending(rows: list):
-    """rows: [(photo id, edit dict)]: remembered (replacing what was there), with a fresh stamp."""
-    if rows:
-        def go(c):
-            ts = _next_ts(c)
-            c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", [(int(pid), json.dumps(e), ts) for pid, e in rows])
-        appstate.write(go)
-
-
-def pending() -> dict:
-    """photo_id -> remembered edit."""
-    if not vdb.exists():
-        return {}
-    con = appstate.connect()
-    try:
-        return {r[0]: json.loads(r[1]) for r in con.execute("SELECT photo_id, data FROM pending_edits")}
-    except Exception:
-        return {}
-    finally:
-        con.close()
-
-
-def pending_one(photo_id: int):
-    """The remembered edit of one photo, or None."""
-    if not vdb.exists():
-        return None
-    con = appstate.connect()
-    try:
-        r = con.execute("SELECT data FROM pending_edits WHERE photo_id = ?", (photo_id,)).fetchone()
-        return json.loads(r[0]) if r else None
-    except Exception:
-        return None
-    finally:
-        con.close()
-
-
-def drop_pending_tag(photo_id: int, path: str):
-    """A tag the user just set or cleared directly in digiKam's rows (a person without a face box) leaves the photo's
-    remembered edit, so the next apply does not add or remove it again."""
-    with lock:
-        e = pending_one(photo_id)
-        if not e:
-            return
-        changed = False
-        for k in ("add_tags", "remove_tags"):
-            if path in e.get(k, []):
-                e[k] = [t for t in e[k] if t != path]
-                changed = True
-        if changed:
-            save_pending([(photo_id, e)])
-
-
-def pending_count() -> int:
-    """How many edits are remembered (what status polls show; cheaper than loading them all)."""
-    if not vdb.exists():
-        return 0
-    con = appstate.connect()
-    try:
-        return con.execute("SELECT count(*) FROM pending_edits").fetchone()[0]
-    except Exception:
-        return 0
-    finally:
-        con.close()
-
-
-def newest_pending() -> int:
-    """When the most recent remembered edit was made (unix time), 0 when there is none."""
-    con = appstate.connect()
-    try:
-        row = con.execute("SELECT max(ts) FROM pending_edits").fetchone()
-        return int(row[0] or 0) if row else 0
-    finally:
-        con.close()
-
-
-def forget(photo_ids):
-    """Drop remembered edits (digiKam has caught up, or they were undone)."""
-    ids = [(int(i),) for i in photo_ids]
-    if ids:
-        appstate.write(lambda c: c.executemany("DELETE FROM pending_edits WHERE photo_id = ?", ids))
-
-
-def remap_pending_tags(mapping: dict) -> list:
-    """After tags were renamed, moved, merged or deleted in digiKam's database: the pending edits that name them by
-    path follow ({old path: new path, or None for a deleted tag}). Returns the photos whose edits changed, whose
-    sidecars should then be rewritten."""
-    if not mapping:
-        return []
-    def follow(t):
-        return mapping[t] if t in mapping else t
-    with lock:
-        cur, rows, touched = pending(), [], []
-        for pid, e in cur.items():
-            if not (set(e.get("add_tags", [])) | set(e.get("remove_tags", []))) & set(mapping):
-                continue
-            e = dict(e)
-            for k in ("add_tags", "remove_tags"):
-                if k in e:
-                    e[k] = list(dict.fromkeys(n for n in (follow(t) for t in e[k]) if n))
-                    if not e[k]:
-                        e.pop(k)
-            rows.append((pid, json.dumps(e), int(time.time())))
-            touched.append(pid)
-        if rows:
-            save_pending([(r[0], json.loads(r[1])) for r in rows])
-    return touched
-
-
-def drop_pending_fields(photo_ids, fields):
-    """Give up these fields of the photos' pending edits (tags: the tag additions and removals)."""
-    keys = set(fields) | ({"add_tags", "remove_tags"} if "tags" in fields else set()) | ({"caption_date"} if "caption" in fields else set())
-    with lock:
-        cur = pending()
-        rows, gone = [], []
-        for pid in photo_ids:
-            e = cur.get(int(pid))
-            if not e:
-                continue
-            e = {k: v for k, v in e.items() if k not in keys}
-            (rows.append((int(pid), json.dumps(e), int(time.time()))) if e else gone.append(int(pid)))
-        if rows:
-            save_pending([(r[0], json.loads(r[1])) for r in rows])
-        forget(gone)
-
-
-def resolved(photo_ids, snapshot: dict = None):
-    """digiKam's database now matches these edits: forget them and drop their
-    backups, so a later edit starts from a fresh backup. With `snapshot` ({id: the edit as it was when compared}),
-    an edit that changed since (a new edit made while the index was being built) is kept."""
-    ids = [int(i) for i in photo_ids]
-    if snapshot is not None:
-        with lock:
-            now = pending()
-            ids = [i for i in ids if i in snapshot and now.get(i) == snapshot[i]]
-            return _resolved(ids, index)
-    return _resolved(ids, index)
-
-
-def _resolved(ids, index):
-    if not ids:
-        return
-    try:
-        con = index.open_index()
-        try:
-            rows = list(in_chunks(con, "SELECT path FROM photos WHERE id IN ({ids})", ids))
-        finally:
-            con.close()
-        for (path,) in rows:
-            b = backup_path(path)
-            b.unlink(missing_ok=True)
-            Path(str(b) + ".created").unlink(missing_ok=True)
-    except (sqlite3.Error, OSError):
-        pass  # a backup left behind is harmless; the edit is forgotten either way
-    forget(ids)
-
-
-def backup_original(photo_path: str) -> Path:
-    """Copy an image file aside before its metadata is rewritten for the first time.
-    One copy per file is kept (the true original); later edits do not replace it."""
-    dst = file_backup_path(photo_path)
-    if dst.exists():
-        return dst
-    size = os.stat(photo_path).st_size
-    if shutil.disk_usage(str(config.DATA_DIR)).free < size + MIN_FREE_BYTES:
-        raise OSError(f"Not enough free disk space to back up {os.path.basename(photo_path)} before editing it")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(dst.name + ".part")
-    shutil.copy2(photo_path, tmp)
-    os.replace(tmp, dst)
-    return dst
-
-
-def move_backups(old_path: str, new_path: str):
-    """A photo (or a folder of them) moved or renamed: its backups follow, so Revert and the change log's restore
-    links still find them, and the next edit does not take an already-edited file for the original."""
-    for root in (BACKUP_DIR, FILE_BACKUP_DIR):
-        suffix = ".xmp" if root == BACKUP_DIR and not os.path.isdir(new_path) else ""
-        for tail in ("", ".created") if suffix else ("",):
-            src = root / (str(rel(old_path)) + suffix + tail)
-            if src.exists():
-                dst = root / (str(rel(new_path)) + suffix + tail)
-                try:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(src), str(dst))
-                except OSError:
-                    pass  # a backup left behind is harmless
-
-
-def _photo_of_sidecar(side: str) -> str:
-    """The photo a sidecar belongs to: photo.jpg for photo.jpg.xmp; for photo.xmp (the compatible naming) the
-    image file beside it with that stem, so the backup is named like backup_path(photo) everywhere."""
-    stem = side[:-4]
-    if os.path.isfile(stem):
-        return stem
-    d, name = os.path.split(stem)
-    try:
-        for n in os.listdir(d or "."):
-            if n != name + ".xmp" and os.path.splitext(n)[0] == name and not n.lower().endswith(".xmp"):
-                return os.path.join(d, n)
-    except OSError:
-        pass
-    return stem
-
-
-def ensure_backup(target: str, photo_path: str = None):
-    """Whatever exiftool is about to rewrite gets a backup first: sidecars under
-    sidecar-backups (once, before the viewer's first change), image files under file-backups."""
-    if target.endswith(".xmp"):
-        photo = photo_path or _photo_of_sidecar(target)
-        backup = backup_path(photo)
-        if not backup.exists() and not Path(str(backup) + ".created").exists() and os.path.exists(target):
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, backup)
-    else:
-        backup_original(target)
-
-
-def prepare(photo_path: str) -> str:
-    """Back the sidecar up before the viewer's first change, creating an empty
-    sidecar if the photo has none. Returns the sidecar path."""
-    side = sidecar_path(photo_path)
-    backup = backup_path(photo_path)
-    created = Path(str(backup) + ".created")
-    if not os.path.exists(side) and not backup.exists() and not created.exists():
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        created.write_text("The viewer created this sidecar; there was none before.\n")  # so revert deletes it
-    ensure_backup(side, photo_path)
-    if not os.path.exists(side):
-        with open(side, "x", encoding="utf-8") as f:
-            f.write(SKELETON)
-    return side
 
 
 # --------------------------------------------------------------------------
@@ -496,24 +247,24 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
     return a
 
 
-def digikam_tag_paths(image_ids: list) -> dict:
-    """{image id: [tag paths]} straight from digiKam's database (read-only):
+def digikam_tag_paths(photo_ids: list) -> dict:
+    """{photo id: [tag paths]} straight from digiKam's database (read-only):
     every assigned tag digiKam itself would write, i.e. all but its internal ones.
     From the viewer's copy of the library when digiKam's database cannot be read."""
     if not dkdb.sync_enabled() or index.offline["since"]:
-        return index.mirror_tag_paths(image_ids)
+        return index.mirror_tag_paths(photo_ids)
     try:
         src = dkdb.connect(write=False)
     except index.SOURCE_ERRORS:
-        return index.mirror_tag_paths(image_ids)
+        return index.mirror_tag_paths(photo_ids)
     try:
         tags = dkdb.tag_tree(src)
         internal = {r[0] for r in src.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'")}
         out = {}
-        for iid, tid in in_chunks(src, "SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({ids})", map(int, image_ids)):
+        for iid, tid in in_chunks(src, "SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({ids})", map(int, photo_ids)):
             if tid in tags and tid not in internal:
                 out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
-        return {iid: out.get(iid, []) for iid in (int(x) for x in image_ids)}
+        return {iid: out.get(iid, []) for iid in (int(x) for x in photo_ids)}
     finally:
         src.close()
 
@@ -774,10 +525,10 @@ def rewrite_tags(photos: list) -> list:
         return [owner[t] for t in run_exiftool(jobs)]
 
 
-def db_state(image_ids: list) -> dict:
+def db_state(photo_ids: list) -> dict:
     """{id: {rating, pick, color, title, caption, tags, taken, gps}} as digiKam's database holds them (read-only): what
     a sidecar and file say once the viewer's own edits are taken back. gps is {lat, lon, alt} or None."""
-    vals = consistency.db_values([int(i) for i in image_ids])
+    vals = consistency.db_values([int(i) for i in photo_ids])
     for v in vals.values():
         v["gps"] = None
     try:
@@ -785,7 +536,7 @@ def db_state(image_ids: list) -> dict:
     except Exception:
         return vals
     try:  # the position at full precision (db_values rounds it for comparing)
-        for pid, lat, lon, alt in in_chunks(src, "SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({ids})", map(int, image_ids)):
+        for pid, lat, lon, alt in in_chunks(src, "SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({ids})", map(int, photo_ids)):
             if pid in vals and lat is not None and lon is not None:
                 vals[pid]["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(alt) if alt is not None else None}
     finally:

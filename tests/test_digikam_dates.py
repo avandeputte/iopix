@@ -19,7 +19,7 @@ def test_face_change_updates_the_file_date_digikam_compares(client, lib):
     con.close()
     import re
     x, y, w, h = map(int, re.search(r'x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"', rect).groups())
-    r = facemgr.apply({"op": "move", "image": pid, "rect": [x, y, w, h], "new_rect": [x + 1, y, w, h]}, check_running=False)
+    r = facemgr.apply({"op": "move", "image": pid, "rect": [x, y, w, h], "new_rect": [x + 1, y, w, h]}, require_digikam_closed=False)
     assert "error" not in r and r.get("sidecar") == "written", r
     con = sqlite3.connect(lib["db"])
     md, size = con.execute("SELECT modificationDate, fileSize FROM Images WHERE id = ?", (pid,)).fetchone()
@@ -34,7 +34,7 @@ def test_face_change_updates_the_file_date_digikam_compares(client, lib):
     assert md == stamp[0] and size == stamp[1], (md, size, stamp)
     side = Path(path + ".xmp")
     assert side.exists() and abs(dt.datetime.fromisoformat(md).timestamp() - side.stat().st_mtime) < 1.5, "the sidecar's time, as digiKam's scanner takes it"
-    facemgr.apply({"op": "move", "image": pid, "rect": [x + 1, y, w, h], "new_rect": [x, y, w, h]}, check_running=False)
+    facemgr.apply({"op": "move", "image": pid, "rect": [x + 1, y, w, h], "new_rect": [x, y, w, h]}, require_digikam_closed=False)
 
 
 def test_mysql_dates_follow_the_library_convention(monkeypatch):

@@ -72,7 +72,7 @@ def rewrap(path: str, work: str, ff: str):
     raise SyncError("No repair made it play: the video data itself may be damaged; the file was left as it is")
 
 
-def video(pid: int, check_running: bool = True) -> dict:
+def video(pid: int, require_digikam_closed: bool = True) -> dict:
     """Repair one video in place. Returns {id, fixed_by, size_before, size_after, duration}."""
     ff = shutil.which("ffmpeg")
     if not ff:
@@ -89,7 +89,7 @@ def video(pid: int, check_running: bool = True) -> dict:
         raise SyncError("Only videos are repaired here")
     if _decodes(ff, path):
         return {"id": pid, "fixed_by": None, "note": "it already plays: nothing to repair"}
-    dbsync.preflight(dkdb.sqlite_path(), check_running, "the video")
+    dbsync.preflight(dkdb.sqlite_path(), require_digikam_closed, "the video")
     work = tempfile.mkdtemp(prefix=".iopix-repair-", dir=os.path.dirname(path))
     try:
         out, label = rewrap(path, work, ff)
@@ -107,7 +107,7 @@ def video(pid: int, check_running: bool = True) -> dict:
     meta = scanner.read([path]).get(path) or {}
     rows = scanner.rows_for(path, meta, 2)
     st = dkdb.file_stamp(path)
-    with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
+    with dbsync.write_transaction(dkdb.sqlite_path(), require_digikam_closed) as con:
         version = scanner.hash_version(con)
         con.execute("UPDATE Images SET uniqueHash = ?, fileSize = ?, modificationDate = ? WHERE id = ?",
                     (scanner.unique_hash(path, version), st[1] if st else None, st[0] if st else None, int(pid)))

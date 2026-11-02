@@ -461,7 +461,7 @@ def fit_inside(photos: list = None) -> dict:
     return out
 
 
-def fix_near_duplicates(after=None, check_running: bool = True) -> int:
+def fix_near_duplicates(after=None, require_digikam_closed: bool = True) -> int:
     """Start the clean-up in the background. Returns how many photos it will touch."""
     if progress["running"]:
         raise dbsync.SyncError("The clean-up is already running.")
@@ -472,12 +472,12 @@ def fix_near_duplicates(after=None, check_running: bool = True) -> int:
     if not todo:
         return 0
     db_path = Path(dkdb.sqlite_path())
-    dbsync.preflight(db_path, check_running, "faces")
+    dbsync.preflight(db_path, require_digikam_closed, "faces")
     progress.start(len(todo), files=False, removed=0, photos=0, errors=0, backup=None)
 
     def job():
         try:
-            _run(todo, db_path, check_running)
+            _run(todo, db_path, require_digikam_closed)
         except Exception as e:
             log.warning("face clean-up stopped: %s", e, exc_info=True)
             progress.fail(e)
@@ -489,7 +489,7 @@ def fix_near_duplicates(after=None, check_running: bool = True) -> int:
     return len(todo)
 
 
-def _run(todo: dict, db_path: Path, check_running: bool):
+def _run(todo: dict, db_path: Path, require_digikam_closed: bool):
     from app.faces import facemgr  # lazy: faces.facemgr -> faces.facequality would be an import cycle
     backup = dkdb.backup(db_path, force=True)  # thousands of regions removed in one go: one full copy first
     progress["backup"] = str(backup) if backup else None
@@ -499,7 +499,7 @@ def _run(todo: dict, db_path: Path, check_running: bool):
         snaps = {pid: history.snapshot(pid, paths[pid] + ".xmp") for pid in batch if pid in paths}
         removed = {}
         with facemgr.lock:
-            with dbsync.write_transaction(db_path, check_running) as con:
+            with dbsync.write_transaction(db_path, require_digikam_closed) as con:
                 for pid in batch:
                     for n in todo[pid]:
                         gone = 0

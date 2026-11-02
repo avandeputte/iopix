@@ -41,7 +41,7 @@ except ImportError:  # numpy comes with the optional AI features; without it the
 log = logging.getLogger(__name__)
 JOBS = ("quality", "vision", "objects", "captions", "looks")
 progress = {key: jobs.Progress(f"analysis:{key}") for key in JOBS}
-_run = {"ids": set()}  # the photos the running jobs were started with, for start()'s "nothing new" rule
+_started_with = {"ids": set()}  # the photos the running jobs were started with, for start()'s "nothing new" rule
 _ocr = None  # the OCR engine once loaded, False when none could be loaded
 on_progress = None  # set by the web app: called now and then so the index picks up new results
 
@@ -569,9 +569,9 @@ def start(photos: list):
         return
     init()
     ids = {p["id"] for p in photos}
-    if any(progress[k]["running"] for k in JOBS) and ids <= _run["ids"]:
+    if any(progress[k]["running"] for k in JOBS) and ids <= _started_with["ids"]:
         return  # nothing new for the running jobs: they carry on (a library change used to restart them at every batch)
-    _run["ids"] = ids
+    _started_with["ids"] = ids
     gens = {k: progress[k].cancel() for k in JOBS}  # the running jobs stop at their next batch; these runs take over
     # one at a time, through the shared job queue, so the machine stays usable
     jobs.submit("pixels", lambda: _pixel_job(photos, gens))

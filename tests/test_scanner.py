@@ -278,7 +278,7 @@ def test_a_file_of_an_unknown_kind_is_not_reported_gone(lib, tmp_path):
     con.execute("INSERT INTO Images (album, name, status, category, modificationDate, fileSize, uniqueHash) VALUES (?, ?, 1, 1, '2020-01-01T00:00:00', 1, 'y')", (album, unicodedata.normalize("NFC", "café.jpg")))
     con.commit(); con.close()
     try:
-        scanner.scan(check_running=False)
+        scanner.scan(require_digikam_closed=False)
         con = sqlite3.connect(lib["db"])
         rows = {r[0]: r[1] for r in con.execute("SELECT name, status FROM Images WHERE name IN ('old.crw', ?)", (unicodedata.normalize("NFC", "café.jpg"),))}
         con.close()

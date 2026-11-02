@@ -195,6 +195,7 @@ def settings() -> dict:
 
 
 def public_settings() -> dict:
+    """The database settings for the settings page: the password replaced by whether one is set, plus the current error and the SQLite file."""
     c = settings()
     return {**{k: v for k, v in c.items() if k != "password"}, "password_set": bool(c["password"]), "error": error, "sqlite_file": str(SQLITE_FILE)}
 
@@ -215,10 +216,12 @@ def save_settings(c: dict):
 
 
 def is_mysql() -> bool:
+    """Whether the viewer's own database is on MySQL right now (configured for it and reachable; otherwise SQLite)."""
     return settings()["type"] == "mysql" and error is None
 
 
 def describe() -> str:
+    """Where the viewer's own data lives, for status pages (with the error when MySQL fell back to SQLite)."""
     c = settings()
     if is_mysql():
         return f"MySQL {c['user']}@{c['host']}:{c['port']}/{c['database']}"
@@ -389,6 +392,7 @@ def writer(timeout: float = 30):
 
 
 def columns(con: VConn, table: str) -> list:
+    """The table's column names in order, on either backend; empty for a table that does not exist."""
     if con.mysql:  # a table that is not there has no columns (as PRAGMA says on SQLite): a fresh, empty database
         return [r[0] for r in con.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? "
                                           "ORDER BY ordinal_position", (table,))]
@@ -476,6 +480,7 @@ OLD_SQLITE_INDEXES = ["objects_photo", "near_dups_a", "lib_imagetags_image", "li
 
 
 def table_names(con: VConn) -> set:
+    """Every table in the viewer database, on either backend."""
     if con.mysql:
         return {r[0] for r in con.execute("SHOW TABLES")}
     return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}

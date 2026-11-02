@@ -30,6 +30,9 @@ _last_submit = 0.0  # jobs submitted close together (a start, a library change) 
 GRACE = 3.0
 MAX_SETTLE = 30.0  # a queue that never goes quiet (rebuild after rebuild) still gets its jobs run
 _progress = {}       # name -> Progress, every background job that reports one
+# the most of an exception's text a status record keeps: the message that says what went wrong, not the
+# traceback (that goes to the log); status pages and tool answers show it whole
+ERROR_TEXT_MAX = 300
 finished_hook = None  # called when any job's run ends (the index folds the results in once, then)
 idle_hooks = []       # called once the queue has run dry: models are dropped so an idle server keeps its memory small
 
@@ -63,7 +66,7 @@ class Progress(dict):
         self["done"] += n
 
     def fail(self, e):
-        self["error"] = (e if isinstance(e, str) else str(e))[:300]
+        self["error"] = (e if isinstance(e, str) else str(e))[:ERROR_TEXT_MAX]
 
     def finish(self, gen: int = None):
         """The run is over; with `gen`, only if no newer run has replaced it (that one reports its own end)."""
@@ -105,6 +108,12 @@ def threads() -> int:
     if v <= 0:
         v = config.BG_THREADS
     return max(1, min(v, max(1, n - 1)))
+
+
+def batch_threads() -> int:
+    """Worker threads for a job that runs the model per photo in a small pool (jerseys, clothing): the core budget,
+    but at most 4, since the model itself is already multi-threaded and more workers only contend for it."""
+    return max(1, min(4, threads()))
 
 
 def submit(key: str, fn):

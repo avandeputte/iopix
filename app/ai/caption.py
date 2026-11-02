@@ -19,13 +19,13 @@ def repo() -> str:
     return models.REGISTRY[models.chosen("caption_model")]["repos"][0]
 
 _lock = threading.Lock()
-_state = {}  # model, processor, device and the torch module once loaded; reset() clears it after a re-download
+_loaded = {}  # model, processor, device and the torch module once loaded; reset() clears it after a re-download
 
 
 def reset():
     """Drop the loaded model so the next describe() reads the files again (after a download or a switch)."""
     with _lock:
-        _state.clear()
+        _loaded.clear()
 
 
 def _florence() -> bool:
@@ -48,17 +48,17 @@ def available() -> bool:
 def _load():
     with _lock:
         name = repo()
-        if "model" in _state and _state.get("repo") == name:
-            return dict(_state)  # a snapshot: a reset or switch meanwhile cannot pull the model from under a running describe()
-        _state.clear()  # first load, or another size was chosen since
+        if "model" in _loaded and _loaded.get("repo") == name:
+            return dict(_loaded)  # a snapshot: a reset or switch meanwhile cannot pull the model from under a running describe()
+        _loaded.clear()  # first load, or another size was chosen since
         import torch
         from transformers import BlipForConditionalGeneration, BlipProcessor
         proc = BlipProcessor.from_pretrained(name, cache_dir=str(MODEL_DIR), local_files_only=True)
         model = BlipForConditionalGeneration.from_pretrained(name, cache_dir=str(MODEL_DIR), local_files_only=True)
         torch.set_num_threads(jobs.threads())  # the CPU side of generation, and all of it without a GPU
         dev = "mps" if torch.backends.mps.is_available() else "cpu"
-        _state.update(model=model.to(dev).eval(), proc=proc, dev=dev, torch=torch, repo=name)
-        return dict(_state)
+        _loaded.update(model=model.to(dev).eval(), proc=proc, dev=dev, torch=torch, repo=name)
+        return dict(_loaded)
 
 
 def describe(paths: list) -> list:

@@ -23,7 +23,7 @@ def test_a_failed_metadata_read_changes_nothing(client, lib, monkeypatch):
     real_exif = scanner._exif
     monkeypatch.setattr(scanner, "_exif", lambda paths: {})
     with pytest.raises(SyncError):
-        metaedit.reread(pid, check_running=False)
+        metaedit.reread(pid, require_digikam_closed=False)
     monkeypatch.setattr(scanner, "_exif", real_exif)
     con = sqlite3.connect(lib["db"])
     try:
@@ -55,7 +55,7 @@ def test_a_reread_keeps_digikams_internal_tags(client, lib):
         con.commit()
     finally:
         con.close()
-    metaedit.reread(pid, check_running=False)
+    metaedit.reread(pid, require_digikam_closed=False)
     con = sqlite3.connect(lib["db"])
     try:
         assert con.execute("SELECT 1 FROM ImageTags WHERE imageid = ? AND tagid = ?", (pid, tid[0])).fetchone(), "the internal tag survived the reread"

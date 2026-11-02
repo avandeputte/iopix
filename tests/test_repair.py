@@ -42,13 +42,13 @@ def test_repairing_a_library_video_in_place(client, lib):
     shutil.copy2(path, keep)
     try:
         _broken(path)
-        r = repair.video(vid, check_running=False)
+        r = repair.video(vid, require_digikam_closed=False)
         assert r["fixed_by"] and repair._decodes(FF, path), r
         assert edits.file_backup_path(path).exists(), "the damaged original is kept"
         con = sqlite3.connect(lib["db"])
         assert con.execute("SELECT fileSize FROM Images WHERE id = ?", (vid,)).fetchone()[0] == os.path.getsize(path)
         con.close()
-        assert repair.video(vid, check_running=False)["fixed_by"] is None, "a video that plays is left alone"
+        assert repair.video(vid, require_digikam_closed=False)["fixed_by"] is None, "a video that plays is left alone"
     finally:
         shutil.copy2(keep, path)
         os.remove(keep)

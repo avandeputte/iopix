@@ -15,7 +15,7 @@ import traceback
 from urllib.parse import quote
 
 from app.ai import analysis, concepts
-from app import config, events, thumbs
+from app import config, events, jobs, thumbs
 from app.digikam import dbsync, dkdb
 from app.photos import edits
 from app.faces import ages, facevecs
@@ -219,7 +219,7 @@ def watch():
         try:
             refresh(initial=kicked)
         except Exception as e:  # e.g. a wrong database setting (MySQL unreachable): the watcher must outlive it
-            state["error"] = str(e)[:300]
+            state["error"] = str(e)[:jobs.ERROR_TEXT_MAX]
             logging.getLogger("app.data.index").warning("index refresh failed: %s", e)
 
 

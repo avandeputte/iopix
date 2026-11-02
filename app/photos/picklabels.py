@@ -35,7 +35,7 @@ def counts() -> dict:
     return {k: int(have.get(k, 0)) for k in LEVELS}
 
 
-def clear(levels: list, check_running: bool = True, after=None) -> int:
+def clear(levels: list, require_digikam_closed: bool = True, after=None) -> int:
     """Take the chosen pick labels (1 Rejected, 2 Pending, 3 Accepted) off every photo. The database part is done
     before this returns; the sidecars follow in the background. Returns how many photos lost a label."""
     levels = sorted({int(x) for x in levels if int(x) in LEVELS})
@@ -44,11 +44,11 @@ def clear(levels: list, check_running: bool = True, after=None) -> int:
     if progress["running"]:
         raise dbsync.SyncError("Pick labels are being cleared already")
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     dkdb.backup(db_path, force=True)  # thousands of rows at once: a full copy first
     internal = "_Digikam_Internal_Tags_/"
     photos = []
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         tags = dkdb.tag_tree(con)
         by_full = {dkdb.tag_path(tags, tid): tid for tid in tags}
         for lv in levels:

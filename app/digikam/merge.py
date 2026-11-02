@@ -292,16 +292,16 @@ def _renumber(remap: dict):
         log.warning("embeddings of uploaded photos were not renumbered: %s", e)
 
 
-def apply(check_running: bool = True) -> dict:
+def apply(require_digikam_closed: bool = True) -> dict:
     """Write every change made with sync off into digiKam's database. Returns {applied: {...}, conflicts, remapped}."""
     if not dkdb.sync_enabled():
         raise dbsync.SyncError("Turn Sync with digiKam on first; the merge writes into digiKam's database.")
     d = diff()
     t0 = time.time()
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the library")
+    dbsync.preflight(db_path, require_digikam_closed, "the library")
     backup = dkdb.backup(db_path, force=True)
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         m = _Merge(con, d)
         m.run()
     # ---- afterwards: the viewer's data follows uploaded photos to their digiKam ids, then the library is digiKam's again

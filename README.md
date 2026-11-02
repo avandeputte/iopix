@@ -417,7 +417,7 @@ The viewer is also an [MCP](https://modelcontextprotocol.io) server, on the same
 
 That is the form behind the reverse proxy; without one, use `http://<host>:8600/mcp` and add `"--allow-http"` to the arguments, since the viewer itself speaks plain HTTP. The tools then appear in Claude Desktop's tool menu. To reach the endpoint from outside the home network it must sit behind the HTTPS proxy with Require sign-in on, so that `/mcp` answers only with the admin token (`"--header", "Authorization: Bearer <token>"` in the `mcp-remote` arguments); do not expose port 8600 to the internet as it is.
 
-Other clients that take an MCP URL use `http://<host>:8600/mcp` directly (set `VIEWER_URL` if links in results should use a different address). Clients that only spawn stdio servers on the machine running the viewer can use `.venv/bin/python -m app.mcp_server` from the checkout; it is the same code.
+Other clients that take an MCP URL use `http://<host>:8600/mcp` directly (set `VIEWER_URL` if links in results should use a different address). Clients that only spawn stdio servers on the machine running the viewer can use `.venv/bin/python -m app.mcp` from the checkout; it is the same code.
 
 
 ## Tests

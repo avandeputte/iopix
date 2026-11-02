@@ -5,7 +5,9 @@ import { G, setBadges } from './grid.js';
 import { confirmDialog, modal } from './actions.js';
 import { placeTagsDialog } from './admin.js';
 import { baseLayers, loadLeaflet, loadMaps, streetView, tiles } from './map.js';
-import { LB, details, getDetail, hasPeople, renderInfo, renderTitle, showItem } from './lightbox.js';
+import { LB, details, getDetail, renderTitle, showItem } from './lightbox.js';
+import { hasPeople } from './faces.js';
+import { renderInfo } from './info.js';
 import { awaitReindex, pollStatus } from './main.js';
 
 /** How well the date is known, as the server saves it (dateprecision.py): the placeholder date and the tag. */
@@ -77,7 +79,7 @@ export async function metadataEditor(d) {
       if (!t.value.trim()) return; changed.set(`${g.value}:${t.value.trim()}`, { group: g.value, tag: t.value.trim(), value: v.value }); saveBtn.disabled = false; fill(saveBtn, `Save ${plural(changed.size, 'change')}`); toast('Added; save to write it.'); } }, 'Add'));
   })() : null;
   const back = modal(`All metadata · ${d.name}`, h('div', { class: 'toolbar',}, filter, which), body, add,
-    h('div', { class: 'modal-btns' }, S.CAN_MANAGE ? reread : null, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close'), S.CAN_MANAGE ? saveBtn : null));
+    { buttons: [S.CAN_MANAGE ? reread : null, 'Close', S.CAN_MANAGE ? saveBtn : null] });
   back.querySelector('.modal').classList.add('mdmodal');
   load();
 }
@@ -107,7 +109,7 @@ export async function copyMetadata(ids) {
   } }, 'Copy to the others');
   const back = modal(`Copy metadata to ${plural(ids.length - 1, 'photo')}`, h('div', { class: 'muted', style: 'margin-bottom:6px' }, 'Copy from this photo (click to choose):'), thumbs,
     h('div', { class: 'expopts' }, F.map(([k, l]) => h('label', { class: 'chk',}, boxes[k], l))),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), go_));
+    { buttons: ['Cancel', go_] });
 }
 export async function editPhotos(ids, changes) {
   let r;
@@ -187,7 +189,7 @@ export function tagDialog(ids) {
     tagPicker((t) => editPhotos(ids, { add_tags: [t.id] })),
     h('div', { class: 'erow', style: 'margin-top:14px' }, h('span', { class: 'el' }, 'Remove'), tagPicker((t) => editPhotos(ids, { remove_tags: [t.id] }), 'Remove a tag from all…', { recent: false })),
     S.CAN_MANAGE ? h('div', { style: 'margin-top:14px' }, h('button', { type: 'button', class: 'lnk', onclick: () => { back.remove(); placeTagsDialog(ids); } }, 'Add place tags from GPS positions…')) : null,
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
+    { buttons: ['Done'] });
 }
 export function editDialog(ids) {
   const save = (ch) => editPhotos(ids, ch);
@@ -211,7 +213,7 @@ export function editDialog(ids) {
     h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'pillbtn', onclick: () => locationDialog(ids, null) }, icon('place'), 'Set location on map'),
       h('button', { class: 'pillbtn', onclick: () => templatePicker(ids) }, icon('copyright'), 'Apply template'),
       h('button', { class: 'pillbtn', onclick: () => gpxDialog(ids) }, icon('map'), 'Correlate with GPS track')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
+    { buttons: ['Done'] });
 }
 
 export async function dbDialog() {
@@ -233,8 +235,7 @@ export async function dbDialog() {
     h('p', null, `${plural(st.pending, 'photo has', 'photos have')} edits that are saved in XMP sidecars but not yet in digiKam’s database.`),
     h('p', null, `This writes the same ratings, labels, titles, captions and tags into digikam4.db. A copy of the database is saved in ${S.APP_NAME}’s data/db-backups folder first.`),
     msg,
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
-      h('a', { class: 'pillbtn', href: hashFor('photos', photosWith({ edited: 1 })), onclick: () => back.remove() }, 'Show them'), applyBtn));
+    { buttons: ['Cancel', h('a', { class: 'pillbtn', href: hashFor('photos', photosWith({ edited: 1 })), onclick: () => back.remove() }, 'Show them'), applyBtn] });
 }
 
 const TEMPLATE_LABEL = { creator: 'Creator', copyrightNotice: 'Copyright notice', rightsUsageTerms: 'Usage terms', creatorJobTitle: 'Job title', provider: 'Credit', source: 'Source', instructions: 'Instructions',
@@ -397,9 +398,9 @@ export async function locationDialog(ids, current, after) {
     h('div', { class: 'toolbar',}, lat, lon, alt, altNote,
       h('button', { class: 'pillbtn', title: 'Use the location of the previous photo in the grid', onclick: () => { const i = G.data?.id.indexOf(ids[0]); for (let k = (i ?? 0) - 1; k >= 0; k--) { if (G.geo.has(k)) { getDetail(G.data.id[k]).then((d) => { lat.value = d.lat; lon.value = d.lon; setAlt(d.alt); altAuto = d.alt == null; fill(altNote); place(); }); return; } } toast('No earlier photo in this view has a location.'); } }, 'Copy from previous photo'),
       h('button', { class: 'pillbtn', title: 'Look at the spot in Street View before saving', onclick: () => { if (!lat.value || !lon.value) { toast('Pick a spot first.'); return; } streetView(+lat.value, +lon.value, 'Street View'); } }, 'Street View')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
-      current ? h('button', { class: 'pillbtn', onclick: async () => { { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); } } }, 'Remove location') : null,
-      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : altM ?? fromHeight(alt.value) } })) after?.(); } }, icon('place'), 'Save location')));
+    { buttons: ['Cancel',
+      current ? ['Remove location', async () => { back.remove(); if (await editPhotos(ids, { gps: null })) after?.(); }] : null,
+      h('button', { class: 'pillbtn on', onclick: async () => { const la = +lat.value, lo = +lon.value; if (!lat.value || !lon.value || Math.abs(la) > 90 || Math.abs(lo) > 180) { toast('Enter a valid latitude and longitude.'); return; } back.remove(); if (await editPhotos(ids, { gps: townOnly.checked ? { lat: la, lon: lo, alt: null, accuracy: +accSel.value } : { lat: la, lon: lo, alt: alt.value === '' ? null : altM ?? fromHeight(alt.value) } })) after?.(); } }, icon('place'), 'Save location')] });
   let map, marker;
   const place = () => { fetchAlt(); if (!map || !lat.value || !lon.value) return; const ll = [+lat.value, +lon.value]; marker ? marker.setLatLng(ll) : (marker = L.marker(ll, { draggable: true }).addTo(map).on('dragend', () => { const p = marker.getLatLng(); lat.value = p.lat.toFixed(6); lon.value = p.lng.toFixed(6); fetchAlt(); drawCircle(); })); map.setView(ll, townOnly.checked ? Math.min(Math.max(map.getZoom(), 10), 13) : Math.max(map.getZoom(), 12)); drawCircle(); };
   // a pasted "40.4441, -79.9623" (comma, semicolon or space separated; N/S/E/W suffixes allowed) fills both fields
@@ -476,13 +477,13 @@ async function gpxDialog(ids) {
     h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Max gap'), gap, h('label', { style: 'display:flex;gap:6px;align-items:center;margin-left:12px' }, onlyMissing, 'only photos without a position')),
     h('div', { class: 'my8',}, h('button', { class: 'pillbtn', onclick: run }, icon('spark'), 'Match')),
     result, mapEl,
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
+    { buttons: ['Cancel',
       h('button', { class: 'pillbtn on', onclick: async () => {
         if (!token || !preview?.matched) { toast('Match first.'); return; }
         if (!await confirmDialog(`Write positions to ${nf.format(preview.matched)} photos? Sidecars are backed up first; digiKam gets them with “Apply edits to digiKam database”.`)) return;
         try { const r = await post('/api/gpx/apply', { token, ids, ...params() }); back.remove(); toast(`Positions written to ${nf.format(r.edited)} photos.`); S.keepView = true; pollSoon(); }
         catch (e) { toastError(e); }
-      } }, icon('place'), 'Apply positions')));
+      } }, icon('place'), 'Apply positions')] });
   file.onchange = run;
 }
 export async function templatePicker(ids, after) {
@@ -492,7 +493,7 @@ export async function templatePicker(ids, after) {
       icon('copyright'), h('div', null, h('b', null, t.name), h('div', { class: 'muted smaller' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ')))))) 
       : h('p', { class: 'muted' }, 'No templates yet. Define them in Settings > Metadata templates.'),
     h('p', { class: 'muted smaller' }, 'Applying a template sets every template field; fields left empty in the template are cleared on the photo, as in digiKam.'),
-    h('div', { class: 'modal-btns' }, h('a', { class: 'pillbtn', href: '#/settings', onclick: () => back.remove() }, 'Manage templates'), h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel')));
+    { buttons: [h('a', { class: 'pillbtn', href: '#/settings', onclick: () => back.remove() }, 'Manage templates'), 'Cancel'] });
 }
 export function templatesSection(m) {
   const list = h('div');
@@ -504,8 +505,8 @@ export function templatesSection(m) {
     const back = modal(isNew ? 'New metadata template' : `Edit “${t.name}”`,
       h('div', { class: 'erow' }, h('span', { class: 'el' }, 'Name'), name),
       h('div', { class: 'alist', style: 'max-height:50vh' }, inputs.map(([k, inp]) => h('div', { class: 'erow' }, h('span', { class: 'el', style: 'width:120px' }, TEMPLATE_LABEL[k]), inp))),
-      h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'),
-        h('button', { class: 'pillbtn on', onclick: () => { if (!name.value.trim()) { name.focus(); return; } t.name = name.value.trim(); inputs.forEach(([k, inp]) => { t.fields[k] = inp.value.trim(); }); if (isNew) tpls.push(t); back.remove(); save(); } }, 'Save')));
+      { buttons: ['Cancel',
+        ['Save', () => { if (!name.value.trim()) { name.focus(); return; } t.name = name.value.trim(); inputs.forEach(([k, inp]) => { t.fields[k] = inp.value.trim(); }); if (isNew) tpls.push(t); back.remove(); save(); }, 'on']] });
   };
   const draw = () => fill(list, tpls.map((t) => h('div', { class: 'srow' }, h('div', null, h('b', null, t.name), h('div', { class: 'muted note' }, Object.entries(t.fields).filter(([, v]) => v).map(([k, v]) => `${TEMPLATE_LABEL[k]}: ${v}`).join(' · ') || 'empty')),
       h('span', { style: 'display:flex;gap:6px' }, h('button', { class: 'pillbtn', onclick: () => edit(t, false) }, 'Edit'), h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the template “${t.name}”? Photos it was applied to are not changed.`, { ok: 'Delete', danger: true })) { tpls = tpls.filter((x) => x !== t); save(); } } }, 'Delete')))),

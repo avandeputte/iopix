@@ -978,9 +978,9 @@ def test_badges_change_at_once_on_every_thumbnail(page, server):
     page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], true))")
     tile(plain).locator(".fbadge").wait_for(**fast)
     try:
-        page.evaluate(f"import('/js/lightbox.js').then((m) => m.faceOp({{ op: 'tagonly', image: {plain}, tag: {person} }}))")
+        page.evaluate(f"import('/js/faces.js').then((m) => m.faceOp({{ op: 'tagonly', image: {plain}, tag: {person} }}))")
         tile(plain).locator(".cbadge[title='Has face tags']").wait_for(**fast)
-        page.evaluate(f"import('/js/lightbox.js').then((m) => m.faceOp({{ op: 'untag', image: {plain}, tag: {person} }}))")  # evaluate awaits faceOp: the server has answered
+        page.evaluate(f"import('/js/faces.js').then((m) => m.faceOp({{ op: 'untag', image: {plain}, tag: {person} }}))")  # evaluate awaits faceOp: the server has answered
         tile(plain).locator(".cbadge[title='Has face tags']").wait_for(state="detached", **fast)
         if nogeo:
             page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: {{ lat: 48.8584, lon: 2.2945, alt: null }} }}))")

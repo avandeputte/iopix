@@ -43,7 +43,7 @@ with TestClient(app) as c:
     out["error"] = s.get("error")
     out["status"] = {k: s["digikam"][k] for k in ("sync", "none")} if s.get("digikam") else None
     out["scanner_on"] = scanner.enabled()
-    res = scanner.scan(check_running=False)
+    res = scanner.scan(require_digikam_closed=False)
     out["scan"] = {k: res[k] for k in ("added", "error")}
     rebuild()
     p = c.get("/api/photos").json()

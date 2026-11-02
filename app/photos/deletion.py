@@ -84,13 +84,13 @@ def _rel(path: str) -> Path:
         return Path(*p.parts[1:]) if p.is_absolute() else p
 
 
-def delete(photos: list, check_running: bool = True) -> dict:
+def delete(photos: list, require_digikam_closed: bool = True) -> dict:
     """photos: index rows (id, path, name, hash, size, taken, rating, title, caption, tags). Returns
     {deleted, failed: [{id, error}], backup}."""
     if not photos:
         return {"deleted": 0, "failed": [], "backup": None}
     db_path = Path(dkdb.sqlite_path())
-    dbsync.preflight(db_path, check_running, "the photos")
+    dbsync.preflight(db_path, require_digikam_closed, "the photos")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     dest = BACKUP_DIR / stamp
     dest.mkdir(parents=True, exist_ok=True)
@@ -131,7 +131,7 @@ def delete(photos: list, check_running: bool = True) -> dict:
     db_backup = dkdb.backup(db_path, force=True)
     # 2. the database rows, in one transaction
     ids = [int(p["id"]) for p in ok]
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         drop_rows(con, ids)
     # 3. the files
     done = []

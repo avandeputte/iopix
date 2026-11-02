@@ -16,6 +16,9 @@ from app import thumbs
 from app.runtime import THUMB_COLS, db
 
 IMG_CACHE = {"Cache-Control": "private, max-age=86400"}
+# the most photo ids one request acts on: more than any one folder or year holds, so a selection is never cut
+# short in practice, and small enough that the id list stays a few hundred KB and its chunked queries a moment
+MAX_IDS = 20000
 
 
 def jresp(request: Request, data) -> Response:

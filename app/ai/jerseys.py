@@ -131,7 +131,7 @@ def _work(gen: int, todo: list):
     ocr = analysis.ocr_engine()  # loaded already: available() was checked before the run
     if ocr is None:
         return
-    n = max(1, min(4, jobs.threads()))
+    n = jobs.batch_threads()
     with ThreadPoolExecutor(n, thread_name_prefix="jerseys") as pool:
         for chunk in chunked(todo, 8):  # small batches: progress is written often, so a restart loses little
             if progress.cancelled(gen):

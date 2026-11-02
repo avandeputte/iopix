@@ -113,31 +113,34 @@ def test_rewrite_sidecars_tool(client, lib):
     """rewrite_sidecars needs the admin token and rewrites the given photos' sidecars from digiKam's database."""
     import pytest as _pytest
     from mcp.server.mcpserver.exceptions import ToolError
-    from app import mcp_server, updates
+    from app import updates
+    from app.mcp import admin
     with _pytest.raises(ToolError):
-        mcp_server.rewrite_sidecars("wrong", [lib["ids"][0]])
-    r = mcp_server.rewrite_sidecars(updates.admin_token(), lib["ids"][:2])
+        admin.rewrite_sidecars("wrong", [lib["ids"][0]])
+    r = admin.rewrite_sidecars(updates.admin_token(), lib["ids"][:2])
     assert r["photos"] == 2 and r["tags_failed"] == [] and set(r["regions"]) == {str(i) for i in lib["ids"][:2]}, r
 
 
 def test_edit_photos_tool_sets_the_date_in_sidecar_and_database(client, lib):
     import sqlite3
-    from app import mcp_server, updates
+    from app import updates
+    from app.mcp import admin, files
     from app.photos import edits
     pid = lib["ids"][-1]
     con = sqlite3.connect(lib["db"]); before = con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0]; con.close()
-    r = mcp_server.edit_photos(updates.admin_token(), [pid], taken="2015-04-04T12:37:05")
+    r = admin.edit_photos(updates.admin_token(), [pid], taken="2015-04-04T12:37:05")
     assert r["edited"] == 1 and r["database"]["applied"] == 1, r
     con = sqlite3.connect(lib["db"])
     assert con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0].startswith("2015-04-04T12:37:05")
     con.close()
-    mcp_server.edit_photos(updates.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
+    admin.edit_photos(updates.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
     edits.forget([pid])
 
 
 def test_inspect_file_reads_a_video(client, lib):
-    from app import mcp_server, updates
-    r = mcp_server.inspect_file(updates.admin_token(), lib["videos"][0])
+    from app import updates
+    from app.mcp import admin, files
+    r = files.inspect_file(updates.admin_token(), lib["videos"][0])
     assert r["size"] > 0 and r["boxes"] and r["complete"] and "exiftool" in r, r
 
 
@@ -147,9 +150,9 @@ def test_tag_op_marks_a_person_and_merges_with_the_token(client, lib):
     import sqlite3
     from app.photos import tagmanager
     tok = client.post("/api/update", json={"action": "token"}).json()["token"]
-    fam = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Boyd"}, check_running=False)["id"]
-    a = tagmanager.apply({"op": "add", "parent": fam, "name": "zz-Steve Boyd"}, check_running=False)["id"]
-    b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-steve Boyd"}, check_running=False)["id"]
+    fam = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Boyd"}, require_digikam_closed=False)["id"]
+    a = tagmanager.apply({"op": "add", "parent": fam, "name": "zz-Steve Boyd"}, require_digikam_closed=False)["id"]
+    b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-steve Boyd"}, require_digikam_closed=False)["id"]
     dk = sqlite3.connect(lib["db"])
     try:
         img = dk.execute("SELECT id FROM Images WHERE status = 1 LIMIT 1").fetchone()[0]
@@ -172,7 +175,7 @@ def test_tag_op_marks_a_person_and_merges_with_the_token(client, lib):
         for op in ({"op": "notperson", "id": a}, {"op": "delete", "id": fam}):
             while tagmanager.pending_jobs():
                 time.sleep(0.2)
-            tagmanager.apply(op, check_running=False)
+            tagmanager.apply(op, require_digikam_closed=False)
 
 
 def test_the_first_setting_keeps_existing_installs_on_and_is_kept_after(client):

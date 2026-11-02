@@ -1,13 +1,13 @@
-/** The pages: explore, people, places, folders, albums, tags, import and the trash. */
-import { $, MONTHS, SETTINGS, api, date, dfDay, del, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, send, store } from './core.js';
-import { NAV, S, ST, VIEW_FNS, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
+/** The pages: explore, people, places, folders, albums, events, detected content and the suggestion pages (sign-in and accounts are users.js). */
+import { $, MONTHS, PREF, actBtn, api, date, del, dfDay, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, send, store } from './core.js';
+import { NAV, S, ST, VIEW_FNS, faceUrl, filterParams, go, hashFor, loadState, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces, editPhotos } from './editing.js';
 import { downloadDialog } from './download.js';
-import { TRANSFORMS, dismissSuggestion, openLightbox, personPicker, popMenu, syncLightbox, tagOnly, transformPhotos } from './lightbox.js';
+import { TRANSFORMS, openLightbox, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
+import { dismissSuggestion, tagOnly } from './info.js';
 import { badgeTiles, tileBadges } from './grid.js';
-import { boot, pollStatus } from './main.js';
 
 function card({ img, fallback, name, sub, onclick, focus }) {
   const im = img ? h('img', { src: img, alt: '', loading: 'lazy', 'data-focus': focus || null }) : null;
@@ -64,10 +64,10 @@ export async function showExplore() {
   const group = (hue, ...kids) => h('div', { class: 'pills', style: `--hue:var(--c-${hue})` }, ...kids);
   // the size of the photos in On this day and Rediscover, remembered
   const sizes = [['s', 'S'], ['m', 'M'], ['l', 'L']];
-  let jsz = store.get('explore-size', 'm');
+  let jsz = store.get(PREF.exploreSize, 'm');
   const page = h('div', { class: `page jsz-${jsz}` });
   const seg = h('div', { class: 'eseg', title: 'Photo size', style: 'margin-left:auto' }, sizes.map(([k, l]) => h('button', { class: k === jsz ? 'on' : '', onclick: (e) => {
-    jsz = k; store.set('explore-size', k); page.className = `page jsz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+    jsz = k; store.set(PREF.exploreSize, k); page.className = `page jsz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
   main.replaceChildren(page);
   fill(page,
     pageTitle('explore', 'purple', 'Explore', seg),
@@ -222,7 +222,7 @@ export async function showPeople() {
     }
     return sec;
   };
-  let sort = store.get('people-sort', 'group'), size = store.get('people-size', 'm'), within = store.get('people-within', 'arranged');
+  let sort = store.get(PREF.peopleSort, 'group'), size = store.get(PREF.peopleSize, 'm'), within = store.get(PREF.peopleWithin, 'arranged');
   const byName = (a, b) => a.name.localeCompare(b.name), byCount = (a, b) => b.nAll - a.nAll;
   // the order inside a section: as arranged (groups only), by name, or the most photos first
   const order = (list, arranged) => within === 'name' ? [...list].sort(byName) : within === 'count' || !arranged ? [...list].sort(within === 'count' ? byCount : byName) : list;
@@ -256,17 +256,17 @@ export async function showPeople() {
     secs.push(rest.length || editing ? section(null, within === 'name' ? order(rest, false) : rest, groups.length ? 'Everyone else' : null) : null);
     body.replaceChildren(...secs.filter(Boolean));
   };
-  const withinSel = h('select', { class: 'sharepick', title: 'Order within each section', onchange: (e) => { within = e.target.value; store.set('people-within', within); draw(); } },
+  const withinSel = h('select', { class: 'sharepick', title: 'Order within each section', onchange: (e) => { within = e.target.value; store.set(PREF.peopleWithin, within); draw(); } },
     [['arranged', 'As arranged'], ['name', 'Name'], ['count', 'Most photos']].map(([v, l]) => h('option', { value: v, selected: v === within }, `Within: ${l.toLowerCase()}`)));
   const arrange = canEdit ? h('button', { class: 'pillbtn' + (editing ? ' on' : ''), onclick: () => { editing = S.arrangePeople = !editing; arrange.classList.toggle('on', editing); fill(arrange, editing ? 'Done' : 'Arrange groups'); newBtn.hidden = !editing; draw(); } }, editing ? 'Done' : 'Arrange groups') : null;
   const newBtn = h('button', { class: 'pillbtn', hidden: !editing, onclick: async () => { const n = await promptDialog('Name of the new group (Family, Friends, Classmates…)'); if (n && n.trim()) newGroup(n.trim()); } }, icon('add'), 'New group');
   // sort and badge size, remembered
-  const sortSel = h('select', { class: 'sharepick', title: 'Sort', onchange: (e) => { sort = e.target.value; store.set('people-sort', sort);
+  const sortSel = h('select', { class: 'sharepick', title: 'Sort', onchange: (e) => { sort = e.target.value; store.set(PREF.peopleSort, sort);
     if (sort !== 'group' && editing) { editing = S.arrangePeople = false; arrange.classList.remove('on'); fill(arrange, 'Arrange groups'); newBtn.hidden = true; }
     draw(); } }, [['group', 'By group'], ['family', 'By family name'], ['name', 'By name'], ['count', 'Most photos first']].map(([v, l]) => h('option', { value: v, selected: v === sort }, l)));
   const pageEl = h('div', { class: `page psz-${size}` });
   const seg = h('div', { class: 'eseg', title: 'Badge size' }, [['s', 'S'], ['m', 'M'], ['l', 'L']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
-    size = k; store.set('people-size', k); pageEl.className = `page psz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
+    size = k; store.set(PREF.peopleSize, k); pageEl.className = `page psz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
   main.replaceChildren(pageEl);
   fill(pageEl, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
     h('div', { class: 'toolbar',},
@@ -347,7 +347,6 @@ export async function showFolders() {
   const kidsOf = new Map();
   all.forEach((f) => { if (f.pid != null) { if (!kidsOf.has(f.pid)) kidsOf.set(f.pid, []); kidsOf.get(f.pid).push(f); } });
   kidsOf.forEach((l) => l.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })));
-  const act = (ic, title, fn) => h('button', { class: 'iconbtn tact', title, 'aria-label': title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(ic));
   const row = (f, flat) => {
     const kids = flat ? [] : (kidsOf.get(f.id) || []);
     const node = h('div', { class: 'tnode' }), box = h('div', { class: 'tkids', hidden: true });
@@ -358,12 +357,12 @@ export async function showFolders() {
     const trow = h('div', { class: 'trow', title: f.path, tabindex: 0, role: 'button', onclick: () => { if (f.nAll) go('photos', photosWith({ album: f.id, sort: 'old' })); else if (can) uploadTo(f); else expand(!node.classList.contains('open')); } },
       tw, cover, h('span', { class: 'nm' }, flat ? f.path.replace(/^\//, '').replaceAll('/', ' › ') : f.name,
         f.caption || f.category ? h('span', { class: 'muted fcap' }, [f.category, f.caption].filter(Boolean).join(' · ')) : null),
-      can ? h('span', { class: 'tacts' }, act('add', 'Upload photos into this folder', () => uploadTo(f)), act('folder', 'New folder inside this one', () => newFolder(f)),
-        f.pid != null ? act('edit', 'Rename this folder', async () => { const n = await promptDialog('Folder name', f.name); if (!n || n.trim() === f.name) return; try { await post(`/api/folders/${f.id}/rename`, { name: n.trim() }); toast(`Renamed to ${n.trim()}.`); } catch (e) { toastError(e); return; } refresh(); }) : null,
-        f.pid != null ? act('open', 'Move this folder under another one', () => folderPicker(`Move “${f.name}” under…`, async (p) => { try { const r = await post(`/api/folders/${f.id}/move`, { parent: p.id }); toast(`Moved to ${r.path}.`); } catch (e) { toastError(e); return; } refresh(); }, (x) => x.id === f.id || x.path.startsWith(f.path + '/'))) : null,
-        act('info', 'Folder properties: caption, date, category, cover', () => folderProperties(f, all, refresh)),
-        f.nAll ? act('download', 'Download this folder as a zip', () => downloadDialog(photosWith({ album: f.id }))) : null,
-        f.nAll && S.CAN_MANAGE && S.FACE_DETECT ? act('face', 'Detect faces in this folder and its subfolders', () => detectFaces(null, f)) : null) : null,
+      can ? h('span', { class: 'tacts' }, actBtn('add', 'Upload photos into this folder', () => uploadTo(f)), actBtn('folder', 'New folder inside this one', () => newFolder(f)),
+        f.pid != null ? actBtn('edit', 'Rename this folder', async () => { const n = await promptDialog('Folder name', f.name); if (!n || n.trim() === f.name) return; try { await post(`/api/folders/${f.id}/rename`, { name: n.trim() }); toast(`Renamed to ${n.trim()}.`); } catch (e) { toastError(e); return; } refresh(); }) : null,
+        f.pid != null ? actBtn('open', 'Move this folder under another one', () => folderPicker(`Move “${f.name}” under…`, async (p) => { try { const r = await post(`/api/folders/${f.id}/move`, { parent: p.id }); toast(`Moved to ${r.path}.`); } catch (e) { toastError(e); return; } refresh(); }, (x) => x.id === f.id || x.path.startsWith(f.path + '/'))) : null,
+        actBtn('info', 'Folder properties: caption, date, category, cover', () => folderProperties(f, all, refresh)),
+        f.nAll ? actBtn('download', 'Download this folder as a zip', () => downloadDialog(photosWith({ album: f.id }))) : null,
+        f.nAll && S.CAN_MANAGE && S.FACE_DETECT ? actBtn('face', 'Detect faces in this folder and its subfolders', () => detectFaces(null, f)) : null) : null,
       h('span', { class: 'ct' }, f.nAll ? nf.format(f.nAll) : h('i', null, 'empty')));
     if (!flat && kids.length && openFolders.has(f.id)) expand(true);
     node.append(trow, box);
@@ -383,6 +382,7 @@ export async function showFolders() {
   draw('');
 }
 const openFolders = new Set();  // which folder nodes are expanded, kept across visits
+const cardBtn = (ic, title, fn) => actBtn(ic, title, fn, 'carddl');  // an album card's own actions, on its cover
 const SMART = new Map();  // "smart album id:library version" -> the promise of its photos (count and cover), so typing in the filter box runs no search again
 /** Albums: groupings that exist only in this viewer (favorites-like lists stored in its own database). */
 export function showAlbums() {
@@ -391,23 +391,21 @@ export function showAlbums() {
   const change = async (path, payload) => { try { await post(path, payload); } catch (e) { toast(e.message || 'Could not update the album.'); return; } await loadState(); showAlbums(); };
   const mine = (a) => {
     const c = thumbCard(a.cover, a.name, plural(a.n, 'photo'), { ualbum: a.id });
-    const act = (ic, title, fn) => h('button', { class: 'carddl', title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
     if (!a.shared) c.querySelector('.cv').append(h('span', { class: 'privbadge', title: 'Private: only you see this album' }, icon('lock')));
     c.querySelector('.cv').append(h('span', { class: 'cardacts' },
-      act('link', 'Copy a link to this album', () => copyLink(location.origin + '/' + hashFor('photos', photosWith({ ualbum: a.id })), a.shared ? `Link copied. It works for anyone who can reach ${S.APP_NAME}.` : 'Link copied. The album is private: it opens only for you.')),
-      a.canEdit ? act('edit', 'Rename', async () => { const n = await promptDialog('Album name', a.name); if (n && n.trim()) return change(`/api/ualbums/${a.id}`, { name: n.trim() }); }) : null,
-      a.canEdit && ST.canShare && ST.canPrivate ? act(a.shared ? 'lock' : 'group', a.shared ? 'Make private (only you will see it)' : 'Share with everyone',
+      cardBtn('link', 'Copy a link to this album', () => copyLink(location.origin + '/' + hashFor('photos', photosWith({ ualbum: a.id })), a.shared ? `Link copied. It works for anyone who can reach ${S.APP_NAME}.` : 'Link copied. The album is private: it opens only for you.')),
+      a.canEdit ? cardBtn('edit', 'Rename', async () => { const n = await promptDialog('Album name', a.name); if (n && n.trim()) return change(`/api/ualbums/${a.id}`, { name: n.trim() }); }) : null,
+      a.canEdit && ST.canShare && ST.canPrivate ? cardBtn(a.shared ? 'lock' : 'group', a.shared ? 'Make private (only you will see it)' : 'Share with everyone',
         async () => { if (await confirmDialog(a.shared ? `Make “${a.name}” private? Only you will see it; other users lose it from their Albums.` : `Share “${a.name}” with everyone who can use ${S.APP_NAME}? Editors and admins can then change it.`)) return change(`/api/ualbums/${a.id}`, { shared: !a.shared }); }) : null,
-      act('download', 'Download as a zip', () => downloadDialog(photosWith({ ualbum: a.id }))),
-      a.canEdit ? act('trash', 'Delete this album (photos are not touched)', async () => { if (await confirmDialog(`Delete the album “${a.name}”? The photos themselves are not affected.`, { ok: 'Delete', danger: true })) return change(`/api/ualbums/${a.id}`, { delete: true }); }) : null));
+      cardBtn('download', 'Download as a zip', () => downloadDialog(photosWith({ ualbum: a.id }))),
+      a.canEdit ? cardBtn('trash', 'Delete this album (photos are not touched)', async () => { if (await confirmDialog(`Delete the album “${a.name}”? The photos themselves are not affected.`, { ok: 'Delete', danger: true })) return change(`/api/ualbums/${a.id}`, { delete: true }); }) : null));
     return c;
   };
   const newAlbum = () => {
     const name = h('input', { class: 'einput', placeholder: 'Album name' }), share = sharingPick();
     const create = () => { if (!name.value.trim()) { name.focus(); return; } back.remove(); change('/api/ualbums', { name: name.value.trim(), shared: pickedShared(share) }); };
     name.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') create(); };
-    const back = modal('New album', h('div', { style: 'display:grid;gap:10px' }, name, share),
-      h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: create }, 'Create')));
+    const back = modal('New album', h('div', { style: 'display:grid;gap:10px' }, name, share), { buttons: ['Cancel', ['Create', create, 'on']] });
     name.focus();
   };
   const newCard = ST.canShare || ST.canPrivate ? h('div', { class: 'card', tabindex: 0, role: 'button', onclick: newAlbum },
@@ -420,12 +418,11 @@ export function showAlbums() {
     if (!SMART.has(key)) { for (const k of SMART.keys()) if (!k.endsWith(`:${S.META.version}`)) SMART.delete(k); SMART.set(key, api('/api/photos?' + q.toString())); }
     SMART.get(key).then((d) => { c.querySelector('.sb').textContent = plural(d.count, 'photo'); if (d.count) c.querySelector('.cv').prepend(h('img', { src: `/thumb/${d.id[0]}`, alt: '', loading: 'lazy' })); })
       .catch(() => { SMART.delete(key); c.querySelector('.sb').textContent = 'could not run the search'; });
-    const act = (ic, title, fn) => h('button', { class: 'carddl', title, 'aria-label': title, onclick: async (e) => { e.stopPropagation(); await fn(); } }, icon(ic));
     c.querySelector('.cv').append(h('span', { class: 'cardacts' },
-      act('link', 'Copy a link to this smart album', () => copyLink(location.origin + '/' + hashFor('photos', q), 'Link copied.')),
-      act('edit', 'Rename', async () => { const n = await promptDialog('Smart album name', s.name); if (n && n.trim()) return change(`/api/searches/${s.id}`, { name: n.trim() }); }),
-      act('download', 'Download as a zip', () => downloadDialog(q)),
-      act('trash', 'Delete this smart album (the photos are not touched)', async () => { if (await confirmDialog(`Delete the smart album “${s.name}”?`, { ok: 'Delete', danger: true })) return change(`/api/searches/${s.id}`, { delete: true }); })));
+      cardBtn('link', 'Copy a link to this smart album', () => copyLink(location.origin + '/' + hashFor('photos', q), 'Link copied.')),
+      cardBtn('edit', 'Rename', async () => { const n = await promptDialog('Smart album name', s.name); if (n && n.trim()) return change(`/api/searches/${s.id}`, { name: n.trim() }); }),
+      cardBtn('download', 'Download as a zip', () => downloadDialog(q)),
+      cardBtn('trash', 'Delete this smart album (the photos are not touched)', async () => { if (await confirmDialog(`Delete the smart album “${s.name}”?`, { ok: 'Delete', danger: true })) return change(`/api/searches/${s.id}`, { delete: true }); })));
     c.classList.add('smart');
     return c;
   };
@@ -680,11 +677,6 @@ export function showDateSuggest() {
   });
 }
 
-// ---- users: sign in / out, own password, first-admin setup, admin user management
-export async function loadUser() {
-  try { const me = await api('/api/auth/me'); S.USER = me.user; SETTINGS.user = me.user ? me.settings : null; S.IS_ADMIN = me.isAdmin; S.USERS_EXIST = me.usersExist; S.REQUIRE_LOGIN = !!me.requireLogin; S.VIA_PROXY = !!me.viaProxy; } catch { S.USER = null; SETTINGS.user = null; }
-  renderUserMenu();
-}
 // which bar item a view belongs to: Explore's sub-pages light Explore, the Faces page People, Maintenance's pages Maintenance
 const NAV_OF = { duplicates: 'explore', detected: 'explore', events: 'explore', faces: 'people', analysis: 'maintenance', history: 'maintenance', consistency: 'maintenance', quality: 'maintenance', trash: 'folders', import: 'folders' };
 export const MORE_VIEWS = ['favorites', 'folders', 'albums', 'tags', 'map', 'events', 'settings', 'maintenance'];
@@ -702,169 +694,7 @@ export function moreSheet() {
   rest.push(['#/settings', 'Settings', 'gear', 'settings']);
   if (S.IS_ADMIN) rest.push(['#/maintenance', 'Maintenance', 'wrench', 'maintenance']);
   const back = modal('More', h('div', { class: 'sheetgrid' }, rest.map(([href, label, ic, v]) => h('a', { href, class: currentNav() === v ? 'on' : '', style: `--hue:var(--c-${{ favorites: 'rose', folders: 'teal', albums: 'indigo', tags: 'orange', map: 'cyan', events: 'green' }[v] || 'slate'})`, onclick: () => back.remove() }, h('span', { class: 'sic' }, icon(ic)), label))),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
-}
-export function renderUserMenu() {
-  const el = $('#usermenu'); if (!el) return;
-  el.replaceChildren(S.USER
-    ? h('button', { class: 'iconbtn tool', title: `${S.USER.name} (${S.USER.role}) · account`, onclick: accountDialog }, avatarOf(S.USER))
-    : h('button', { class: 'iconbtn tool', title: S.USERS_EXIST ? 'Sign in' : 'Create the admin account', onclick: () => (S.USERS_EXIST ? loginDialog() : setupDialog()) }, icon('person')));
-}
-async function afterLogin(me) {
-  S.USER = me.user; SETTINGS.user = me.settings || {}; renderUserMenu();
-  if (!S.BOOTED) { applyBadgePref(); applyTheme(); await boot(); return; }  // sign-in was required: load the library now
-  await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute();
-}
-/** required: the viewer shows nothing else until someone signs in (no Cancel, no closing). */
-export function loginDialog(required) {
-  // the account picker: a tile per account; one click for a passwordless viewer, a password for the others
-  const name = h('input', { class: 'einput', placeholder: 'User name', autocomplete: 'username' });
-  const pw = h('input', { class: 'einput', type: 'password', placeholder: 'Password', autocomplete: 'current-password' });
-  const form = h('div', { style: 'display:grid;gap:8px;margin-top:10px' }, name, pw);
-  const tiles = h('div', { class: 'accounts' });
-  const submit = async () => { try { const me = await post('/api/auth/login', { name: name.value.trim(), password: pw.value }); back.remove(); await afterLogin(me); toast(`Signed in as ${me.user.name}.`); } catch (e) { toastError(e); } };
-  [name, pw].forEach((i) => { i.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') submit(); }; });
-  const back = modal('Sign in', tiles, form,
-    h('p', { class: 'muted small' }, required ? `Sign in to use ${S.APP_NAME}.` : 'Without signing in you can browse everything; signing in keeps your display settings, favorites and albums on the server, and editors can change the library.'),
-    h('div', { class: 'modal-btns' }, required ? null : h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: submit }, 'Sign in')));
-  back.querySelector('.modal').prepend(h('div', { class: 'signin-brand' }, h('span', { class: 'logo' }), brandName()));  // the logo and the name above the title
-  if (required) { back.onclick = null; back.classList.add('required'); }
-  api('/api/auth/accounts').then((d) => {
-    if (!d.accounts.length) { name.focus(); return; }
-    form.hidden = true;
-    fill(tiles, d.accounts.map((a) => h('button', { class: 'account', title: a.passwordless ? `Sign in as ${a.name}` : `${a.name} (password)`, onclick: async () => {
-      if (a.passwordless) { try { const me = await post('/api/auth/login', { name: a.name }); back.remove(); await afterLogin(me); toast(`Signed in as ${a.name}.`); } catch (e) { toastError(e); } return; }
-      name.value = a.name; form.hidden = false; tiles.querySelectorAll('.account').forEach((t) => t.classList.toggle('on', t === tiles.querySelector(`[data-n="${CSS.escape(a.name)}"]`))); pw.focus();
-    }, 'data-n': a.name }, avatarOf(a, true), h('span', { class: 'nm' }, a.name), a.passwordless ? null : h('span', { class: 'muted', style: 'font-size:11px' }, 'password'))),
-      h('button', { class: 'account', title: 'Type a user name', onclick: () => { form.hidden = false; name.value = ''; name.focus(); } }, h('span', { class: 'avatar big', style: 'background:var(--bg3);color:var(--fg2)' }, '…'), h('span', { class: 'nm' }, 'Other')));
-  }).catch(() => name.focus());
-}
-export function setupDialog() {
-  const name = h('input', { class: 'einput', placeholder: 'Admin user name', autocomplete: 'username' });
-  const pw = h('input', { class: 'einput', type: 'password', placeholder: 'Password (8 characters or more)', autocomplete: 'new-password' });
-  const submit = async () => { try { const me = await post('/api/auth/setup', { name: name.value.trim(), password: pw.value }); back.remove(); await afterLogin({ user: me.user, settings: {} }); toast('Admin account created; you are signed in.'); } catch (e) { toastError(e); } };
-  [name, pw].forEach((i) => { i.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') submit(); }; });
-  const back = modal('Create the admin account', h('p', { class: 'muted' }, `Right now ${S.APP_NAME} is open to anyone who can reach it. Once an admin exists, visitors browse read-only, signed-in users keep their settings on the server, and only editors and admins can change the library or the settings.`),
-    h('div', { class: 'stack',}, name, pw),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Cancel'), h('button', { class: 'pillbtn on', onclick: submit }, 'Create')));
-  name.focus();
-}
-function accountDialog() {
-  const cur = h('input', { class: 'einput', type: 'password', placeholder: 'Current password', autocomplete: 'current-password' });
-  const pw = h('input', { class: 'einput', type: 'password', placeholder: 'New password (8 characters or more)', autocomplete: 'new-password' });
-  [cur, pw].forEach((i) => { i.onkeydown = (e) => e.stopPropagation(); });
-  // how this browser is signed in, and so what Sign out does
-  const how = h('p', { class: 'muted small' });
-  const outBtn = h('button', { class: 'pillbtn', onclick: async () => {
-    back.remove(); let r; try { r = await post('/api/auth/logout', {}); } catch (e) { toastError(e); return; }
-    if (r && r.cloudflareLogout) { location.href = r.cloudflareLogout; return; }  // Cloudflare's own sign-out page ends its session too
-    if (S.REQUIRE_LOGIN) { location.reload(); return; } S.USER = null; SETTINGS.user = null; renderUserMenu(); await pollStatus(); applyBadgePref(); applyTheme(); S.viewKey = null; onRoute(); toast('Signed out.'); } }, 'Sign out');
-  api('/api/auth/me').then((me) => {
-    const by = me.signedInBy;
-    fill(how, h('b', null, 'Signed in: '), by === 'cloudflare' ? (me.throughCloudflare ? 'through Cloudflare Access, from outside your network.' : 'through Cloudflare Access; this browser stays signed in on your home network too.')
-      : by === 'proxy' ? 'at the sign-in page of your proxy; sign out there.' : by === 'oneclick' ? 'here, with one click (no password).' : 'here, with a password.');
-    outBtn.textContent = by === 'cloudflare' && me.throughCloudflare ? 'Sign out (of Cloudflare too)' : 'Sign out';
-    outBtn.title = by === 'cloudflare' ? 'Ends the session here and Cloudflare Access’s, so Cloudflare asks for sign-in again next time' : '';
-    if (by === 'proxy') { outBtn.remove(); allBtn.remove(); }
-  }).catch(() => {});
-  const allBtn = h('button', { class: 'pillbtn', title: 'Ends this account’s sessions on every other browser and phone; this one stays signed in', onclick: async () => {
-    if (!await confirmDialog('Sign this account out everywhere else? Every other browser and phone will have to sign in again; this one stays.', { ok: 'Sign out everywhere' })) return;
-    try { await post('/api/auth/logout_all', {}); toast('Signed out everywhere else.'); } catch (e) { toastError(e); } } }, 'Sign out everywhere else');
-  const back = modal(`${S.USER.name} · ${S.USER.role}`,
-    h('p', { class: 'muted' }, S.USER.role === 'admin' ? 'You can change the library, the settings and the users.' : S.USER.role === 'editor' ? 'You can change the library (edits, tags, faces, places).' : 'You can browse, and keep favorites, albums and display settings.'),
-    h('h4', null, 'Who you are in People'),
-    h('div', {}, avatarOf(S.USER, true), h('span', null, S.USER.person && S.tagById.get(S.USER.person) ? S.tagById.get(S.USER.person).name : 'not linked'),
-      S.IS_ADMIN ? h('button', { class: 'pillbtn', onclick: () => personPicker(async (t) => { try { S.USER = await post('/api/auth/person', { person: t.id }); renderUserMenu(); back.remove(); accountDialog(); } catch (e) { toastError(e); } }) }, S.USER.person ? 'Change' : 'Link to a person')
-        : h('span', { class: 'muted' }, S.USER.person ? '' : '(an admin can link your account in Settings › Users)'),
-      S.USER.person ? h('a', { class: 'lnk', href: hashFor('photos', photosWith({ tag: S.USER.person })), onclick: () => back.remove() }, 'Photos of me') : null),
-    how,
-    S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', {}, cur, pw)],
-    S.VIA_PROXY ? null : h('div', {}, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toastError(e); } } }, 'Change password')),
-    h('div', { class: 'modal-btns' }, allBtn, outBtn,
-      h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Done')));
-}
-export function usersSection() {
-  const body = h('div');
-  const wrap = h('div', null, h('h2', null, 'Users'),
-    h('div', { class: 'muted', style: 'max-width:820px' }, 'Visitors who are not signed in browse read-only with display settings in their browser. Viewers keep settings, favorites and albums on the server; editors can also change the library; admins can also change settings, run maintenance and manage users.'),
-    h('div', { class: 'srow' }, h('div', null, h('b', null, 'Require sign-in'), h('div', { class: 'muted', style: 'font-size:13px' }, 'Visitors see only the sign-in screen; nothing from the library (not even thumbnails) is served without an account. MCP clients then need the admin token as a bearer header (see the README).')),
-      h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' }, h('input', { type: 'checkbox', id: 'reqlogin', checked: S.REQUIRE_LOGIN, disabled: !S.USERS_EXIST, onchange: async (e) => {
-        try { await post('/api/settings', { require_login: e.target.checked }); S.REQUIRE_LOGIN = e.target.checked; toast(S.REQUIRE_LOGIN ? 'Visitors now have to sign in.' : 'Visitors can browse again.'); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), 'Require sign-in')), body);
-  const draw = async () => {
-    let d; try { d = await api('/api/users'); } catch (e) { fill(body, errorBox(e)); return; }
-    const name = h('input', { class: 'einput', placeholder: 'User name', style: 'width:160px' }), pw = h('input', { class: 'einput', type: 'password', placeholder: 'Password', style: 'width:160px' });
-    const email = h('input', { class: 'einput', type: 'email', placeholder: 'Email (optional)', autocomplete: 'off', style: 'width:200px' });
-    const role = h('select', null, d.roles.map((r) => h('option', { value: r }, r)));
-    const nopw = h('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px' }, h('input', { type: 'checkbox', onchange: (e) => { pw.disabled = e.target.checked; if (e.target.checked) { pw.value = ''; role.value = 'viewer'; } } }), 'no password (one-click sign-in, viewer only)');
-    [name, pw, email].forEach((i) => { i.onkeydown = (e) => e.stopPropagation(); });
-    const act = async (fn, after = draw) => { try { await fn(); } catch (err) { toastError(err); } after(); };
-    const setPerson = (u, t) => act(async () => { await post(`/api/users/${u.id}`, { person: t ? t.id : null }); if (S.USER && S.USER.id === u.id) { S.USER.person = t ? t.id : null; renderUserMenu(); } });
-    fill(body, h('table', { class: 'utable' },
-      h('thead', null, h('tr', null, ['Account', 'Email', 'Person in People', 'Role', 'Password', 'Sign-in list', ''].map((c) => h('th', null, c)))),
-      h('tbody', null, d.users.map((u) => h('tr', { 'data-user': u.name },
-        h('td', null, h('span', { class: 'ucell' }, avatarOf(u), h('span', null, u.name, u.id === S.USER?.id ? h('span', { class: 'muted' }, ' (you)') : null))),
-        h('td', null, u.email || h('span', { class: 'muted' }, 'none'), ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: async () => { const v = await promptDialog(`Email address for ${u.name} (empty to clear)`, u.email || ''); if (v !== null) act(async () => { await post(`/api/users/${u.id}`, { email: v.trim() }); }); } }, u.email ? 'Change' : 'Set')),
-        h('td', null, u.person && S.tagById.get(u.person) ? S.tagById.get(u.person).name : h('span', { class: 'muted' }, 'not linked'), ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: () => personPicker((t) => setPerson(u, t)) }, u.person ? 'Change' : 'Link'), u.person ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: () => setPerson(u, null) }, 'Unlink')] : null),
-        h('td', null, h('select', { onchange: (e) => act(async () => { await post(`/api/users/${u.id}`, { role: e.target.value }); toast(`${u.name} is now ${e.target.value}.`); }) }, d.roles.map((r) => h('option', { value: r, selected: r === u.role }, r)))),
-        h('td', null, u.passwordless ? h('span', { class: 'muted' }, 'none (one-click)') : 'set', ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: async () => { const p = await promptDialog(`New password for ${u.name}`, { type: 'password', placeholder: '8 characters or more', ok: 'Set password' }); if (p) act(async () => { await post(`/api/users/${u.id}`, { password: p }); toast('Password set.'); }, () => {}); } }, 'Set'),
-          u.role === 'viewer' && !u.passwordless ? [' · ', h('button', { type: 'button', class: 'lnk', title: 'One-click sign-in from the account picker', onclick: async () => { if (await confirmDialog(`Remove ${u.name}’s password? Anyone who can reach ${S.APP_NAME} can then sign in as ${u.name} with one click.`)) act(() => post(`/api/users/${u.id}`, { password: '' })); } }, 'Remove')] : null),
-        h('td', { style: 'text-align:center' }, h('input', { type: 'checkbox', checked: u.listed !== false, title: `Offered on the sign-in screen. Unticked, ${u.name} signs in through “Other”, by name${u.passwordless ? '' : ' and password'}.`,
-          onchange: (e) => act(async () => { await post(`/api/users/${u.id}`, { listed: e.target.checked }); toast(e.target.checked ? `${u.name} is offered on the sign-in screen again.` : `${u.name} is no longer offered on the sign-in screen; “Other” and the name still sign in.`); }) })),
-        h('td', { style: 'text-align:right' }, u.id !== S.USER?.id ? h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the user ${u.name}?`, { ok: 'Delete', danger: true })) act(() => post(`/api/users/${u.id}`, { delete: true })); } }, 'Delete') : null))))),
-      h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px' }, name, email, pw, role, nopw, h('button', { class: 'pillbtn on', onclick: async () => {
-        try { await post('/api/users', { name: name.value.trim(), email: email.value.trim(), password: nopw.querySelector('input').checked ? '' : pw.value, role: nopw.querySelector('input').checked ? 'viewer' : role.value }); toast(`Added ${name.value.trim()}.`); } catch (err) { toastError(err); } draw();
-      } }, icon('add'), 'Add user')));
-  };
-  draw();
-  wrap.append(proxySection());
-  return wrap;
-}
-// sign-in at a reverse proxy (Cloudflare Access, Authelia behind nginx...): who signed in there is signed in here
-function proxySection() {
-  const box = h('div');
-  const draw = async () => {
-    let d; try { d = await api('/api/settings/proxy'); } catch (e) { fill(box, errorBox(e)); return; }
-    const v = d.values, env = new Set(d.fromEnv || []);
-    const lock = (k, el) => { if (env.has(k)) { el.disabled = true; el.title = 'Set in iopix.env'; } el.onkeydown = (e) => e.stopPropagation(); return el; };
-    const inp = (k, ph, w = 320) => lock(k, h('input', { class: 'einput', value: v[k] || '', placeholder: ph, style: `margin:0;width:${w}px;max-width:100%` }));
-    const modeSel = lock('AUTH_PROXY', h('select', null, [['off', 'Off'], ['cloudflare', 'Cloudflare Access'], ['haproxy', 'HAProxy'], ['nginx', 'nginx'], ['caddy', 'Caddy'], ['traefik', 'Traefik'], ['header', 'Another proxy']]
-      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY || 'off').toLowerCase() === k }, l))));
-    const team = inp('CF_ACCESS_TEAM', 'myteam.cloudflareaccess.com'), aud = inp('CF_ACCESS_AUD', 'Application Audience (AUD) tag', 520);
-    const header = inp('AUTH_PROXY_HEADER', 'default: ' + (d.mode === 'cloudflare' ? 'Cf-Access-Authenticated-User-Email' : 'Remote-User, X-Forwarded-User, X-Auth-Request-Email…'));
-    const trusted = inp('AUTH_PROXY_TRUSTED', 'default: 127.0.0.1, ::1');
-    const create = lock('AUTH_PROXY_CREATE', h('select', null, [['', 'Gets the sign-in screen (default)'], ['deny', 'Is denied access'], ['viewer', 'Gets a viewer account'], ['editor', 'Gets an editor account']]
-      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY_CREATE || '') === k }, l))));
-    const row = (label, detail, el) => h('div', { class: 'srow' }, h('div', null, h('b', null, label), h('div', { class: 'muted', style: 'font-size:13px' }, detail)), el);
-    const cf = h('div', null,
-      row('Cloudflare team domain', 'Zero Trust › Settings › Team name and domain (the address the Access sign-in page is on).', team),
-      row('Application Audience (AUD) tag', 'Zero Trust › Access › Applications › this app › Overview. With both set, the token Cloudflare signs is checked and the email comes from it; nothing else is believed.', aud));
-    const other = h('div', null,
-      row('User header', 'The request header the proxy puts the signed-in user (name or email) in. Comma-separate several.', header),
-      row('Proxy addresses', 'The header is believed only from these addresses or networks (where the proxy connects from).', trusted));
-    const seen = d.seen && d.seen.iss ? h('div', { class: 'muted', style: 'font-size:13px;margin:6px 0' }, `Last request through your tunnel (its claims as sent, unverified until saved): team ${String(d.seen.iss).replace(/^https:\/\//, '')}, AUD ${[].concat(d.seen.aud || []).join(', ')}${d.seen.email ? ', ' + d.seen.email : ''}${d.seen.account !== undefined ? (d.seen.account ? ' (account ' + d.seen.account + ')' : ' (no account)') : ''}. `,
-      env.has('CF_ACCESS_TEAM') || env.has('CF_ACCESS_AUD') ? null : h('button', { type: 'button', class: 'lnk', onclick: () => { team.value = String(d.seen.iss).replace(/^https:\/\//, ''); aud.value = [].concat(d.seen.aud || [])[0] || ''; } }, 'Use these')) : null;
-    const show = () => { cf.style.display = modeSel.value === 'cloudflare' ? '' : 'none'; other.style.display = modeSel.value === 'off' ? 'none' : ''; rest.style.display = modeSel.value === 'off' ? 'none' : ''; };
-    const rest = h('div', null, row('Someone with no account here', 'When the proxy lets in a person whose email or name matches no account. Denied: a “No access” page, with no way to sign in here.', create));
-    modeSel.onchange = show;
-    const state = d.mode === 'off' ? 'Off: only the sign-in here.' : d.mode === 'cloudflare' ? (d.cloudflareVerified ? 'On: Cloudflare Access tokens are verified.' : 'On, but without the team domain and AUD tag: the header is believed from the proxy addresses only.') : `On (${d.mode}): the user header is believed from ${d.trusted.join(', ')}.`;
-    fill(box, h('h2', null, 'Sign-in at a proxy'),
-      h('div', { class: 'muted', style: 'max-width:820px' }, 'Someone signed in at your reverse proxy (Cloudflare Access on a tunnel, or Authelia, Authentik or oauth2-proxy behind HAProxy, nginx, Caddy or Traefik) is signed in here too, matched to an account by email, then name. Everyone else still uses the sign-in here; requests from outside through Cloudflare can only use accounts with a password.'),
-      h('div', { style: 'margin:8px 0' }, h('b', null, state)),
-      env.size ? h('div', { class: 'muted', style: 'font-size:13px' }, `Set in iopix.env (change them there): ${[...env].join(', ')}`) : null,
-      row('Proxy', 'Which reverse proxy signs people in.', modeSel), cf, seen, other, rest,
-      h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn on', onclick: async () => {
-        const body = {};
-        [['AUTH_PROXY', modeSel], ['CF_ACCESS_TEAM', team], ['CF_ACCESS_AUD', aud], ['AUTH_PROXY_HEADER', header], ['AUTH_PROXY_TRUSTED', trusted], ['AUTH_PROXY_CREATE', create]]
-          .forEach(([k, el]) => { if (!env.has(k)) body[k] = el.value.trim(); });
-        try { await post('/api/settings/proxy', body); toast('Proxy sign-in saved.'); draw(); } catch (e) { toastError(e); }
-      } }, 'Save')));
-    show();
-  };
-  draw();
-  return box;
+    { buttons: ['Close'] });
 }
 export function showAnalysis() { go('maintenance', null, true); }  // the old #/analysis page now lives in Maintenance; keep bookmarks working
 

@@ -1,5 +1,5 @@
 /** The filter drawer: browse every metadata facet. */
-import { $, api, fill, h, icon, isoDay, nf, store } from './core.js';
+import { $, PREF, api, fill, h, icon, isoDay, nf, store } from './core.js';
 import { FILTER_VIEWS, S, applyFilter, faceUrl, filterParams, go, setOne, toggle } from './state.js';
 
 // photo quality: why a photo looks like a reject (index.REJECT_REASONS)
@@ -13,7 +13,7 @@ export function toggleFilters(force, remember = true) {
   el.hidden = !show;
   document.body.classList.toggle('filters-open', show);
   $('#filterbtn').classList.toggle('on', show);
-  if (remember) store.set('filters', show ? '1' : '0');
+  if (remember) store.set(PREF.filters, show ? '1' : '0');
   if (show) renderFilters();
 }
 

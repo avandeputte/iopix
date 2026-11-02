@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facemgr
-from app import config, events, mcp_server, proxyauth, thumbs, updates, users
+from app import config, events, mcp, proxyauth, thumbs, updates, users
 from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate
 from app.digikam import dkdb
@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
 from app.routes import auth, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
 from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, setup_file_log, models_arrived
-__all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
+__all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewarmer"]  # tests and app.mcp reach these through app.main
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -52,7 +52,7 @@ async def lifespan(_app):
     updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them
         dlmodels.auto_download(config.AUTO_MODELS, on_done=models_arrived)
-    async with mcp_server.server.session_manager.run():  # the MCP endpoint (/mcp) lives in this process
+    async with mcp.server.session_manager.run():  # the MCP endpoint (/mcp) lives in this process
         yield
 
 
@@ -136,7 +136,7 @@ async def _auth_guard(request: Request, call_next):
     if request.url.path.startswith("/mcp"):
         if not mcp_enabled():  # switched off (the default): as if there were no such endpoint
             return JSONResponse({"detail": "The MCP server is switched off (Settings › Viewer › MCP server)."}, status_code=404)
-        mcp_server.token_given.set(_mcp_token_ok(request))  # answers with file paths only for the token holder
+        mcp.token_given.set(_mcp_token_ok(request))  # answers with file paths only for the token holder
     if user is None and users.require_login():
         path = request.url.path
         if path.startswith("/mcp"):
@@ -209,7 +209,7 @@ app.include_router(faces.router)
 # DNS-rebinding protection is off because the viewer is reached by LAN name or IP, not localhost only.
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 
-_mcp_asgi = mcp_server.server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True,
+_mcp_asgi = mcp.server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True,
                                                    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
 # its route handles the exact path /mcp; placed first so the static root mount never sees it
 app.router.routes[:0] = list(_mcp_asgi.routes)

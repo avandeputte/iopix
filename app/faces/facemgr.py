@@ -23,8 +23,9 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history, tagmanager
-from app.data import index, vdb
+from app.data import index
 from app.digikam.dbsync import SyncError
+from app.faces import sidecar_queue
 from app.faces.facequality import NEAR
 
 log = logging.getLogger("app.faces.facemgr")
@@ -119,128 +120,33 @@ def _find(con, sp, image, rect):
     return None, None
 
 
-def apply(op: dict, db_path=None, check_running: bool = True, background: bool = False) -> dict:
+def apply(op: dict, db_path=None, require_digikam_closed: bool = True, background: bool = False) -> dict:
     """One face change (see apply_many for the operations)."""
-    return apply_many([op], db_path, check_running, background)[0]
+    return apply_many([op], db_path, require_digikam_closed, background)[0]
 
 
-_side_queue = {}            # image -> db_path, waiting for its sidecar rewrite (latest database state is written)
-_side_writing = set()       # images whose sidecar is being written right now (a reread waits for them)
-_side_cond = threading.Condition()
-_side_worker = {"thread": None}
-
-
-def _sidecar_worker():
-    while True:
-        with _side_cond:
-            while not _side_queue:
-                _side_cond.wait()
-            batch = list(_side_queue.items())[:50]
-            for image, _p in batch:
-                _side_queue.pop(image, None)
-            _side_writing.update(image for image, _p in batch)
-        by_db = {}
-        for image, path in batch:
-            by_db.setdefault(path, []).append(image)
-        try:
-            for db_path, images in by_db.items():
-                try:
-                    res = write_regions_many(images, db_path)
-                    bad = [i for i, v in res.items() if v != "written"]
-                    for i in res:
-                        if i not in bad:
-                            _tries.pop(i, None)
-                    _unqueue([i for i in res if i not in bad])
-                    if bad:
-                        log.warning("face regions not written to the sidecars of %s: %s", bad[:10], {i: res[i] for i in bad[:3]})
-                        _retry(bad, db_path)
-                except Exception as e:
-                    log.warning("face regions not written to the sidecars of %s: %s", images[:10], e)
-                    _retry(images, db_path)
-        finally:
-            with _side_cond:
-                _side_writing.difference_update(image for image, _p in batch)
-                _side_cond.notify_all()
-
-
-_tries = {}
-
-
-def _retry(images, db_path):
-    """Put photos whose sidecar could not be written back on the queue, a few times, a minute apart."""
-    again = [i for i in images if _tries.get(i, 0) < 3]
-    for i in images:
-        _tries[i] = _tries.get(i, 0) + 1
-    if again:
-        t = threading.Timer(60, queue_sidecars, args=(again, db_path))
-        t.daemon = True  # a pending retry must not hold the process open at shutdown
-        t.start()
-
-
-def _unqueue(images: list):
-    """These photos' sidecars are written: they leave the queue kept in the viewer database."""
-    if not images:
-        return
-    try:
-        with vdb.writer() as con:
-            con.executemany("DELETE FROM face_sidecar_queue WHERE image_id = ?", [(int(i),) for i in images])
-    except Exception as e:
-        log.debug("face sidecar queue: %s", e)
+# the background sidecar rewrites live in sidecar_queue; these names stay for the callers (main, tagmanager, metaedit, tests)
+def queue_sidecars(images: list, db_path=None, remember: bool = True):
+    """Rewrite these photos' sidecar regions in the background (sidecar_queue.queue_sidecars)."""
+    return sidecar_queue.queue_sidecars(images, db_path, remember)
 
 
 def resume_queue():
-    """At start: the sidecar rewrites a restart interrupted (the queue is kept in the viewer database) go on."""
-    try:
-        with vdb.reader() as con:
-            images = [r[0] for r in con.execute("SELECT image_id FROM face_sidecar_queue")]
-    except Exception as e:
-        log.debug("face sidecar queue: %s", e)
-        return
-    if images:
-        log.info("face regions: %d sidecar rewrites left from before the restart resume", len(images))
-        queue_sidecars(images, remember=False)
-
-
-def queue_sidecars(images: list, db_path=None, remember: bool = True):
-    """Rewrite these photos' sidecar regions from the database in the background, in order, one worker. The queue is
-    also kept in the viewer database, so a restart in between does not leave regions in digiKam's rows but not in
-    the sidecars."""
-    if remember and images:
-        try:
-            import time
-            with vdb.writer() as con:
-                con.executemany("INSERT OR REPLACE INTO face_sidecar_queue (image_id, ts) VALUES (?,?)", [(int(i), int(time.time())) for i in images])
-        except Exception as e:
-            log.debug("face sidecar queue: %s", e)
-    with _side_cond:
-        for i in images:
-            _side_queue[int(i)] = db_path
-        if _side_worker["thread"] is None or not _side_worker["thread"].is_alive():
-            _side_worker["thread"] = threading.Thread(target=_sidecar_worker, name="face-sidecars", daemon=True)
-            _side_worker["thread"].start()
-        _side_cond.notify()
+    """At start: the sidecar rewrites a restart interrupted go on (sidecar_queue.resume_queue)."""
+    return sidecar_queue.resume_queue()
 
 
 def sidecars_pending() -> int:
-    with _side_cond:
-        return len(_side_queue)
+    """How many photos still wait for their sidecar rewrite."""
+    return sidecar_queue.sidecars_pending()
 
 
 def flush_sidecar(pid: int):
-    """A face change of this photo still waiting for its sidecar is written now (a reread of the file would undo it);
-    one being written right now is waited for first."""
-    pid = int(pid)
-    with _side_cond:
-        for _ in range(60):
-            if pid not in _side_writing:
-                break
-            _side_cond.wait(timeout=1)
-        waiting = _side_queue.pop(pid, "none")
-    if waiting != "none":
-        write_regions_many([pid])
+    """A face change of this photo still waiting for its sidecar is written now (sidecar_queue.flush_sidecar)."""
+    return sidecar_queue.flush_sidecar(pid)
 
 
-def apply_many(ops: list, db_path=None, check_running: bool = True, background: bool = False) -> list:
+def apply_many(ops: list, db_path=None, require_digikam_closed: bool = True, background: bool = False) -> list:
     """Several face changes in one transaction with one backup. Each op:
     {op: name|confirm|ignore|unknown|remove|add|move, image, rect: [x,y,w,h], tag?, new_rect?}
     name:    give the face at rect (unknown, suggested or confirmed) the person `tag`
@@ -262,11 +168,11 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     for op in ops:
         if op.get("op") not in ("name", "confirm", "ignore", "unknown", "remove", "add", "move", "detected", "suggest", "untag", "tagonly"):
             raise SyncError("Unknown face operation")
-    dbsync.preflight(db_path, check_running, "faces")
+    dbsync.preflight(db_path, require_digikam_closed, "faces")
     results, touched = [], []
     with lock:
         backup = None  # face changes take no full database copy; each is in the change log
-        with dbsync.write_transaction(db_path, check_running) as con:
+        with dbsync.write_transaction(db_path, require_digikam_closed) as con:
             sp = special_tags(con)
             for op in ops:
                 try:

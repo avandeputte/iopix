@@ -23,7 +23,7 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 
-from app import config
+from app import config, jobs
 from app.digikam import dkdb
 from app.photos import edits, history
 from app.digikam.dkdb import in_chunks
@@ -71,10 +71,10 @@ def _confirmed_closed() -> bool:
         return False
 
 
-def preflight(db_path: Path, check_running: bool = True, holds: str = None):
+def preflight(db_path: Path, require_digikam_closed: bool = True, holds: str = None):
     """The checks every writer runs before backing up: digiKam closed, no interrupted
     write left behind. `holds` names what lives in the database for the message."""
-    if check_running and digikam_running():
+    if require_digikam_closed and digikam_running():
         raise SyncError("digiKam is running. Quit digiKam first" + (f"; {holds} live in its database." if holds else ", then try again."))
     with dkdb.write_lock:  # a write of the viewer's own still running is not an unfinished write
         pending = dkdb.journal_pending(db_path)
@@ -84,7 +84,7 @@ def preflight(db_path: Path, check_running: bool = True, holds: str = None):
 
 
 @contextmanager
-def write_transaction(db_path: Path = None, check_running: bool = True):
+def write_transaction(db_path: Path = None, require_digikam_closed: bool = True):
     """One guarded write to digiKam's database: BEGIN, schema-version check, the caller's
     statements, integrity check, a last look for a running digiKam, COMMIT. Any error
     rolls back; the connection is always closed."""
@@ -102,7 +102,7 @@ def write_transaction(db_path: Path = None, check_running: bool = True):
         yield con
         if not con.integrity_ok():
             raise SyncError("Integrity check failed; nothing was changed.")
-        if check_running and digikam_running():
+        if require_digikam_closed and digikam_running():
             raise SyncError("digiKam was started during the update; nothing was changed.")
         con.commit()
         dkdb.note_own_write()
@@ -126,7 +126,7 @@ class AfterList(list):
         self.revert = []
 
 
-def batch(items: list, per_item, check_running: bool = True, holds: str = None, db_path: Path = None, backup: bool = False) -> dict:
+def batch(items: list, per_item, require_digikam_closed: bool = True, holds: str = None, db_path: Path = None, backup: bool = False) -> dict:
     """A batch endpoint's loop as one guarded write: preflight once, one backup (when asked), one transaction, and
     per_item(con, item, after) for each item inside it. An item that raises is rolled back to its savepoint and
     recorded in `failed` with the message; the others stand. Returns {done: [items], failed: [{id, error}]}. per_item
@@ -134,7 +134,7 @@ def batch(items: list, per_item, check_running: bool = True, holds: str = None, 
     reverse). Work that must see the committed rows (a sidecar written from them) goes into `after`, a list of
     callables run once the transaction is through, for the items that succeeded."""
     db_path = Path(db_path or dkdb.sqlite_path())
-    preflight(db_path, check_running, holds)
+    preflight(db_path, require_digikam_closed, holds)
     if backup:
         dkdb.backup(db_path, force=True)
     done, failed = [], []
@@ -142,7 +142,7 @@ def batch(items: list, per_item, check_running: bool = True, holds: str = None, 
         return {"done": done, "failed": failed}
     later, reverts = [], []
     try:
-        with write_transaction(db_path, check_running) as con:
+        with write_transaction(db_path, require_digikam_closed) as con:
             for n, item in enumerate(items):
                 con.execute(f"SAVEPOINT item{n}")
                 after = AfterList()
@@ -153,7 +153,7 @@ def batch(items: list, per_item, check_running: bool = True, holds: str = None, 
                     con.execute(f"RELEASE SAVEPOINT item{n}")
                     for fn in after.revert:  # the item's file, if it was already replaced
                         fn()
-                    failed.append({"id": item.get("id") if isinstance(item, dict) else item, "error": str(e)[:300]})
+                    failed.append({"id": item.get("id") if isinstance(item, dict) else item, "error": str(e)[:jobs.ERROR_TEXT_MAX]})
                     continue
                 con.execute(f"RELEASE SAVEPOINT item{n}")
                 done.append(item)
@@ -238,18 +238,18 @@ def photo_paths(ids: list) -> list:
     return out
 
 
-def apply_pending(db_path: Path = None, pending: dict = None, check_running: bool = True) -> dict:
+def apply_pending(db_path: Path = None, pending: dict = None, require_digikam_closed: bool = True) -> dict:
     """Write every pending viewer edit into the digiKam database."""
     db_path = Path(db_path or dkdb.sqlite_path())
     pending = edits.pending() if pending is None else pending
     if not pending:
         return {"applied": 0, "skipped": [], "backup": None}
-    preflight(db_path, check_running)
+    preflight(db_path, require_digikam_closed)
     if not dkdb.is_mysql() and not dkdb.standalone() and not os.access(db_path, os.W_OK):
         raise SyncError("The digiKam database file is not writable.")
     # ordinary edits take no full database copy: each is in the change log, and the sidecars have their own backups
     applied, skipped = [], []
-    with write_transaction(db_path, check_running) as con:
+    with write_transaction(db_path, require_digikam_closed) as con:
         tags = dkdb.tag_tree(con)
         by_full = {dkdb.tag_path(tags, tid): tid for tid in tags}
         internal = "_Digikam_Internal_Tags_/"

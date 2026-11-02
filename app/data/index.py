@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from app.ai import analysis, jerseys, moments, ocrwords, smartcrop, videos
-from app import config
+from app import config, jobs
 from app.digikam import dkdb, library
 from app.photos import dateprecision, edits
 from app.geo import places
@@ -115,7 +115,7 @@ def _set_offline(err):
         if not offline["since"]:
             log.warning("digiKam's database is unreachable; working from the viewer's copy of the library: %s", err)
             offline["since"] = int(time.time())
-        offline.update(error=str(err)[:300], checked=int(time.time()))
+        offline.update(error=str(err)[:jobs.ERROR_TEXT_MAX], checked=int(time.time()))
 
 
 def mirror_info() -> dict:
@@ -243,9 +243,9 @@ def refresh_library():
         src.close()
 
 
-def mirror_tag_paths(image_ids: list) -> dict:
-    """{image id: [tag paths]} from the library tables (every tag but digiKam's internal ones)."""
-    ids = [int(x) for x in image_ids]
+def mirror_tag_paths(photo_ids: list) -> dict:
+    """{photo id: [tag paths]} from the library tables (every tag but digiKam's internal ones)."""
+    ids = [int(x) for x in photo_ids]
     con = library.connect()
     try:
         tags = dkdb.tag_tree(con)

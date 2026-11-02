@@ -1,16 +1,29 @@
 /** What the whole app shares: user and settings, the library's metadata, the route and the navigation, status polling. */
-import { $, DOCK_MIN, api, fill, h, main, norm, store } from './core.js';
+import { $, DOCK_MIN, PREF, api, fill, h, main, norm, store } from './core.js';
 import { crumbs, renderChips } from './search.js';
 import { G, keepPlace, removeScrubber, showPhotos } from './grid.js';
 import { clearSelection, showDamaged, showHistory, showImport, showQuality, showTrash } from './actions.js';
 import { MORE_VIEWS, currentNav, showAlbums, showAnalysis, showClothing, showDateSuggest, showDetected, showEvents, showExplore, showFolders, showJerseys, showPeople, showPlaceSuggest, showPlaces, showRotation } from './pages.js';
-import { showConsistency, showDuplicates, showFaces, showMaintenance, showSettings, showTags } from './admin.js';
+import { showConsistency, showDuplicates, showFaces, showTags } from './admin.js';
+import { showMaintenance, showSettings } from './settings.js';
 import { M, showMap } from './map.js';
 import { renderFilters, toggleFilters } from './filters.js';
 import { LB, syncLightbox } from './lightbox.js';
 import { pollStatus } from './main.js';
 
-/** Mutable state every module reads and writes (one object, so modules can assign it; ES module bindings cannot be assigned from outside). */
+/** Mutable state every module reads and writes (one object, so modules can assign it; ES module bindings cannot be
+ *  assigned from outside). Each group of fields has one writer; the rest only read:
+ *  - the session (users.js loadUser, after a sign-in or sign-out): USER, IS_ADMIN, USERS_EXIST, REQUIRE_LOGIN, VIA_PROXY;
+ *  - the server's status (main.js pollStatus, from /api/status and /api/meta): META, tagById, albumById, SEM, APP_STAMP,
+ *    APP_VERSION, APP_COMMIT, APP_NAME, LOSSLESS, EDITING, WRITE_FILES, CAN_MANAGE, FACE_DETECT, SYNC_OFF, NO_DK, AUTO_DB,
+ *    DIGIKAM_CHECK, PENDING, BOOTED, RELOAD_PENDING, STALE_VIEW, liveRedraw, quietUntil, pollTimer;
+ *  - the route and what is drawn (state.js onRoute and go): route, viewKey, drawnKey, lastHash, keepView, facetToken, placeRows;
+ *  - editing helpers loaded on first use (editing.js): TEMPLATES, RECENT_TAGS, CONCEPTS (loadConcepts below), dragTag, manageTags;
+ *  - the maps (map.js): MAPS, mapsLoaded, leafletP, clusterP; the search box (search.js): sgItems, sgSel, scrollRaf.
+ *  A page may also keep a flag of its own here (arrangePeople, applySidebar, reindexUntil), set and read by that one module.
+ *  Keys are UPPER_CASE when they come from the server or the session and camelCase when the page sets them; G (grid.js),
+ *  LB (lightbox.js) and M (map.js) stay with their widget: they are that widget's own working state (what it shows, where it
+ *  is scrolled, its DOM nodes), reset by it and read by nobody else except to ask what it shows. */
 export const S = {
   RELOAD_PENDING: false,
   STALE_VIEW: false,
@@ -64,14 +77,7 @@ export const S = {
 export const faceUrl = (tagId) => `/face/${tagId}?v=${S.tagById.get(tagId)?.icon || 0}`;
 // an account's avatar: the linked person's face badge from People, else the first letter
 export const avatarOf = (u, big) => u.person ? h('img', { class: 'avatar' + (big ? ' big' : ''), src: faceUrl(u.person), alt: '' }) : h('span', { class: 'avatar' + (big ? ' big' : '') }, u.name[0].toUpperCase());
-export function toastError(e, ms = 9000) { toast((e && e.message) || String(e), null, null, ms); }
-export function toast(msg, action, fn, ms = 6000) {
-  const t = $('#toast');
-  fill(t, msg, action ? h('button', { type: 'button', class: 'lnk', onclick: () => { t.hidden = true; fn(); } }, action) : null);
-  t.hidden = false;
-  clearTimeout(toast.t);
-  toast.t = setTimeout(() => { t.hidden = true; }, ms);
-}
+export { toast, toastError } from './core.js';  // defined there so core's act() can use them; every module keeps importing them from here
 
 
 export const FILTER_VIEWS = ['photos', 'map'];
@@ -100,7 +106,7 @@ export const ST = { rev: -1, fav: new Set(), albums: [], searches: [] };
 
 export function loadConcepts() { if (S.CONCEPTS || !S.SEM.enabled) return; S.CONCEPTS = []; api('/api/concepts').then((c) => { S.CONCEPTS = c.concepts.map((x) => ({ ...x, _n: norm(x.name) })); }).catch(() => { S.CONCEPTS = null; }); }
 
-export const applyBadgePref = () => document.body.classList.toggle('nobadges', store.get('badges', '1') === '0');
+export const applyBadgePref = () => document.body.classList.toggle('nobadges', store.get(PREF.badges, '1') === '0');
 // The photo info panel's sections, each one a user can hide (Settings › Display › Info panel, or the gear in the
 // panel). What is stored is the hidden set, so a section added later shows by default.
 const INFO_SECTIONS = [
@@ -108,17 +114,17 @@ const INFO_SECTIONS = [
   ['location', 'Location and map'], ['details', 'Details: rating, creator, copyright, video'], ['camera', 'Camera, lens and exposure'],
   ['ai', 'AI analysis: description, detected content, objects, text, sharpness'], ['history', 'Edit log: every change made here, with undo'],
 ];
-export const infoHidden = () => new Set(store.get('info_hide', '').split(',').filter(Boolean));
+export const infoHidden = () => new Set(store.get(PREF.infoHide, '').split(',').filter(Boolean));
 export function infoPrefsEditor(onchange) {
   const hid = infoHidden();
   return h('div', { class: 'iprefs' }, INFO_SECTIONS.map(([k, label]) => h('label', null, h('input', { type: 'checkbox', checked: !hid.has(k), onchange: (e) => {
-    const s = infoHidden(); if (e.target.checked) s.delete(k); else s.add(k); store.set('info_hide', [...s].join(',')); onchange?.(); } }), label)));
+    const s = infoHidden(); if (e.target.checked) s.delete(k); else s.add(k); store.set(PREF.infoHide, [...s].join(',')); onchange?.(); } }), label)));
 }
 /** Appearance: light, dark, or follow the system (the default). Set on <html> so the stylesheet
  *  picks the palette; the browser chrome (theme-color) follows the page background. */
 export const THEMES = [['light', 'Light'], ['dark', 'Dark'], ['system', 'System']];  // light unless chosen otherwise
 export function applyTheme() {
-  const t = store.get('theme', 'light');
+  const t = store.get(PREF.theme, 'light');
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
   S.applySidebar?.();  // docked or put away is a display preference too: it follows the account
   requestAnimationFrame(() => { const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = getComputedStyle(document.body).backgroundColor; });
@@ -227,7 +233,7 @@ export function onRoute() {
     document.body.classList.remove('cbulk-open', 'managing');  // page-wide states of the consistency and tags pages; they set them again when drawn
     // the filter pane belongs to the photo and map views: it steps aside elsewhere and comes back with them
     if (!FILTER_VIEWS.includes(S.route.view)) { if (!$('#filters').hidden) toggleFilters(false, false); }
-    else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= DOCK_MIN) toggleFilters(true, false);
+    else if ($('#filters').hidden && store.get(PREF.filters, '0') === '1' && innerWidth >= DOCK_MIN) toggleFilters(true, false);
     const drawn = VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp);
     done = Promise.resolve(drawn);
     if (kept) {

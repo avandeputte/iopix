@@ -72,7 +72,7 @@ def list_all() -> list:
     return out
 
 
-def set_properties(album_id: int, props: dict, check_running: bool = True) -> dict:
+def set_properties(album_id: int, props: dict, require_digikam_closed: bool = True) -> dict:
     """digiKam's Album Properties: caption, date (YYYY-MM-DD), category (Albums.collection) and cover (Albums.icon,
     an image id; None for automatic). Only the keys given change."""
     import re as _re
@@ -95,13 +95,13 @@ def set_properties(album_id: int, props: dict, check_running: bool = True) -> di
     if not sets:
         return {"id": album_id}
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "folders")
-    with dbsync.write_transaction(db_path, check_running) as con:
+    dbsync.preflight(db_path, require_digikam_closed, "folders")
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         con.execute(f"UPDATE Albums SET {', '.join(sets)} WHERE id = ?", (*vals, album_id))
     return {"id": album_id, **{k: props[k] for k in ("caption", "date", "category", "icon") if k in props}}
 
 
-def create(parent_id: int, name: str, check_running: bool = True) -> dict:
+def create(parent_id: int, name: str, require_digikam_closed: bool = True) -> dict:
     """mkdir under the parent folder and the Albums row digiKam's New Album would add."""
     name = clean_name(name, "folder")
     with dkdb.reader() as con:
@@ -110,14 +110,14 @@ def create(parent_id: int, name: str, check_running: bool = True) -> dict:
         if con.execute("SELECT 1 FROM Albums WHERE albumRoot = ? AND relativePath = ?", (parent["root"], rel)).fetchone():
             raise SyncError("A folder with that name already exists there.")
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "folders")
+    dbsync.preflight(db_path, require_digikam_closed, "folders")
     target = parent["dir"] / name
     try:
         target.mkdir(exist_ok=True)  # the directory may already be there (made by hand); digiKam just did not know it yet
     except OSError as e:
         raise SyncError(f"Could not create the folder on disk: {e}")
     dkdb.backup(db_path)
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         cur = con.execute("INSERT INTO Albums (albumRoot, relativePath, date, caption, collection) VALUES (?, ?, ?, NULL, NULL)",
                           (parent["root"], rel, time.strftime("%Y-%m-%d")))
         new_id = cur.lastrowid
@@ -182,7 +182,7 @@ def album_for_dir(directory: Path):
         return None
 
 
-def upload(album_id: int, files: list, check_running: bool = True) -> dict:
+def upload(album_id: int, files: list, require_digikam_closed: bool = True) -> dict:
     """files: [(name, bytes or an open binary file)]. Each goes into the folder (a taken name gets ' (2)'), then one
     transaction adds their rows; an open file is copied in chunks. Returns {added: [{id, name}], skipped: [{name, reason}]}."""
     with dkdb.reader() as con:
@@ -190,7 +190,7 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     if not folder["dir"].is_dir():
         raise SyncError(f"The folder is not on disk here: {folder['dir']}")
     db_path = dkdb.sqlite_path()
-    dbsync.preflight(db_path, check_running, "the photo list")
+    dbsync.preflight(db_path, require_digikam_closed, "the photo list")
     staged, skipped = [], []
     for name, data in files:
         try:
@@ -219,15 +219,15 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
             skipped.append({"name": name, "reason": str(e)})
     if not staged:
         return {"added": [], "skipped": skipped}
-    added = register(album_id, staged, check_running)
-    scanner.complete([a["id"] for a in added], check_running)  # camera, place, keywords, faces, digiKam's hash, as digiKam's scan would
+    added = register(album_id, staged, require_digikam_closed)
+    scanner.complete([a["id"] for a in added], require_digikam_closed)  # camera, place, keywords, faces, digiKam's hash, as digiKam's scan would
     from app.photos import importer  # lazy: photos.importer -> photos.folders would be an import cycle
     importer.sidecars_from_db([a["id"] for a in added])
     history.record([{"photo_id": a["id"], "action": "added", "summary": f"Uploaded into {folder.get('rel') or folder['dir']} (sidecar created)", "path": str(folder["dir"] / a["name"])} for a in added])
     return {"added": added, "skipped": skipped}
 
 
-def register(album_id: int, staged: list, check_running: bool = True, con=None) -> list:
+def register(album_id: int, staged: list, require_digikam_closed: bool = True, con=None) -> list:
     """Files already in the folder on disk -> their Images and ImageInformation rows, as an upload makes them.
     staged: [(file name, category, extension, path, probe info)]. With `con`, the rows go into the caller's own
     write transaction (which took the backup) instead of one of their own."""
@@ -235,7 +235,7 @@ def register(album_id: int, staged: list, check_running: bool = True, con=None) 
         return register_rows(con, album_id, staged)
     db_path = dkdb.sqlite_path()
     dkdb.backup(db_path)
-    with dbsync.write_transaction(db_path, check_running) as con:
+    with dbsync.write_transaction(db_path, require_digikam_closed) as con:
         return register_rows(con, album_id, staged)
 
 

@@ -35,7 +35,7 @@ MAX_TOKENS = 160
 PARTS = ("vision_encoder", "embed_tokens", "encoder_model", "decoder_model_merged")
 FILES = ["*.json", "merges.txt"] + [f"onnx/{p}.onnx" for p in PARTS]  # what the download keeps of the repository
 _lock = threading.Lock()
-_state = {}
+_loaded = {}  # the ONNX session, tokenizer and prompt once loaded, with the snapshot and thread count they were built for; reset() clears it
 
 
 def _snapshot():
@@ -65,15 +65,15 @@ def download():
 
 def reset():
     with _lock:
-        _state.clear()
+        _loaded.clear()
 
 
 def _load() -> dict:
     with _lock:
         snap = _snapshot()
         threads = jobs.threads()
-        if _state.get("snap") == snap and _state.get("threads") == threads:
-            return dict(_state)
+        if _loaded.get("snap") == snap and _loaded.get("threads") == threads:
+            return dict(_loaded)
         import onnxruntime as ort
         from tokenizers import Tokenizer
         opts = ort.SessionOptions()
@@ -81,12 +81,12 @@ def _load() -> dict:
         sess = {p: ort.InferenceSession(str(snap / "onnx" / f"{p}.onnx"), sess_options=opts, providers=["CPUExecutionProvider"]) for p in PARTS}
         tok = Tokenizer.from_file(str(snap / "tokenizer.json"))
         dec = sess["decoder_model_merged"]
-        _state.clear()
-        _state.update(snap=snap, threads=threads, sess=sess, tok=tok, prompt=np.array([tok.encode(TASK).ids], np.int64),
+        _loaded.clear()
+        _loaded.update(snap=snap, threads=threads, sess=sess, tok=tok, prompt=np.array([tok.encode(TASK).ids], np.int64),
                       dec_in=[i.name for i in dec.get_inputs()], dec_out=[o.name for o in dec.get_outputs()],
                       layers=sum(1 for i in dec.get_inputs() if i.name.endswith(".decoder.key")),
                       heads=dec.get_inputs()[3].shape[1], head_dim=dec.get_inputs()[3].shape[3])
-        return dict(_state)
+        return dict(_loaded)
 
 
 def _pixels(im):

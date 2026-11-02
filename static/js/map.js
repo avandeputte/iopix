@@ -1,5 +1,5 @@
 /** The map page (Leaflet, loaded on demand). */
-import { $, TOAST_LONG, accuracyChoices, api, date, dfDay, dfTime, errorBox, fill, fmtDist, h, icon, main, nf, plural, store } from './core.js';
+import { $, PREF, TOAST_LONG, accuracyChoices, api, date, dfDay, dfTime, errorBox, fill, fmtDist, h, icon, main, nf, plural, store } from './core.js';
 import { S, applyFilter, filterParams, go, toast, toastError } from './state.js';
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
@@ -31,11 +31,11 @@ export const tiles = () => window.L.tileLayer(S.MAPS.url, { maxZoom: S.MAPS.maxZ
 export function baseLayers(map, position = 'topright') {
   const L = window.L, road = tiles();
   const sat = S.MAPS.satellite ? L.tileLayer(S.MAPS.satellite.url, { maxZoom: S.MAPS.satellite.maxZoom, attribution: S.MAPS.satellite.attribution }) : null;
-  const first = sat && store.get('map-layer', 'map') === 'satellite' ? sat : road;
+  const first = sat && store.get(PREF.mapLayer, 'map') === 'satellite' ? sat : road;
   first.addTo(map);
   if (sat) {
     L.control.layers({ Map: road, Satellite: sat }, null, { position, collapsed: false }).addTo(map);
-    map.on('baselayerchange', (e) => store.set('map-layer', e.layer === sat ? 'satellite' : 'map'));
+    map.on('baselayerchange', (e) => store.set(PREF.mapLayer, e.layer === sat ? 'satellite' : 'map'));
   }
   return first;
 }
@@ -47,7 +47,7 @@ export function streetView(lat, lon, title) {
   const back = modal(title || 'Street View', h('iframe', { class: 'svframe', src: at(sv.embed), allowfullscreen: true, loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade' }),
     h('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' }, 'Where Google has no Street View imagery nearby, the frame stays gray. ',
       h('a', { class: 'lnk', href: at(sv.link), target: '_blank', rel: 'noopener' }, 'Open in Google Maps')),
-    h('div', { class: 'modal-btns' }, h('button', { class: 'pillbtn', onclick: () => back.remove() }, 'Close')));
+    { buttons: ['Close'] });
   back.querySelector('.modal').classList.add('svmodal');
 }
 export const mapLink = (lat, lon) => S.MAPS.link.replaceAll('{lat}', lat).replaceAll('{lon}', lon);
@@ -251,9 +251,9 @@ async function placeTray(map, fp, el) {
     map.setView([x.lat, x.lon], x.name === 'This spot' ? map.getZoom() : townOnly.checked ? 12 : Math.max(x.zoom || 0, 18));  // a town: all of it
   };
   // thumbnail size, remembered
-  const px = () => +store.get('tray-size', '70');
+  const px = () => +store.get(PREF.traySize, '70');
   const sizer = h('input', { type: 'range', min: 60, max: 200, step: 10, value: px(), title: 'Thumbnail size', style: 'flex:1',
-    oninput: () => { store.set('tray-size', sizer.value); grid.style.setProperty('--tsz', sizer.value + 'px'); } });
+    oninput: () => { store.set(PREF.traySize, sizer.value); grid.style.setProperty('--tsz', sizer.value + 'px'); } });
   grid.style.setProperty('--tsz', px() + 'px');
   fill(tray, h('div', { class: 'mapsearch' }, search, results),
     h('label', { class: 'mttown', title: 'Find the town, then put the photos on its pin: they are saved as approximate' }, townOnly, 'Only the town is known', accSel), h('div', { class: 'mthead' }, count, h('span', { class: 'sp' }), h('button', { class: 'pillbtn', onclick: () => { ids.slice(0, shown).forEach((x) => sel.add(x)); draw(); } }, 'Select shown'),
