@@ -540,7 +540,9 @@ def _download_here(key: str):
             subprocess.run(cmd, check=True)
         import onnx_asr
         d = asr_dir(key)
-        d.mkdir(parents=True, exist_ok=True)
+        if d.exists():  # a folder that exists means "offline" to onnx-asr: a half-done download is swept so the files are fetched
+            shutil.rmtree(d, ignore_errors=True)
+        d.parent.mkdir(parents=True, exist_ok=True)
         onnx_asr.load_model(m["asr"], str(d), quantization=m.get("quantization"), providers=["CPUExecutionProvider"])  # downloads into d
         from app.ai import videos
         videos.reset_sessions()
