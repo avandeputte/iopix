@@ -288,6 +288,9 @@ def start_analysis(job: str = "all", reset: bool = False) -> dict:
             facevecs.reset()
         elif job == "ages":
             ages.reset()
+        elif job == "jerseys":
+            from app.ai import jerseys
+            jerseys.reset()
         else:
             raise HTTPException(400, "Choose one analysis to run again from scratch")
     _start_prewarm()

@@ -98,6 +98,7 @@ export async function showExplore() {
       pill('Best looking', null, { looks: 'top', sort: 'looks' }), pill('Likely rejects', null, { rejects: 1 }),
       S.EDITING ? h('a', { class: 'pill', href: '#/datesuggest' }, 'Date suggestions') : null,
       S.EDITING ? h('a', { class: 'pill', href: '#/placesuggest' }, 'Place suggestions') : null,
+      S.EDITING ? h('a', { class: 'pill', href: '#/jerseys' }, 'Jersey numbers') : null,
       S.EDITING && !S.NO_DK ? pill('Edited here, not yet in digiKam', S.PENDING, { edited: 1 }) : null,
       h('a', { class: 'pill', href: '#/map' }, 'Map', h('b', null, nf.format(S.META.geotagged)))),
     sec('blue', 'calendar', 'Years'),
@@ -876,5 +877,55 @@ export async function showPlaceSuggest() {
     items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
       : h('div', { class: 'empty' }, 'No suggestions: no photo without a position has photos with one around it.')));
   badgeTiles(grid);
+  syncLightbox();
+}
+
+/** Explore › Jersey numbers: the players suggested for people whose shirt number was read but whose face is not named
+ * (jerseys.py), grouped by player. Nothing is tagged until a suggestion is used; a number is searchable as jersey=10. */
+export async function showJerseys() {
+  main.replaceChildren(loadingBox('Reading the numbers…'));
+  let d;
+  try { d = await api('/api/jerseys?limit=2000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
+  if (S.route.view !== 'jerseys') return;
+  const items = d.items;
+  const use = async (list, btn) => {
+    btn.disabled = true;
+    const byTag = new Map();
+    list.forEach((x) => { if (!byTag.has(x.tag)) byTag.set(x.tag, []); byTag.get(x.tag).push(x.id); });
+    for (const [tag, ids] of byTag) { if (!(await editPhotos(ids, { add_tags: [tag] }))) { btn.disabled = false; return false; } }
+    return true;
+  };
+  const card = (x) => {
+    const el = h('div', { class: 'dupitem', style: 'width:220px' },
+      h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
+        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
+      h('div', null, h('b', null, `Number ${x.number}`), h('span', { class: 'muted' }, x.basis === 'folder' ? ` · ${x.n} named in this folder` : ` · ${x.n} named this year`)),
+      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Tag ${x.name} on this photo (undo from the edit log)`,
+        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`) : null);
+    return el;
+  };
+  const groups = new Map();
+  items.forEach((x) => { if (!groups.has(x.tag)) groups.set(x.tag, { name: x.name, list: [] }); groups.get(x.tag).list.push(x); });
+  const sections = [...groups.entries()].map(([tag, g]) => {
+    const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' }, g.list.map(card));
+    return h('div', { class: 'jgroup' },
+      h('h3', { style: 'display:flex;gap:12px;align-items:center' }, h('img', { class: 'avatar', src: faceUrl(tag), alt: '' }), `${g.name} `, h('span', { class: 'muted' }, nf.format(g.list.length)),
+        S.EDITING && g.list.length > 1 ? h('button', { class: 'pillbtn', onclick: async (e) => {
+          if (!(await confirmDialog(`Tag ${g.name} on these ${nf.format(g.list.length)} photos? Each is in the edit log with undo.`, { ok: 'Tag them' }))) return;
+          if (await use(g.list, e.currentTarget)) showJerseys();
+        } }, 'Tag all') : null),
+      grid);
+  });
+  const players = d.players.length ? h('div', { class: 'hlist' }, d.players.map((p) => h('div', { class: 'hrow' },
+    h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
+    h('div', { class: 'hmain' }, h('b', null, p.name), ' · ', p.numbers.map((n, k) => [k ? ', ' : '', h('a', { class: 'lnk', href: `#/photos?jersey=${encodeURIComponent(n)}` }, `number ${n}`)]))))) : null;
+  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install text recognition (RapidOCR) and an object detection model under Maintenance › AI analysis and models to read jersey numbers.')
+    : d.coverage[0] < d.coverage[1] ? h('div', { class: 'enote' }, `Reading numbers: ${nf.format(d.coverage[0])} of ${nf.format(d.coverage[1])} photos with people so far.`) : null;
+  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Jersey numbers', null]]),
+    pageTitle('text', 'blue', 'Jersey numbers ', h('span', { class: 'muted' }, nf.format(items.length))),
+    h('div', { class: 'muted intro' }, `The number on each detected person’s shirt is read. Where a named face wears a number, that player is learnt for the folder and the year; a number on someone whose face is not named, seen from behind or too small for a face, then suggests the player. Tagging adds the person to the photo without a face region, with undo in the edit log; nothing is tagged until you do. ${nf.format(d.read)} numbers read, ${nf.format(d.named)} on named people.`),
+    waiting, d.players.length ? [h('h3', null, 'Players and their numbers'), players] : null,
+    items.length ? sections : h('div', { class: 'empty' }, d.ready ? 'No suggestions: every number read is on a named person, or belongs to nobody known in that folder or year.' : 'No suggestions yet.')));
+  sections.forEach((s) => badgeTiles(s));
   syncLightbox();
 }

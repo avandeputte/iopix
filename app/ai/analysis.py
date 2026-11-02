@@ -78,7 +78,8 @@ def signature() -> str:
     counts = _counts()
     if counts is None:
         return "a0"
-    return "a" + ".".join(str(n // 2000 * 2000 if progress[key]["running"] else n) for key, n in counts.items())
+    from app.ai import jerseys
+    return "a" + ".".join(str(n // 2000 * 2000 if progress[key]["running"] else n) for key, n in counts.items()) + f".j{jerseys.coverage()[0]}"
 
 
 def coverage() -> dict:
@@ -551,6 +552,8 @@ def start(photos: list):
     if config.CAPTIONS:
         jobs.submit("captions", lambda: _caption_job(photos, gen))
     jobs.submit("looks", lambda: _looks_job(photos, gen))
+    from app.ai import jerseys
+    jerseys.start(photos)  # numbers on shirts, after object detection has found the people
 
 
 def results() -> dict:

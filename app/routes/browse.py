@@ -459,6 +459,10 @@ def api_photo(photo_id: int, request: Request):
             from app.ai import dateclues
             hit = dateclues.suggestions([photo_id])["items"]
             d["dateSuggestion"] = hit[0] if hit else None
+        from app.ai import jerseys
+        d["jerseys"] = jerseys.for_photo(photo_id)  # numbers read on shirts, with the player suggested for an unnamed one (editors)
+        if d["jerseys"] and users.can_write(request.state.user):
+            d["jerseySuggestions"] = jerseys.suggestions([photo_id])["items"]
         if d.get("lat") is None and not d.get("video") and users.can_write(request.state.user):  # where it was probably taken (placeguess.py), editors only
             from app.geo import placeguess
             hit = placeguess.suggestions([photo_id])["items"]

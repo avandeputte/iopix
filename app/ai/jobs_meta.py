@@ -4,6 +4,7 @@ from app import config, jobs as bgjobs
 from app.ai import analysis, caption, detector, looks, models as dlmodels
 from app.ai.semantic import enabled as semantic_enabled, ENGINES, semantic
 from app.core import prewarmer
+from app.ai import jerseys
 from app.faces import ages, facedetect, facevecs
 
 
@@ -46,8 +47,10 @@ def rows(total: int, stills: int, signed_in: bool) -> list:
         {"key": "captions", "label": "Photo descriptions", "detail": f"A description of each photo ({mname('caption_model')}: one sentence with BLIP, a short paragraph with Florence-2), searchable from the search box and shown in the info panel. After switching to another model, “Run again” redoes every photo with it; until then only new photos use it.",
          "done": cov["captions"], "total": stills, "running": analysis.progress["captions"]["running"],
          "enabled": config.ANALYSIS and caption.available(), "rerun": True},
+        {"key": "jerseys", "label": "Jersey numbers", "detail": "Reads the number on the shirt of each detected person (text recognition on the upper part of each person box). A number on someone whose face is named teaches who wears it in that folder and that year; a number on someone without a named face then suggests the player (Explore › Jersey numbers), and nothing is tagged until you accept it. Photos are searchable by number.",
+         "done": jerseys.coverage()[0], "total": jerseys.coverage()[1], "running": jerseys.progress["running"], "enabled": config.ANALYSIS and jerseys.available(), "rerun": True},
     ]
-    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages"}
+    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages", "jerseys": "jerseys"}
     for j in jobs:
         j["queued"] = bgjobs.is_queued(queue_key[j["key"]])
     return jobs

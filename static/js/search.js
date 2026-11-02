@@ -38,6 +38,7 @@ export function chipList(p) {
     else if (k === 'sharpest') add(k, v, 'Sharpest', { ic: 'spark' });
     else if (k === 'exposure') add(k, v, v === 'dark' ? 'Very dark' : 'Very bright', { ic: 'spark' });
     else if (k === 'hastext') add(k, v, 'Contains text', { ic: 'text' });
+    else if (k === 'jersey') add(k, v, `Jersey number ${v}`, { ic: 'text' });
     else if (k === 'rejects') add(k, v, 'Likely rejects', { ic: 'spark' });
     else if (k === 'reject') add(k, v, `Likely reject: ${(REJECTS.find((r) => r[0] === v) || [v, v])[1].toLowerCase()}`, { ic: 'spark' });
     else if (k === 'looks') add(k, v, 'Best looking', { ic: 'spark' });

@@ -56,6 +56,10 @@ For photos without a position, **Explore › Place suggestions** (for editors) p
 
 Every suggestion says how far off it may be. **Use** saves it as an approximate position (the accuracy is written with it), with undo in the edit log; nothing is written before that. The info panel of a photo without a position shows its suggestion too, and the location editor still lists the nearest photos with a position.
 
+## Jersey numbers
+
+On each detected person, text recognition reads the number on the shirt. Photos are searchable by it (**Jersey number 10** as a filter chip, `jersey=10` in the address), and the info panel lists the numbers read. Where the person wearing a number has a named face, that player is learnt for the folder and the year. A number on someone whose face is not named, seen from behind or too small for a face, then suggests the player on **Explore › Jersey numbers** (for editors), when one player clearly wears it in the same folder (else the same year). **Tag** adds the person to the photo without a face region, with undo in the edit log; nothing is tagged before that.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.

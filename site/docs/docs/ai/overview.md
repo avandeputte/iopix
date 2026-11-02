@@ -13,6 +13,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Photo quality**: sharpness, exposure, focus, an aesthetic score and closed eyes, to find the best shots and suggest rejects.
 - **Date suggestions**: a year for photos whose date is unknown, from how old the people in them look, when those people are photographed, what the photo looks like and the camera.
 - **Place suggestions**: where photos without a position were probably taken, from the photos around them that have one.
+- **Jersey numbers**: the number on each player's shirt, searchable, and the player it suggests for someone whose face is not named.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 
@@ -24,11 +25,11 @@ AI results are guesses, and iopix treats them that way:
 - detected content is a filter, not stored tags,
 - descriptions are shown with the AI analysis at the end of the info panel, never in place of your own caption,
 - a likely reject is only a suggestion: no label is ever set on a photo,
-- a suggested year or place is only saved when you click **Use**.
+- a suggested year, place or player is only saved when you click **Use** or **Tag**.
 
 ## Background jobs
 
-New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions. The damaged-files check runs only when you start it.
+New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers. The damaged-files check runs only when you start it.
 
 Each job may use half the machine's cores by default (**Settings › AI and search**, or `BG_THREADS`), so iopix and everything else on the server stay responsive.
 

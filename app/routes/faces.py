@@ -302,6 +302,19 @@ def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str
                            "people": out["people"], "ready": any(sources.values()), "sources": sources, "faces": list(ages.coverage())})
 
 
+@router.get("/api/jerseys", dependencies=[access.editor])
+def api_jerseys(request: Request, offset: int = 0, limit: int = 200, ids: str = ""):
+    """Jersey numbers (jerseys.py): {total, items: [{id, number, tag, name, basis: folder|year, n, text, box}], players:
+    [{tag, name, numbers}], read, named, ready, coverage: [done, total]}. Each item is a person without a named face whose
+    number names a player; using one is /api/edit {add_tags: [tag]} on the photo. Nothing is written here."""
+    from app.ai import jerseys
+    want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
+    out = jerseys.suggestions(want)
+    items = out["items"]
+    return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 2000))],
+                           "players": out["players"], "read": out["read"], "named": out["named"], "ready": jerseys.available(), "coverage": list(jerseys.coverage())})
+
+
 @router.post("/api/people/birth", dependencies=[access.signed_in])
 async def api_people_birth(request: Request):
     """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.

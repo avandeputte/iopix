@@ -25,6 +25,7 @@
  "GET /api/history": "editor",
  "GET /api/import/layouts": "editor",
  "GET /api/import/{token}": "editor",
+ "GET /api/jerseys": "editor",
  "GET /api/library/merge": "admin",
  "GET /api/location/suggest": "public",
  "GET /api/log": "admin",

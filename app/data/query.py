@@ -209,6 +209,7 @@ FILTERS = [
     _flag("looks", {"top": "aesthn >= 0.9"}),  # the best-looking tenth by the aesthetic score
     _flag("eyes", {"closed": "eyes_closed > 0"}),  # someone's eyes closed (even when most faces are fine)
     _flag("hastext", {"1": "ocr IS NOT NULL AND length(ocr) >= 3"}),
+    _each("jersey", "(' ' || jerseys || ' ') LIKE ?", cast=lambda v: f"% {v} %"),  # a number read on someone's shirt
     _flag("bursts", {"1": "burst IS NOT NULL"}),
     _flag("bestonly", {"1": "(burst IS NULL OR burst_best = 1)"}),  # collapse each burst to its best frame
     _each("burst", "burst = ?", cast=int),

@@ -24,7 +24,7 @@ export function aiSection(view) {
   const fmtDate = (t) => (t ? dfDayLocal.format(new Date(t * 1000)) : '');  // when the model was installed: a real moment, in this browser's zone
   // a job's models: fixed ones (vision: RapidOCR; photo quality: the aesthetic and eye models; ages: MiVOLO) or the one
   // chosen for the feature (Maintenance offers the alternatives in a menu)
-  const JOB_MODEL = { vision: ['ocr'], looks: ['aesthetic', 'eyes'], ages: ['mivolo'] };
+  const JOB_MODEL = { vision: ['ocr'], looks: ['aesthetic', 'eyes'], ages: ['mivolo'], jerseys: ['ocr'] };
   const JOB_CHOICE = { embeddings: 'search_model', objects: 'object_model', faces: 'face_vectors', facedetect: 'face_detector', captions: 'caption_model' };
   const modelState = (m, p) => {
     const c = m.check;
