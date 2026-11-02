@@ -895,7 +895,7 @@ def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, 
     out = dateclues.suggestions(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 500))], "people": out["people"],
-            "sources": {"ages": ages.available(), "look": semantic_enabled()}, "faces": list(ages.coverage())}
+            "sources": {"ages": ages.available(), "look": semantic_enabled()}, "faces": list(ages.coverage()), "hints": dateclues.hints()}
 
 
 @server.tool(annotations=READ_ONLY)
@@ -947,6 +947,25 @@ def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200,
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "dismissed": out["dismissed"],
             "coverage": list(rotation.coverage()), "phase": rotation.progress.get("phase")}
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def set_date_hint(token: str, folder: str, not_before: Optional[int] = None, not_after: Optional[int] = None) -> dict:
+    """A folder hint for the date suggestions: nothing in this folder (subfolders included; name, path such as "/1974"
+    or id) was taken before not_before or after not_after. Both empty removes the hint. Written to iopix's own
+    database only; the suggestions then keep to the window. Needs the admin token."""
+    _need_token(token)
+    from app.ai import dateclues
+    con = db()
+    try:
+        album = _resolve_album(con, folder)
+    finally:
+        con.close()
+    try:
+        dateclues.set_hint(album, not_before, not_after)
+    except ValueError as e:
+        raise ToolError(str(e))
+    return {"ok": True, "album": album, "hints": dateclues.hints()}
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))

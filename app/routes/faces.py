@@ -341,6 +341,44 @@ async def api_suggestions_dismiss(request: Request):
     return {"dismissed": n}
 
 
+@router.get("/api/datehints", dependencies=[access.editor])
+def api_datehints(request: Request):
+    """The folders holding photos marked "Date unknown" (and every folder with a hint), each with its hint:
+    {folders: [{album, path, n, not_before, not_after}]}. A hint covers the folder's subfolders."""
+    from app.ai import dateclues
+    h = dateclues.hints()
+    con = db()
+    try:
+        rows = con.execute("SELECT a.id, a.path, count(p.id) FROM albums a LEFT JOIN photos p ON p.album_id = a.id AND p.dprec = 3 AND p.video = 0 "
+                           f"GROUP BY a.id HAVING count(p.id) > 0 OR a.id IN ({','.join(str(int(k)) for k in h) or 'NULL'}) ORDER BY a.path").fetchall()
+    finally:
+        con.close()
+    return jresp(request, {"folders": [{"album": r[0], "path": r[1], "n": r[2], "not_before": h.get(r[0], {}).get("not_before"), "not_after": h.get(r[0], {}).get("not_after")} for r in rows]})
+
+
+@router.post("/api/datehints", dependencies=[access.editor_write])
+async def api_datehints_set(request: Request):
+    """Body {album, not_before, not_after} (null or "" clears a bound; both clear: the hint is removed): nothing in
+    this folder, subfolders included, was taken outside these years. Viewer database only."""
+    from app.ai import dateclues
+    body = await request.json()
+    try:
+        album = int(body["album"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "album is the folder's id")
+    con = db()
+    try:
+        if not con.execute("SELECT 1 FROM albums WHERE id = ?", (album,)).fetchone():
+            raise HTTPException(404, "No such folder")
+    finally:
+        con.close()
+    try:
+        await run_in_threadpool(dateclues.set_hint, album, body.get("not_before"), body.get("not_after"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
 @router.post("/api/people/birth", dependencies=[access.signed_in])
 async def api_people_birth(request: Request):
     """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.

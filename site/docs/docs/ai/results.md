@@ -43,7 +43,7 @@ For photos marked **Date unknown**, **Explore › Date suggestions** (for editor
 - **what it looks like**: the dated photos that look most like it, from the content-search model (film grain, colour, clothes and the scene itself place a print or a scan in its years);
 - **the camera**: the years the same camera took dated photos.
 
-Each clue gives a year with an uncertainty; the suggestion is their weighted mean, shown as a range with the clues it came from, and the closest ranges come first. A photo without named people still gets a suggestion from how it looks or the camera. **Use** saves it as a year-only date, with undo in the edit log; nothing is written before that. The info panel of an undated photo shows its suggestion and clues too.
+Each clue gives a year with an uncertainty; the suggestion is their weighted mean, shown as a range with the clues it came from, and the closest ranges come first. **Folder hints** on the page (the earliest and latest year anything in a folder can be from, subfolders included) keep every suggestion in that folder within those years and leave dated photos outside them out of the clues. A photo without named people still gets a suggestion from how it looks or the camera. **Use** saves it as a year-only date, with undo in the edit log; nothing is written before that. The info panel of an undated photo shows its suggestion and clues too.
 
 ## Place suggestions
 

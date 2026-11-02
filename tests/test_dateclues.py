@@ -15,7 +15,11 @@ def _index(tmp_path):
     p = tmp_path / "index.db"
     con = sqlite3.connect(p)
     con.executescript("""
-        CREATE TABLE photos (id INTEGER PRIMARY KEY, path TEXT, w INTEGER, h INTEGER, ts INTEGER, year INTEGER, dprec INTEGER, video INTEGER, camera TEXT);
+        CREATE TABLE photos (id INTEGER PRIMARY KEY, path TEXT, w INTEGER, h INTEGER, ts INTEGER, year INTEGER, dprec INTEGER, video INTEGER, camera TEXT, album_id INTEGER DEFAULT 1);
+        CREATE TABLE albums (id INTEGER PRIMARY KEY, path TEXT);
+        CREATE TABLE album_closure (anc INTEGER, album INTEGER);
+        INSERT INTO albums VALUES (1, '/1974'), (2, '/1974/scans');
+        INSERT INTO album_closure VALUES (1, 1), (1, 2), (2, 2);
         CREATE TABLE faces (photo_id INTEGER, tag_id INTEGER, x INTEGER, y INTEGER, w INTEGER, h INTEGER, kind TEXT);
         CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT, person INTEGER);
         INSERT INTO tags VALUES (10, 'Ann', 1), (11, 'Bob', 1), (12, 'Cy', 1);
@@ -34,7 +38,8 @@ def _index(tmp_path):
              (5, "/p/5.jpg", 4000, 3000, 0, 1974, 3, 1, None)]              # a video: never suggested
     faces += [(1, 10, 100, 100, 200, 200, "confirmed"), (1, 11, 600, 100, 200, 200, "confirmed"), (1, 12, 1000, 100, 200, 200, "confirmed"),
               (2, 12, 100, 100, 200, 200, "confirmed"), (4, 10, 100, 100, 200, 200, "unknown")]
-    con.executemany("INSERT INTO photos VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    con.executemany("INSERT INTO photos (id, path, w, h, ts, year, dprec, video, camera) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    con.execute("UPDATE photos SET album_id = 2 WHERE id = 2")
     con.executemany("INSERT INTO faces VALUES (?,?,?,?,?,?,?)", faces)
     con.commit()
     con.close()
@@ -55,7 +60,7 @@ def test_people_look_and_camera_clues(tmp_path, monkeypatch):
     p = _index(tmp_path)
     monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
     monkeypatch.setattr(ages, "available", lambda: False)
-    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids: {2: (1998.0, 3.0, 20, 0.8)} if 2 in ids else {})
+    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids, win=None: {2: (1998.0, 3.0, 20, 0.8)} if 2 in ids else {})
     out = dateclues.suggestions()
     items = {i["id"]: i for i in out["items"]}
     assert set(items) == {1, 2, 3}  # photo 4 has no named face, no camera and no look-alike; 5 is a video
@@ -79,7 +84,7 @@ def test_age_clue_joins_the_others_and_its_birth_floor_holds(tmp_path, monkeypat
     monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
     monkeypatch.setattr(ages, "available", lambda: True)
     monkeypatch.setattr(ages, "coverage", lambda: (1, 1))
-    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids: {})
+    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids, win=None: {})
     monkeypatch.setattr(ages, "suggestions", lambda ids=None: {
         "items": [{"id": 2, "year": 1990, "lo": 1988, "hi": 1992, "floor": 1996, "people": [{"tag": 12, "name": "Cy", "age": 3, "year": 1990}]}],
         "people": [{"tag": 12, "name": "Cy", "birth": 1996, "entered": True, "basis": "entered", "n": 0}]})
@@ -98,3 +103,36 @@ def test_suggestions_endpoint_and_mcp_tool(client, lib):
     assert set(d["sources"]) == {"ages", "look"}
     for it in d["items"]:
         assert it["clues"] and it["lo"] <= it["year"] <= it["hi"]
+
+
+def test_folder_hints_bound_the_clues(tmp_path, monkeypatch, lib):
+    p = _index(tmp_path)
+    monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
+    monkeypatch.setattr(ages, "available", lambda: False)
+    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids, win=None: {})
+    from app.data import vdb
+    with vdb.writer() as con:
+        con.execute("DELETE FROM date_hints")
+    try:
+        before = {i["id"]: i for i in dateclues.suggestions()["items"]}
+        assert 2001 <= before[1]["year"] <= 2003
+        dateclues.set_hint(1, None, 2002)  # nothing under /1974 after 2002
+        assert dateclues.hints() == {1: {"not_before": None, "not_after": 2002}}
+        after = {i["id"]: i for i in dateclues.suggestions()["items"]}
+        assert after[1]["hi"] <= 2002 and after[1]["clues"][-1]["kind"] == "hint"
+        assert after[2]["hi"] <= 2002  # the subfolder inherits the hint
+        assert 3 not in after  # the camera's years (2003-2006) all fall outside the window: no clue is left
+        with pytest.raises(ValueError):
+            dateclues.set_hint(1, 2000, 1990)
+        dateclues.set_hint(1, None, None)
+        assert dateclues.hints() == {}
+    finally:
+        with vdb.writer() as con:
+            con.execute("DELETE FROM date_hints")
+
+
+def test_datehints_endpoints(client, lib):
+    d = client.get("/api/datehints").json()
+    assert "folders" in d
+    assert client.post("/api/datehints", json={"album": 999999, "not_after": 1990}).status_code == 404
+    assert client.post("/api/datehints", json={"album": "x"}).status_code == 400

@@ -24,7 +24,7 @@ Results carry links into iopix (set `VIEWER_URL` to your public address).
 
 These need the **admin token** from **Maintenance › iopix › MCP update token** (or `MCP_ADMIN_TOKEN`), because they reveal paths, log lines and settings:
 
-`diagnostics`, `server_log`, `job_queue`, `photo_file`, `date_suggestions` (the year suggestions for undated photos, with their clues), `place_suggestions` (where photos without a position were probably taken), `jersey_suggestions` (players for the shirt numbers read on unnamed people), `clothing_suggestions` (people probably present, by their clothes), `rotation_findings` (photos stored on their side or upside down), `run_analysis` (start a background analysis, as Maintenance does), and `update_viewer`, which installs a new version. `check_for_update` is open.
+`diagnostics`, `server_log`, `job_queue`, `photo_file`, `date_suggestions` (the year suggestions for undated photos, with their clues), `set_date_hint` (a folder's earliest and latest possible year), `place_suggestions` (where photos without a position were probably taken), `jersey_suggestions` (players for the shirt numbers read on unnamed people), `clothing_suggestions` (people probably present, by their clothes), `rotation_findings` (photos stored on their side or upside down), `run_analysis` (start a background analysis, as Maintenance does), and `update_viewer`, which installs a new version. `check_for_update` is open.
 
 !!! danger "Treat the admin token like a root password"
     `update_viewer` replaces the code iopix runs. Keep the token secret, and regenerate it if it was ever shared.

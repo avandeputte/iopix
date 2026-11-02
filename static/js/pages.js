@@ -615,6 +615,19 @@ export async function showDateSuggest() {
   const people = h('div', { class: 'hlist' }, d.people.map((p) => h('div', { class: 'hrow' },
     h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
     h('div', { class: 'hmain' }, h('b', null, p.name), ' · ', p.birth ? `born ${p.entered ? '' : 'about '}${p.birth}` : 'birth year unknown', h('span', { class: 'muted' }, ` (${basis(p)}) `), birthBtn(p)))));
+  // folder hints: the earliest and latest year anything in a folder (subfolders included) can be from
+  let hints = { folders: [] };
+  try { hints = await api('/api/datehints'); } catch { /* shown without */ }
+  const yearIn = (f, k) => h('input', { type: 'number', min: 1800, max: new Date().getFullYear(), value: f[k] ?? '', placeholder: k === 'not_before' ? 'earliest' : 'latest', style: 'width:84px', disabled: !S.EDITING });
+  const hintRow = (f) => {
+    const a = yearIn(f, 'not_before'), b = yearIn(f, 'not_after');
+    const save = S.EDITING ? h('button', { type: 'button', class: 'lnk', onclick: async () => {
+      try { await post('/api/datehints', { album: f.album, not_before: a.value || null, not_after: b.value || null }); toast('Hint saved.'); showDateSuggest(); } catch (e) { toastError(e); }
+    } }, 'Save') : null;
+    return h('div', { class: 'hrow' }, h('div', { class: 'hmain', style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
+      h('b', null, f.path || '/'), h('span', { class: 'muted' }, f.n ? ` ${nf.format(f.n)} undated` : ''), ' not before ', a, ' not after ', b, save));
+  };
+  const hintList = hints.folders.length ? h('div', { class: 'hlist' }, hints.folders.map(hintRow)) : null;
   const use = async (list, btn) => {
     btn.disabled = true;
     const byYear = new Map();
@@ -644,7 +657,8 @@ export async function showDateSuggest() {
   main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Date suggestions', null]]),
     pageTitle('calendar', 'amber', 'Date suggestions ', h('span', { class: 'muted' }, nf.format(items.length))),
     h('div', { class: 'muted intro' }, 'A year for each photo marked “Date unknown”, from every clue the library has about it: how old the named people in it look, the years those people are photographed in (together, when they are), the photos with a date that look most like it, and the camera. Each person’s photos with a known date teach the age model how that person ages; a birth year you enter helps someone with few dated photos. Every suggestion is a range and lists its clues. Nothing is saved until you use a year: it is then saved as a year-only date, with undo in the edit log.'),
-    waiting, d.people.length ? [h('h3', null, 'People'), people] : null,
+    waiting, hintList ? [h('h3', null, 'Folder hints'), h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'The earliest and latest year anything in a folder can be from, subfolders included: every suggestion in it keeps to those years, and dated photos outside them are not used as clues.'), hintList] : null,
+    d.people.length ? [h('h3', null, 'People'), people] : null,
     items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
       : h('div', { class: 'empty' }, d.ready ? 'No suggestions: no photo marked “Date unknown” has a clue to go on.' : 'No suggestions yet.')));
   badgeTiles(grid);
