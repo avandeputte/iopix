@@ -11,6 +11,14 @@ from app.faces import ages
 np = pytest.importorskip("numpy")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    dateclues._all_cache.update(key=None, value=None)
+    dateclues._look_cache.update(key=None, years={})
+    yield
+    dateclues._all_cache.update(key=None, value=None)
+
+
 def _index(tmp_path):
     p = tmp_path / "index.db"
     con = sqlite3.connect(p)

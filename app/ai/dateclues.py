@@ -19,6 +19,7 @@ Everything is computed on request from the index, the stored ages and the embedd
 Using a suggestion is the user's click (the date editor's year-only date through /api/edit). Hints live in the
 viewer database (date_hints).
 """
+import json
 import logging
 import math
 import statistics
@@ -210,8 +211,10 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
         if not enabled():
             return {}
         semantic.load()
-        from app import config
-        key = (semantic.key, config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, len(semantic.ids) if semantic.ids is not None else 0)
+        # the answers depend on the embeddings and on which photos are dated with which year: the key changes with
+        # those, not with every index build (the index is rebuilt often while jobs run)
+        dated = {r[0]: r[1] for r in con.execute("SELECT id, year FROM photos WHERE dprec IS NULL AND video = 0 AND year >= ?", (FIRST_REAL_YEAR,))}
+        key = (semantic.key, len(semantic.ids) if semantic.ids is not None else 0, len(dated), sum(dated.values()), min(dated) if dated else 0, max(dated) if dated else 0)
     except Exception:
         return {}
     with _lock:
@@ -227,19 +230,31 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
         if sids is None or not len(sids):
             return {}
         pos = {int(i): k for k, i in enumerate(sids)}
-        dated = {r[0]: r[1] for r in con.execute("SELECT id, year FROM photos WHERE dprec IS NULL AND video = 0 AND year >= ?", (FIRST_REAL_YEAR,))}
         dpos = np.array([pos[i] for i in dated if i in pos], dtype=np.int64)
         dids = np.array([i for i in dated if i in pos], dtype=np.int64)
         dyears = np.array([dated[int(i)] for i in dids], dtype=np.float64)
+        dvecs = vecs[dpos] if len(dpos) else None
+        have = [pid for pid in missing if pos.get(pid) is not None]
         for pid in missing:
-            k = pos.get(pid)
+            if pos.get(pid) is None:
+                cache[ck(pid)] = None
+        # one matrix product per batch of photos instead of one per photo: a few seconds become well under one
+        sims = {}
+        for part in range(0, len(have), 128):
+            chunk = have[part:part + 128]
+            if dvecs is None:
+                break
+            with np.errstate(all="ignore"):
+                block = dvecs @ vecs[[pos[i] for i in chunk]].T  # dated x chunk
+            for j, pid in enumerate(chunk):
+                sims[pid] = block[:, j]
+        for pid in have:
             w = win.get(pid)
             keep = np.ones(len(dpos), bool) if w is None else ((dyears >= (w[0] or -1e9)) & (dyears <= (w[1] or 1e9)))
-            if k is None or not keep.any():
+            if dvecs is None or not keep.any():
                 cache[ck(pid)] = None
                 continue
-            with np.errstate(all="ignore"):
-                scores = (vecs[dpos] @ vecs[k])[keep]
+            scores = sims[pid][keep]
             yrs_all = dyears[keep]
             n = min(LOOK_K, len(scores))
             top = np.argpartition(-scores, n - 1)[:n]
@@ -282,9 +297,27 @@ def _camera_clues(con, cams: dict, win: dict = None) -> dict:
 # putting them together
 # --------------------------------------------------------------------------
 
+_all_cache = {"key": None, "at": 0.0, "value": None}
+ALL_TTL = 120  # seconds the whole answer is kept for the page (a changed hint or dismissal starts over)
+
+
 def suggestions(ids: list = None) -> dict:
     """{"items": [{id, year, lo, hi, clues: [{kind, text, year, sd}], people: [...]}], "people": [...]} for the photos
     marked "Date unknown" (or those of `ids`), best supported first. `people` is the age calibration list."""
+    if ids is None:
+        from app import config
+        key = (config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, json.dumps(hints(), sort_keys=True), json.dumps(ages.births(), sort_keys=True))
+        with _lock:
+            if _all_cache["key"] == key and time.time() - _all_cache["at"] < ALL_TTL:
+                return _all_cache["value"]
+        out = _suggestions(None)
+        with _lock:
+            _all_cache.update(key=key, at=time.time(), value=out)
+        return out
+    return _suggestions(ids)
+
+
+def _suggestions(ids: list = None) -> dict:
     con = index.open_index()
     try:
         rows = con.execute("SELECT id, camera, album_id FROM photos WHERE dprec = 3 AND video = 0").fetchall()

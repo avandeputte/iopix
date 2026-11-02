@@ -79,7 +79,8 @@ def signature() -> str:
     if counts is None:
         return "a0"
     from app.ai import jerseys
-    return "a" + ".".join(str(n // 2000 * 2000 if progress[key]["running"] else n) for key, n in counts.items()) + f".j{jerseys.coverage()[0]}"
+    j = jerseys.coverage()[0]
+    return "a" + ".".join(str(n // 2000 * 2000 if progress[key]["running"] else n) for key, n in counts.items()) + f".j{j // 2000 * 2000 if jerseys.progress['running'] else j}"
 
 
 def coverage() -> dict:

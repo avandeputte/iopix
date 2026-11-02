@@ -375,7 +375,8 @@ def signature() -> str:
     """Part of the index version: changes as transcripts arrive."""
     try:
         with vdb.reader() as con:
-            return "v%d" % con.execute("SELECT count(*) FROM video_info WHERE transcript IS NOT NULL").fetchone()[0]
+            n = con.execute("SELECT count(*) FROM video_info WHERE transcript IS NOT NULL").fetchone()[0]
+        return "v%d" % (n // 200 * 200 if progress["running"] else n)  # in steps while the job runs: no rebuild per video
     except Exception:
         return "v0"
 
