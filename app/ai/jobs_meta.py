@@ -4,7 +4,7 @@ from app import config, jobs as bgjobs
 from app.ai import analysis, caption, detector, looks, models as dlmodels
 from app.ai.semantic import enabled as semantic_enabled, ENGINES, semantic
 from app.core import prewarmer
-from app.ai import clothing, jerseys, rotation
+from app.ai import clothing, jerseys, rotation, videos
 from app.faces import ages, facedetect, facevecs
 
 
@@ -53,8 +53,11 @@ def rows(total: int, stills: int, signed_in: bool) -> list:
          "done": clothing.coverage()[0], "total": clothing.coverage()[1], "running": clothing.progress["running"], "enabled": config.ANALYSIS and clothing.available(), "rerun": True},
         {"key": "rotation", "label": "Wrongly rotated", "detail": f"Finds photos stored on their side or upside down. Your own photos teach a small classifier on the content-search embeddings ({mname('search_model')}) what upright looks like; every photo that reads as turned is then checked in all four turns. The findings are listed under Maintenance › Wrongly rotated with the lossless rotate; nothing is changed until you do. Learnt again when the search model changes.",
          "done": rotation.coverage()[0], "total": rotation.coverage()[1], "running": rotation.progress["running"], "enabled": config.ANALYSIS and rotation.available(), "rerun": True},
+        {"key": "videos", "label": "Videos", "detail": "For each video: the best of several frames as its cover (sharp, well lit, a face when the face detector is installed), chapter thumbnails at the scene changes (or spread over a single take) to jump to in the viewer, and "
+         + (f"a transcript of what is said ({mname('speech_model')}), searchable from the search box and shown in the info panel." if videos.speech_available() else "a transcript of what is said once a speech model is installed."),
+         "done": videos.coverage()[0], "total": total - stills, "running": videos.progress["running"], "enabled": config.ANALYSIS and videos.available(), "rerun": True},
     ]
-    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages", "jerseys": "jerseys", "clothing": "clothing", "rotation": "rotation"}
+    queue_key = {"thumbs": "thumbs", "embeddings": "embeddings", "quality": "pixels", "objects": "pixels", "vision": "vision", "captions": "captions", "faces": "faces", "facedetect": "facedetect", "looks": "looks", "ages": "ages", "jerseys": "jerseys", "clothing": "clothing", "rotation": "rotation", "videos": "videos"}
     for j in jobs:
         j["queued"] = bgjobs.is_queued(queue_key[j["key"]])
     return jobs

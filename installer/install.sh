@@ -14,7 +14,7 @@
 #   --port N            listen port                 (default 8600)
 #   --host ADDR         listen address              (default 0.0.0.0)
 #   --user NAME         service user                (default: iopix, created if missing)
-#   --features LIST     search,places,objects,ocr,captions (default: ask; "none" for browsing only)
+#   --features LIST     search,places,objects,ocr,captions,speech (default: ask; "none" for browsing only)
 #   --admin NAME:PASS   the admin account (default: ask); IOPIX_ADMIN=NAME:PASS in the environment does the
 #                       same without the password in the process list, and IOPIX_MYSQL=HOST:PORT/DB:USER:PASSWORD stands in for --mysql
 #   --iopix-db sqlite|HOST:PORT/DB:USER:PASS  iopix's own database (default: ask; IOPIX_VIEWER_DB in the environment does the same)

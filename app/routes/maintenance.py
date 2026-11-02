@@ -297,6 +297,9 @@ def start_analysis(job: str = "all", reset: bool = False) -> dict:
         elif job == "rotation":
             from app.ai import rotation
             rotation.reset()
+        elif job == "videos":
+            from app.ai import videos
+            videos.reset()
         else:
             raise HTTPException(400, "Choose one analysis to run again from scratch")
     _start_prewarm()

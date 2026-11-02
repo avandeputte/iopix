@@ -33,7 +33,7 @@ A sudoers rule lets the service user run exactly `systemctl restart iopix`, so *
 | `--mysql HOST:PORT/DB:USER:PASSWORD` | digiKam on MariaDB/MySQL instead |
 | `--no-digikam` | no digiKam: iopix keeps the library itself |
 | `--iopix-db sqlite` or `HOST:PORT/DB:USER:PASSWORD` | where iopix keeps its own database |
-| `--features search,places,objects,ocr,captions` | the AI features; `none` for browsing only |
+| `--features search,places,objects,ocr,captions,speech` | the AI features; `none` for browsing only |
 | `--captions` | all features, including photo descriptions |
 | `--admin NAME:PASS` | the admin account |
 | `--prefix`, `--data` | where the app and its data go |

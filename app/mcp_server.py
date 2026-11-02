@@ -952,7 +952,7 @@ def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200,
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
 def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
     """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
-    captions, looks, faces, ages, jerseys, clothing, rotation or facedetect (facedetect writes faces into digiKam's database). Without reset only
+    captions, looks, faces, ages, jerseys, clothing, rotation, videos or facedetect (facedetect writes faces into digiKam's database). Without reset only
     new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Needs the
     admin token."""
     _need_token(token, writes=(job == "facedetect"))

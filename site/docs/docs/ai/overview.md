@@ -17,6 +17,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Clothing matches**: within one event, who is probably in a photo by what they wear, when their face is not named.
 - **Wrongly rotated**: photos stored on their side or upside down, with the lossless rotate that rights them.
 - **Smart crop**: tiles and cards that crop a photo keep its subject (the faces, else the people) in the frame.
+- **Videos**: a better cover frame, chapter thumbnails to jump to, and a searchable transcript of what is said.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 
@@ -32,7 +33,7 @@ AI results are guesses, and iopix treats them that way:
 
 ## Background jobs
 
-New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers, clothing matches, wrongly rotated photos. The damaged-files check runs only when you start it.
+New and changed photos are picked up automatically. Heavy work goes through **one queue, one job at a time**, in this order: thumbnails, sharpness and objects, content search, text and face quality, face grouping, similar photos (on request), descriptions, photo quality, ages for date suggestions, jersey numbers, clothing matches, wrongly rotated photos, videos. The damaged-files check runs only when you start it.
 
 Each job may use half the machine's cores by default (**Settings › AI and search**, or `BG_THREADS`), so iopix and everything else on the server stay responsive.
 

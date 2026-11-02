@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
-from app import access, thumbs, users, videostream
+from app import access, config, thumbs, users, videostream
 from app.core import _cached_image, _form_items, _photo_row, db, IMG_CACHE, resolve, THUMB_COLS
 from app.photos import edits, export
 
@@ -89,6 +89,23 @@ def original(photo_id: int, dl: int = 0):
     return FileResponse(row["path"], media_type=mime, filename=row["name"],
                         content_disposition_type="attachment" if dl else "inline",
                         headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/video/{photo_id}/frame")
+def video_frame_at(photo_id: int, t: float = 0.0, h: int = 240):
+    """One frame of a video at `t` seconds (a chapter thumbnail), cached; h is its height (120-720)."""
+    row = _photo_row(photo_id)
+    if not row["video"]:
+        raise HTTPException(404, "Not a video")
+    h = max(120, min(int(h), 720))
+    t = max(0.0, float(t))
+    dst = config.CACHE_DIR / "vf" / f"{photo_id % 256:02x}" / f"{photo_id}-{thumbs.stamp_for(row['hash'], row['size'], row['modified'])}-{t:.2f}-{h}.jpg"
+    if not dst.exists():
+        if not os.path.isfile(row["path"]):
+            raise HTTPException(404, "Original file is not available")
+        if not thumbs.video_frame(row["path"], dst, h, row.get("duration"), at=t):
+            raise HTTPException(503, "The frame could not be read")
+    return FileResponse(dst, media_type="image/jpeg", headers=IMG_CACHE)
 
 
 @router.get("/video/{photo_id}.mp4")

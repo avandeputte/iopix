@@ -942,3 +942,9 @@ html.inapp #nav, html.inapp #sidebtn, html.inapp #menubtn, html.inapp #navscrim 
 html.inapp body, html.inapp body.side-docked { --nav: 0px; }
 html.inapp #main, html.inapp #filters, html.inapp .cbulk { bottom: 0; }
 html.inapp #scrub { bottom: 8px; } html.inapp #toast, html.inapp #reloadnote { bottom: 16px; } html.inapp #banners { bottom: 16px; }
+
+/* chapter thumbnails under a video (videos.py) */
+.lb-chapters { position: absolute; left: 0; right: 0; bottom: 64px; z-index: 5; display: flex; gap: 6px; justify-content: center; padding: 6px 10px; overflow-x: auto; pointer-events: auto; }
+.lb-chapters button { flex: none; border: 0; background: rgba(0,0,0,.55); color: #fff; padding: 0; border-radius: var(--r-s); cursor: pointer; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
+.lb-chapters img { height: 48px; display: block; }
+.lb-chapters span { font-size: 11px; padding: 1px 4px; }

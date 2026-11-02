@@ -72,6 +72,10 @@ Scans and old files are often stored on their side or upside down. No extra mode
 
 A square or wide tile crops the photo to its own shape, and a centre crop cuts heads off portraits. Each photo has a focus point, the centre of its subject: the faces digiKam knows, else the people object detection found, else the middle of the frame. The Explore tiles, the covers of folders, albums, people and places, and the apps' tiles keep that point in view, and `/thumb/<id>?fit=square` (or `fit=16x9`) serves a thumbnail cropped around it. Nothing is written to any photo; the point lives in the search index and moves with the faces.
 
+## Videos
+
+For each video, iopix picks the **cover frame** from several frames spread over it (sharp, well lit, with a face when the face detector is installed) instead of a frame a quarter of the way in; the thumbnail and preview are made from it. **Chapter thumbnails** under the player mark the scene changes (or, in a single take, moments spread evenly): click one to jump there. With a speech model installed (**Maintenance › AI analysis and models**: Parakeet by default, Whisper base as the small alternative), **what is said** is transcribed on the CPU, searchable from the search box, and shown in the info panel with the moments it was said, to jump to. Nothing is written to any video.
+
 ## Text in photos
 
 Text that recognition finds in a photo (signs, jerseys, documents) is searchable and shown in the info panel. Only what reads as words is kept: numbers, words from English, French, Dutch and German word lists, the names of your people, tags, folders and places, your titles and captions, and words read in three or more of your photos (a team's or a school's name). Misreadings such as "NIVHITY" on a curved sweatshirt are left out.

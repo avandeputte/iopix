@@ -135,12 +135,17 @@ def open_oriented(src: str, want_w: int, want_h: int):
     return im, icc
 
 
-def video_frame(src: str, dst: Path, height: int, duration) -> bool:
+def video_frame(src: str, dst: Path, height: int, duration, at: float = None) -> bool:
+    """One frame of a video as a JPEG: the chosen cover frame (`at`, from videos.py) when there is one, else a frame
+    a little way in, else the first."""
     if not FFMPEG:
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(f".{dst.name}.{os.getpid()}.{threading.get_ident()}.tmp.jpg")
-    for seek in ((min(1.0, (duration or 0) / 4),) if duration else (1.0,)) + (0.0,):
+    seeks = ((min(1.0, (duration or 0) / 4),) if duration else (1.0,)) + (0.0,)
+    if at is not None:
+        seeks = (float(at),) + seeks
+    for seek in seeks:
         cmd = [FFMPEG, "-v", "error", "-nostdin", "-y", "-ss", f"{seek:.2f}", "-i", src,
                "-frames:v", "1", "-vf", f"scale=-2:'min({height},ih)'", "-q:v", "4", str(tmp)]
         try:
@@ -178,7 +183,8 @@ def make(kind: str, photo: dict) -> Path:
             raise FileNotFoundError(photo["path"])
         try:
             if photo["video"]:
-                if not video_frame(photo["path"], dst, box_h if kind == "t" else 1080, photo["duration"]):
+                from app.ai import videos
+                if not video_frame(photo["path"], dst, box_h if kind == "t" else 1080, photo["duration"], at=videos.cover_time(photo["id"])):
                     _placeholder(dst, photo["w"], photo["h"])
             else:
                 im, icc = open_oriented(photo["path"], box_w, box_h)

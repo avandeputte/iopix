@@ -558,6 +558,8 @@ def start(photos: list):
     clothing.start(photos)  # what each detected person wears, for matches within an event
     from app.ai import rotation
     rotation.start()  # photos stored on their side, from the search embeddings
+    from app.ai import videos
+    videos.start(photos)  # cover frame, chapters and speech for videos
 
 
 def results() -> dict:

@@ -13,6 +13,7 @@ Each AI feature runs on a model that is downloaded once into the data folder. Wh
 | Photo quality | LAION aesthetic predictor on CLIP ViT-L/14 | | about 1.2 GB |
 | Closed eyes | a ViT eye-state classifier | | about 340 MB, plus a face detection model |
 | Date suggestions | MiVOLO v2 (age) | | about 120 MB |
+| Speech in videos | Parakeet TDT 0.6B v3 (25 European languages) | Whisper base (smaller, more languages, less accurate) | 150 to 640 MB |
 | Places | GeoNames | | about 30 MB |
 
 ## Switching models

@@ -24,7 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
 
-from app.ai import analysis, jerseys, moments, smartcrop
+from app.ai import analysis, jerseys, moments, smartcrop, videos
 from app import config
 from app.digikam import dkdb, library
 from app.photos import dateprecision, edits
@@ -73,7 +73,7 @@ CREATE INDEX faces_photo ON faces (photo_id);
 CREATE INDEX faces_tag ON faces (tag_id);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts USING fts5(
-    name, album, title, caption, tags, people, camera, misc, ocr, caption_ai,
+    name, album, title, caption, tags, people, camera, misc, ocr, caption_ai, speech,
     tokenize = "unicode61 remove_diacritics 2", prefix = '1 2 3'
 );
 """
@@ -84,7 +84,7 @@ COLOR = {f"Color Label {n}": i for i, n in enumerate(COLORS)}
 MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
           "August", "September", "October", "November", "December"]
 SPECIAL_PERSON_PROPS = ("unknownPerson", "ignoredPerson", "unconfirmedPerson")
-SCHEMA_VERSION = "16"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects); 14: text in photos kept to words (ocrwords); 15: jersey numbers; 16: focus point for cropped thumbnails
+SCHEMA_VERSION = "17"  # 10: folder date, category and chosen cover; 11: AI descriptions without filler; 12: dprec (approximate dates); 13: photo quality (aesthetic, focus, eyes, likely rejects); 14: text in photos kept to words (ocrwords); 15: jersey numbers; 16: focus point for cropped thumbnails; 17: speech in videos (fts column)
 RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -644,6 +644,8 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
     seen = analysis.results()  # sharpness, OCR text, objects... from the app's own analysis
     for pid, nums in jerseys.results().items():  # the numbers read on shirts, searchable as jersey=10
         seen.setdefault(pid, {})["jerseys"] = nums
+    for pid, text in videos.transcripts().items():  # what is said in videos, searchable
+        seen.setdefault(pid, {})["speech"] = text
     phases["analysis"] = time.time() - t1
     faces_by = defaultdict(list)  # the faces that place a cropped thumbnail (smartcrop.py): not the ones marked ignored
     for f in side["faces"]:
@@ -761,7 +763,7 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
             y if (dprec or 0) < 3 else None, MONTHS[mo] if (dprec or 0) < 2 else None, fmt, "video" if video else "photo", lens, cr.get("creator"),
             cr.get("copyrightNotice"), " ".join(iprops.get(iid, {}).values()), *(loc or ())) if x)
         out.fts_rows.append((iid, name, album["path"], p_title, p_caption,
-                             " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai")))
+                             " ; ".join(tag_names), " ; ".join(people_names), cam, misc, an.get("ocr"), an.get("caption_ai"), an.get("speech")))
     _clean_ocr(out, tags, albums)
     return out
 
@@ -796,8 +798,8 @@ def _fill(dst, rows: SimpleNamespace, albums: dict, root_path: dict, tags: dict,
     """Every table of a new index file, from the rows computed above."""
     dst.executescript("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;" + SCHEMA)
     dst.executemany(f"INSERT INTO photos VALUES ({','.join('?' * 66)})", rows.photos)
-    dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows.fts_rows)
+    dst.executemany("INSERT INTO fts (rowid, name, album, title, caption, tags, people, camera, misc, ocr, caption_ai, speech) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows.fts_rows)
     _rank(dst, rows, "sharpn", 4)
     _rank(dst, rows, "focusn", 7)
     _rank(dst, rows, "aesthn", 8)
@@ -935,7 +937,7 @@ def _embed_signature() -> str:
 
 
 def _version_for(source: str) -> str:
-    return f"{SCHEMA_VERSION}:{source}:{places.signature()}:{edits.signature()}:{analysis.signature()}:{_embed_signature()}"
+    return f"{SCHEMA_VERSION}:{source}:{places.signature()}:{edits.signature()}:{analysis.signature()}:{videos.signature()}:{_embed_signature()}"
 
 
 def expected_version() -> str:

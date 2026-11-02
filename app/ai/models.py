@@ -110,6 +110,13 @@ REGISTRY = {
                "sha256": "2db5e05be33b3f120518a86f29a4a65eb0a01c2967219b8787a7dead9b796951",
                "page": "https://huggingface.co/iitolstykh/mivolo_v2", "what": "Year suggestions for photos whose date is unknown: estimates how old each named person looks (MiVOLO v2, one of the most accurate published age estimators; an ONNX export of its age output). Each person's photos with a known date calibrate it for that person. Ages from faces are rough, so a suggestion is a year with a range, and nothing is written until you use it.",
                "size": "118 MB"},
+    # Speech in videos (videos.py; choice "speech_model"): models run with onnx-asr (onnxruntime on the CPU)
+    "parakeet": {"label": "Parakeet TDT 0.6B v3 (speech)", "kind": "asr", "asr": "nemo-parakeet-tdt-0.6b-v3", "quantization": "int8", "repos": ["istupakov/parakeet-tdt-0.6b-v3-onnx"], "choice": "speech_model",
+                 "page": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", "what": "Speech in videos: NVIDIA's Parakeet, which transcribes 25 European languages (English, French, Dutch, German, Spanish, Italian…) with timestamps and does not make text up over noise. The 8-bit export; transcribes at a few times real time on the CPU.",
+                 "size": "640 MB"},
+    "whisper_base": {"label": "Whisper base (speech)", "kind": "asr", "asr": "whisper-base", "quantization": None, "repos": ["istupakov/whisper-base-onnx"], "choice": "speech_model",
+                     "page": "https://huggingface.co/openai/whisper-base", "what": "Speech in videos: OpenAI's small Whisper, which knows many more languages but gets more words wrong and can loop on noise (such loops are dropped). About four times faster than Parakeet.",
+                     "size": "150 MB"},
     # Data
     "geonames": {"label": "GeoNames places", "kind": "data", "url": "https://download.geonames.org/export/dump/cities1000.zip",
                  "page": "https://download.geonames.org/export/dump/", "what": "Offline reverse geocoding: town, region and country for each GPS position. GeoNames regenerates this export daily.",
@@ -127,6 +134,7 @@ CHOICES = {
     "object_model": {"label": "Object detection", "default": "yolox"},
     "face_detector": {"label": "Face detection", "default": "yunet"},
     "face_vectors": {"label": "Face grouping", "default": "sface"},
+    "speech_model": {"label": "Speech in videos", "default": "parakeet"},
 }
 
 
@@ -194,9 +202,25 @@ def hf_local(repo: str):
         return None, None
 
 
+def asr_dir(key: str):
+    """Where a speech model's files are kept (onnx-asr downloads them as plain files into this folder)."""
+    return MODEL_DIR / f"asr-{key}"
+
+
+def installed(key: str) -> bool:
+    return bool(local(key).get("installed"))
+
+
 def local(key: str) -> dict:
     """{installed, revision, at}: revision is a commit id, a date or a version."""
     m = REGISTRY[key]
+    if m["kind"] == "asr":
+        d = asr_dir(key)
+        onnx_files = [p for p in d.glob("*.onnx")] if d.is_dir() else []
+        if not onnx_files or not (d / ("vocab.json" if m["asr"] == "whisper-base" else "vocab.txt")).exists():
+            return {"installed": False}
+        at = int(max(p.stat().st_mtime for p in onnx_files))
+        return {"installed": True, "revision": datetime.fromtimestamp(at).strftime("%Y-%m-%d"), "at": at}
     if m["kind"] == "hf":
         shas, ats = [], []
         for repo in m["repos"]:
@@ -310,6 +334,13 @@ def check(key: str) -> dict:
                     out["status"] = "newer" if t.timestamp() > loc["at"] + 86400 else "current"
                 else:
                     out["status"] = "update" if t.timestamp() > loc["at"] else "current"
+        elif m["kind"] == "asr":  # plain files from a hub repository: compared by the repository's last change
+            with _get(f"https://huggingface.co/api/models/{m['repos'][0]}") as r:
+                info = json.load(r)
+            out["remote"] = (info.get("sha") or "")[:7]
+            out["remote_at"] = info.get("lastModified")
+            t = datetime.fromisoformat(info["lastModified"].replace("Z", "+00:00")).timestamp() if info.get("lastModified") else None
+            out["status"] = "missing" if not loc["installed"] else ("update" if t and t > loc["at"] else "current")
         elif m["kind"] == "pip":
             with _get(f"https://pypi.org/pypi/{m['package']}/json") as r:
                 info = json.load(r)
@@ -502,6 +533,17 @@ def _download_here(key: str):
         fetch_file(m["url"], path(key), m.get("member"), m.get("sha256"))
         for x in m.get("extra", []):
             fetch_file(x["url"], MODEL_DIR / x["file"], None, x["sha256"])
+    elif m["kind"] == "asr":
+        if importlib.util.find_spec("onnx_asr") is None:  # the recogniser package comes with the first speech model
+            uv = shutil.which("uv")
+            cmd = [uv, "pip", "install", "--upgrade", "-p", sys.executable, "onnx-asr"] if uv else [sys.executable, "-m", "pip", "install", "--upgrade", "onnx-asr"]
+            subprocess.run(cmd, check=True)
+        import onnx_asr
+        d = asr_dir(key)
+        d.mkdir(parents=True, exist_ok=True)
+        onnx_asr.load_model(m["asr"], str(d), quantization=m.get("quantization"), providers=["CPUExecutionProvider"])  # downloads into d
+        from app.ai import videos
+        videos.reset_sessions()
     elif key == "geonames":
         from app.geo import places
         places.fetch()

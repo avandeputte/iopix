@@ -483,6 +483,17 @@ export function showItem() {
     v.onerror = () => { if (token === LB.token) { v.remove(); toast('This video format cannot play in the browser.', 'Download', () => el.dl.click()); } };
     v.onended = () => { if (LB.play) step(1); };
     el.frame.append(v);
+    LB.video = v;
+  };
+  /** Chapter thumbnails under the player (videos.py): click to jump there. */
+  const mountChapters = (d) => {
+    const ch = d.videoInfo?.chapters || [];
+    el.chapters?.remove();
+    if (!ch.length || !LB.video) return;
+    const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    el.chapters = h('div', { class: 'lb-chapters', onclick: (e) => e.stopPropagation() }, ch.map((t) => h('button', { type: 'button', title: `Jump to ${fmt(t)}`, onclick: () => { if (LB.video) { LB.video.currentTime = t; LB.video.play(); } } },
+      h('img', { src: `/video/${id}/frame?t=${t}&h=120`, alt: '', loading: 'lazy' }), h('span', null, fmt(t)))));
+    el.stage.append(el.chapters);
   };
   if (isVideo === true) mountVideo(); else if (isVideo === false) loadPreview();
   getDetail(id).then((d) => {
@@ -491,6 +502,7 @@ export function showItem() {
     LB.ar = d.w / (d.h || 1);
     sizeFrame();
     if (isVideo === undefined) { isVideo = !!d.video; d.video ? mountVideo() : loadPreview(); }
+    if (d.video) mountChapters(d);
     renderTitle();
     el.facesBtn.style.display = d.faces.length || d.faces_other?.length ? '' : 'none';
     el.addFaceBtn.style.display = S.CAN_MANAGE && !d.video ? '' : 'none';
@@ -1072,6 +1084,8 @@ function infoAi(c) {
     d.boxes?.length ? [sub('Objects'), h('div', { class: 'ichips' }, [...new Set(d.boxes.map((b) => b.cls))].map((c) => h('span', { class: 'ichip', onclick: () => filterFromLightbox({ obj: c }) },
       c, h('b', { style: 'font-weight:400;color:var(--fg2)' }, d.boxes.filter((b) => b.cls === c).length > 1 ? ` ×${d.boxes.filter((b) => b.cls === c).length}` : ''))))] : null,
     d.ocr ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Text in the picture'), h('div', { class: 'a small' }, d.ocr.slice(0, 600).split(/\n+/).map((t) => t.trim()).filter(Boolean).join(' · ')))) : null,
+    d.videoInfo?.transcript ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, `What is said${d.videoInfo.lang ? ` (${d.videoInfo.lang})` : ''}`),
+      h('div', { class: 'a small' }, d.videoInfo.segments?.length ? d.videoInfo.segments.map((s, k) => [k ? ' ' : '', h('button', { type: 'button', class: 'lnk', title: `Jump to ${Math.floor(s.t / 60)}:${String(Math.floor(s.t % 60)).padStart(2, '0')}`, onclick: () => { if (LB.video) { LB.video.currentTime = s.t; LB.video.play(); } } }, s.text)]) : d.videoInfo.transcript.slice(0, 2000)))) : null,
     d.jerseys?.length ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Jersey numbers'),
       h('div', { class: 'a small' }, [...new Set(d.jerseys.map((j) => j.number))].map((n, k) => [k ? ' · ' : '', lnk(`number ${n}`, { jersey: n })])),
       (d.jerseySuggestions || []).map((x) => h('div', { class: 'b', style: 'margin-top:4px' }, `Number ${x.number} is probably ${x.name} (${x.n} named ${x.basis === 'folder' ? 'in this folder' : 'this year'}). `,

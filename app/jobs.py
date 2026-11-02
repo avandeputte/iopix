@@ -18,7 +18,7 @@ import traceback
 from app import config
 from app.data import state
 
-ORDER = ["thumbs", "pixels", "embeddings", "vision", "facedetect", "faces", "neardups", "captions", "looks", "ages", "jerseys", "clothing", "rotation", "filecheck"]
+ORDER = ["thumbs", "pixels", "embeddings", "vision", "facedetect", "faces", "neardups", "captions", "looks", "ages", "jerseys", "clothing", "rotation", "videos", "filecheck"]
 
 _lock = threading.Lock()
 _wake = threading.Event()
