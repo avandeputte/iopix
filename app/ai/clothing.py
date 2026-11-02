@@ -262,6 +262,8 @@ def suggestions(ids: list = None) -> dict:
         events = _events(con, ids)
         names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
         albums = {r[0]: r[1] for r in con.execute("SELECT id, name FROM albums")}
+        from app.ai import dismissed
+        no = dismissed.ids("clothing")
         items = []
         for (album, day), pids in events.items():
             if len(pids) < 2:
@@ -274,7 +276,7 @@ def suggestions(ids: list = None) -> dict:
                     tagged[pid].add(tag)
             seen = set()
             for s in match_event(boxes, faces, tagged):
-                if s["tag"] not in names or (s["id"], s["tag"]) in seen or (ids is not None and s["id"] not in set(ids)):
+                if s["tag"] not in names or (s["id"], s["tag"]) in seen or (ids is not None and s["id"] not in set(ids)) or (s["id"], s["tag"]) in no:
                     continue
                 seen.add((s["id"], s["tag"]))
                 s.update(name=names[s["tag"]], event=f"{albums.get(album, '')} · {day}".strip(" ·"),

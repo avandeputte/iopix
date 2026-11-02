@@ -24,9 +24,14 @@ MIN_BOX = 0.02        # of the frame: smaller people carry no readable number
 MIN_HEIGHT = 0.12     # of the frame's height
 TORSO = 0.62          # the upper part of the person box that is searched
 CROP_WIDTH = 320      # the crop is enlarged to at least this width for the recogniser
-MIN_CONF = 0.6
+MIN_CONF = 0.75
+CENTRE = (0.12, 0.88)   # the number's box must sit within this part of the torso crop's width (not the background beside the person)
+MIN_WIDTH = 0.1         # and be at least this wide, as a fraction of the crop: a shirt number is big
 MAX_BOXES = 12
 NUMBER = re.compile(r"\d{1,2}")
+VERSION = "2"         # ai_scans.detail: 2 reads the shirt colour too; older rows are read again
+HUE_APART = 40        # degrees (0-360): shirts whose hue differs by more, both colourful, are different kits
+VAL_APART = 90        # 0-255: for dull shirts (white, black, grey), the brightness difference that tells them apart
 LEARN_MIN_FOLDER = 2  # named sightings of a number in one folder before it names a player there
 LEARN_MIN_YEAR = 3    # and in one year
 AGREE = 0.8           # the share of sightings the leading player needs
@@ -42,8 +47,39 @@ def _k(v: float) -> int:
     return int(round(v * 1000))
 
 
+def shirt_colour(crop) -> tuple:
+    """(hue 0-359, saturation 0-255, value 0-255) of the middle of a torso crop: the shirt's colour, roughly."""
+    try:
+        import numpy as np
+        w, h = crop.size
+        mid = crop.crop((int(w * 0.25), int(h * 0.3), int(w * 0.75), int(h * 0.85))).convert("HSV").resize((16, 16))
+        a = np.asarray(mid, np.float32)
+        sat, val = float(a[:, :, 1].mean()), float(a[:, :, 2].mean())
+        hue = a[:, :, 0] * (360 / 256) * (np.pi / 180)
+        wgt = a[:, :, 1] + 1e-3  # the hue of the colourful pixels counts
+        hx, hy = float((np.cos(hue) * wgt).sum()), float((np.sin(hue) * wgt).sum())
+        h_deg = (np.degrees(np.arctan2(hy, hx)) + 360) % 360
+        return int(round(h_deg)), int(round(sat)), int(round(val))
+    except Exception:
+        return None, None, None
+
+
+def same_kit(a: tuple, b: tuple) -> bool:
+    """Whether two shirt colours could be the same kit; True when either is unknown."""
+    if not a or not b or a[0] is None or b[0] is None:
+        return True
+    ha, sa, va = a
+    hb, sb, vb = b
+    if sa >= 70 and sb >= 70:  # both colourful: the hue decides
+        d = abs(ha - hb) % 360
+        return min(d, 360 - d) <= HUE_APART
+    if sa < 70 and sb < 70:   # both dull: brightness decides
+        return abs(va - vb) <= VAL_APART
+    return False  # one colourful, one not
+
+
 def read_numbers(im, boxes: list, ocr) -> list:
-    """[(box, number, confidence)] for the person boxes (fractions of the upright frame) with a number on their shirt."""
+    """[(box, number, confidence, colour)] for the person boxes (fractions of the upright frame) with a number on their shirt."""
     out = []
     W, H = im.size
     for x, y, w, h in boxes[:MAX_BOXES]:
@@ -54,12 +90,20 @@ def read_numbers(im, boxes: list, ocr) -> list:
         if s > 1:
             crop = crop.resize((int(crop.width * s), int(crop.height * s)))
         best = None
-        for text, conf in ocr(crop.convert("RGB")):
+        rgb = crop.convert("RGB")
+        found = ocr.boxes(rgb) if hasattr(ocr, "boxes") else [(t, c, None) for t, c in ocr(rgb)]
+        for text, conf, bx in found:
             t = text.strip().replace(" ", "")
-            if conf >= MIN_CONF and NUMBER.fullmatch(t) and (best is None or conf > best[1]):
+            if conf < MIN_CONF or not NUMBER.fullmatch(t):
+                continue
+            if bx is not None:  # where it was read: on the shirt, not on a sign or a banner beside the person
+                cx = (bx[0] + bx[2]) / 2 / rgb.width
+                if not (CENTRE[0] <= cx <= CENTRE[1]) or (bx[2] - bx[0]) < MIN_WIDTH * rgb.width or bx[1] < 0.08 * rgb.height:
+                    continue
+            if best is None or conf > best[1]:
                 best = (t, conf)
         if best:
-            out.append(((x, y, w, h), best[0], round(float(best[1]), 3)))
+            out.append(((x, y, w, h), best[0], round(float(best[1]), 3), shirt_colour(crop)))
     return out
 
 
@@ -76,10 +120,10 @@ def _person_boxes(ids: list) -> dict:
 def _todo(photos: list) -> list:
     """Still photos with people detected that this job has not read yet (or whose file or detection changed since)."""
     with vdb.reader() as con:
-        have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'jerseys'")}
+        have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'jerseys'")}
         objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'objects'")}
     from app.ai.analysis import stamp
-    return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != stamp(p)]
+    return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != (stamp(p), VERSION)]
 
 
 def coverage() -> tuple:
@@ -128,9 +172,9 @@ def _job(photos: list, gen: int):
                     return
                 with vdb.writer() as con:
                     con.executemany("DELETE FROM ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
-                    con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score) VALUES (?,?,?,?,?,?,?)",
-                                    [(p["id"], _k(b[0]), _k(b[1]), _k(b[2]), _k(b[3]), num, sc) for p, found in ready for b, num, sc in found])
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,NULL)", [(p["id"], stamp(p)) for p, _ in ready])
+                    con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                    [(p["id"], _k(b[0]), _k(b[1]), _k(b[2]), _k(b[3]), num, sc, *col) for p, found in ready for b, num, sc, col in found])
+                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], stamp(p), VERSION) for p, _ in ready])
                 progress.step(len(chunk))
     finally:
         progress.finish(gen)
@@ -169,8 +213,8 @@ def results() -> dict:
 # --------------------------------------------------------------------------
 
 def _sightings(con, rows: list) -> list:
-    """[(photo, album, year, box, number, score, named tag or None)]: each number read, with the named face standing
-    in that person box (its centre within the box, in the box's upper third) when there is one."""
+    """[(photo, album, year, box, number, score, named tag or None, colour)]: each number read, with the named face
+    standing in that person box (its centre within the box, in the box's upper third) when there is one."""
     ids = sorted({r[0] for r in rows})
     faces, meta = {}, {}
     for part in chunked(ids, 500):
@@ -180,18 +224,18 @@ def _sightings(con, rows: list) -> list:
         for pid, album, year, pw, ph in con.execute(f"SELECT id, album_id, year, w, h FROM photos WHERE id IN ({chunk})"):
             meta[pid] = (album, year, pw or 1, ph or 1)
     out = []
-    for pid, px, py, pw, ph, number, score in rows:
+    for pid, px, py, pw, ph, number, score, hue, sat, val in rows:
         album, year, W, H = meta.get(pid, (None, None, 1, 1))
         x, y, w, h = px / 1000, py / 1000, pw / 1000, ph / 1000
         inside = [t for t, cx, cy in faces.get(pid, []) if x <= cx / W <= x + w and y <= cy / H <= y + 0.35 * h]
-        out.append((pid, album, year, (x, y, w, h), number, score, inside[0] if len(inside) == 1 else None))
+        out.append((pid, album, year, (x, y, w, h), number, score, inside[0] if len(inside) == 1 else None, (hue, sat, val)))
     return out
 
 
 def _roster(sightings: list) -> tuple:
     """({(album, number): tag}, {(year, number): tag}, counts) from the named sightings, where one player clearly wears it."""
     by_album, by_year = defaultdict(Counter), defaultdict(Counter)
-    for pid, album, year, _box, number, _s, tag in sightings:
+    for pid, album, year, _box, number, _s, tag, _c in sightings:
         if tag is None:
             continue
         by_album[(album, number)][tag] += 1
@@ -225,7 +269,7 @@ def suggestions(ids: list = None) -> dict:
     photos where a number is read on someone whose face is not named, and that number names a player in the same folder
     (else the same year) who is not yet tagged on the photo. Computed on request; nothing is written."""
     with vdb.reader() as vcon:
-        rows = [tuple(r) for r in vcon.execute("SELECT photo_id, px, py, pw, ph, number, score FROM ai_jerseys")]
+        rows = [tuple(r) for r in vcon.execute("SELECT photo_id, px, py, pw, ph, number, score, hue, sat, val FROM ai_jerseys")]
     con = index.open_index()
     try:
         sightings = _all_sightings(con, rows)
@@ -233,6 +277,14 @@ def suggestions(ids: list = None) -> dict:
         names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
         albums = {r[0]: r[1] for r in con.execute("SELECT id, name FROM albums")}
         candidates = [s for s in sightings if s[6] is None and (ids is None or s[0] in set(ids))]
+        # the kit each player wears a number in, per folder and per year: the colours of their named sightings
+        kits = defaultdict(list)
+        for pid, album, year, _box, number, _s, tag, colour in sightings:
+            if tag is not None and colour and colour[0] is not None:
+                kits[("a", album, number, tag)].append(colour)
+                kits[("y", year, number, tag)].append(colour)
+        from app.ai import dismissed
+        no = dismissed.ids("jersey")
         tagged = defaultdict(set)
         for part in chunked(sorted({s[0] for s in candidates}), 500):
             for pid, tag in con.execute(f"SELECT photo_id, tag_id FROM photo_tags WHERE photo_id IN ({','.join(str(i) for i in part)})"):
@@ -240,14 +292,18 @@ def suggestions(ids: list = None) -> dict:
     finally:
         con.close()
     items, seen = [], set()
-    for pid, album, year, box, number, score, _t in candidates:
+    for pid, album, year, box, number, score, _t, colour in candidates:
         tag, basis, n = None, None, 0
         if (album, number) in album_map:
             tag, basis, n = album_map[(album, number)], "folder", counts["album"][(album, number)]
+            kit = kits.get(("a", album, number, tag), [])
         elif (year, number) in year_map:
             tag, basis, n = year_map[(year, number)], "year", counts["year"][(year, number)]
-        if tag is None or tag in tagged[pid] or (pid, tag) in seen or tag not in names:
+            kit = kits.get(("y", year, number, tag), [])
+        if tag is None or tag in tagged[pid] or (pid, tag) in seen or tag not in names or (pid, tag) in no:
             continue
+        if kit and colour and colour[0] is not None and not any(same_kit(colour, k) for k in kit):
+            continue  # the same number on the other team's shirt
         seen.add((pid, tag))
         where = f"in {albums.get(album, 'this folder')}" if basis == "folder" else f"in {year}"
         items.append({"id": pid, "number": number, "tag": tag, "name": names[tag], "basis": basis, "n": n,
@@ -261,7 +317,7 @@ def suggestions(ids: list = None) -> dict:
         players[tag][number] += counts["year"][(year, number)]
     plist = [{"tag": t, "name": names.get(t, ""), "numbers": [n for n, _ in c.most_common()]} for t, c in players.items() if t in names]
     plist.sort(key=lambda p: p["name"].lower())
-    return {"items": items, "players": plist, "read": len(rows), "named": sum(1 for s in sightings if s[6] is not None)}
+    return {"items": items, "players": plist, "read": len(rows), "named": sum(1 for s in sightings if s[6] is not None), "dismissed": len(no)}
 
 
 def for_photo(photo_id: int) -> list:

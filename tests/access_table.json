@@ -132,6 +132,7 @@
  "POST /api/searches/{search_id}": "signed_in",
  "POST /api/settings": "admin",
  "POST /api/settings/proxy": "admin",
+ "POST /api/suggestions/dismiss": "editor+write",
  "POST /api/tags/op": "editor+write",
  "POST /api/tags/recent": "signed_in",
  "POST /api/trash/empty": "editor+write",

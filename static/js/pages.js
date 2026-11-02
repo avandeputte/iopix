@@ -5,8 +5,8 @@ import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
 import { detectFaces, editPhotos } from './editing.js';
 import { downloadDialog } from './download.js';
-import { TRANSFORMS, openLightbox, personPicker, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
-import { badgeTiles, tileBadges } from './grid.js';
+import { TRANSFORMS, faceOp, openLightbox, personPicker, popMenu, syncLightbox, transformPhotos } from './lightbox.js';
+import { badgeTiles, setBadges, tileBadges } from './grid.js';
 import { boot, pollStatus } from './main.js';
 
 export function card({ img, fallback, name, sub, onclick, focus }) {
@@ -884,16 +884,19 @@ export async function showPlaceSuggest() {
 /** Explore › Jersey numbers: the players suggested for people whose shirt number was read but whose face is not named
  * (jerseys.py), grouped by player. Nothing is tagged until a suggestion is used; a number is searchable as jersey=10. */
 export async function showJerseys() {
+  const KIND = 'jersey';
   main.replaceChildren(loadingBox('Reading the numbers…'));
   let d;
   try { d = await api('/api/jerseys?limit=2000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
   if (S.route.view !== 'jerseys') return;
   const items = d.items;
-  const use = async (list, btn) => {
+  const use = async (list, btn) => {  // a person on the photo without a face box: digiKam's own person tag, sidecar included
     btn.disabled = true;
-    const byTag = new Map();
-    list.forEach((x) => { if (!byTag.has(x.tag)) byTag.set(x.tag, []); byTag.get(x.tag).push(x.id); });
-    for (const [tag, ids] of byTag) { if (!(await editPhotos(ids, { add_tags: [tag] }))) { btn.disabled = false; return false; } }
+    let r;
+    try { r = await post('/api/faces/batch', { ops: list.map((x) => ({ op: 'tagonly', image: x.id, tag: x.tag })) }); } catch (e) { toastError(e); btn.disabled = false; return false; }
+    if (r.failed?.length) { toast(`${plural(r.failed.length, 'photo')} not tagged: ${r.failed[0].error}`, null, null, 8000); btn.disabled = false; return false; }
+    setBadges(list.map((x) => x.id), { faces: true });
+    toast(list.length === 1 ? `Added ${list[0].name}.` : `${plural(list.length, 'photo')} tagged.`);
     return true;
   };
   const card = (x) => {
@@ -901,8 +904,11 @@ export async function showJerseys() {
       h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
       h('div', null, h('b', null, `Number ${x.number}`), h('span', { class: 'muted' }, x.basis === 'folder' ? ` · ${x.n} named in this folder` : ` · ${x.n} named this year`)),
-      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`) : null);
+      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+        h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
+          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`),
+        h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
+          onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
     return el;
   };
   const groups = new Map();
@@ -934,16 +940,19 @@ export async function showJerseys() {
 /** Explore › Clothing matches: people probably present in a photo, matched by what they wear to the photos of the same
  * event where their face is named (clothing.py), grouped by person. Nothing is tagged until a suggestion is used. */
 export async function showClothing() {
+  const KIND = 'clothing';
   main.replaceChildren(loadingBox('Matching clothes…'));
   let d;
   try { d = await api('/api/clothing?limit=2000'); } catch (e) { main.replaceChildren(errorBox(e)); return; }
   if (S.route.view !== 'clothing') return;
   const items = d.items;
-  const use = async (list, btn) => {
+  const use = async (list, btn) => {  // a person on the photo without a face box: digiKam's own person tag, sidecar included
     btn.disabled = true;
-    const byTag = new Map();
-    list.forEach((x) => { if (!byTag.has(x.tag)) byTag.set(x.tag, []); byTag.get(x.tag).push(x.id); });
-    for (const [tag, ids] of byTag) { if (!(await editPhotos(ids, { add_tags: [tag] }))) { btn.disabled = false; return false; } }
+    let r;
+    try { r = await post('/api/faces/batch', { ops: list.map((x) => ({ op: 'tagonly', image: x.id, tag: x.tag })) }); } catch (e) { toastError(e); btn.disabled = false; return false; }
+    if (r.failed?.length) { toast(`${plural(r.failed.length, 'photo')} not tagged: ${r.failed[0].error}`, null, null, 8000); btn.disabled = false; return false; }
+    setBadges(list.map((x) => x.id), { faces: true });
+    toast(list.length === 1 ? `Added ${list[0].name}.` : `${plural(list.length, 'photo')} tagged.`);
     return true;
   };
   const card = (x) => {
@@ -952,8 +961,11 @@ export async function showClothing() {
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
       h('div', null, h('b', null, x.event), h('span', { class: 'muted' }, ` · ${Math.round(x.score * 100)}%`)),
       h('div', { class: 'sb' }, x.text),
-      S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Tag ${x.name} on this photo (undo from the edit log)`,
-        onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`) : null);
+      S.EDITING ? h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+        h('button', { type: 'button', class: 'pillbtn', title: `Tag ${x.name} on this photo (undo from the edit log)`,
+          onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Tag ${x.name}`),
+        h('button', { type: 'button', class: 'pillbtn', title: `Not ${x.name}: never suggest them for this photo again`,
+          onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: KIND, pairs: [[x.id, x.tag]] }); } catch (e) { toastError(e); return; } el.remove(); items.splice(items.indexOf(x), 1); } }, 'Not them')) : null);
     return el;
   };
   const groups = new Map();

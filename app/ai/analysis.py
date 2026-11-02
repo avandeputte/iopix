@@ -235,13 +235,21 @@ class _OCR:
         self.engine, self.modern = engine, modern
 
     def __call__(self, image) -> list:
+        return [(t, c) for t, c, _b in self.boxes(image)]
+
+    def boxes(self, image) -> list:
+        """[(text, confidence, (x0, y0, x1, y1))] with each line's box in the image's pixels."""
+        def box(pts):
+            xs, ys = [float(p[0]) for p in pts], [float(p[1]) for p in pts]
+            return (min(xs), min(ys), max(xs), max(ys))
         if self.modern:
             r = self.engine(image)
             if r is None or not getattr(r, "txts", None):
                 return []
-            return list(zip(r.txts, r.scores or [1.0] * len(r.txts)))
+            bx = list(getattr(r, "boxes", None) or [])
+            return [(t, c, box(bx[i]) if i < len(bx) else None) for i, (t, c) in enumerate(zip(r.txts, r.scores or [1.0] * len(r.txts)))]
         res, _elapsed = self.engine(image)
-        return [(x[1], x[2]) for x in (res or []) if len(x) > 2]
+        return [(x[1], x[2], box(x[0]) if x[0] is not None else None) for x in (res or []) if len(x) > 2]
 
 
 _ocr_lock = threading.Lock()

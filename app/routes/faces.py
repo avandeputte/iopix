@@ -327,6 +327,20 @@ def api_clothing(request: Request, offset: int = 0, limit: int = 200, ids: str =
                            "ready": clothing.available(), "coverage": list(clothing.coverage())})
 
 
+@router.post("/api/suggestions/dismiss", dependencies=[access.editor_write])
+async def api_suggestions_dismiss(request: Request):
+    """Body {kind: jersey|clothing, pairs: [[photo id, tag id]], on: true}: "Not them": the person is never suggested for
+    that photo again (on: false takes it back). Viewer database only."""
+    from app.ai import dismissed
+    body = await request.json()
+    try:
+        pairs = [(int(p), int(t)) for p, t in body.get("pairs") or []]
+        n = await run_in_threadpool(dismissed.set_dismissed, str(body.get("kind", "")), pairs, bool(body.get("on", True)))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    return {"dismissed": n}
+
+
 @router.post("/api/people/birth", dependencies=[access.signed_in])
 async def api_people_birth(request: Request):
     """Body: {tag, year} (null or "" clears it): a person's birth year, for year suggestions when their dated photos are few.
