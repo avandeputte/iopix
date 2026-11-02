@@ -30,7 +30,7 @@ def test_users_flow_in_the_browser(page, server, browser):
     page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Users')", timeout=10000)
     assert page.locator("#nav a[data-v=maintenance]").is_visible()
     # a visitor in a fresh context: read-only, no maintenance icon, sign-in dialog
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
     pid = _get(server, "/api/photos")["id"][0]
     _open_photo(visitor, server, pid)
     if visitor.locator(".lb-info").is_hidden():
@@ -80,7 +80,7 @@ def test_account_picker_one_click_sign_in(page, server, browser):
     page.locator("button", has_text="Add user").click(); page.wait_for_selector(".utable tr[data-user='kid']", timeout=5000)
     assert page.locator(".utable tr[data-user='kid']", has_text="none (one-click)").count() == 1
     # a visitor: two tiles, one click as kid
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900}); v = ctx.new_page()
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); v = ctx.new_page()
     v.goto(server + "/#/photos"); v.wait_for_selector(".tile img", timeout=15000)
     v.locator("#usermenu button").click(); v.wait_for_selector(".modal .account", timeout=5000)
     names = v.locator(".modal .account .nm").all_inner_texts()
@@ -97,7 +97,7 @@ def test_require_sign_in_shows_only_the_login_dialog(page, server, browser):
     make_admin(page, "alex", "correct horse")
     assert page.request.post(server + "/api/settings", data={"require_login": True}).ok
     try:
-        ctx = browser.new_context(viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
+        ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
         visitor.goto(server + "/#/photos")
         visitor.wait_for_selector(".modal-back.required .modal h3:has-text('Sign in')", timeout=10000)
         visitor.wait_for_timeout(800)  # a fixed wait on purpose: nothing of the library must load behind the dialog, and nothing marks a load that does not happen
@@ -183,7 +183,7 @@ def test_an_account_can_be_taken_off_the_sign_in_list(page, server, browser):
         box.uncheck()
     assert _eventually(lambda: [a["name"] for a in _get(server, "/api/auth/accounts")["accounts"]] == ["kid"]), "the sign-in list no longer offers alex"
     assert not page.locator(".utable tr[data-user='alex'] input[type=checkbox]").is_checked()
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900}); v = ctx.new_page()
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); v = ctx.new_page()
     v.goto(server + "/#/photos"); v.wait_for_selector(".tile img", timeout=15000)
     v.locator("#usermenu button").click(); v.wait_for_selector(".modal .account", timeout=5000)
     assert v.locator(".modal .account .nm").all_inner_texts() == ["kid", "Other"], "alex is not offered"

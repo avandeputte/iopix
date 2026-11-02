@@ -24,7 +24,7 @@ def test_appearance_setting_switches_the_theme(page, server):
     assert page.evaluate("localStorage.getItem('iopix.theme')") == "system"
 
 def test_light_is_the_default_theme(browser, server):
-    ctx = browser.new_context(color_scheme="dark")  # even on a device set to dark
+    ctx = browser.new_context(bypass_csp=True, color_scheme="dark")  # even on a device set to dark
     pg = ctx.new_page()
     pg.goto(server + "/#/photos")
     pg.wait_for_selector("#topbar", timeout=10000)
@@ -61,7 +61,7 @@ def test_sidebar_docks_hides_and_slides_over(browser, server):
     """Wide screen: the sidebar (name, destinations, Settings) is docked beside the page; its button puts it away
     (remembered), the menu button then slides it over the page and choosing a destination puts it away again.
     A narrower screen never docks it."""
-    ctx = browser.new_context(viewport={"width": 1280, "height": 860}); page = ctx.new_page()
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 860}); page = ctx.new_page()
     try:
         page.goto(server + "/#/photos"); page.wait_for_selector("body.side-docked #nav a.on", timeout=10000)
         assert page.locator(".navhead .brand-name").is_visible() and page.locator(".navhead .logo").count() == 0
@@ -123,7 +123,7 @@ def test_filter_pane_steps_aside_on_pages_it_does_not_apply_to(page, server):
 def test_phone_layout_fits_the_screen(browser, server):
     """At phone width: the bottom bar shows four destinations and More (the rest in a sheet), the selection
     bar keeps every action on screen as icons, and nothing in the page is wider than the screen."""
-    ctx = browser.new_context(viewport={"width": 393, "height": 852}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 393, "height": 852}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page()
     try:
         page.goto(server + "/#/photos"); page.wait_for_selector("#grid .tile", timeout=20000); _wait_flags(page)
@@ -191,7 +191,7 @@ def test_page_title_takes_focus_and_the_status_box_is_live(page, server):
 def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, server):
     """A note centred with left: 50% used to be sized to the right half of the screen, so its words wrapped into a
     tall column on phones; the update and digiKam cards stack in one corner instead of overlapping."""
-    ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    ctx = browser.new_context(bypass_csp=True, viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page()
     try:
         page.goto(server + "/#/explore"); page.wait_for_selector("#nav > a", timeout=10000)
@@ -279,7 +279,7 @@ def test_inside_the_app_the_web_navigation_steps_aside(browser, server):
     """?app=1 (the iPhone, iPad and Mac apps): no sidebar, menu button or bottom bar, the page reaches the bottom
     edge, the mode stays for the tab, and every change of page is posted to the app's iopixRoute handler."""
     for vp in ({"width": 393, "height": 852}, {"width": 1280, "height": 860}):
-        ctx = browser.new_context(viewport=vp); page = ctx.new_page()
+        ctx = browser.new_context(bypass_csp=True, viewport=vp); page = ctx.new_page()
         page.add_init_script("window.__routes = []; window.webkit = { messageHandlers: { iopixRoute: { postMessage: (h) => window.__routes.push(h) } } };")
         try:
             page.goto(server + "/?app=1#/photos"); page.wait_for_selector("#grid .tile", timeout=20000)
