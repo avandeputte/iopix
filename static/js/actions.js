@@ -235,7 +235,15 @@ export function modal(title, ...kids) {
     h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': typeof title === 'string' ? title : null, tabindex: '-1' }, h('h3', null, title), ...kids));
   // Escape closes it whatever has focus (fields stop keydown from bubbling, so this listens on the way down);
   // the one that must be answered (sign-in required) stays
-  back.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !back.classList.contains('required')) { e.stopPropagation(); e.preventDefault(); back.remove(); } }, true);
+  back.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !back.classList.contains('required')) { e.stopPropagation(); e.preventDefault(); back.remove(); return; }
+    if (e.key === 'Tab') {  // focus cycles inside the dialog instead of leaving it
+      const f = [...back.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+      if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+    }
+  }, true);
   const before = document.activeElement;
   const remove = back.remove.bind(back);
   back.remove = () => { remove(); if (before && before.isConnected && typeof before.focus === 'function') before.focus(); };

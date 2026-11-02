@@ -205,7 +205,7 @@ export function openLightbox(src, i, fromUser) {
 export const TRANSFORMS = [['right', 'Rotate right'], ['left', 'Rotate left'], ['180', 'Turn upside down'], ['fliph', 'Flip horizontally'], ['flipv', 'Flip vertically']];
 export function editMenu(ids, anchor, withCrop) {
   $('.facemenu')?.remove();
-  const item = (label, fn, cls = '') => h('div', { class: 'fmi ' + cls, onclick: (e) => { e.stopPropagation(); menu.remove(); fn(); } }, label);
+  const item = (label, fn, cls = '') => h('div', { class: 'fmi ' + cls, tabindex: 0, role: 'button', onclick: (e) => { e.stopPropagation(); menu.remove(); fn(); } }, label);
   const menu = h('div', { class: 'facemenu' }, h('div', { class: 'fmh' }, ids.length > 1 ? `${plural(ids.length, 'photo')}, without loss` : 'Without loss'),
     TRANSFORMS.map(([op, label]) => item(label, () => transformPhotos(ids, op))),
     withCrop ? item('Crop…', () => startCrop()) : null,
@@ -228,7 +228,7 @@ export function editMenu(ids, anchor, withCrop) {
 export function popMenu(anchor, items) {
   $('.facemenu')?.remove();
   const menu = h('div', { class: 'facemenu', style: 'position:fixed' }, items.filter(Boolean).map((it) => typeof it === 'string' ? h('div', { class: 'fmsep' }, it)
-    : h('div', { class: 'fmi ' + (it[2] || ''), onclick: (e) => { e.stopPropagation(); menu.remove(); it[1](e); } }, it[0])));
+    : h('div', { class: 'fmi ' + (it[2] || ''), tabindex: 0, role: 'button', onclick: (e) => { e.stopPropagation(); menu.remove(); it[1](e); } }, it[0])));
   document.body.append(menu);
   const br = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = Math.min(menu.offsetHeight, innerHeight - 16);
   menu.style.maxHeight = `${innerHeight - 16}px`; menu.style.overflowY = 'auto';
@@ -413,6 +413,26 @@ export function dropIndex(src, k) {
     else if (v && typeof v === 'object' && Object.keys(v).every((x) => /^\d+$/.test(x))) {
       out[key] = {};
       for (const [i, x] of Object.entries(v)) { const j = +i; if (j < k) out[key][j] = x; else if (j > k) out[key][j - 1] = x; }
+    } else out[key] = v;
+  }
+  return out;
+}
+/** Like dropIndex for several positions at once: one pass over every column instead of one copy per photo. */
+export function dropIndexes(src, ks) {
+  const gone = new Set(ks);
+  if (!gone.size) return src;
+  const n = src.id.length, shift = new Int32Array(n + 1);
+  for (let i = 0, g = 0; i < n; i++) { if (gone.has(i)) g++; shift[i] = g; }  // how many removed at or before i
+  const map = (i) => (gone.has(i) ? -1 : i - shift[i]);
+  const out = {};
+  for (const [key, v] of Object.entries(src)) {
+    if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+      if (!INDEX_LISTS.has(key)) out[key] = Array.from(v).filter((_, i) => !gone.has(i));
+      else out[key] = Array.from(v).map(map).filter((i) => i >= 0);
+    } else if (v instanceof Set) out[key] = new Set([...v].map(map).filter((i) => i >= 0));
+    else if (v && typeof v === 'object' && Object.keys(v).every((x) => /^\d+$/.test(x))) {
+      out[key] = {};
+      for (const [i, x] of Object.entries(v)) { const j = map(+i); if (j >= 0) out[key][j] = x; }
     } else out[key] = v;
   }
   return out;

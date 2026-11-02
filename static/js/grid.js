@@ -4,7 +4,7 @@ import { S, ST, applyFilter, filterParams, loadState, onRoute, savedSearchFor, t
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
-import { LB, dropIndex, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
+import { LB, dropIndex, dropIndexes, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
 
 export const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM
@@ -76,8 +76,7 @@ export function dropPhotos(ids) {
   const gone = new Set(ids), ks = [];
   G.data.id.forEach((id, i) => { if (gone.has(id)) ks.push(i); });
   if (!ks.length) return;
-  let d = G.data;
-  for (const k of ks.reverse()) d = dropIndex(d, k);
+  const d = dropIndexes(G.data, ks);
   d.count = d.id.length;
   if (!d.count) { S.viewKey = null; onRoute(); return; }
   G.data = d; G.geo = new Set(d.geo || []); G.faces = new Set(d.faces || []); G.lastSel = -1;  // the shift-click anchor was an index into the old list

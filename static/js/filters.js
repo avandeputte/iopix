@@ -29,7 +29,7 @@ export async function renderFilters() {
 /** The pane from facets already fetched; "All N" and "Show less" only draw it again. */
 function drawFilters(el, f, p) {
   const has = (k, v) => p.getAll(k).includes(String(v));
-  const frow = (label, count, on, onclick, extra) => h('div', { class: 'frow' + (on ? ' on' : ''), onclick, title: label }, extra, h('span', { class: 'nm' }, label),
+  const frow = (label, count, on, onclick, extra) => h('div', { class: 'frow' + (on ? ' on' : ''), onclick, title: label, tabindex: 0, role: 'button' }, extra, h('span', { class: 'nm' }, label),
     h('span', { class: 'ct' }, count != null ? nf.format(count) : ''));
   const section = (title, rows, limit = 8) => {
     if (!rows.length) return null;

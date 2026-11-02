@@ -241,6 +241,14 @@ class Engine:
             last_save = time.time()
             done = 0
             added = 0
+            pend_ids, pend_vecs = [], []  # embedded since the last flush: joined to the matrix once a minute, not per batch (O(n²) copies)
+
+            def flush():
+                nonlocal pend_ids, pend_vecs
+                if pend_ids:
+                    self.ids = np.concatenate([self.ids, np.concatenate(pend_ids)])
+                    self.vecs = np.concatenate([self.vecs, np.concatenate(pend_vecs)])
+                    pend_ids, pend_vecs = [], []
             for todo_batch in chunked(todo, BATCH):
                 if run != self._run:
                     return
@@ -268,20 +276,25 @@ class Engine:
                                 log.warning("embeddings: cannot embed %s (%s)", path, e1)
                         batch, vecs = good, (np.concatenate(vl) if vl else None)
                     if batch:
-                        with self.lock:
-                            if run != self._run:
-                                return
-                            self.ids = np.concatenate([self.ids, np.asarray(batch, np.int32)])
-                            self.vecs = np.concatenate([self.vecs, vecs])
-                            added += len(batch)
+                        if run != self._run:
+                            return
+                        pend_ids.append(np.asarray(batch, np.int32))
+                        pend_vecs.append(vecs)
+                        added += len(batch)
                 done += len(todo_batch)
                 self.done = done
                 if time.time() - last_save > 60:
                     with self.lock:
+                        if run != self._run:
+                            return
+                        flush()
                         self._save()
                     last_save = time.time()
             if added:  # nothing new embedded: the file (and its time, part of the index version) is left alone
                 with self.lock:
+                    if run != self._run:
+                        return
+                    flush()
                     self._save()
             if run == self._run:
                 self._finished_ok = True

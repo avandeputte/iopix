@@ -591,7 +591,11 @@ def start(photos: list):
     if not config.ANALYSIS:
         return
     init()
+    ids = {p["id"] for p in photos}
+    if any(progress[k]["running"] for k in JOBS) and ids <= _run.get("ids", set()):
+        return  # nothing new for the running jobs: they carry on (a library change used to restart them at every batch)
     _run["gen"] += 1
+    _run["ids"] = ids
     gen = _run["gen"]
     # one at a time, through the shared job queue, so the machine stays usable
     jobs.submit("pixels", lambda: _pixel_job(photos, gen))
