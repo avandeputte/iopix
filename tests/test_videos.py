@@ -51,7 +51,7 @@ def test_info_and_transcripts(lib):
         i = videos.info(5)
         assert i["cover_t"] == 12.5 and i["chapters"] == [3.0, 20.0] and i["segments"][0]["t"] == 1.0
         assert videos.cover_time(5) == 12.5 and videos.cover_time(6) is None
-        assert videos.transcripts() == {5: "happy birthday"} and videos.signature() == "v1"
+        assert videos.transcripts() == {5: "happy birthday"} and videos.signature() == "v0"  # in steps of 200; the job's end folds the rest in
         assert videos.info(6) == {}
     finally:
         with vdb.writer() as con:

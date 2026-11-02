@@ -384,7 +384,7 @@ def signature() -> str:
     try:
         with vdb.reader() as con:
             n = con.execute("SELECT count(*) FROM video_info WHERE transcript IS NOT NULL").fetchone()[0]
-        return "v%d" % (n // 200 * 200 if progress["running"] else n)  # in steps while the job runs: no rebuild per video
+        return "v%d" % (n // 200 * 200)  # in steps; the run's end folds the rest in (jobs.finished_hook)
     except Exception:
         return "v0"
 

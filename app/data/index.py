@@ -926,14 +926,21 @@ def current_version(path: Path = config.INDEX_DB):
         return None
 
 
+_embed_last = {"v": "v0"}
+
+
 def _embed_signature() -> str:
-    """Bursts use the content embeddings, so rebuild when that file changes."""
+    """Bursts use the content embeddings, so rebuild when that file changes; not at each save while the job runs
+    (one a minute), only once it is done (its end bumps the analysis epoch)."""
     try:
         from app.ai.semantic import semantic
+        if semantic.running:
+            return _embed_last["v"]
         st = os.stat(semantic.active.file)
-        return f"v{semantic.active.name}{int(st.st_mtime)}"
+        _embed_last["v"] = f"v{semantic.active.name}{int(st.st_mtime)}"
     except OSError:
-        return "v0"
+        _embed_last["v"] = "v0"
+    return _embed_last["v"]
 
 
 def _version_for(source: str) -> str:

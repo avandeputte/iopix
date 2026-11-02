@@ -30,6 +30,7 @@ _last_submit = 0.0  # jobs submitted close together (a start, a library change) 
 GRACE = 3.0
 MAX_SETTLE = 30.0  # a queue that never goes quiet (rebuild after rebuild) still gets its jobs run
 _progress = {}       # name -> Progress, every background job that reports one
+finished_hook = None  # called when any job's run ends (the index folds the results in once, then)
 
 
 class Progress(dict):
@@ -70,6 +71,11 @@ class Progress(dict):
         self["running"] = False
         if "finished" in self._times:
             self["finished"] = int(time.time())
+        if finished_hook and self["done"]:  # a run that did something: the results are ready to be folded in
+            try:
+                finished_hook()
+            except Exception:
+                traceback.print_exc()
 
     def cancel(self) -> int:
         """Stop the running job at its next batch (a reset, a model switch). Returns the new generation."""

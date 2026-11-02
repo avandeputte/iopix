@@ -286,6 +286,8 @@ class Engine:
             if run == self._run:
                 self._finished_ok = True
                 self.running = False
+                if added and jobs.finished_hook:  # the saved file is folded into the index once, now
+                    jobs.finished_hook()
                 if self.on_finish:
                     self.on_finish(self)
 

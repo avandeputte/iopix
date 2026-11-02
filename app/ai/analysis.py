@@ -72,15 +72,27 @@ def _counts() -> dict:
         con.close()
 
 
+_epoch = {"n": 0}  # bumped when a job's run ends: the one moment its results are folded into the index
+
+
+def bump():
+    """A background job finished a run (jobs.finished_hook): the next version check rebuilds the index once."""
+    _epoch["n"] += 1
+
+
+jobs.finished_hook = bump
+
+
 def signature() -> str:
-    """Part of the index version: changes as analysis results accumulate (in steps
-    while a job is running, exactly once it has finished)."""
+    """Part of the index version: the results accumulate in steps of 2000 while jobs run (a rebuild every so often,
+    never one per batch) and are folded in exactly once when a run ends (the epoch). A job's running flag is
+    deliberately not part of it: a version that changed at every start and every end rebuilt the index in a loop."""
     counts = _counts()
     if counts is None:
         return "a0"
     from app.ai import jerseys
     j = jerseys.coverage()[0]
-    return "a" + ".".join(str(n // 2000 * 2000 if progress[key]["running"] else n) for key, n in counts.items()) + f".j{j // 2000 * 2000 if jerseys.progress['running'] else j}"
+    return f"a{_epoch['n']}." + ".".join(str(n // 2000 * 2000) for n in counts.values()) + f".j{j // 2000 * 2000}"
 
 
 def coverage() -> dict:
@@ -120,6 +132,7 @@ def _notify(last: float, every: float) -> float:
 def _finish(*keys):
     for key in keys:
         progress[key]["running"] = False
+    bump()
     if on_progress:
         on_progress()
 
