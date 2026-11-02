@@ -144,3 +144,27 @@ def test_datehints_endpoints(client, lib):
     assert "folders" in d
     assert client.post("/api/datehints", json={"album": 999999, "not_after": 1990}).status_code == 404
     assert client.post("/api/datehints", json={"album": "x"}).status_code == 400
+
+
+def test_an_age_estimate_far_outside_the_hint_is_dropped_not_capped(tmp_path, monkeypatch, lib):
+    p = _index(tmp_path)
+    monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
+    monkeypatch.setattr(ages, "available", lambda: True)
+    monkeypatch.setattr(ages, "coverage", lambda: (1, 1))
+    monkeypatch.setattr(dateclues, "_look_years", lambda con, ids, win=None: {})
+    monkeypatch.setattr(ages, "suggestions", lambda ids=None: {
+        "items": [{"id": 1, "year": 2001, "lo": 1999, "hi": 2003, "floor": None, "people": [{"tag": 10, "name": "Ann", "age": 21, "year": 2001}]},
+                  {"id": 2, "year": 1993, "lo": 1990, "hi": 1996, "floor": None, "people": [{"tag": 12, "name": "Cy", "age": 33, "year": 1993}]}],
+        "people": []})
+    from app.data import vdb
+    with vdb.writer() as con:
+        con.execute("DELETE FROM date_hints")
+    try:
+        dateclues.set_hint(1, None, 1990)
+        out = {i["id"]: i for i in dateclues.suggestions()["items"]}
+        assert "ages" not in [c["kind"] for c in out[1]["clues"]]  # 2001 against "not after 1990": the ages are wrong here and left out
+        two = out[2]                             # 1993 is three years over with a two-year uncertainty: capped, but less sure
+        assert two["year"] == 1990 and two["clues"][0]["kind"] == "ages" and two["clues"][0]["sd"] > 3
+    finally:
+        with vdb.writer() as con:
+            con.execute("DELETE FROM date_hints")

@@ -35,6 +35,8 @@ TOGETHER_MIN = 3     # dated photos of the same group of people before "together
 LOOK_K = 40          # dated look-alikes considered
 LOOK_MIN_SIM = 0.55  # the closest dated look-alike must be at least this similar, or the look says nothing
 LOOK_SD_FLOOR = 3.0  # years: look-alikes are a soft clue
+APPROX_LOOK_WEIGHT = 0.5  # a look-alike dated only to the year or month (a used suggestion) counts this much next to an exactly dated one
+HINT_CONTRADICTION = 3.0  # an age estimate this many of its own uncertainties outside the folder's window is wrong for this photo, not clipped
 PEOPLE_SD_FLOOR = 2.0
 _look_cache = {"key": None, "years": {}}
 _lock = threading.Lock()
@@ -164,9 +166,9 @@ def _people_clues(con, undated: dict, win: dict = None) -> dict:
         return {}
     names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
     by_photo = {}
-    for pid, tag, year in con.execute(
+    for pid, tag, year in con.execute(  # photos dated to the day, and those dated to the year or month (a used suggestion, a year typed in)
             "SELECT f.photo_id, f.tag_id, p.year FROM faces f JOIN photos p ON p.id = f.photo_id "
-            f"WHERE f.kind = 'confirmed' AND p.dprec IS NULL AND p.year >= ? AND f.tag_id IN ({','.join('?' * len(tags))})",
+            f"WHERE f.kind = 'confirmed' AND (p.dprec IS NULL OR p.dprec IN (1, 2)) AND p.year >= ? AND f.tag_id IN ({','.join('?' * len(tags))})",
             (FIRST_REAL_YEAR, *tags)):
         by_photo.setdefault(pid, (year, set()))[1].add(tag)
     years_of = {}
@@ -213,8 +215,12 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
         semantic.load()
         # the answers depend on the embeddings and on which photos are dated with which year: the key changes with
         # those, not with every index build (the index is rebuilt often while jobs run)
-        dated = {r[0]: r[1] for r in con.execute("SELECT id, year FROM photos WHERE dprec IS NULL AND video = 0 AND year >= ?", (FIRST_REAL_YEAR,))}
-        key = (semantic.key, len(semantic.ids) if semantic.ids is not None else 0, len(dated), sum(dated.values()), min(dated) if dated else 0, max(dated) if dated else 0)
+        dated, approx = {}, set()
+        for pid, year, dprec in con.execute("SELECT id, year, dprec FROM photos WHERE (dprec IS NULL OR dprec IN (1, 2)) AND video = 0 AND year >= ?", (FIRST_REAL_YEAR,)):
+            dated[pid] = year
+            if dprec:
+                approx.add(pid)
+        key = (semantic.key, len(semantic.ids) if semantic.ids is not None else 0, len(dated), len(approx), sum(dated.values()), min(dated) if dated else 0, max(dated) if dated else 0)
     except Exception:
         return {}
     with _lock:
@@ -233,6 +239,7 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
         dpos = np.array([pos[i] for i in dated if i in pos], dtype=np.int64)
         dids = np.array([i for i in dated if i in pos], dtype=np.int64)
         dyears = np.array([dated[int(i)] for i in dids], dtype=np.float64)
+        dweight = np.array([APPROX_LOOK_WEIGHT if int(i) in approx else 1.0 for i in dids], dtype=np.float64)
         dvecs = vecs[dpos] if len(dpos) else None
         have = [pid for pid in missing if pos.get(pid) is not None]
         for pid in missing:
@@ -256,6 +263,7 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
                 continue
             scores = sims[pid][keep]
             yrs_all = dyears[keep]
+            wts_all = dweight[keep]
             n = min(LOOK_K, len(scores))
             top = np.argpartition(-scores, n - 1)[:n]
             top = top[np.argsort(-scores[top])]
@@ -263,7 +271,7 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
             if best < LOOK_MIN_SIM:
                 cache[ck(pid)] = None
                 continue
-            wt = np.clip(scores[top] - LOOK_MIN_SIM + 0.05, 0.01, None)
+            wt = np.clip(scores[top] - LOOK_MIN_SIM + 0.05, 0.01, None) * wts_all[top]
             yrs = yrs_all[top]
             med = _weighted_median(list(yrs), list(wt))
             mad = _weighted_median([abs(y - med) for y in yrs], list(wt))
@@ -339,7 +347,12 @@ def _suggestions(ids: list = None) -> dict:
         clues = {pid: [] for pid in pids}
         for it in age_out["items"]:
             text = " · ".join(f"{p['name']} looks {p['age']}" for p in it["people"])
-            clues[it["id"]].append({"kind": "ages", "year": _clip(it["year"], win.get(it["id"])), "sd": max(1.0, (it["hi"] - it["lo"]) / 3), "text": text,
+            sd = max(1.0, (it["hi"] - it["lo"]) / 3)
+            w = win.get(it["id"])
+            over = abs(it["year"] - _clip(it["year"], w))  # how far the age estimate lies outside the folder's window
+            if over > HINT_CONTRADICTION * sd:
+                continue  # the ages say a year the folder rules out: that clue is wrong for this photo, not "the latest allowed year"
+            clues[it["id"]].append({"kind": "ages", "year": _clip(it["year"], w), "sd": sd + over, "text": text,
                                     "people": it["people"], "floor": it.get("floor")})
         for pid, c in _people_clues(con, named, win).items():
             clues[pid].append(c)
