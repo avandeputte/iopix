@@ -414,7 +414,41 @@ def _camera(make, model):
 
 
 _build_lock = threading.Lock()  # one build at a time in this process: the watcher, a request and the MCP server can all ask
-HIDDEN: set = set()  # photos on their way to the trash: out of the index at once, and out of every build until the move is done
+class _Hidden:
+    """Photos on their way to the trash: out of the index at once (drop_photos), and out of every build until a build
+    that STARTED after their move finished has been swapped in. Letting go as soon as the move was done was a gap: a
+    build that had read digiKam's rows before the move, and finished after it, put the photo back until the next build.
+    Behaves as the set it used to be (add, discard, update, difference_update, in, iteration) plus release() and let_go()."""
+
+    def __init__(self):
+        self._t: dict = {}  # id -> None while the move runs, else the time the move finished
+
+    def add(self, i): self._t[int(i)] = None
+    def discard(self, i): self._t.pop(int(i), None)
+    def update(self, ids):
+        for i in ids:
+            self.add(i)
+    def difference_update(self, ids):
+        for i in ids:
+            self.discard(i)
+    def release(self, ids):
+        """The move of these photos is done: the first build that starts from now on reads rows that know it."""
+        now = time.time()
+        for i in ids:
+            if int(i) in self._t:
+                self._t[int(i)] = now
+    def let_go(self, started: float):
+        """Called by a build that started at `started`, once it is in: photos released before that are no longer hidden."""
+        for i, t in list(self._t.items()):
+            if t is not None and t < started:
+                self._t.pop(i, None)
+    def __contains__(self, i): return int(i) in self._t
+    def __iter__(self): return iter(list(self._t))
+    def __len__(self): return len(self._t)
+    def __bool__(self): return bool(self._t)
+
+
+HIDDEN = _Hidden()
 
 
 def _drop(con, ids):
@@ -907,6 +941,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
         dst.executemany("INSERT INTO meta VALUES (?,?)", [(k, str(v)) for k, v in stats.items() if k != "resolved_snapshot"])
 
     _swap_in(Path(dst_path), fill)
+    HIDDEN.let_go(t0)  # this build read rows that know about every move finished before it started
     phases["write"] = time.time() - t2
     log.info("index built from %s in %.1fs: %d photos (%s)", "digiKam's database" if direct else "the library copy", time.time() - t0, len(rows.photos),
              ", ".join(f"{k} {v:.1f}s" for k, v in phases.items()))

@@ -129,7 +129,8 @@ def _trash_in_background(ids: list) -> dict:
         except Exception as e:  # the cause goes to the log; the photos come back
             logging.getLogger("app.photos.organize").exception("moving photos to the trash failed")
             r = {"trashed": [], "infos": [], "failed": [{"id": i, "error": str(e)} for i in ids]}
-        index.HIDDEN.difference_update(ids)
+        index.HIDDEN.difference_update(f["id"] for f in r["failed"])  # not moved: back at once
+        index.HIDDEN.release(ids)  # moved: hidden until a build that starts after this moment is in (its rows know the move)
         TRASH_JOBS[job]["result"] = r
         TRASH_JOBS[job]["done"].set()
         events.after_write()  # the photos that could not be moved come back

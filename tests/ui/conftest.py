@@ -79,7 +79,7 @@ def server(lib):
         proc.terminate()
         proc.wait(10)
         log.close()
-        Path(log.name).unlink(missing_ok=True)
+        if not os.environ.get("IOPIX_UI_KEEP_LOG"): Path(log.name).unlink(missing_ok=True)  # keep it to read a failing run
 
 
 @pytest.fixture(scope="session")

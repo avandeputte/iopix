@@ -139,11 +139,25 @@ def test_trash_in_the_background_leaves_every_page_at_once(client, lib):
     j = client.get(f"/api/photos/trash/{job}?wait=20").json()
     assert j["done"] and j["trashed"] == [pid] and not j["failed"] and len(j["infos"]) == 1
     assert not os.path.exists(path) and _row(lib["db"], pid)[2] == 3
+    assert pid in index.HIDDEN, "still hidden: a build that read digiKam's rows before the move could put it back"
+    index.build()  # started after the move: it lets go
     assert pid not in index.HIDDEN
     r = client.post("/api/trash/restore", json={"infos": j["infos"]})
     assert r.status_code == 200 and r.json()["restored"] == [pid], r.text
     assert os.path.exists(path) and _path(pid) == path
     assert client.get("/api/photos/trash/nope").status_code == 404
+
+
+def test_hidden_photos_are_let_go_by_a_build_that_started_after_their_move():
+    import time
+    h = index._Hidden()
+    h.update([7, 8]); h.release([7])
+    h.let_go(time.time() - 1)  # a build that started before the move finished: 7 stays hidden
+    assert 7 in h and 8 in h
+    h.let_go(time.time() + 1)  # one that started after: 7 goes, 8 (still moving) stays
+    assert 7 not in h and 8 in h and len(h) == 1
+    h.difference_update([8])
+    assert not h
 
 
 def test_a_photo_on_its_way_to_the_trash_stays_out_of_a_rebuild(lib):
