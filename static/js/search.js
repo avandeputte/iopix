@@ -74,7 +74,7 @@ export function renderChips() {
 }
 
 
-export function suggestions(text) {
+function suggestions(text) {
   const words = norm(text).split(/\s+/).filter(Boolean);
   const out = [{ ic: 'search', label: `Search everything for “${text.trim()}”`, kind: 'Text', act: (p) => p.append('q', text.trim()) }];
   if (!words.length || !S.META) return [];
@@ -117,7 +117,7 @@ export function suggestions(text) {
   }
   return out;
 }
-export function renderSuggest() {
+function renderSuggest() {
   const box = $('#suggest');
   box.hidden = !S.sgItems.length;
   box.replaceChildren(...S.sgItems.map((s, i) => h('div', { class: 'sg' + (i === S.sgSel ? ' sel' : ''), onmousedown: (e) => { e.preventDefault(); pickSuggestion(i); } },
@@ -125,7 +125,7 @@ export function renderSuggest() {
     h('span', { class: 'kind' }, s.kind))));
   box.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
 }
-export function pickSuggestion(i) {
+function pickSuggestion(i) {
   const s = S.sgItems[i];
   if (!s) return;
   $('#q').value = '';

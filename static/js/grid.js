@@ -1,17 +1,17 @@
 /** The timeline grid: layout, virtual rendering, selection by click and keyboard. */
-import { $, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtKnown, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
+import { $, BREAK_PHONE, MONTHS, api, date, dfDay, dfMonth, fill, fmtDur, fmtKnown, fmtRange, h, icon, main, nf, plural, post, store } from './core.js';
 import { S, ST, applyFilter, filterParams, loadState, onRoute, savedSearchFor, toast, toastError } from './state.js';
 import { crumbs, photoCrumbs } from './search.js';
 import { clearSelection, promptDialog, selectRange, toggleSelect, updateSelBar } from './actions.js';
 import { downloadDialog } from './download.js';
-import { LB, dropIndex, dropIndexes, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
+import { LB, dropIndexes, openLightbox, sizeFrame, syncLightbox } from './lightbox.js';
 
-export const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
+const SIZES = { S: [120, 80], M: [190, 110], L: [280, 170] };
 // grid state: sel = selected photo ids; items = laid-out rows/headers; rendered = row index -> element currently in the DOM
 export const G = { sel: new Set(), lastSel: -1, data: null, items: [], ar: null, total: 0, top0: 0, restore: 0, anchor: null, keepAt: -1, rendered: new Map(), token: 0,
   size: store.get('tile', 'M') in SIZES ? store.get('tile', 'M') : 'M', group: store.get('group', 'day') === 'month' ? 'month' : 'day', lastTop: 0, lastT: 0, settle: 0, scrub: null };
 /** The section a timestamp belongs to in the chronological grid: its day, or its month. */
-export function groupKey(ts) {
+function groupKey(ts) {
   if (G.group === 'month') { const dt = date(ts); return dt.getUTCFullYear() * 12 + dt.getUTCMonth(); }
   return Math.floor(ts / 86400);
 }
@@ -23,7 +23,7 @@ function sectionKey(d, i) {
   const dt = date(d.ts[i]);
   return n === 3 ? 'unknown' : n === 2 ? `y${dt.getUTCFullYear()}` : `m${dt.getUTCFullYear() * 12 + dt.getUTCMonth()}`;
 }
-export const GAP = 4, BAR_H = 48, HEAD_H = 46;
+const GAP = 4, BAR_H = 48, HEAD_H = 46;
 
 export async function showPhotos(fp) {
   const token = ++G.token;
@@ -88,10 +88,10 @@ export function dropPhotos(ids) {
   main.scrollTop = top;
   renderGrid(true);
 }
-export function layoutGrid() {
+function layoutGrid() {
   const grid = $('#grid'), d = G.data;
   if (!grid || !d) return;
-  const W = grid.clientWidth, H = SIZES[G.size][innerWidth < 800 ? 1 : 0];
+  const W = grid.clientWidth, H = SIZES[G.size][innerWidth < BREAK_PHONE ? 1 : 0];
   const items = [], byDate = G.sort === 'new' || G.sort === 'old';
   const sections = [];
   if (byDate) {
@@ -163,12 +163,12 @@ export function layoutGrid() {
   buildScrubber(byDate);
 }
 
-export function itemAt(y) { // last item starting at or above y
+function itemAt(y) { // last item starting at or above y
   let lo = 0, hi = G.items.length - 1;
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (G.items[mid].y <= y) lo = mid; else hi = mid - 1; }
   return lo;
 }
-export function firstVisibleIndex() {
+function firstVisibleIndex() {
   if (!G.items.length) return 0;
   return G.items[itemAt(main.scrollTop + 1)].s;
 }
@@ -241,7 +241,7 @@ export async function badgeTiles(root) {
 }
 
 /** Keep the photo's subject in a cropping box: object-position from the focus point ("x,y" fractions). */
-export function focusImage(img, focus) {
+function focusImage(img, focus) {
   if (!img || !focus) return;
   const [x, y] = focus.split(',').map(Number);
   if (Number.isFinite(x) && Number.isFinite(y)) img.style.objectPosition = `${Math.round(x * 100)}% ${Math.round(y * 100)}%`;
@@ -293,7 +293,7 @@ main.addEventListener('scroll', () => {
 }, { passive: true });
 
 export function removeScrubber() { $('#scrub')?.remove(); G.scrub = null; }
-export function buildScrubber(byDate) {
+function buildScrubber(byDate) {
   removeScrubber();
   if (!byDate || G.total < main.clientHeight * 3) return;
   const d = G.data;
@@ -370,7 +370,7 @@ export function buildScrubber(byDate) {
   sc.onpointerleave = () => { if (!drag) { bubble.hidden = true; shown = -1; } };
   updateScrubPos();
 }
-export function updateScrubPos(top = main.scrollTop, vh = main.clientHeight) {
+function updateScrubPos(top = main.scrollTop, vh = main.clientHeight) {
   const s = G.scrub;
   if (!s) return;
   s.pos.style.top = (top / Math.max(1, G.total - vh)) * (s.track - 2) + 'px';

@@ -350,7 +350,7 @@ async def api_folder_create(request: Request):
 
 
 @router.get("/api/import/layouts", dependencies=[access.editor])
-def api_import_layouts(request: Request):
+def api_import_layouts():
     """The folder layouts an import can use, and the one in use."""
     # patterns: apps may send their own folder pattern ({yyyy}/{yyyy}{mm}, Uploads...) instead of a layout key
     return {"layouts": importer.layouts(), "layout": importer.layout(), "patterns": True}

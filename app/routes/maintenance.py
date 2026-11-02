@@ -114,7 +114,7 @@ async def api_models_download(request: Request):
 
 
 @router.get("/api/update", dependencies=[access.admin])
-def api_update(request: Request):
+def api_update():
     """Installed commit, the last GitHub check, and whether update.sh can run here (admins: the log names server paths)."""
     return updates.status()
 

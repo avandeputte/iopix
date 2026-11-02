@@ -9,13 +9,18 @@ or too small for a face, then suggests the player: "probably Sam (number 10, as 
 The suggestion adds the person's tag to the photo when the user clicks it (no face region: digiKam's own
 "person in this photo without a face" tag), and is written nowhere before that. Numbers are kept in the
 viewer database (ai_jerseys, keyed by the person box) and searchable as "jersey:10".
+
+The job's bookkeeping (progress, the start rule, reset, coverage) is the shared ScanJob (scanjob.py); this module
+keeps the to-do query, the reading loop and the stamp rule (the file's stamp and VERSION, in ai_scans).
 """
 import logging
 import re
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from app import config, jobs, thumbs
+from app import jobs, thumbs
+from app.ai import detector
+from app.ai.scanjob import ScanJob
 from app.data import index, vdb
 from app.digikam.dkdb import chunked
 
@@ -38,17 +43,11 @@ VAL_APART = 90        # 0-255: for dull shirts (white, black, grey), the brightn
 LEARN_MIN_FOLDER = 2  # named sightings of a number in one folder before it names a player there
 LEARN_MIN_YEAR = 3    # and in one year
 AGREE = 0.8           # the share of sightings the leading player needs
-progress = jobs.Progress("jerseys")
-_running = {"todo": set()}  # the photos the running job is working through: a new start with nothing more to do leaves it alone
 
 
 def available() -> bool:
     from app.ai.analysis import vision_available
     return vision_available()
-
-
-def _k(v: float) -> int:
-    return int(round(v * 1000))
 
 
 def shirt_colour(crop) -> tuple:
@@ -116,99 +115,62 @@ def read_numbers(im, boxes: list, ocr) -> list:
     return out
 
 
-def _person_boxes(ids: list) -> dict:
-    out = {}
-    with vdb.reader() as con:
-        for part in chunked(ids, 500):
-            for r in con.execute(f"SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({','.join(str(int(i)) for i in part)}) ORDER BY w * h DESC"):
-                if r[3] * r[4] >= MIN_BOX and r[4] >= MIN_HEIGHT:
-                    out.setdefault(r[0], []).append((r[1], r[2], r[3], r[4]))
-    return out
-
-
-def _todo(photos: list) -> list:
+def _todo(con, photos: list) -> list:
     """Still photos with people detected that this job has not read yet (or whose file or detection changed since)."""
-    with vdb.reader() as con:
-        have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'jerseys'")}
-        objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'objects'")}
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'jerseys'")}
+    objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'objects'")}
     from app.ai.analysis import stamp
     return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != (stamp(p), VERSION)]
 
 
-def coverage() -> tuple:
-    try:
-        with vdb.reader() as con:
-            done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'jerseys'").fetchone()[0]
-            total = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0]
-        return int(done), int(total)
-    except Exception:
-        return 0, 0
+def _counts(con) -> tuple:
+    """(photos read, photos with object detection): the numbers can only be read where the people were found."""
+    return (con.execute("SELECT count(*) FROM ai_scans WHERE job = 'jerseys'").fetchone()[0],
+            con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0])
 
 
-def _job(photos: list, gen: int):
-    from app.ai.analysis import _ocr_engine, stamp
-    ocr = _ocr_engine()
+def _work(gen: int, todo: list):
+    from app.ai.analysis import ocr_engine, stamp
+    ocr = ocr_engine()  # loaded already: available() was checked before the run
     if ocr is None:
         return
-    todo = _todo(photos)
-    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
-    progress.update(running=bool(todo), done=0, total=len(todo))
-    if not todo:
-        return
-    try:
-        n = max(1, min(4, jobs.threads()))
-        with ThreadPoolExecutor(n, thread_name_prefix="jerseys") as pool:
-            for chunk in chunked(todo, 8):  # small batches: progress is written often, so a restart loses little
-                if progress.cancelled(gen):
-                    return
-                boxes = _person_boxes([p["id"] for p in chunk])
+    n = max(1, min(4, jobs.threads()))
+    with ThreadPoolExecutor(n, thread_name_prefix="jerseys") as pool:
+        for chunk in chunked(todo, 8):  # small batches: progress is written often, so a restart loses little
+            if progress.cancelled(gen):
+                return
+            boxes = detector.person_boxes([p["id"] for p in chunk], MIN_BOX, MIN_HEIGHT)
 
-                def work(p):
-                    bs = boxes.get(p["id"], [])
-                    if not bs:
-                        return p, []
-                    try:
-                        im, _ = thumbs.open_oriented(p["path"], 2000, 2000)
-                    except OSError as e:  # unreadable now: tried again next time
-                        log.warning("jerseys: cannot read %s (%s)", p["path"], e)
-                        return None
-                    except Exception as e:  # cannot be decoded: recorded as read with nothing on it
-                        log.warning("jerseys: cannot decode %s (%s)", p["path"], e)
-                        return p, []
-                    try:
-                        return p, read_numbers(im, bs, ocr)
-                    except Exception as e:
-                        log.warning("jerseys: failed on %s (%s)", p["path"], e)
-                        return p, []
-                ready = [r for r in pool.map(work, chunk) if r]
-                if progress.cancelled(gen):
-                    return
-                with vdb.writer() as con:
-                    con.executemany("DELETE FROM ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
-                    con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                    [(p["id"], _k(b[0]), _k(b[1]), _k(b[2]), _k(b[3]), num, sc, *col) for p, found in ready for b, num, sc, col in found])
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], stamp(p), VERSION) for p, _ in ready])
-                progress.step(len(chunk))
-    finally:
-        progress.finish(gen)
+            def work(p):
+                bs = boxes.get(p["id"], [])
+                if not bs:
+                    return p, []
+                try:
+                    im, _ = thumbs.open_oriented(p["path"], 2000, 2000)
+                except OSError as e:  # unreadable now: tried again next time
+                    log.warning("jerseys: cannot read %s (%s)", p["path"], e)
+                    return None
+                except Exception as e:  # cannot be decoded: recorded as read with nothing on it
+                    log.warning("jerseys: cannot decode %s (%s)", p["path"], e)
+                    return p, []
+                try:
+                    return p, read_numbers(im, bs, ocr)
+                except Exception as e:
+                    log.warning("jerseys: failed on %s (%s)", p["path"], e)
+                    return p, []
+            ready = [r for r in pool.map(work, chunk) if r]
+            if progress.cancelled(gen):
+                return
+            with vdb.writer() as con:
+                con.executemany("DELETE FROM ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
+                con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                [(p["id"], detector.thousandths(b[0]), detector.thousandths(b[1]), detector.thousandths(b[2]), detector.thousandths(b[3]), num, sc, *col) for p, found in ready for b, num, sc, col in found])
+                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], stamp(p), VERSION) for p, _ in ready])
+            progress.step(len(chunk))
 
 
-def start(photos: list):
-    """Read the numbers still missing. photos: index rows with id, path, video, hash, size, modified."""
-    if not config.ANALYSIS or not available():
-        return
-    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running["todo"]:
-        return  # nothing new: the running job carries on (an index rebuild must not restart it every few minutes)
-    gen = progress.cancel()
-    jobs.submit("jerseys", lambda: _job(photos, gen))
-
-
-def reset():
-    progress.cancel()
-    _running["todo"] = set()
-    with vdb.writer() as con:
-        con.execute("DELETE FROM ai_jerseys")
-        con.execute("DELETE FROM ai_scans WHERE job = 'jerseys'")
+job = ScanJob("jerseys", _todo, _work, _counts, available, tables=("ai_jerseys",))
+progress, start, reset, coverage = job.progress, job.start, job.reset, job.coverage
 
 
 def results() -> dict:

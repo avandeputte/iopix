@@ -1,5 +1,5 @@
 /** What the whole app shares: user and settings, the library's metadata, the route and the navigation, status polling. */
-import { $, api, fill, h, main, norm, store } from './core.js';
+import { $, DOCK_MIN, api, fill, h, main, norm, store } from './core.js';
 import { crumbs, renderChips } from './search.js';
 import { G, keepPlace, removeScrubber, showPhotos } from './grid.js';
 import { clearSelection, showDamaged, showHistory, showImport, showQuality, showTrash } from './actions.js';
@@ -92,8 +92,8 @@ export const NAV_MANAGE = [
 // hash S.route name -> page renderer (function declarations are hoisted, so this can sit above them)
 export const VIEW_FNS = { photos: showPhotos, explore: showExplore, people: showPeople, places: showPlaces, folders: showFolders, albums: showAlbums, tags: showTags, map: showMap, duplicates: showDuplicates,
   detected: showDetected, bursts: showBursts, events: showEvents, history: showHistory, analysis: showAnalysis, settings: showSettings, maintenance: showMaintenance, consistency: showConsistency, quality: showQuality, trash: showTrash, import: showImport, faces: showFaces, datesuggest: showDateSuggest, placesuggest: showPlaceSuggest, jerseys: showJerseys, clothing: showClothing, rotation: showRotation, damaged: showDamaged };
-export const VIEWS = Object.keys(VIEW_FNS);
-export const PARAM_VIEWS = ['places', 'bursts', 'faces', 'history', 'import'];  // views whose own query parameters (not photo filters) pick what they show
+const VIEWS = Object.keys(VIEW_FNS);
+const PARAM_VIEWS = ['places', 'bursts', 'faces', 'history', 'import'];  // views whose own query parameters (not photo filters) pick what they show
 // favorites and app albums (stored by the app, not in digiKam)
 export const ST = { rev: -1, fav: new Set(), albums: [], searches: [] };
 
@@ -103,7 +103,7 @@ export function loadConcepts() { if (S.CONCEPTS || !S.SEM.enabled) return; S.CON
 export const applyBadgePref = () => document.body.classList.toggle('nobadges', store.get('badges', '1') === '0');
 // The photo info panel's sections, each one a user can hide (Settings › Display › Info panel, or the gear in the
 // panel). What is stored is the hidden set, so a section added later shows by default.
-export const INFO_SECTIONS = [
+const INFO_SECTIONS = [
   ['caption', 'Title and caption'], ['date', 'Date and time'], ['file', 'File name, size and folder'], ['people', 'People'], ['tags', 'Tags'],
   ['location', 'Location and map'], ['details', 'Details: rating, creator, copyright, video'], ['camera', 'Camera, lens and exposure'],
   ['ai', 'AI analysis: description, detected content, objects, text, sharpness'], ['history', 'Edit log: every change made here, with undo'],
@@ -227,7 +227,7 @@ export function onRoute() {
     document.body.classList.remove('cbulk-open', 'managing');  // page-wide states of the consistency and tags pages; they set them again when drawn
     // the filter pane belongs to the photo and map views: it steps aside elsewhere and comes back with them
     if (!FILTER_VIEWS.includes(S.route.view)) { if (!$('#filters').hidden) toggleFilters(false, false); }
-    else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= 1100) toggleFilters(true, false);
+    else if ($('#filters').hidden && store.get('filters', '0') === '1' && innerWidth >= DOCK_MIN) toggleFilters(true, false);
     const drawn = VIEW_FNS[S.route.view](PARAM_VIEWS.includes(S.route.view) ? vp : fp);
     done = Promise.resolve(drawn);
     if (kept) {

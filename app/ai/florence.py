@@ -16,7 +16,7 @@ runs words together.
 import logging
 import threading
 
-from app import config, jobs, thumbs
+from app import jobs, thumbs
 from app.ai import models
 
 try:
@@ -148,8 +148,3 @@ def describe(paths: list) -> list:
             continue
         out.append(caption(im))
     return out
-
-
-def ready_for_config() -> bool:
-    """Florence-2 needs no PyTorch: only that descriptions are on (CAPTIONS) and the files are here."""
-    return config.CAPTIONS and available()

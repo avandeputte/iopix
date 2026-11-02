@@ -1,5 +1,5 @@
 /** Settings, maintenance, the model table, consistency, face quality, the history page and faces. */
-import { $, UNITS, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, regionUsesMiles, send, store } from './core.js';
+import { $, TOAST_LONG, UNITS, api, date, dfDay, dfDayLocal, dfMonth, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, norm, plural, post, regionUsesMiles, send, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, faceUrl, filterParams, go, hashFor, infoPrefsEditor, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs } from './search.js';
 import { confirmDialog, logDialog, modal, promptDialog } from './actions.js';
@@ -12,7 +12,7 @@ import { awaitReindex, indexMeta, runUpdate } from './main.js';
 /** Maintenance › AI analysis and models: one table, a row per feature, with the model it runs on (download,
  *  update check) and the background job that fills it (progress, run again). Models without a job (places)
  *  and an installed search model that is not in use get rows of their own. */
-export function aiSection(view) {
+function aiSection(view) {
   const body = h('div');
   let timer = 0;
   const checkBtn = h('button', { class: 'pillbtn', onclick: async () => { checkBtn.disabled = true; checkBtn.textContent = 'Checking…'; try { await post('/api/models/check', {}); } catch (e) { toastError(e); } draw(); } }, icon('spark'), 'Check models for updates');
@@ -157,7 +157,7 @@ export function aiSection(view) {
   drawSafe();
   return wrap;
 }
-export function analysisSection(view, part = 'jobs') {
+function analysisSection(view, part = 'jobs') {
   // part 'jobs': the job list with progress (Maintenance); 'prefs': the search model and the core budget (Settings)
   const body = h('div');
   const wrap = h('div', null,
@@ -214,8 +214,8 @@ export function analysisSection(view, part = 'jobs') {
   return wrap;
 }
 
-export const SRC_LABEL = { db: 'Database', sidecar: 'Sidecar', file: 'Image file' };
-export const FIELD_LABEL = { rating: 'Rating', title: 'Title', caption: 'Caption', tags: 'Tags', taken: 'Date', gps: 'Location' };
+const SRC_LABEL = { db: 'Database', sidecar: 'Sidecar', file: 'Image file' };
+const FIELD_LABEL = { rating: 'Rating', title: 'Title', caption: 'Caption', tags: 'Tags', taken: 'Date', gps: 'Location' };
 export async function showConsistency() {
   let field = '', offset = 0, selected = new Set(), d, wasRunning = false, pollT = 0;
   const head = h('div'), list = h('div'), more = h('button', { class: 'pillbtn', style: 'margin:16px 0', onclick: () => load(true) }, 'Show more');
@@ -251,7 +251,7 @@ export async function showConsistency() {
   const fixOne = async (r, src) => {
     const targets = ['db', 'sidecar', 'file'].filter((t) => t !== src && (t !== 'file' || r.file_editable));
     if (!await confirmDialog(`Copy ${r.mismatch.map((f) => (FIELD_LABEL[f] || f).toLowerCase()).join(', ')} from the ${SRC_LABEL[src].toLowerCase()} to the ${targets.map((t) => SRC_LABEL[t].toLowerCase()).join(' and ')} for ${r.name}?` + (targets.includes('db') ? '\n\nThis writes into digiKam’s database.' : ''))) return;
-    try { const res = await post('/api/consistency/sync', { ids: [r.id], source: src, targets, fields: r.mismatch }); toast(res.synced ? `Fixed ${r.name}.` : `Not fixed: ${res.skipped[0]?.reason || 'nothing to copy'}`, null, null, 8000); } catch (e) { toastError(e); return; }
+    try { const res = await post('/api/consistency/sync', { ids: [r.id], source: src, targets, fields: r.mismatch }); toast(res.synced ? `Fixed ${r.name}.` : `Not fixed: ${res.skipped[0]?.reason || 'nothing to copy'}`, null, null, TOAST_LONG); } catch (e) { toastError(e); return; }
     load();
   };
   // the bulk bar: fixed at the bottom of the page, wraps on narrow screens. One click per source ("take the values
@@ -325,7 +325,7 @@ export async function showConsistency() {
       field === 'nosidecar' && d.total ? h('p', { class: 'muted mt0' }, `These photos keep their metadata only in digiKam’s database (and the file, when it can hold it). A sidecar is not required, but digiKam and other programs read it, and ${S.APP_NAME} writes edits there. Creating one copies the rating, title, caption and tags from digiKam’s database.`) : null,
       p.error && !p.failed ? h('p', { class: 'warn' }, 'Last error: ' + p.error) : null);
     // a scan that just finished: say so once
-    if (wasRunning && !p.running) toast(p.failed ? `Check finished with errors: ${nf.format(p.failed)} photos could not be compared.` : `Check finished: ${nf.format(s.scanned)} photos compared, ${nf.format(s.mismatched)} disagree.`, null, null, 8000);
+    if (wasRunning && !p.running) toast(p.failed ? `Check finished with errors: ${nf.format(p.failed)} photos could not be compared.` : `Check finished: ${nf.format(s.scanned)} photos compared, ${nf.format(s.mismatched)} disagree.`, null, null, TOAST_LONG);
     wasRunning = p.running;
     if (!append) list.replaceChildren();
     if (!d.items.length && !offset) list.append(h('div', { class: 'empty' }, !s.scanned ? '' : field === 'nosidecar' ? 'Every photo has a sidecar.' : 'Everything that was checked agrees.'));
@@ -341,7 +341,7 @@ export async function showConsistency() {
     try {
       const r = await send('/api/consistency/scan', q);
       toast(`Checking ${nf.format(r.queued)} photos in the background.`);
-    } catch (e) { toast('Could not start the check: ' + e.message, null, null, 8000); return; }
+    } catch (e) { toast('Could not start the check: ' + e.message, null, null, TOAST_LONG); return; }
     wasRunning = true;
     load();
   };
@@ -380,9 +380,9 @@ export async function placeTagsDialog(ids) {
 
 /** Faces page: the decided faces leave the page at once; the batch is written in the background, and a
  *  failure puts them back. DECIDED hides them from the queue until the index has caught up. */
-export const DECIDED = new Map();  // "photo:x:y:w:h" -> when it was decided
-export const faceKey = (o) => `${o.image ?? o.photo}:${(o.rect || [o.x, o.y, o.w, o.h]).join(':')}`;
-export async function facesBatch(ops, msg) {
+const DECIDED = new Map();  // "photo:x:y:w:h" -> when it was decided
+const faceKey = (o) => `${o.image ?? o.photo}:${(o.rect || [o.x, o.y, o.w, o.h]).join(':')}`;
+async function facesBatch(ops, msg) {
   const now = Date.now();
   ops.forEach((o) => DECIDED.set(faceKey(o), now));
   toast(`${msg}: ${plural(ops.length, 'face')}.`, null, null, 4000);
@@ -404,7 +404,7 @@ export async function facesBatch(ops, msg) {
   });
   return true;
 }
-export function onRouteFaces() { S.viewKey = null; onRoute(); }
+function onRouteFaces() { S.viewKey = null; onRoute(); }
 let facesTimer = 0;  // the one timer that follows face grouping; every draw of the page replaces it
 export async function showFaces(vp) {
   clearTimeout(facesTimer);
@@ -532,7 +532,7 @@ function scannerRow(c) {
     h('span', { class: 'toolbar',}, on, every,
       btn('Scan now', async () => { try { await post('/api/scan', {}); toast('Scanning the album folders…'); setTimeout(again, 4000); } catch (e) { toastError(e); } })));
 }
-export const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
+const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
   settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['users', 'Users and sign-in']],
@@ -894,7 +894,7 @@ function viewerTab(c) {
       btn('Restart', async () => { if (!await confirmDialog(`Restart ${S.APP_NAME} now?`)) return; try { await post('/api/restart', {}); toast('Restarting…'); } catch (e) { toastError(e); } })),
   ];
 }
-export async function settingsPage(view) {
+async function settingsPage(view) {
   let m;
   if (!main.querySelector('.spage')) main.replaceChildren(h('div', { class: 'page spage' }, loadingBox(view === 'settings' ? 'Loading the settings…' : 'Loading…')));
   try { m = await api('/api/maintenance'); } catch (e) { if (S.route.view === view) main.replaceChildren(h('div', { class: 'empty' }, 'Could not load settings: ' + e.message)); return; }
@@ -943,7 +943,7 @@ export async function showDuplicates() {
   syncLightbox();
 }
 /** Near-duplicates: look-alike photos found with the content-search embeddings (resized, re-saved, burst neighbors). */
-export function nearDupsSection(src) {
+function nearDupsSection(src) {
   const sec = h('div', { style: 'margin-top:36px' });
   let timer = 0;
   const later = (ms) => { clearTimeout(timer); timer = setTimeout(() => { if (S.route.view === 'duplicates' && sec.isConnected) draw(); }, ms); };
@@ -952,7 +952,7 @@ export function nearDupsSection(src) {
     if (S.route.view !== 'duplicates' || !sec.isConnected) return;
     const p = d.progress;
     const level = h('select', null, Object.keys(d.levels).map((k) => h('option', { value: k, selected: k === d.level }, `${k} (${d.levels[k]})`)));
-    const run = S.IS_ADMIN ? h('button', { class: 'pillbtn on', disabled: p.running || !d.enabled, onclick: async () => { try { await post('/api/neardups', { level: level.value }); toast('Looking for similar photos in the background.'); } catch (e) { toastError(e, 8000); } later(1500); } }, icon('spark'), d.gen ? 'Find again' : 'Find similar photos') : null;
+    const run = S.IS_ADMIN ? h('button', { class: 'pillbtn on', disabled: p.running || !d.enabled, onclick: async () => { try { await post('/api/neardups', { level: level.value }); toast('Looking for similar photos in the background.'); } catch (e) { toastError(e, TOAST_LONG); } later(1500); } }, icon('spark'), d.gen ? 'Find again' : 'Find similar photos') : null;
     const note = !d.enabled ? 'Needs content search (SigLIP 2 or CLIP) installed: the similarity comes from its embeddings.'
       : p.running ? `Comparing… ${nf.format(p.done)} / ${nf.format(p.total)} photos.`
       : p.error ? `Last run failed: ${p.error}`
@@ -972,29 +972,29 @@ export function nearDupsSection(src) {
   draw();
   return sec;
 }
-export const albumIdByPath = (path) => S.META.albums.find((a) => a.path === path)?.id ?? '';
+const albumIdByPath = (path) => S.META.albums.find((a) => a.path === path)?.id ?? '';
 
 export async function tagOp(op, t) {
   let r;
   try { r = await post('/api/tags/op', op); } catch (e) { toastError(e); return; }
   toast(op.op === 'icon' ? `“${r.path}” now uses this photo.` : op.op === 'notperson' ? `“${r.path}” is a keyword tag again, no longer listed under People.` : op.op === 'person' ? `“${r.path}” is a person now.` : op.op === 'merge' ? `Merged “${r.path}” into “${r.new_path}” (${nf.format(r.photos)} photos).` : op.op === 'add' ? `Created “${r.path}”.` : `${{ rename: 'Renamed', move: 'Moved', delete: 'Deleted' }[op.op]} “${r.path}”${r.new_path ? ` → “${r.new_path}”` : ''}.` +
-    (r.sidecars ? ` Updating ${nf.format(r.photos)} photos’ sidecars in the background.` : ''), null, null, 8000);
+    (r.sidecars ? ` Updating ${nf.format(r.photos)} photos’ sidecars in the background.` : ''), null, null, TOAST_LONG);
   await awaitReindex();
   $('#taglist')?.remove();  // the tag datalist is rebuilt from the new tag list on next use
   details.clear();
   if (S.route.view === 'tags') showTags();
   pollSoon(500);
 }
-export const openTags = new Set();  // which tag nodes are expanded, kept across redraws
+const openTags = new Set();  // which tag nodes are expanded, kept across redraws
 /** digiKam's own face buckets under People; not real people and not to be renamed, moved or deleted. */
-export const isFaceBucket = (t) => ['Unknown', 'Ignored', 'Unconfirmed'].includes(t.name) && t.full.startsWith('People/');
+const isFaceBucket = (t) => ['Unknown', 'Ignored', 'Unconfirmed'].includes(t.name) && t.full.startsWith('People/');
 /** parent id (0 = top level) -> child tags, optionally leaving some tags out. */
-export function tagKids(skip = () => false) {
+function tagKids(skip = () => false) {
   const kidsOf = new Map();
   for (const t of S.META.tags) { if (skip(t)) continue; const k = t.pid ?? 0; if (!kidsOf.has(k)) kidsOf.set(k, []); kidsOf.get(k).push(t); }
   return kidsOf;
 }
-export function tagTreePicker(onPick, { exclude = () => false, allowTop = true } = {}) {
+function tagTreePicker(onPick, { exclude = () => false, allowTop = true } = {}) {
   const kidsOf = tagKids(isFaceBucket);
   const filter = h('input', { class: 'pagefilter', style: 'margin:0 0 8px;width:100%', placeholder: 'Find a tag…' });
   const list = h('div', { class: 'alist', style: 'max-height:45vh' });
@@ -1014,7 +1014,7 @@ export function tagTreePicker(onPick, { exclude = () => false, allowTop = true }
   draw('');
   return h('div', null, filter, list);
 }
-export function moveTagDialog(t) {
+function moveTagDialog(t) {
   const sub = (x) => x.id === t.id || x.full.startsWith(t.full + '/') || x.id === t.pid;
   const move = (parent) => { back.remove(); tagOp({ op: 'move', id: t.id, parent }, t); };
   const back = modal(`Move “${t.name}” into…`,

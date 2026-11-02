@@ -502,7 +502,7 @@ def _read_source(source: tuple):
     return kind, ver, raw, root_path, direct
 
 
-def _album_rows(raw: dict, root_path: dict) -> dict:
+def _album_rows(raw: dict) -> dict:
     """{album id: {id, root, rel, caption, label, date, category, icon, pid, name, path}} for the albums under a known root."""
     roots = {r[0]: r[1] for r in raw["roots"]}
     single_root = len(roots) == 1
@@ -886,7 +886,7 @@ def _build(dst_path: Path, source: tuple) -> dict:
     last_source.update(kind=kind, version=ver)
     phases = {"read": time.time() - t0}
 
-    all_albums = _album_rows(raw, root_path)
+    all_albums = _album_rows(raw)
     if kind == "digikam":
         full_paths = {r[0]: root_path[all_albums[r[1]]["root"]] + all_albums[r[1]]["rel"].rstrip("/") + "/" + r[2]
                       for r in all_images if r[1] in all_albums and all_albums[r[1]]["root"] in root_path}
@@ -949,10 +949,6 @@ def _embed_signature() -> str:
 
 def _version_for(source: str) -> str:
     return f"{SCHEMA_VERSION}:{source}:{places.signature()}:{edits.signature()}:{analysis.signature()}:{videos.signature()}:{_embed_signature()}"
-
-
-def expected_version() -> str:
-    return _version_for(probe()[1])
 
 
 def ensure_fresh() -> bool:

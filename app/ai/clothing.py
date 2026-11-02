@@ -10,13 +10,17 @@ the person is in those photos too: "probably Sam, dressed as in 6 photos where t
 A suggestion adds the person's tag to the photo when the user clicks it, as a person present without a face
 region, and is written nowhere before that. The embeddings are kept in the viewer database (ai_person_looks,
 keyed by the person box like the jersey numbers) and are computed again when the search model changes.
+
+The job's bookkeeping (progress, the start rule, reset, coverage) is the shared ScanJob (scanjob.py); this module
+keeps the to-do query, the embedding loop and the stamp rule (the file's stamp and the model's name, in ai_scans).
 """
 import logging
-import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-from app import config, jobs, thumbs
+from app import jobs, thumbs
+from app.ai import detector
+from app.ai.scanjob import ScanJob
 from app.data import index, vdb
 from app.digikam.dkdb import chunked
 
@@ -32,9 +36,6 @@ MAX_BOXES = 12
 MIN_SIM = 0.78       # an unnamed person box must look at least this much like one of the person's named boxes
 MARGIN = 0.05        # and lead the next-best person by this much (on named faces, the lead alone kept 9 in 10 right)
 ALONE = 0.88         # with a single person named in the event there is nobody to lead: a high bar instead
-progress = jobs.Progress("clothing")
-_running = {"todo": set()}
-_lock = threading.Lock()
 
 
 def available() -> bool:
@@ -54,39 +55,20 @@ def _model_key() -> str:
         return ""
 
 
-def _k(v: float) -> int:
-    return int(round(v * 1000))
-
-
-def _person_boxes(ids: list) -> dict:
-    out = {}
-    with vdb.reader() as con:
-        for part in chunked(ids, 500):
-            for r in con.execute(f"SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({','.join(str(int(i)) for i in part)}) ORDER BY w * h DESC"):
-                if r[3] * r[4] >= MIN_BOX and r[4] >= MIN_HEIGHT:
-                    out.setdefault(r[0], []).append((r[1], r[2], r[3], r[4]))
-    return out
-
-
-def _todo(photos: list) -> list:
+def _todo(con, photos: list) -> list:
     """Still photos with people detected whose boxes are not embedded with the current model, or whose file changed."""
     from app.ai.analysis import stamp
     model = _model_key()
-    with vdb.reader() as con:
-        have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'clothing'")}
-        objects = {r[0] for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'")}
+    have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'clothing'")}
+    objects = {r[0] for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'")}
     return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != f"{stamp(p)}:{model}"]
 
 
-def coverage() -> tuple:
-    try:
-        model = _model_key()
-        with vdb.reader() as con:
-            done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'clothing' AND stamp LIKE ?", (f"%:{model}",)).fetchone()[0]
-            total = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0]
-        return int(done), int(total)
-    except Exception:
-        return 0, 0
+def _counts(con) -> tuple:
+    """(photos embedded with the current model, photos with object detection)."""
+    model = _model_key()
+    return (con.execute("SELECT count(*) FROM ai_scans WHERE job = 'clothing' AND stamp LIKE ?", (f"%:{model}",)).fetchone()[0],
+            con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0])
 
 
 def crops(im, boxes: list) -> list:
@@ -100,73 +82,50 @@ def crops(im, boxes: list) -> list:
     return out
 
 
-def _job(photos: list, gen: int):
+def _work(gen: int, todo: list):
     from app.ai.analysis import stamp
-    if not available():
-        return
-    todo = _todo(photos)
-    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
-    progress.update(running=bool(todo), done=0, total=len(todo))
-    if not todo:
-        return
     engine = _engine()
     model = engine.name
-    try:
-        with ThreadPoolExecutor(max(1, min(4, jobs.threads())), thread_name_prefix="clothing") as pool:
-            for chunk in chunked(todo, 8):
-                if progress.cancelled(gen):
-                    return
-                boxes = _person_boxes([p["id"] for p in chunk])
+    with ThreadPoolExecutor(max(1, min(4, jobs.threads())), thread_name_prefix="clothing") as pool:
+        for chunk in chunked(todo, 8):
+            if progress.cancelled(gen):
+                return
+            boxes = detector.person_boxes([p["id"] for p in chunk], MIN_BOX, MIN_HEIGHT)
 
-                def prepare(p):
-                    bs = boxes.get(p["id"], [])
-                    if not bs:
-                        return p, [], []
-                    try:
-                        im, _ = thumbs.open_oriented(p["path"], 1600, 1600)
-                    except OSError as e:
-                        log.warning("clothing: cannot read %s (%s)", p["path"], e)
-                        return None
-                    except Exception as e:
-                        log.warning("clothing: cannot decode %s (%s)", p["path"], e)
-                        return p, [], []
-                    return p, bs[:MAX_BOXES], crops(im, bs)
-                ready = [r for r in pool.map(prepare, chunk) if r]
-                flat = [(p, b, c) for p, bs, cs in ready for b, c in zip(bs, cs)]
-                vecs = []
-                if flat:
-                    try:
-                        vecs = engine.embed_images([c for _p, _b, c in flat])
-                    except Exception as e:
-                        log.warning("clothing: embedding failed on a batch (%s)", e)
-                        continue
-                if progress.cancelled(gen):
-                    return
-                with vdb.writer() as con:
-                    con.executemany("DELETE FROM ai_person_looks WHERE photo_id = ?", [(p["id"],) for p, _bs, _cs in ready])
-                    con.executemany("INSERT OR REPLACE INTO ai_person_looks (photo_id, px, py, pw, ph, vec) VALUES (?,?,?,?,?,?)",
-                                    [(p["id"], _k(b[0]), _k(b[1]), _k(b[2]), _k(b[3]), np.asarray(v, np.float32).tobytes()) for (p, b, _c), v in zip(flat, vecs)])
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'clothing',?,NULL)", [(p["id"], f"{stamp(p)}:{model}") for p, _bs, _cs in ready])
-                progress.step(len(chunk))
-    finally:
-        progress.finish(gen)
+            def prepare(p):
+                bs = boxes.get(p["id"], [])
+                if not bs:
+                    return p, [], []
+                try:
+                    im, _ = thumbs.open_oriented(p["path"], 1600, 1600)
+                except OSError as e:
+                    log.warning("clothing: cannot read %s (%s)", p["path"], e)
+                    return None
+                except Exception as e:
+                    log.warning("clothing: cannot decode %s (%s)", p["path"], e)
+                    return p, [], []
+                return p, bs[:MAX_BOXES], crops(im, bs)
+            ready = [r for r in pool.map(prepare, chunk) if r]
+            flat = [(p, b, c) for p, bs, cs in ready for b, c in zip(bs, cs)]
+            vecs = []
+            if flat:
+                try:
+                    vecs = engine.embed_images([c for _p, _b, c in flat])
+                except Exception as e:
+                    log.warning("clothing: embedding failed on a batch (%s)", e)
+                    continue
+            if progress.cancelled(gen):
+                return
+            with vdb.writer() as con:
+                con.executemany("DELETE FROM ai_person_looks WHERE photo_id = ?", [(p["id"],) for p, _bs, _cs in ready])
+                con.executemany("INSERT OR REPLACE INTO ai_person_looks (photo_id, px, py, pw, ph, vec) VALUES (?,?,?,?,?,?)",
+                                [(p["id"], detector.thousandths(b[0]), detector.thousandths(b[1]), detector.thousandths(b[2]), detector.thousandths(b[3]), np.asarray(v, np.float32).tobytes()) for (p, b, _c), v in zip(flat, vecs)])
+                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'clothing',?,NULL)", [(p["id"], f"{stamp(p)}:{model}") for p, _bs, _cs in ready])
+            progress.step(len(chunk))
 
 
-def start(photos: list):
-    if not config.ANALYSIS or not available():
-        return
-    if progress["running"] and {p["id"] for p in _todo(photos)} <= _running["todo"]:
-        return  # nothing new for the running job
-    gen = progress.cancel()
-    jobs.submit("clothing", lambda: _job(photos, gen))
-
-
-def reset():
-    progress.cancel()
-    _running["todo"] = set()
-    with vdb.writer() as con:
-        con.execute("DELETE FROM ai_person_looks")
-        con.execute("DELETE FROM ai_scans WHERE job = 'clothing'")
+job = ScanJob("clothing", _todo, _work, _counts, available, tables=("ai_person_looks",))
+progress, start, reset, coverage = job.progress, job.start, job.reset, job.coverage
 
 
 # --------------------------------------------------------------------------

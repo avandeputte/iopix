@@ -72,7 +72,7 @@ def _photos_cached(version: str, key: str) -> bytes:
 
 
 @router.get("/api/random", dependencies=[access.public])
-def api_random(request: Request, n: int = 12):
+def api_random(n: int = 12):
     """Explore › Rediscover: photos picked at random from the whole library (stills): {id, w, h, ts} and the badges
     {video, geo, faces} as /api/photos gives them (by position)."""
     where, params, _rank = resolve([("type", "photo")])
@@ -89,7 +89,7 @@ def api_random(request: Request, n: int = 12):
 
 
 @router.get("/api/badges", dependencies=[access.public])
-def api_badges(request: Request, ids: str = ""):
+def api_badges(ids: str = ""):
     """The marks on a thumbnail outside the Photos grid (Rediscover, On this day, bursts, duplicates...), for up to
     500 photo ids: {geo: [id], faces: [id], video: {id: seconds}, focus: {id: "x,y"}}, as /api/photos gives them by position."""
     try:
@@ -110,7 +110,7 @@ def api_badges(request: Request, ids: str = ""):
 
 
 @router.get("/api/thenandnow", dependencies=[access.public])
-def api_then_and_now(request: Request, n: int = 3, person: int = None):
+def api_then_and_now(n: int = 3, person: int = None):
     """Explore › Then and now: people photographed years apart, with their earliest and latest named face:
     {pairs: [{tag, name, then: {photo, ts, rect}, now: {...}, years}]}. person: that one person; else random ones."""
     con = db()
@@ -252,7 +252,7 @@ def api_facets(request: Request):
 
 
 @lru_cache(maxsize=32)
-def _facets_cached(version: str, key: str) -> dict:
+def _facets_cached(version: str, key: str) -> dict:  # `version` is only part of the cache key: a new index gets fresh facets
     where, params, _ = resolve(parse_qsl(key.split("|", 1)[1], keep_blank_values=True))
     con = db()
     try:
@@ -306,7 +306,7 @@ def _object_counts(q) -> list:
 
 
 @lru_cache(maxsize=2)
-def _events(version: str) -> list:
+def _events(version: str) -> list:  # `version` is only the cache key: computed once per index build
     con = db()
     try:
         return moments.events_and_trips(con)
@@ -328,7 +328,7 @@ def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
     on_this_day = None
     if re.fullmatch(r"\d\d-\d\d", md or ""):
         on_this_day = orjson.loads(gzip.decompress(_photos_cached(state["version"], f"{appstate.rev}.{semantic.key}|md={md}")))
-    return jresp(request, {"random": api_random(request, n), "thenAndNow": api_then_and_now(request, pairs),
+    return jresp(request, {"random": api_random(n), "thenAndNow": api_then_and_now(pairs),
                            "events": _events(state["version"]), "onThisDay": on_this_day, "peopleGroups": api_people_groups(request)})
 
 

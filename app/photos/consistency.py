@@ -32,6 +32,7 @@ FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the view
 SOURCES = ["db", "sidecar", "file"]
 log = logging.getLogger("app.photos.consistency")
 progress = jobs.Progress("consistency", mismatched=0, scanned_at=None)
+READ_TIMEOUT = 30  # a read of the viewer database may wait behind a job's long write transaction (as analysis.READ_TIMEOUT)
 TAGS_XMP = ["XMP-digiKam:TagsList", "XMP-microsoft:LastKeywordXMP", "XMP-lr:HierarchicalSubject", "XMP-mediapro:CatalogSets"]
 READ_TAGS = ["-XMP-xmp:Rating", "-XMP-digiKam:PickLabel", "-XMP-digiKam:ColorLabel", "-XMP-dc:Title", "-XMP-dc:Description",
              *["-" + t for t in TAGS_XMP], "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude", "-GPSAltitude"]
@@ -266,7 +267,7 @@ def scan(photos: list, rescan_all: bool = True):
     init()
     todo = list(photos)  # videos too: their sidecar against digiKam (the file itself is not read)
     if not rescan_all:
-        con = analysis.connect()
+        con = vdb.connect(timeout=READ_TIMEOUT)
         try:
             have = dict(con.execute("SELECT photo_id, stamp FROM metadata_check").fetchall())
         finally:
@@ -313,7 +314,7 @@ def summary() -> dict:
     empty = {"scanned": 0, "mismatched": 0, "by_field": {}, "no_sidecar": 0, "scanned_at": None}
     if not vdb.exists():
         return empty
-    con = analysis.connect()
+    con = vdb.connect(timeout=READ_TIMEOUT)
     try:
         scanned, mism, no_side, last = con.execute(
             "SELECT count(*), sum(mismatch > 0), sum(has_sidecar = 0), max(checked) FROM metadata_check").fetchone()
@@ -333,7 +334,7 @@ def summary() -> dict:
 
 def report(field: str = None, offset: int = 0, limit: int = 100) -> dict:
     """The photos that disagree (on `field`, or on any), newest first; field "nosidecar": those without a sidecar."""
-    con = analysis.connect()
+    con = vdb.connect(timeout=READ_TIMEOUT)
     try:
         if field == "nosidecar":
             rows = con.execute("SELECT data FROM metadata_check WHERE has_sidecar = 0 ORDER BY photo_id DESC").fetchall()
@@ -359,7 +360,7 @@ def recheck(photo_ids: list):
     ids = [int(i) for i in photo_ids]
     if not ids:
         return
-    con = analysis.connect()
+    con = vdb.connect(timeout=READ_TIMEOUT)
     try:
         known = {r[0] for r in con.execute(f"SELECT photo_id FROM metadata_check WHERE photo_id IN ({','.join(map(str, ids))})")}
     finally:
@@ -426,7 +427,7 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     if source not in SOURCES or any(t not in SOURCES or t == source for t in targets) or not targets:
         raise ValueError("Choose a source and at least one different target")
     fields = [f for f in (fields or FIELDS) if f in FIELDS]
-    con = analysis.connect()
+    con = vdb.connect(timeout=READ_TIMEOUT)
     try:
         stored = {}
         for part in chunked(photo_ids, 500):

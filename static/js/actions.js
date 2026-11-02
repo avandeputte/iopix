@@ -1,5 +1,5 @@
 /** Selection bar actions and app-side state: favorites, albums, trash, move, rename, the edit log entries. */
-import { $, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, send, store } from './core.js';
+import { $, TOAST_LONG, api, date, dfDay, errorBox, fill, fmtBytes, fmtWhen, h, icon, main, nf, norm, plural, post, send, store } from './core.js';
 import { S, ST, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError, ualbumById } from './state.js';
 import { crumbs } from './search.js';
 import { G, dropPhotos, renderGrid, setBadges } from './grid.js';
@@ -9,13 +9,13 @@ import { pageTitle } from './pages.js';
 import { LB, details, editMenu, openLightbox, showItem, toggleFaces, updateFavBtn } from './lightbox.js';
 import { pollStatus } from './main.js';
 
-export function redrawTiles() {
+function redrawTiles() {
   for (const el of G.rendered.values()) el.remove();
   G.rendered.clear();
   renderGrid(true);
 }
 /** The selection shown on the tiles already drawn, without redrawing them (a redraw decoded every thumbnail again). */
-export function markSelected() {
+function markSelected() {
   const grid = $('#grid');
   if (!grid || !G.data) return;
   for (const t of grid.querySelectorAll('.tile[data-i]')) t.classList.toggle('sel', G.sel.has(G.data.id[+t.dataset.i]));
@@ -76,8 +76,8 @@ export function updateSelBar() {
     S.CAN_MANAGE ? btn('trash', 'Move to trash (Delete key)', () => trashPhotos(ids())) : null);
 }
 // ---- the edit log: entries for one photo (info panel) or the whole library (#/history)
-export const HIST_ACTION = { edit: 'Edit', face: 'Face', tag: 'Tag', deleted: 'Deleted', trashed: 'Trashed', moved: 'Moved', restore: 'Restore', sync: 'Sync', database: 'digiKam', revert: 'Undo', added: 'Added', guard: 'Protected', lossless: 'File', filerepair: 'Repair' };
-export const HIST_RESTORE = { undo: ['Undo', 'Put back the values from before this change'], trash: ['Restore from trash', 'Put the photo back where it was'], sidecar: ['Restore sidecar', 'Put the sidecar back as it was just before this change'],
+const HIST_ACTION = { edit: 'Edit', face: 'Face', tag: 'Tag', deleted: 'Deleted', trashed: 'Trashed', moved: 'Moved', restore: 'Restore', sync: 'Sync', database: 'digiKam', revert: 'Undo', added: 'Added', guard: 'Protected', lossless: 'File', filerepair: 'Repair' };
+const HIST_RESTORE = { undo: ['Undo', 'Put back the values from before this change'], trash: ['Restore from trash', 'Put the photo back where it was'], sidecar: ['Restore sidecar', 'Put the sidecar back as it was just before this change'],
   original: ['Restore original file', 'Put the image file back as it was before the first write into it'], deleted: ['Restore photo', 'Put the files back and add the photo to the library again'] };
 export function histEntry(e, onDone, withPhoto) {
   const btns = S.CAN_MANAGE ? e.restore.map((k) => h('button', { type: 'button', class: 'lnk', title: HIST_RESTORE[k][1], onclick: async () => {
@@ -177,7 +177,7 @@ export async function trashPhotos(ids, after) {
 export async function folderPicker(title, onPick, exclude) {
   let d; try { d = await api('/api/folders'); } catch (e) { toastError(e); return; }
   const all = d.folders.map((f) => ({ ...f, _n: norm(f.path) })).filter((f) => !exclude || !exclude(f)).sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
-  const inp = h('input', { class: 'pagefilter', style: 'width:100%', placeholder: 'Type part of a folder name…' });
+  const inp = h('input', { class: 'pagefilter wfull', placeholder: 'Type part of a folder name…' });
   const list = h('div', { class: 'alist', style: 'max-height:45vh;margin-top:8px' });
   const draw = () => { const f = norm(inp.value); fill(list, all.filter((x) => !f || x._n.includes(f)).slice(0, 200).map((x) => h('div', { class: 'frow', onclick: () => { back.remove(); onPick(x); } }, icon('folder'), h('span', { class: 'nm' }, x.path), x.nAll ? h('span', { class: 'ct' }, nf.format(x.nAll)) : null))); };
   inp.oninput = draw; inp.onkeydown = (e) => e.stopPropagation();
@@ -189,13 +189,13 @@ export function movePhotos(ids, after) {
     let r;
     try { r = await post('/api/photos/move', { ids, album: f.id }); } catch (e) { toastError(e, 10000); return; }
     ids.forEach((i) => details.delete(i));
-    toast(`${plural(r.moved.length, 'photo')} moved to ${f.path}.${r.failed.length ? ` ${nf.format(r.failed.length)} could not be: ${r.failed[0].error}.` : ''}`, null, null, 8000);
+    toast(`${plural(r.moved.length, 'photo')} moved to ${f.path}.${r.failed.length ? ` ${nf.format(r.failed.length)} could not be: ${r.failed[0].error}.` : ''}`, null, null, TOAST_LONG);
     after?.(r);
     S.keepView = true; S.viewKey = null; await pollStatus(); onRoute();
   });
 }
 /** Rename the selected files by the date they were taken; ids, sidecars and history stay with them, Undo puts the names back. */
-export function renameByDate(ids) {
+function renameByDate(ids) {
   const ex = { date: '2026-10-17_143205.jpg', 'date-name': '2026-10-17_IMG_1234.jpg', 'date-seq': '2026-10-17_001.jpg' };
   const pat = h('select', { class: 'sharepick', onchange: () => fill(eg, 'For example: ' + ex[pat.value]) }, [['date', 'Date and time'], ['date-name', 'Date and original name'], ['date-seq', 'Date and number']].map(([v, l]) => h('option', { value: v }, l)));
   const eg = h('div', { class: 'muted small' }, 'For example: ' + ex.date);
@@ -710,7 +710,7 @@ export async function showTrash() {
   let d; try { d = await api('/api/trash'); } catch (e) { fill(body, errorBox(e)); return; }
   if (S.route.view !== 'trash') return;
   const sel = new Set();
-  const act = async (path, payload, msg) => { try { const r = await post(path, payload); toast(msg(r), null, null, 8000); } catch (e) { toastError(e); return; } pollSoon(600); showTrash(); };
+  const act = async (path, payload, msg) => { try { const r = await post(path, payload); toast(msg(r), null, null, TOAST_LONG); } catch (e) { toastError(e); return; } pollSoon(600); showTrash(); };
   const chosen = () => (sel.size ? d.items.filter((t) => sel.has(t.info)) : d.items);
   const bar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 12px' });
   const drawBar = () => fill(bar,

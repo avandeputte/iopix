@@ -23,7 +23,7 @@ function precisionLocal(d, ch) {
   d.tags.push(...(PREC_TAGS[k] ? [tag ? { id: tag.id, name: tag.name, full: tag.full, person: 0 } : { id: 0, name: PREC_TAGS[k].split('/')[1], full: PREC_TAGS[k], person: 0 }] : []));
   return out;
 }
-export function applyLocal(d, ch) {
+function applyLocal(d, ch) {
   if ('date_precision' in ch) ch = precisionLocal(d, ch);
   if ('rating' in ch) d.rating = ch.rating > 0 ? ch.rating : -1;
   for (const k of ['title', 'caption']) if (k in ch) d[k] = ch[k] || null;
@@ -136,14 +136,14 @@ export async function editPhotos(ids, changes) {
   pollSoon();
   return true;
 }
-export function flashEdit(ch) {
+function flashEdit(ch) {
   const msg = 'rating' in ch ? (ch.rating ? '★'.repeat(ch.rating) : 'Rating cleared') : null;
   if (msg) toast(msg, null, null, 1200);
 }
 
-export async function recentTags() { if (!S.RECENT_TAGS) try { S.RECENT_TAGS = (await api('/api/maintenance')).recentTags || []; } catch { S.RECENT_TAGS = []; } return S.RECENT_TAGS; }
-export async function noteRecent(ids) { try { S.RECENT_TAGS = (await post('/api/tags/recent', { ids })).recent; } catch { /* cosmetic */ } }
-export async function createTagThenPick(full, onPick) {
+async function recentTags() { if (!S.RECENT_TAGS) try { S.RECENT_TAGS = (await api('/api/maintenance')).recentTags || []; } catch { S.RECENT_TAGS = []; } return S.RECENT_TAGS; }
+async function noteRecent(ids) { try { S.RECENT_TAGS = (await post('/api/tags/recent', { ids })).recent; } catch { /* cosmetic */ } }
+async function createTagThenPick(full, onPick) {
   // "Parent/Child" creates the child under an existing parent; a bare name makes a top-level tag
   const parts = full.split('/').map((s) => s.trim()).filter(Boolean);
   const name = parts.pop();
@@ -164,10 +164,10 @@ export function tagPicker(onPick, placeholder = 'Add a tag…', { recent = true 
   wrap.append(tagPickerInput(pick, placeholder));
   return wrap;
 }
-export function tagPickerInput(onPick, placeholder) {
+function tagPickerInput(onPick, placeholder) {
   const id = 'taglist';
   if (!$('#' + id)) document.body.append(h('datalist', { id }, S.META.tags.filter((t) => !t.person && !t.full.startsWith('People')).map((t) => h('option', { value: t.full }))));
-  const inp = h('input', { class: 'pagefilter', style: 'width:100%', placeholder, list: id });
+  const inp = h('input', { class: 'pagefilter wfull', placeholder, list: id });
   const tryPick = () => { const t = S.META.tags.find((x) => !x.person && x.full.toLowerCase() === inp.value.trim().toLowerCase()); if (t) { inp.value = ''; onPick(t); } };
   inp.oninput = tryPick;
   inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { tryPick(); if (inp.value.trim() && S.CAN_MANAGE) { const v = inp.value.trim(); inp.value = ''; createTagThenPick(v, onPick); } else if (inp.value) toast('Pick an existing tag from the list.'); } };
@@ -237,10 +237,10 @@ export async function dbDialog() {
       h('a', { class: 'pillbtn', href: hashFor('photos', photosWith({ edited: 1 })), onclick: () => back.remove() }, 'Show them'), applyBtn));
 }
 
-export const TEMPLATE_LABEL = { creator: 'Creator', copyrightNotice: 'Copyright notice', rightsUsageTerms: 'Usage terms', creatorJobTitle: 'Job title', provider: 'Credit', source: 'Source', instructions: 'Instructions',
+const TEMPLATE_LABEL = { creator: 'Creator', copyrightNotice: 'Copyright notice', rightsUsageTerms: 'Usage terms', creatorJobTitle: 'Job title', provider: 'Credit', source: 'Source', instructions: 'Instructions',
   'creatorContactInfo.address': 'Address', 'creatorContactInfo.city': 'City', 'creatorContactInfo.provinceState': 'State / province', 'creatorContactInfo.postalCode': 'Postal code', 'creatorContactInfo.country': 'Country', 'creatorContactInfo.phone': 'Phone', 'creatorContactInfo.email': 'Email', 'creatorContactInfo.webUrl': 'Web' };
 
-export async function loadTemplates() { if (!S.TEMPLATES) try { S.TEMPLATES = (await api('/api/maintenance')).templates || []; } catch { S.TEMPLATES = []; } return S.TEMPLATES; }
+async function loadTemplates() { if (!S.TEMPLATES) try { S.TEMPLATES = (await api('/api/maintenance')).templates || []; } catch { S.TEMPLATES = []; } return S.TEMPLATES; }
 export function dateEditor(ids, current, after, precision) {
   // current: "YYYY-MM-DDTHH:MM:SS" for one photo, or null for a batch; precision: how well that date is known
   // (exact, month, year, unknown). An approximate date is saved as a placeholder (1 January of the year, or the 1st of
@@ -426,7 +426,7 @@ export async function locationDialog(ids, current, after) {
   place();
   drawCircle();
 }
-export async function gpxDialog(ids) {
+async function gpxDialog(ids) {
   const file = h('input', { type: 'file', accept: '.gpx,application/gpx+xml' });
   const tzNow = -new Date().getTimezoneOffset() * 60;  // this browser's offset, as a sensible default
   // every whole hour, and the half- and three-quarter-hour zones (Newfoundland, Iran, India, Nepal, Myanmar, Adelaide…)

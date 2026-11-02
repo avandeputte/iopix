@@ -14,9 +14,10 @@ Everything is computed from the original files, which are only read, and is
 keyed by a stamp of the file so a changed photo is analysed again. The index
 build folds the results into the search index; nothing goes to digiKam.
 
-Each analysis is one job in the shared background queue (jobs.py). A job checks
-`_run["gen"]` between batches: start() and reset() bump it, which makes the
-running job stop so the new submission can take over.
+Each analysis is one job in the shared background queue (jobs.py), with its own
+Progress. The five are started and reset together, so start() and reset() cancel
+every Progress at once, and a job checks its own `progress[key].cancelled(gen)`
+between batches: the running job stops so the new submission can take over.
 """
 from PIL import UnidentifiedImageError
 import importlib
@@ -40,18 +41,12 @@ except ImportError:  # numpy comes with the optional AI features; without it the
 log = logging.getLogger(__name__)
 JOBS = ("quality", "vision", "objects", "captions", "looks")
 progress = {key: jobs.Progress(f"analysis:{key}") for key in JOBS}
-_run = {"gen": 0}
+_run = {"ids": set()}  # the photos the running jobs were started with, for start()'s "nothing new" rule
 _ocr = None  # the OCR engine once loaded, False when none could be loaded
 on_progress = None  # set by the web app: called now and then so the index picks up new results
 
 
-def connect():
-    return vdb.connect(timeout=30)
-
-
-def _writer():
-    """One serialised write transaction on the viewer database (vdb.writer)."""
-    return vdb.writer()
+READ_TIMEOUT = 30  # a read here may wait behind a job's long write transaction: longer than vdb.reader's default
 
 
 def init():
@@ -62,14 +57,12 @@ def _counts() -> dict:
     """{job: photos analysed so far}, or None when the database is missing or unreadable."""
     if not vdb.exists():
         return None
-    con = connect()
     try:
-        have = dict(con.execute("SELECT job, count(*) FROM ai_scans GROUP BY job").fetchall())
+        with vdb.reader(READ_TIMEOUT) as con:
+            have = dict(con.execute("SELECT job, count(*) FROM ai_scans GROUP BY job").fetchall())
         return {key: int(have.get(key, 0)) for key in JOBS}
     except Exception:
         return None
-    finally:
-        con.close()
 
 
 _epoch = {"n": 0}  # bumped when a job's run ends: the one moment its results are folded into the index
@@ -122,19 +115,11 @@ def stamp(p: dict) -> str:
 
 def _todo(job: str, photos: list, con=None) -> list:
     """The still photos this job has not looked at, or looked at in an older version of the file (ai_scans)."""
-    own = con is None
-    con = con or connect()
-    try:
-        have = dict(con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = ?", (job,)).fetchall())
-    finally:
-        if own:
-            con.close()
+    if con is None:
+        with vdb.reader(READ_TIMEOUT) as con:
+            return _todo(job, photos, con)
+    have = dict(con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = ?", (job,)).fetchall())
     return [p for p in photos if not p["video"] and have.get(p["id"]) != stamp(p)]
-
-
-def _save(sql: str, rows: list):
-    with _writer() as con:
-        con.executemany(sql, rows)
 
 
 def _notify(last: float, every: float) -> float:
@@ -154,7 +139,7 @@ def _finish(*keys):
         on_progress()
 
 
-def _laplacian_var(a) -> float:
+def laplacian_var(a) -> float:
     """Variance of the 4-neighbour Laplacian of a float32 greyscale array: higher is sharper."""
     lap = a[1:-1, 1:-1] * 4 - a[:-2, 1:-1] - a[2:, 1:-1] - a[1:-1, :-2] - a[1:-1, 2:]
     return float(lap.var())
@@ -175,7 +160,7 @@ def measure(im) -> tuple:
     a = np.asarray(g, dtype=np.float32)
     h, w = a.shape
     c = a[int(h * 0.15):int(h * 0.85), int(w * 0.15):int(w * 0.85)]
-    return (_laplacian_var(c), float(a.mean() / 255.0), float((a < 8).mean()), float((a > 247).mean()))
+    return (laplacian_var(c), float(a.mean() / 255.0), float((a < 8).mean()), float((a > 247).mean()))
 
 
 def _analyse_one(p: dict, want_quality: bool, detector):
@@ -189,15 +174,15 @@ def _analyse_one(p: dict, want_quality: bool, detector):
     return out
 
 
-def _pixel_job(photos: list, gen: int):
+def _pixel_job(photos: list, gens: dict):
+    """One decode serves two analyses, so this job reports as both "quality" and "objects" and stops when either is cancelled."""
+    def cancelled() -> bool:
+        return any(progress[k].cancelled(gens[k]) for k in ("quality", "objects"))
     workers = config.ANALYSIS_WORKERS or jobs.threads()
     detector = det.load(max(1, jobs.threads() // workers))  # None until the model is installed
-    con = connect()
-    try:
+    with vdb.reader(READ_TIMEOUT) as con:
         q_todo = {p["id"] for p in _todo("quality", photos, con)}
         o_todo = {p["id"] for p in _todo("objects", photos, con)} if detector else set()
-    finally:
-        con.close()
     todo = [p for p in photos if p["id"] in q_todo or p["id"] in o_todo]
     progress["quality"].update(running=bool(q_todo), done=0, total=len(q_todo))
     progress["objects"].update(running=bool(o_todo), done=0, total=len(o_todo))
@@ -206,7 +191,7 @@ def _pixel_job(photos: list, gen: int):
 
     try:
         def work(p):
-            if gen != _run["gen"]:
+            if cancelled():
                 return None
             try:
                 return p, _analyse_one(p, p["id"] in q_todo, detector if p["id"] in o_todo else None)
@@ -224,7 +209,7 @@ def _pixel_job(photos: list, gen: int):
         last = time.time()
         with ThreadPoolExecutor(workers, thread_name_prefix="analyse") as pool:
             for chunk in chunked(todo, 64):
-                if gen != _run["gen"]:
+                if cancelled():
                     return
                 qrows, orows, done = [], [], []
                 for res in pool.map(work, chunk):
@@ -237,15 +222,15 @@ def _pixel_job(photos: list, gen: int):
                     if p["id"] in o_todo:
                         done.append((p["id"], st))
                         orows += [(p["id"], *o) for o in out.get("objects", [])]
-                if gen != _run["gen"]:  # reset while this batch was computed: its results are of the model before
+                if cancelled():  # reset while this batch was computed: its results are of the model before
                     return
                 if qrows:
-                    with _writer() as con:
+                    with vdb.writer() as con:
                         con.executemany("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
                         con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'quality',?,NULL)", [(r[0], r[1]) for r in qrows])
                     progress["quality"]["done"] += len(qrows)
                 if done:
-                    with _writer() as con:
+                    with vdb.writer() as con:
                         con.executemany("DELETE FROM ai_objects WHERE photo_id = ?", [(d[0],) for d in done])
                         con.executemany("INSERT INTO ai_objects VALUES (?,?,?,?,?,?,?)", orows)
                         con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'objects',?,NULL)", done)
@@ -287,14 +272,14 @@ class _OCR:
 _ocr_lock = threading.Lock()
 
 
-def _ocr_engine():
+def ocr_engine():
     """RapidOCR, if installed. None otherwise; the import is tried once, by one thread (a second caller waits for the
     load instead of seeing "no OCR" while it is in progress)."""
     with _ocr_lock:
-        return _ocr_engine_locked()
+        return _load_ocr()
 
 
-def _ocr_engine_locked():
+def _load_ocr():
     global _ocr
     if _ocr is None:
         _ocr = False
@@ -335,7 +320,7 @@ def face_regions(photo_ids: list) -> dict:
 
 def _portable_batch(batch: list) -> list:
     """OCR with RapidOCR and face quality from the sharpness of digiKam's face regions."""
-    ocr = _ocr_engine()
+    ocr = ocr_engine()
     regions = face_regions([p["id"] for p in batch])
     rows = []
     for p in batch:
@@ -370,14 +355,14 @@ def _portable_batch(batch: list) -> list:
                 continue
             crop = im.crop(box).convert("L").resize((96, 96))
             # 0..1: a crisp face at this size has a Laplacian variance around 400+
-            quals.append(float(min(1.0, (_laplacian_var(np.asarray(crop, dtype=np.float32)) / 400.0) ** 0.5)))
+            quals.append(float(min(1.0, (laplacian_var(np.asarray(crop, dtype=np.float32)) / 400.0) ** 0.5)))
         rows.append((p["id"], stamp(p), text, len(faces), max(quals) if quals else None))
     return rows
 
 
 def vision_available() -> bool:
     """RapidOCR is installed (the ocr dependency group)."""
-    return _ocr_engine() is not None
+    return ocr_engine() is not None
 
 
 
@@ -400,12 +385,12 @@ def _vision_job(photos: list, gen: int):
         n = _vision_workers()
         with ThreadPoolExecutor(n, thread_name_prefix="vision") as pool:
             for chunk in chunked(batches, n):
-                if gen != _run["gen"]:
+                if progress["vision"].cancelled(gen):
                     return
                 for rows in pool.map(recognise, chunk):  # (photo, stamp, text, nfaces, faceq)
-                    if gen != _run["gen"]:
+                    if progress["vision"].cancelled(gen):
                         return
-                    with _writer() as con:
+                    with vdb.writer() as con:
                         con.executemany("INSERT OR REPLACE INTO ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
                         con.executemany("INSERT OR REPLACE INTO ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
                         con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'vision',?,NULL)", [(r[0], r[1]) for r in rows])
@@ -425,7 +410,7 @@ def _caption_job(photos: list, gen: int):
     try:
         last = time.time()
         for chunk in chunked(todo, 8):  # one thread: the GPU serialises anyway, and the other jobs keep the CPU
-            if gen != _run["gen"]:
+            if progress["captions"].cancelled(gen):
                 return
             batch = chunk
             try:
@@ -435,9 +420,9 @@ def _caption_job(photos: list, gen: int):
                 progress["captions"]["done"] += len(batch)
                 continue
             rows = [(p["id"], stamp(p), (t or "")[:500]) for p, t in zip(batch, texts)]
-            if gen != _run["gen"]:
+            if progress["captions"].cancelled(gen):
                 return
-            with _writer() as con:
+            with vdb.writer() as con:
                 con.executemany("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
                 con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])
             progress["captions"]["done"] += len(batch)
@@ -460,13 +445,10 @@ def _looks_todo(photos: list, parts: dict, con=None) -> list:
     """[(photo, {parts it still needs})]: a changed file needs them all; otherwise only a part whose model
     arrived since (or whose measure changed) is filled in, and the rest is kept."""
     import json
-    own = con is None
-    con = con or connect()
-    try:
-        have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks'")}
-    finally:
-        if own:
-            con.close()
+    if con is None:
+        with vdb.reader(READ_TIMEOUT) as con:
+            return _looks_todo(photos, parts, con)
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks'")}
     out = []
     for p in photos:
         if p["video"]:
@@ -516,7 +498,7 @@ def _looks_job(photos: list, gen: int):
         last = time.time()
         with ThreadPoolExecutor(n, thread_name_prefix="looks") as pool:
             for chunk in chunked(todo, 16):
-                if gen != _run["gen"]:
+                if progress["looks"].cancelled(gen):
                     return
                 batch = chunk
                 faces = _looks_faces([p["id"] for p, need in batch if "e" in need])
@@ -552,9 +534,9 @@ def _looks_job(photos: list, gen: int):
                             r[2]["aesthetic"] = score
                     except Exception as e:
                         log.warning("photo quality: the aesthetic model failed on a batch (%s)", e)
-                if gen != _run["gen"]:
+                if progress["looks"].cancelled(gen):
                     return
-                with _writer() as con:
+                with vdb.writer() as con:
                     old = {r[0]: r for r in con.execute(
                         f"SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks WHERE photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
                     have = {r[0]: (r[1], r[2]) for r in con.execute(
@@ -592,17 +574,16 @@ def start(photos: list):
         return
     init()
     ids = {p["id"] for p in photos}
-    if any(progress[k]["running"] for k in JOBS) and ids <= _run.get("ids", set()):
+    if any(progress[k]["running"] for k in JOBS) and ids <= _run["ids"]:
         return  # nothing new for the running jobs: they carry on (a library change used to restart them at every batch)
-    _run["gen"] += 1
     _run["ids"] = ids
-    gen = _run["gen"]
+    gens = {k: progress[k].cancel() for k in JOBS}  # the running jobs stop at their next batch; these runs take over
     # one at a time, through the shared job queue, so the machine stays usable
-    jobs.submit("pixels", lambda: _pixel_job(photos, gen))
-    jobs.submit("vision", lambda: _vision_job(photos, gen))
+    jobs.submit("pixels", lambda: _pixel_job(photos, gens))
+    jobs.submit("vision", lambda: _vision_job(photos, gens["vision"]))
     if config.CAPTIONS:
-        jobs.submit("captions", lambda: _caption_job(photos, gen))
-    jobs.submit("looks", lambda: _looks_job(photos, gen))
+        jobs.submit("captions", lambda: _caption_job(photos, gens["captions"]))
+    jobs.submit("looks", lambda: _looks_job(photos, gens["looks"]))
     from app.ai import jerseys
     jerseys.start(photos)  # numbers on shirts, after object detection has found the people
     from app.ai import clothing
@@ -617,33 +598,31 @@ def results() -> dict:
     """{photo_id: {...}} for the index build."""
     if not vdb.exists():
         return {}
-    con = connect()
     out = {}
     try:
-        for r in con.execute("SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality"):
-            out.setdefault(r[0], {}).update(sharp=r[1], bright=r[2], clip_lo=r[3], clip_hi=r[4])
-        for r in con.execute("SELECT photo_id, text FROM ai_text"):
-            out.setdefault(r[0], {}).update(ocr=r[1] or None)
-        for r in con.execute("SELECT photo_id, nfaces, faceq FROM ai_face_count"):
-            out.setdefault(r[0], {}).update(vfaces=r[1], faceq=r[2])
-        for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'"):
-            out.setdefault(r[0], {}).update(objects={}, npeople=0)
-        for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks"):
-            out.setdefault(r[0], {}).update(aesth=r[1], focus=r[2], eyes_checked=r[3], eyes_closed=r[4])
-        from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
-        for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
-            out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
-        for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
-            out.setdefault(pid, {}).setdefault("persons", []).append((x, y, w, h))  # for the focus point of a cropped thumbnail (smartcrop.py)
-        for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):
-            d = out.setdefault(pid, {})
-            d.setdefault("objects", {})[cls] = n
-            if cls == "person":
-                d["npeople"] = n
+        with vdb.reader(READ_TIMEOUT) as con:
+            for r in con.execute("SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality"):
+                out.setdefault(r[0], {}).update(sharp=r[1], bright=r[2], clip_lo=r[3], clip_hi=r[4])
+            for r in con.execute("SELECT photo_id, text FROM ai_text"):
+                out.setdefault(r[0], {}).update(ocr=r[1] or None)
+            for r in con.execute("SELECT photo_id, nfaces, faceq FROM ai_face_count"):
+                out.setdefault(r[0], {}).update(vfaces=r[1], faceq=r[2])
+            for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'"):
+                out.setdefault(r[0], {}).update(objects={}, npeople=0)
+            for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks"):
+                out.setdefault(r[0], {}).update(aesth=r[1], focus=r[2], eyes_checked=r[3], eyes_closed=r[4])
+            from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
+            for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
+                out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
+            for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
+                out.setdefault(pid, {}).setdefault("persons", []).append((x, y, w, h))  # for the focus point of a cropped thumbnail (smartcrop.py)
+            for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):
+                d = out.setdefault(pid, {})
+                d.setdefault("objects", {})[cls] = n
+                if cls == "person":
+                    d["npeople"] = n
     except Exception as e:
         log.warning("analysis: results unreadable (%s)", e)
-    finally:
-        con.close()
     return out
 
 
@@ -651,21 +630,20 @@ def boxes(photo_id: int) -> list:
     """Detected objects of one photo for the info panel: [{cls, score, x, y, w, h}], best first."""
     if not vdb.exists():
         return []
-    con = connect()
     try:
-        return [dict(r) for r in con.execute(
-            "SELECT cls, round(score, 2) AS score, x, y, w, h FROM ai_objects WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
+        with vdb.reader(READ_TIMEOUT) as con:
+            return [dict(r) for r in con.execute(
+                "SELECT cls, round(score, 2) AS score, x, y, w, h FROM ai_objects WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
     except Exception:
         return []
-    finally:
-        con.close()
 
 
 def reset(job: str):
     """Throw away one analysis so it is computed again from scratch."""
     tables = {"quality": ["ai_quality"], "vision": ["ai_text", "ai_face_count"], "objects": ["ai_objects"], "captions": ["ai_descriptions"], "looks": ["ai_looks"]}.get(job, [])
-    _run["gen"] += 1  # stop the running jobs; the caller restarts them
-    with _writer() as con:
+    for k in JOBS:  # stop the running jobs (all of them: they run as one set, and the caller restarts the set)
+        progress[k].cancel()
+    with vdb.writer() as con:
         for t in tables:
             con.execute(f"DELETE FROM {t}")
         if job in JOBS:

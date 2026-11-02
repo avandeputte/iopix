@@ -1,7 +1,7 @@
 /** DOM helpers, icons, number and date formatting, the API calls, toasts and the iOS keyboard fix. */
 
 export const $ = (s, r = document) => r.querySelector(s);
-export const ICONS = {
+const ICONS = {
   rotate: 'M15.55 5.55L11 1v3.07C7.06 4.56 4 7.92 4 12s3.05 7.44 7 7.93v-2.02c-2.84-.48-5-2.94-5-5.91s2.16-5.43 5-5.91V10l4.55-4.45zM19.93 11c-.17-1.39-.72-2.73-1.62-3.89l-1.42 1.42c.54.75.88 1.6 1.02 2.47h2.02zM13 17.9v2.02c1.39-.17 2.74-.71 3.9-1.61l-1.44-1.44c-.75.54-1.59.89-2.46 1.03zm3.89-2.42l1.42 1.41c.9-1.16 1.45-2.5 1.62-3.89h-2.02c-.14.87-.48 1.72-1.02 2.48z',
   crop: 'M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z',
   search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
@@ -85,6 +85,10 @@ export const norm = (s) => String(s ?? '').toLowerCase().normalize('NFD').replac
 export const nf = new Intl.NumberFormat();
 export const plural = (n, one, many = one + 's') => `${nf.format(n)} ${n === 1 ? one : many}`;
 export const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// the sizes and times shared across modules (and with app.css): one place to retune them
+export const DOCK_MIN = 1100;  // the sidebar docks beside the grid from this width on
+export const BREAK_PHONE = 800;  // narrower than this is a phone: app.css's @media (max-width: 800px)
+export const TOAST_LONG = 8000;  // ms: a toast with more to read than a one-liner
 // Photo timestamps are the camera's local time stored as if UTC, so they are formatted in UTC to show what the camera saw.
 export const UTC = { timeZone: 'UTC' };
 export const dfDay = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', ...UTC });
@@ -99,7 +103,7 @@ export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', '
 export const date = (ts) => new Date(ts * 1000);
 /** How well a photo's date is known: the index's dprec (1 month and year, 2 year only, 3 unknown) or the API's
  *  datePrecision name; 0 = exact. */
-export const PREC = { exact: 0, month: 1, year: 2, unknown: 3 };
+const PREC = { exact: 0, month: 1, year: 2, unknown: 3 };
 export const precOf = (p) => (typeof p === 'number' ? p : PREC[p] || 0);
 const dfMonthLong = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', ...UTC });
 /** A date as much of it as is known: "May 1992", "1992", "Date unknown"; `exact` formats a date known to the day. */
@@ -117,13 +121,13 @@ export const isoDay = (ts) => date(ts).toISOString().slice(0, 10);
  *  one reflow makes WebKit measure the viewport again; it is done only when the viewport is short (its height
  *  below the screen's), after a text field loses focus, on start and on return to the app. If the viewport stays
  *  short, html.vpshort makes the bottom bar fit the part that is drawn. */
-export const IOS_APP = navigator.standalone === true;
-export function screenTall() {
+const IOS_APP = navigator.standalone === true;
+function screenTall() {
   const portrait = window.matchMedia('(orientation: portrait)').matches;
   return portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
 }
-export const viewportShort = () => IOS_APP && screenTall() - window.innerHeight > 4;
-export function healViewport() {
+const viewportShort = () => IOS_APP && screenTall() - window.innerHeight > 4;
+function healViewport() {
   if (!IOS_APP) return;
   if (viewportShort()) {
     const keep = ['#main', '#filters', '.lb-info'].map((q) => { const el = $(q); return el ? [el, el.scrollTop] : null; }).filter(Boolean);
@@ -153,7 +157,7 @@ const MILE_REGIONS = ['US', 'PR', 'GU', 'VI', 'AS', 'MP', 'UM', 'GB', 'LR', 'MM'
 export function regionUsesMiles(lang) {
   try { const l = new Intl.Locale(lang || 'en-US'); return MILE_REGIONS.includes(l.region || l.maximize().region); } catch { return false; }
 }
-export const useMiles = () => { const u = store.get('units', 'auto'); return u === 'mi' || (u !== 'km' && regionUsesMiles(navigator.language)); };
+const useMiles = () => { const u = store.get('units', 'auto'); return u === 'mi' || (u !== 'km' && regionUsesMiles(navigator.language)); };
 const FT = 3.28084, MI = 1609.344, nf1 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 /** A distance in metres in words: "350 m", "1.2 km"; "800 ft", "0.7 mi". */
 export function fmtDist(m) {
@@ -186,7 +190,7 @@ export const NET = { lost: false };
 export const NO_CONNECTION = 'No connection to the server.';
 const isNetErr = (e) => e instanceof TypeError;
 const netError = (more = '') => Object.assign(new Error(NO_CONNECTION + more), { net: true });
-export function netWait(ms) {
+function netWait(ms) {
   return new Promise((ok) => {
     const done = () => { clearTimeout(t); window.removeEventListener('online', done); document.removeEventListener('visibilitychange', vis); ok(); };
     const vis = () => { if (document.visibilityState === 'visible') done(); };
@@ -197,7 +201,7 @@ export function netWait(ms) {
 /** Every call to the server goes through here. opts: {method, body (a plain object is sent as JSON; a FormData or a
  *  URLSearchParams as it is), retry (reads: try again when the connection drops)}. A failed request becomes an Error
  *  carrying the server's message (its JSON `detail`) or the status. */
-export async function request(path, { method = 'GET', body, retry = method === 'GET' } = {}) {
+async function request(path, { method = 'GET', body, retry = method === 'GET' } = {}) {
   const init = { method };
   if (body instanceof FormData || body instanceof URLSearchParams) init.body = body;
   else if (body !== undefined) { init.headers = { 'content-type': 'application/json' }; init.body = JSON.stringify(body); }
@@ -226,7 +230,7 @@ export const del = (path) => request(path, { method: 'DELETE' });
 
 /** The signed-in user's settings (synced to the server) behind `store`; kept here so core.js imports nothing. */
 export const SETTINGS = { user: null, pending: {}, flush: 0 };
-export const KEY = 'iopix.';  // every key this app keeps in the browser starts with it
+const KEY = 'iopix.';  // every key this app keeps in the browser starts with it
 export const store = {
   // browser keys carry the app's prefix (iopix.theme, iopix.tile…); the server-side user settings keep the bare names
   get(k, d) { if (SETTINGS.user) return k in SETTINGS.user ? String(SETTINGS.user[k]) : d; try { return localStorage.getItem(KEY + k) ?? d; } catch { return d; } },

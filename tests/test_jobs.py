@@ -92,3 +92,45 @@ def test_a_burst_of_submissions_is_picked_in_order(monkeypatch):
     jobs.submit("pixels", lambda: order.append("pixels"))
     assert _wait(lambda: len(order) == 3, timeout=5)
     assert order == ["thumbs", "pixels", "embeddings"]
+
+
+def test_scan_job_start_rule_and_reset(monkeypatch):
+    """The shared scan scaffolding (app/ai/scanjob.py): a start whose to-do is already inside the running job's is
+    ignored, one with something new cancels the run, and a reset cancels it and empties the job's tables."""
+    from app.ai.scanjob import ScanJob
+    from app.data import vdb
+    monkeypatch.setattr(jobs.config, "ANALYSIS", True)  # the tests run with analysis off; start() refuses otherwise
+    monkeypatch.setattr(jobs, "GRACE", 0.2)
+    gate = threading.Event()
+    runs, done = [], []
+
+    def work(gen, todo):
+        runs.append(gen)
+        gate.wait(2)
+        if not job.progress.cancelled(gen):
+            done.append([p["id"] for p in todo])
+
+    job = ScanJob("captions", lambda con, photos: [p for p in photos if p["id"] not in done_ids], work)
+    done_ids = set()
+    photos = [{"id": 1}, {"id": 2}]
+    job.start(photos)
+    assert _wait(lambda: job.progress["running"] and job.progress["total"] == 2)
+    job.start(photos)  # nothing new: no second run, the first one keeps its generation
+    job.start([photos[0]])
+    assert len(runs) == 1 and not job.progress.cancelled(runs[0])
+    job.start(photos + [{"id": 3}])  # something new: the running job is cancelled and a new run takes over
+    assert job.progress.cancelled(runs[0])
+    gate.set()
+    assert _wait(lambda: len(runs) == 2 and jobs.status()["running"] is None)
+    assert done == [[1, 2, 3]]
+    gate.clear()
+    job.start(photos + [{"id": 4}])
+    assert _wait(lambda: len(runs) == 3)
+    job.reset()  # cancels the run (its results are not recorded) and leaves nothing in ai_scans for the job
+    assert job.progress.cancelled(runs[2]) and not job.progress["running"]
+    gate.set()
+    assert _wait(lambda: jobs.status()["running"] is None)
+    assert done == [[1, 2, 3]]
+    with vdb.reader() as con:
+        assert con.execute("SELECT count(*) FROM ai_scans WHERE job = 'captions'").fetchone()[0] == 0
+    jobs._progress.pop("captions", None)  # the test's own Progress leaves the status registry as it found it

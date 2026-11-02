@@ -63,7 +63,7 @@ def api_settings_get(request: Request):
 
 
 @router.get("/api/settings/proxy", dependencies=[access.admin])
-def api_proxy_get(request: Request):
+def api_proxy_get():
     """Sign-in at a reverse proxy (Cloudflare Access...): its settings, which of them iopix.env fixes, and the
     Cloudflare Access team and application last seen in requests. Admins only."""
     return proxyauth.status()
@@ -287,7 +287,7 @@ def db_settings_public() -> dict:
 
 
 @router.get("/api/roots", dependencies=[access.admin])
-async def api_roots(request: Request):
+async def api_roots():
     """Album roots from digiKam with the local folder each one maps to (admin)."""
     return {"roots": await run_in_threadpool(dkdb.album_roots), "photosRoot": str(config.PHOTOS_ROOT)}
 
@@ -303,7 +303,7 @@ async def api_db_test(request: Request):
 
 
 @router.get("/api/viewerdb", dependencies=[access.admin])
-def api_viewerdb(request: Request):
+def api_viewerdb():
     """Where the viewer keeps its own data: SQLite (the default) or MySQL/MariaDB."""
     return vdb.public_settings()
 

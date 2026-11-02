@@ -150,7 +150,7 @@ def discard(token: str):
 
 
 # ---- the plan
-def _sha256(path, limit: int = None) -> str:
+def _sha256(path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:

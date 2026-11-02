@@ -2476,3 +2476,33 @@ def test_date_suggestions_and_quality_pages_render(page, server, lib):
     page.wait_for_selector("button:has-text('Check')", timeout=10000)
     page.goto(server + "/#/photos?rejects=1")
     page.wait_for_selector("#chips :text('Likely rejects')", timeout=10000)
+
+
+def test_suggestion_cards_tag_all_and_not_them(page, server, lib):
+    """With suggestions to show (the API answered here: the test library has no models), Jersey numbers draws a card per
+    photo under the player's heading with Tag, Not them and a Tag all for the group; Not them posts the dismissal and the
+    card leaves without the page being drawn again. Wrongly rotated shows each finding turned the way the fix would leave it."""
+    import json as _json
+    ids = lib["ids"][:3]
+    jerseys = {"ready": True, "coverage": [5, 5], "read": 3, "named": 1, "players": [{"tag": 1, "name": "Ann", "numbers": [10]}],
+               "items": [{"id": ids[0], "tag": 1, "name": "Ann", "number": 10, "basis": "folder", "n": 4}, {"id": ids[1], "tag": 1, "name": "Ann", "number": 10, "basis": "year", "n": 2}]}
+    answer = lambda data: (lambda route: route.fulfill(status=200, content_type="application/json", body=_json.dumps(data)))
+    page.route("**/api/jerseys*", answer(jerseys))
+    posted = []
+    page.route("**/api/suggestions/dismiss", lambda route: (posted.append(_json.loads(route.request.post_data)), route.fulfill(status=200, content_type="application/json", body="{}")))
+    page.goto(server + "/#/jerseys")
+    page.wait_for_selector(".jgroup .sugg-item .tile img", timeout=10000)
+    assert page.locator(".sugg-item").count() == 2 and "4 named in this folder" in page.locator(".sugg-item").first.text_content()
+    assert page.locator(".jgroup h3 .pillbtn", has_text="Tag all").count() == 1
+    assert page.locator(".sugg-item button[title^='Tag Ann']").count() == 2
+    page.evaluate("document.querySelector('.jgroup').dataset.mark = 'kept'")
+    page.locator(".sugg-item").first.locator("button", has_text="Not them").click()
+    page.wait_for_function("document.querySelectorAll('.sugg-item').length === 1", timeout=5000)
+    assert posted == [{"kind": "jersey", "pairs": [[ids[0], 1]]}]
+    assert page.evaluate("document.querySelector('.jgroup').dataset.mark") == "kept", "the page was drawn again"
+    rotation = {"ready": True, "running": False, "coverage": [1, 1], "dismissed": 2, "items": [{"id": ids[2], "op": "right", "text": "On its left side", "score": 0.97}]}
+    page.route("**/api/rotation*", answer(rotation))
+    page.goto(server + "/#/rotation")
+    page.wait_for_selector(".sugg-item .tile img[title^='Shown the way']", timeout=10000)
+    assert "2 marked as fine are left out" in page.inner_text(".intro")
+    assert page.locator(".sugg-item button", has_text="It’s fine").count() == page.evaluate("import('/js/state.js').then((m) => m.S.CAN_MANAGE ? 1 : 0)")

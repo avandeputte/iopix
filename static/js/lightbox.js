@@ -1,5 +1,5 @@
 /** The photo viewer: navigation, zoom, info panel, faces, objects, sharing, lossless edits, slideshow. */
-import { $, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, fmtKnown, precOf, h, icon, nf, norm, plural, post, store } from './core.js';
+import { $, TOAST_LONG, api, date, dfDay, dfLong, dfTime, fill, fmtBytes, fmtDist, fmtDur, fmtHeight, fmtKnown, h, icon, nf, norm, plural, post, precOf, store } from './core.js';
 import { S, ST, faceUrl, go, hashFor, infoHidden, infoPrefsEditor, onRoute, parseHash, photosWith, pollSoon, toast, toastError } from './state.js';
 import { G, renderGrid, scrollToIndex, setBadges } from './grid.js';
 import { albumDialog, clearSelection, histEntry, modal, movePhotos, renamePhoto, setFavorite, trashPhotos } from './actions.js';
@@ -11,10 +11,10 @@ import { awaitReindex, pollStatus } from './main.js';
 // src = the list being browsed ({id, w, h, ts, video}); faces/objects = overlay toggles; pushed = we added a history entry for ?p=
 export const LB = { open: false, src: null, i: 0, token: 0, info: store.get('info', '0') === '1', prefs: false, faces: false, objects: false, scale: 1, tx: 0, ty: 0, ar: 1.5, pushed: false, detail: null, play: 0, mini: null, hires: false };
 export const details = new Map();  // photo id -> promise of /api/photo/:id, bounded LRU-ish cache
-export const NATIVE = new Set(['JPG', 'PNG', 'GIF', 'WEBP']);
+const NATIVE = new Set(['JPG', 'PNG', 'GIF', 'WEBP']);
 // face changes made here in the last minute, per photo: a copy of the photo fetched from the server while the
 // index has not caught up yet must not show the old faces for a moment, so they are applied to it again
-export const RECENT_FACE_OPS = new Map();  // photo id -> [{op, at}]
+const RECENT_FACE_OPS = new Map();  // photo id -> [{op, at}]
 const reapplyRecent = (id, d) => {
   const ops = (RECENT_FACE_OPS.get(id) || []).filter((x) => Date.now() - x.at < 60000);
   if (!ops.length) { RECENT_FACE_OPS.delete(id); return d; }
@@ -29,7 +29,7 @@ export function getDetail(id) {
   }
   return details.get(id);
 }
-export function currentSource() { return S.route.view === 'map' ? M.data : S.route.view === 'photos' ? G.data : { id: [] }; }
+function currentSource() { return S.route.view === 'map' ? M.data : S.route.view === 'photos' ? G.data : { id: [] }; }
 export function syncLightbox() {
   const p = +S.route.params.get('p');
   if (!p) { if (LB.open) closeLightbox(false); return; }
@@ -39,14 +39,14 @@ export function syncLightbox() {
   const idx = src.id.indexOf(p);
   if (idx >= 0) openLightbox(src, idx, false); else openLightbox({ id: [p] }, 0, false);
 }
-export function setPhotoParam(id, push) {
+function setPhotoParam(id, push) {
   const p = new URLSearchParams(S.route.params);
   p.set('p', id);
   history[push ? 'pushState' : 'replaceState'](null, '', hashFor(S.route.view, p));
   S.route = parseHash(); S.lastHash = location.hash;  // drawn already: Back from here is a change (state.js onNav)
 }
 
-export function buildLightbox() {
+function buildLightbox() {
   const lb = $('#lightbox');
   const btn = (name, title, fn, cls = '') => h('button', { class: 'iconbtn ' + cls, title, 'aria-label': title, onclick: (e) => { e.stopPropagation(); fn(); } }, icon(name));
   LB.el = {
@@ -99,7 +99,7 @@ export function buildLightbox() {
  *  (same origin, quick: the click still counts as the gesture the sheet requires), not for every
  *  photo shown. Where the browser has no share sheet (Firefox on the desktop, plain http) the menu
  *  below opens instead. */
-export async function shareNow() {
+async function shareNow() {
   const anchor = LB.el.shareBtn;
   if (!navigator.share) { shareMenu(anchor); return; }
   const id = LB.src.id[LB.i], d = LB.detail, name = d?.name || `photo-${id}.jpg`;
@@ -120,7 +120,7 @@ async function shareFile(id, d) {
 
 /** The fallback menu: a link to the photo here, the original or a smaller JPEG as a download,
  *  the original in a tab, and an email with the link. Anchored under the share button. */
-export function shareMenu(anchor) {
+function shareMenu(anchor) {
   const open = $('.sharemenu');
   if (open) { open.remove(); return; }
   const id = LB.src.id[LB.i], d = LB.detail, name = d?.name || `photo ${id}`, url = location.href;
@@ -143,7 +143,7 @@ export function shareMenu(anchor) {
 
 /** Hovering a strip thumbnail shows that photo over the stage, without leaving the current one;
  *  the thumbnail appears at once and the full preview replaces it when loaded. */
-export function peek(id) {
+function peek(id) {
   clearTimeout(LB.peekT);
   LB.peekT = setTimeout(() => {
     if (!LB.open) return;
@@ -157,14 +157,14 @@ export function peek(id) {
     full.src = `/preview/${id}`;
   }, 90);
 }
-export function unpeek() {
+function unpeek() {
   clearTimeout(LB.peekT);
   LB.peekEl?.remove(); LB.peekEl = null;
 }
 
 /** Rebuild the strip around the current photo when it drifts out of the rendered window, and
  *  keep the current one marked and centered. */
-export function renderStrip() {
+function renderStrip() {
   const { src, i, el } = LB, reel = el.strip.querySelector('.reel');
   if (!src || src.id.length < 2) { el.strip.hidden = true; return; }
   el.strip.hidden = false;
@@ -241,7 +241,7 @@ export function popMenu(anchor, items) {
   return menu;
 }
 /** The info panel's Actions menu: everything that can be done with this photo, in one place. */
-export function photoActions(anchor, d) {
+function photoActions(anchor, d) {
   const editing = S.EDITING, manage = S.CAN_MANAGE;
   const dateBox = () => { const box = LB.el.info.querySelector('.dateedit')?.parentElement; if (box) { box.hidden = false; box.scrollIntoView({ block: 'nearest' }); box.querySelector('input')?.focus(); } };
   popMenu(anchor, [
@@ -269,11 +269,11 @@ export function photoActions(anchor, d) {
     editing ? ['Edit log', () => { location.hash = `#/history?photo=${d.id}`; }] : null,
   ]);
 }
-export async function refreshImages(id) {
+async function refreshImages(id) {
   await Promise.all([fetch(`/thumb/${id}`, { cache: 'reload' }), fetch(`/preview/${id}`, { cache: 'reload' })]).catch(() => {});
   document.querySelectorAll(`img[src$="/thumb/${id}"], img[src$="/preview/${id}"]`).forEach((img) => { const u = img.src; img.src = ''; img.src = u; });
 }
-export async function afterFileChange(id, d) {
+async function afterFileChange(id, d) {
   details.delete(id);
   await refreshImages(id);
   if (LB.open) {
@@ -283,13 +283,13 @@ export async function afterFileChange(id, d) {
   }
   S.keepView = true; pollSoon(600);
 }
-export async function undoLast(id) {
+async function undoLast(id) {
   try {
     const e = (await api(`/api/history?photo=${id}&limit=1`)).entries[0];
     if (!e || e.action !== 'lossless') throw new Error('Nothing to undo');
     await post(`/api/history/${e.id}/restore`, { kind: 'undo' });
     await afterFileChange(id, null); toast('Put back as it was.');
-  } catch (err) { toastError(err, 8000); }
+  } catch (err) { toastError(err, TOAST_LONG); }
 }
 export async function transformPhotos(ids, op) {
   let r;
@@ -305,7 +305,7 @@ export async function transformPhotos(ids, op) {
 /** The one editing mode in progress on the photo shown (adjust, crop, draw a face, move a face). It captures the
  *  photo it started on: stepping to another photo or closing the viewer ends it, so it can never act on the wrong photo. */
 function setMode(stop) { endMode(); LB.mode = { stop }; }
-export function endMode() { const m = LB.mode; LB.mode = null; if (m) m.stop(); }
+function endMode() { const m = LB.mode; LB.mode = null; if (m) m.stop(); }
 function startAdjust() {
   const { stage, frame } = LB.el, d = LB.detail;
   if (!d || d.video) return;
@@ -346,12 +346,12 @@ function startAdjust() {
   stage.append(bar);
 }
 /** Crop: drag a rectangle over the photo, adjust it by its corners, then Crop. The dark edge shows what goes. */
-export function startCrop() {
+function startCrop() {
   const { stage, frame } = LB.el, d = LB.detail;
   if (!d || d.video || !S.LOSSLESS) return;
   const W = d.w, H = d.h;
   const ext = (d.name || '').split('.').pop().toLowerCase();
-  if (S.LOSSLESS.crop && !S.LOSSLESS.crop.includes('.' + ext)) { toast(`Cropping here works for ${S.LOSSLESS.crop.map((x) => x.slice(1).toUpperCase()).join(', ')} files.`, null, null, 8000); return; }
+  if (S.LOSSLESS.crop && !S.LOSSLESS.crop.includes('.' + ext)) { toast(`Cropping here works for ${S.LOSSLESS.crop.map((x) => x.slice(1).toUpperCase()).join(', ')} files.`, null, null, TOAST_LONG); return; }
   stage.querySelector('.cropbar')?.remove(); frame.querySelector('.cropbox')?.remove();
   toast('Drag a rectangle over the part to keep.', null, null, 4000);
   let r = null, start = null, drag = null;
@@ -403,7 +403,7 @@ export function startCrop() {
 /** A source list without item k: the id list and every array alongside it (w, h, ts...), index lists (geo, faces)
  *  and index-keyed maps (video) shifted, so what is shown stays the photo at that position. */
 const INDEX_LISTS = new Set(['geo', 'faces']);  // lists of positions into id (every other array runs alongside id)
-export function dropIndex(src, k) {
+function dropIndex(src, k) {
   const out = {};
   for (const [key, v] of Object.entries(src)) {
     if (Array.isArray(v) || ArrayBuffer.isView(v)) {
@@ -437,7 +437,7 @@ export function dropIndexes(src, ks) {
   }
   return out;
 }
-export function deleteCurrent() {
+function deleteCurrent() {
   if (!S.CAN_MANAGE || !LB.open) return;
   const id = LB.src.id[LB.i];
   const wasGrid = LB.src === G.data;  // the grid replaces its data while trashing: the viewer must follow it, not a copy
@@ -449,7 +449,7 @@ export function deleteCurrent() {
     LB.i = Math.min(LB.i, LB.src.id.length - 1); setPhotoParam(LB.src.id[LB.i], false); showItem();
   });
 }
-export function closeLightbox(fromUser) {
+function closeLightbox(fromUser) {
   if (!LB.open) return;
   endMode(); stopSlideshow();
   LB.open = false; LB.token++;
@@ -467,7 +467,7 @@ export function closeLightbox(fromUser) {
   }
   LB.pushed = false;
 }
-export function step(d) {
+function step(d) {
   if (LB.mode) return;  // a crop or face box in progress belongs to this photo: finish or cancel it first
   const n = LB.i + d;
   if (n < 0 || n >= LB.src.id.length) { if (LB.play) stopSlideshow(); return; }
@@ -564,7 +564,7 @@ export function sizeFrame() {
   frame.style.marginLeft = -w / 2 + 'px'; frame.style.marginTop = -hgt / 2 + 'px';
   applyZoom();
 }
-export function applyZoom() {
+function applyZoom() {
   const { stage, frame } = LB.el;
   if (LB.scale <= 1.001) { LB.scale = 1; LB.tx = LB.ty = 0; }
   const mx = Math.max(0, (LB.fw * LB.scale - stage.clientWidth) / 2), my = Math.max(0, (LB.fh * LB.scale - stage.clientHeight) / 2);
@@ -580,7 +580,7 @@ export function applyZoom() {
     full.src = `/orig/${d.id}`;
   }
 }
-export function zoomAt(factor, cx, cy) {
+function zoomAt(factor, cx, cy) {
   const { stage } = LB.el, r = stage.getBoundingClientRect();
   const s2 = Math.min(10, Math.max(1, LB.scale * factor));
   const dx = cx - r.left - r.width / 2 - LB.tx, dy = cy - r.top - r.height / 2 - LB.ty;
@@ -588,7 +588,7 @@ export function zoomAt(factor, cx, cy) {
   LB.scale = s2;
   applyZoom();
 }
-export function initGestures(stage) {
+function initGestures(stage) {
   const pts = new Map();
   let start = null, pinch = 0, moved = false;
   stage.addEventListener('wheel', (e) => {
@@ -636,7 +636,7 @@ export function initGestures(stage) {
   stage.addEventListener('pointerup', up);
   stage.addEventListener('pointercancel', up);
 }
-export function toggleInfo() {
+function toggleInfo() {
   LB.info = !LB.info;
   store.set('info', LB.info ? '1' : '0');
   LB.el.info.hidden = !LB.info;
@@ -644,7 +644,7 @@ export function toggleInfo() {
   if (LB.info) renderInfo();
   sizeFrame();
 }
-export function toggleObjects() {
+function toggleObjects() {
   LB.objects = !LB.objects;
   LB.el.objectsBtn.classList.toggle('on', LB.objects);
   renderFaces();
@@ -655,9 +655,9 @@ export function toggleFaces() {
   renderFaces();
 }
 /** Face regions on the photo (confirmed, suggested, unknown), shown when LB.faces is on; ignored ones are never drawn. */
-export const faceRegions = (d) => [...d.faces.map((f) => ({ ...f, kind: 'confirmed' })), ...(d.faces_other || [])].filter((f) => f.kind !== 'ignored');
+const faceRegions = (d) => [...d.faces.map((f) => ({ ...f, kind: 'confirmed' })), ...(d.faces_other || [])].filter((f) => f.kind !== 'ignored');
 /** Redraw the face and object overlays on the picture from the toggles in LB.faces / LB.objects. */
-export function renderFaces() {
+function renderFaces() {
   const { frame } = LB.el, d = LB.detail;
   frame.querySelectorAll('.facebox').forEach((x) => x.remove());
   if (!d || d.video) return;
@@ -671,7 +671,7 @@ export function renderFaces() {
       onclick: (e) => { e.stopPropagation(); S.CAN_MANAGE ? faceMenu(e.currentTarget, f, d) : (f.kind === 'confirmed' && filterFromLightbox({ tag: f.tag })); } }, h('span', null, label)));
   }
 }
-export function faceMenu(box, f, d) {
+function faceMenu(box, f, d) {
   $('.facemenu')?.remove();
   const rect = () => [f.x, f.y, f.w, f.h];
   const item = (label, fn, danger) => h('div', { class: 'fmi' + (danger ? ' danger' : ''), onclick: (e) => { e.stopPropagation(); menu.remove(); fn(); } }, label);
@@ -713,9 +713,9 @@ export function faceMenu(box, f, d) {
 }
 /** A face change shows at once: the photo's details are changed here first, the request follows in the
  *  background (one at a time per photo, in order), and only a failure brings the server's version back. */
-export const FACE_Q = new Map();  // photo id -> promise of the last change sent for it
+const FACE_Q = new Map();  // photo id -> promise of the last change sent for it
 /** A person tagged on the photo without a face box: show their photos, mark their face, or take them off the photo. */
-export function tagOnlyMenu(anchor, f, d) {
+function tagOnlyMenu(anchor, f, d) {
   popMenu(anchor, [
     `${f.name} · no face box`,
     ['Show all photos of ' + f.name, () => filterFromLightbox({ tag: f.tag })],
@@ -724,7 +724,7 @@ export function tagOnlyMenu(anchor, f, d) {
   ]);
 }
 export const hasPeople = (d) => !!(d.faces?.length || d.tags?.some((t) => t.person));
-export function applyFaceLocally(d, op) {
+function applyFaceLocally(d, op) {
   const same = (f) => f.x === op.rect?.[0] && f.y === op.rect?.[1] && f.w === op.rect?.[2] && f.h === op.rect?.[3];
   const t = op.tag ? S.tagById.get(op.tag) : null;
   const confirmed = (d.faces || []).find(same), other = (d.faces_other || []).find(same);
@@ -745,24 +745,24 @@ export function applyFaceLocally(d, op) {
   else if (op.op === 'tagonly') keepTag(op.tag);
   else if (op.op === 'move' && was) { const moved = { ...was, ...at(op.new_rect) }; if (was.kind === 'confirmed') { delete moved.kind; d.faces.push(moved); } else d.faces_other.push(moved); }
 }
-export function redrawPhoto(id) {
+function redrawPhoto(id) {
   if (LB.open && LB.src.id[LB.i] === id && LB.detail) { renderFaces(); if (LB.info) renderInfo(); }
 }
 /** Remove a face region at once (no question); the message offers Undo, which puts the same region back. */
-export function removeFace(f, d) {
+function removeFace(f, d) {
   const rect = [f.x, f.y, f.w, f.h];
   const back = f.kind === 'confirmed' ? { op: 'add', tag: f.tag } : f.kind === 'suggested' ? { op: 'suggest', tag: f.tag } : f.kind === 'unknown' ? { op: 'detected' } : null;
   faceOp({ op: 'remove', image: d.id, rect }, back ? () => faceOp({ ...back, image: d.id, rect }) : null);
 }
 /** Every unnamed (unknown) face region on the photo, removed in one go; Undo puts them all back. */
-export function removeUnnamedFaces(d) {
+function removeUnnamedFaces(d) {
   const rects = faceRegions(d).filter((f) => f.kind === 'unknown').map((f) => [f.x, f.y, f.w, f.h]);
   if (!rects.length) { toast('No unnamed face regions on this photo.'); return; }
   const ops = (op) => rects.map((rect) => ({ op, image: d.id, rect }));
   faceOp(ops('remove'), () => faceOp(ops('detected'), null, `${plural(rects.length, 'unnamed face')} put back.`), `${plural(rects.length, 'unnamed face region')} removed.`);
 }
 /** One face change, or several on the same photo (an array, sent as one batch): shown at once, sent in order, undone from the message. */
-export function faceOp(op, undo, said) {
+export function faceOp(op, undo, said) {  // exported for test_ui.py, which calls it through import()
   const ops = Array.isArray(op) ? op : [op];
   op = ops[0];
   const id = op.image;
@@ -805,7 +805,7 @@ export function personPicker(onPick, photoId) {
   // people: person tags, and single tags filed under People that digiKam has not marked as persons yet (naming a face
   // with one marks it), so an existing "People/Belcufine/Nathan Belcufine" is offered instead of a new person being made
   const people = S.META.tags.filter((t) => t.full !== 'People' && t.full.split('/')[0] === 'People' && (t.person || (!t.hasKids && t.full.split('/').length > 2)));
-  const inp = h('input', { class: 'pagefilter', style: 'width:100%', placeholder: 'Type a name…' });
+  const inp = h('input', { class: 'pagefilter wfull', placeholder: 'Type a name…' });
   const list = h('div', { class: 'alist', style: 'max-height:40vh;margin-top:8px' });
   const families = S.META.tags.filter((t) => !t.person && t.full.startsWith('People/') && t.full.split('/').length === 2);
   // the people of the nearby photos in the same folder, nearest in time first: most likely the same people
@@ -839,7 +839,7 @@ export function personPicker(onPick, photoId) {
   draw(); inp.focus();
 }
 /** P in the lightbox: name the first face digiKam has not named yet (its picker opens), or draw one when there is none. */
-export function nameNextFace() {
+function nameNextFace() {
   const d = LB.detail;
   if (!d || d.video) return;
   const f = faceRegions(d).find((x) => x.kind === 'unknown' || x.kind === 'suggested');
@@ -847,7 +847,7 @@ export function nameNextFace() {
   if (!LB.faces) toggleFaces();
   personPicker((t) => faceOp({ op: 'name', image: d.id, rect: [f.x, f.y, f.w, f.h], tag: t.id }), d.id);
 }
-export function startDrawFace() {
+function startDrawFace() {
   const { stage, frame } = LB.el, d = LB.detail;
   if (!d || d.video) return;
   if (!LB.faces) toggleFaces();
@@ -871,7 +871,7 @@ export function startDrawFace() {
 }
 /** Move or resize a face box: drag inside it to move, drag a corner to resize; it stays inside the photo.
  *  Saved as a move of the region (digiKam's database and the sidecar), with undo in the edit log. */
-export function adjustFace(f, d) {
+function adjustFace(f, d) {
   const { frame } = LB.el;
   if (!d || d.video) return;
   const W = d.w, H = d.h;
@@ -912,13 +912,13 @@ export function adjustFace(f, d) {
     } }, 'Save'));
   LB.el.stage.append(bar);
 }
-export async function setTagIcon(t, photoId) {
+async function setTagIcon(t, photoId) {
   await tagOp({ op: 'icon', id: t.id, photo: photoId }, t);
   if (LB.open) { details.delete(LB.src.id[LB.i]); showItem(); }
 }
-export function toggleSlideshow() { LB.play ? stopSlideshow() : (LB.play = setInterval(() => { if (!LB.el.frame.querySelector('video')) step(1); }, 4000), LB.el.playBtn.replaceChildren(icon('pause'))); }
-export function stopSlideshow() { clearInterval(LB.play); LB.play = 0; LB.el?.playBtn.replaceChildren(icon('play')); }
-export function filterFromLightbox(obj) {
+function toggleSlideshow() { LB.play ? stopSlideshow() : (LB.play = setInterval(() => { if (!LB.el.frame.querySelector('video')) step(1); }, 4000), LB.el.playBtn.replaceChildren(icon('pause'))); }
+function stopSlideshow() { clearInterval(LB.play); LB.play = 0; LB.el?.playBtn.replaceChildren(icon('play')); }
+function filterFromLightbox(obj) {
   closeLightbox(false);
   LB.pushed = false;
   go('photos', photosWith(obj));
@@ -1097,6 +1097,33 @@ function infoDetails(c) {
 }
 
 /** Everything a model produced, together at the end: description, detected content, objects, text, sharpness, bursts, look-alikes. */
+/** Tags each suggested person on its photo without a face box (digiKam's own person tag, sidecar included); false when any failed. */
+export async function tagOnly(list) {
+  let r;
+  try { r = await post('/api/faces/batch', { ops: list.map((x) => ({ op: 'tagonly', image: x.id, tag: x.tag })) }); } catch (e) { toastError(e); return false; }
+  if (r.failed?.length) { toast(`${plural(r.failed.length, 'photo')} not tagged: ${r.failed[0].error}`, null, null, TOAST_LONG); return false; }
+  setBadges(list.map((x) => x.id), { faces: true });
+  list.forEach((x) => details.delete(x.id));  // a photo open in the viewer shows the person at its next draw
+  toast(list.length === 1 ? `Added ${list[0].name}.` : `${plural(list.length, 'photo')} tagged.`);
+  return true;
+}
+/** Never suggest `tag` for this photo again (jersey, clothing), or say it is the right way up (rotation); throws on failure. */
+export function dismissSuggestion(kind, id, tag) {
+  return kind === 'rotation' ? post('/api/rotation/dismiss', { photos: [id], on: true }) : post('/api/suggestions/dismiss', { kind, pairs: [[id, tag]] });
+}
+/** One suggestion line of the info panel: its text, the button that applies it, "not this one" (disabled while it posts) and the link to the page. */
+function suggestionRow(attrs, text, act, dismiss, all) {
+  const noBtn = dismiss ? h('button', { type: 'button', class: 'lnk', onclick: async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { await dismissSuggestion(dismiss.kind, dismiss.id, dismiss.tag); toast(dismiss.said); } catch (err) { toastError(err); b.disabled = false; }
+  } }, dismiss.label) : null;
+  return h('div', attrs, text, act ? h('button', { type: 'button', class: 'lnk', title: act.title, onclick: act.onclick }, act.label) : null,
+    noBtn ? [' · ', noBtn] : null, ' · ', h('a', { class: 'lnk', href: all.href }, all.label));
+}
+/** The info panel's Tag button for a suggested person: applied at once in the viewer, with undo in the toast. */
+const tagHere = (d, x) => ({ title: `Tag ${x.name} on this photo (undo from the edit log)`, label: `Tag ${x.name}`, onclick: () => faceOp({ op: 'tagonly', image: d.id, tag: x.tag }, () => faceOp({ op: 'untag', image: d.id, tag: x.tag }), `Added ${x.name}.`) });
+const notThem = (kind, d, x) => ({ kind, id: d.id, tag: x.tag, label: 'Not them', said: `Not ${x.name}: noted.` });
+
 function infoAi(c) {
   const { d, show, sub, lnk } = c;
   // everything a model produced, together at the end: description, detected content, objects, text, sharpness, bursts, look-alikes
@@ -1110,19 +1137,14 @@ function infoAi(c) {
       h('div', { class: 'a small' }, d.videoInfo.segments?.length ? d.videoInfo.segments.map((s, k) => [k ? ' ' : '', h('button', { type: 'button', class: 'lnk', title: `Jump to ${Math.floor(s.t / 60)}:${String(Math.floor(s.t % 60)).padStart(2, '0')}`, onclick: () => { if (LB.video) { LB.video.currentTime = s.t; LB.video.play(); } } }, s.text)]) : d.videoInfo.transcript.slice(0, 2000)))) : null,
     d.jerseys?.length ? h('div', { class: 'irow' }, icon('text'), h('div', null, h('div', { class: 'b' }, 'Jersey numbers'),
       h('div', { class: 'a small' }, [...new Set(d.jerseys.map((j) => j.number))].map((n, k) => [k ? ' · ' : '', lnk(`number ${n}`, { jersey: n })])),
-      (d.jerseySuggestions || []).map((x) => h('div', { class: 'b', style: 'margin-top:4px' }, `Number ${x.number} is probably ${x.name} (${x.n} named ${x.basis === 'folder' ? 'in this folder' : 'this year'}). `,
-        S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Tag ${x.name} on this photo (undo from the edit log)`, onclick: () => faceOp({ op: 'tagonly', image: d.id, tag: x.tag }, () => faceOp({ op: 'untag', image: d.id, tag: x.tag }), `Added ${x.name}.`) }, `Tag ${x.name}`) : null,
-        S.EDITING ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: 'jersey', pairs: [[d.id, x.tag]] }); toast(`Not ${x.name}: noted.`); } catch (e) { toastError(e); } } }, 'Not them')] : null,
-        ' · ', h('a', { class: 'lnk', href: '#/jerseys' }, 'All suggestions'))))) : null,
+      (d.jerseySuggestions || []).map((x) => suggestionRow({ class: 'b', style: 'margin-top:4px' }, `Number ${x.number} is probably ${x.name} (${x.n} named ${x.basis === 'folder' ? 'in this folder' : 'this year'}). `,
+        S.EDITING ? tagHere(d, x) : null, S.EDITING ? notThem('jersey', d, x) : null, { href: '#/jerseys', label: 'All suggestions' })))) : null,
     d.rotationSuggestion ? h('div', { class: 'irow' }, icon('rotate'), h('div', null, h('div', { class: 'a' }, d.rotationSuggestion.text, h('span', { class: 'muted' }, ` (${Math.round(d.rotationSuggestion.score * 100)}% sure)`)),
-      h('div', { class: 'b' }, S.CAN_MANAGE && S.LOSSLESS ? h('button', { type: 'button', class: 'lnk', title: 'Lossless rotate (undo from the edit log)', onclick: () => transformPhotos([d.id], d.rotationSuggestion.op) }, TRANSFORMS.find((t) => t[0] === d.rotationSuggestion.op)?.[1] || 'Rotate') : null,
-        S.CAN_MANAGE ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/rotation/dismiss', { photos: [d.id], on: true }); toast('Marked as the right way up.'); } catch (e) { toastError(e); } } }, 'It’s fine')] : null,
-        ' · ', h('a', { class: 'lnk', href: '#/rotation' }, 'All findings')))) : null,
+      suggestionRow({ class: 'b' }, null, S.CAN_MANAGE && S.LOSSLESS ? { title: 'Lossless rotate (undo from the edit log)', onclick: () => transformPhotos([d.id], d.rotationSuggestion.op), label: TRANSFORMS.find((t) => t[0] === d.rotationSuggestion.op)?.[1] || 'Rotate' } : null,
+        S.CAN_MANAGE ? { kind: 'rotation', id: d.id, label: 'It’s fine', said: 'Marked as the right way up.' } : null, { href: '#/rotation', label: 'All findings' }))) : null,
     d.clothingSuggestions?.length ? h('div', { class: 'irow' }, icon('people'), h('div', null, h('div', { class: 'b' }, 'Probably here, by the clothes'),
-      d.clothingSuggestions.map((x) => h('div', { class: 'a small' }, `${x.name} (${Math.round(x.score * 100)}% like ${x.n} named ${x.n === 1 ? 'photo' : 'photos'} of this event). `,
-        S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Tag ${x.name} on this photo (undo from the edit log)`, onclick: () => faceOp({ op: 'tagonly', image: d.id, tag: x.tag }, () => faceOp({ op: 'untag', image: d.id, tag: x.tag }), `Added ${x.name}.`) }, `Tag ${x.name}`) : null,
-        S.EDITING ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: async () => { try { await post('/api/suggestions/dismiss', { kind: 'clothing', pairs: [[d.id, x.tag]] }); toast(`Not ${x.name}: noted.`); } catch (e) { toastError(e); } } }, 'Not them')] : null,
-        ' · ', h('a', { class: 'lnk', href: '#/clothing' }, 'All matches'))))) : null,
+      d.clothingSuggestions.map((x) => suggestionRow({ class: 'a small' }, `${x.name} (${Math.round(x.score * 100)}% like ${x.n} named ${x.n === 1 ? 'photo' : 'photos'} of this event). `,
+        S.EDITING ? tagHere(d, x) : null, S.EDITING ? notThem('clothing', d, x) : null, { href: '#/clothing', label: 'All matches' })))) : null,
     d.quality ? qualityRow(d) : null,
     d.burst ? h('div', { class: 'irow' }, icon('dup'), h('div', null, h('div', { class: 'a' }, lnk(`Part of a burst of ${d.burst_size} frames`, { burst: d.burst, sort: 'old' })),
       h('div', { class: 'b' }, d.burst_best ? 'Picked as the best frame' : ['Not the best frame', d.burst_best_id ? [' · ', h('button', { type: 'button', class: 'lnk', title: d.burst_best_name, onclick: () => { const i = LB.src.id.indexOf(d.burst_best_id); if (i >= 0) { LB.i = i; setPhotoParam(d.burst_best_id, false); showItem(); } else openLightbox({ id: [d.burst_best_id] }, 0, true); } }, 'open the best frame')] : null]))) : null,

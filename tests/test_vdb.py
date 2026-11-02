@@ -27,7 +27,7 @@ def test_sqlite_snapshot_and_copy_keep_every_row(client, tmp_path, fresh):
     state.set_setting("zz_probe", "value with ? and %s and `key`")
     state.set_favorites([(1, "h1"), (2, "h2")], True)
     aid = state.create_album("Trip"); state.set_album_items(aid, [(1, "h1")], True)
-    with analysis._writer() as con:
+    with vdb.writer() as con:
         con.execute("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", (1, 0.5, 0.4, 0, 0))
         con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,?,?,?)", (1, "quality", "s1", None))
     snap = tmp_path / "snap.db"
@@ -73,7 +73,7 @@ def test_mysql_round_trip(client, tmp_path, fresh, monkeypatch):
         users.create("alex", "correct horse", "admin"); users.create("vi", "", "viewer")
         state.set_setting("zz_probe", "héllo ? %s"); state.set_favorites([(1, "h1")], True)
         aid = state.create_album("Trip"); state.set_album_items(aid, [(1, "h1")], True)
-        with analysis._writer() as con:
+        with vdb.writer() as con:
             con.execute("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", (1, 0.5, 0.4, 0, 0))
             con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,?,?,?)", (1, "quality", "2026-10-15T00:00:00.000", None))
             con.execute("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", (1, "a dog on a beach"))
@@ -122,7 +122,7 @@ def test_mysql_round_trip(client, tmp_path, fresh, monkeypatch):
             assert {r[0] for r in c.execute("SELECT is_shared FROM viewer_albums")} == {1}
         finally:
             c.close()
-        with analysis._writer() as con:
+        with vdb.writer() as con:
             con.execute("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", (2, 0.1, 0.9, 0, 0))
             con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,?,?,?)", (2, "quality", "2026-10-15T00:00:00.000", None))
         res = analysis.results()

@@ -1,6 +1,6 @@
 /** Startup: metadata, state, the first route. */
-import { $, NET, NO_CONNECTION, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
-import { FILTER_VIEWS, NAV, NAV_LIBRARY, NAV_MANAGE, S, ST, toast, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toastError } from './state.js';
+import { $, DOCK_MIN, NET, NO_CONNECTION, api, fill, fmtWhen, h, healSoon, icon, main, nf, norm, plural, post, sleep, store } from './core.js';
+import { FILTER_VIEWS, NAV, NAV_LIBRARY, NAV_MANAGE, S, ST, applyAppName, applyBadgePref, applyTheme, loadState, onRoute, parseHash, pollSoon, toastError } from './state.js';
 import { initSearch } from './search.js';
 import { confirmDialog } from './actions.js';
 import { G } from './grid.js';
@@ -55,7 +55,7 @@ async function _awaitReindex(until, tries, ms) {
  *  Dismissed for this browser session, per episode. */
 /** The corner the cards stack in (the update card above digiKam's), made when the first card needs it. */
 function banners() { return $('#banners') || document.body.appendChild(h('div', { id: 'banners' })); }
-export function dkBanner(d) {
+export function dkBanner(d) {  // exported for test_ui.py, which calls it through import()
   let b = $('#dkbanner');
   const show = d && S.IS_ADMIN && !d.none && (!d.sync || !d.reachable || d.conflict);  // no digiKam at all: nothing to warn about
   const key = !show ? null : d.conflict ? 'conflict:' + d.localChanges : d.sync ? 'offline:' + d.since : 'off';
@@ -76,7 +76,7 @@ export function dkBanner(d) {
   banners().append(b);
 }
 /** The "a newer version is out" banner, for admins, when the daily check found one; dismissed per version in this browser. */
-export function updateBanner(u) {
+export function updateBanner(u) {  // exported for test_ui.py, which calls it through import()
   let b = $('#updbanner');
   let gone = '';
   try { gone = localStorage.getItem('iopix.updateDismissed') || ''; } catch { /* private mode */ }
@@ -210,7 +210,7 @@ function reconnected() {
 const lookAgain = () => { if (NET.lost) pollSoon(300); };
 window.addEventListener('online', lookAgain);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollSoon(300); });  // back in view: catch up now
-export async function start() {
+async function start() {
   await loadUser();
   // the sidebar: the destinations in groups (a gap after Favorites, Places and Map), then Settings and Maintenance at
   // the foot above the status line. On phones the same links are the bottom bar: four of them and More.
@@ -231,7 +231,6 @@ export async function start() {
 /** The sidebar docks beside the page on a wide screen, unless its button put it away (remembered). Put away, or on a
  *  narrower screen, it hides off the left edge and the menu button in the top bar slides it over the page; choosing a
  *  destination, the dimmed page or Escape puts it away again. Phones keep the bottom bar instead. */
-const DOCK_MIN = 1100;
 function initSidebar() {
   const body = document.body, btn = $('#sidebtn');
   const canDock = () => innerWidth >= DOCK_MIN;
@@ -262,7 +261,7 @@ export async function boot() {
   S.BOOTED = true; document.body.classList.remove('locked');
   // (a search typed before the metadata arrived draws its list once it is here)
   try { indexMeta(await api('/api/meta')); await loadState(); const q = $('#q'); if (q && q.value && document.activeElement === q) q.dispatchEvent(new Event('input')); } catch (e) { main.replaceChildren(h('div', { class: 'empty' }, 'Could not reach the server: ' + e.message)); S.BOOTED = false; setTimeout(boot, 5000); return; }  // tried again until it answers (the index may not be readable yet after a first start)
-  if (store.get('filters', '0') === '1' && innerWidth >= 1100 && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
+  if (store.get('filters', '0') === '1' && innerWidth >= DOCK_MIN && FILTER_VIEWS.includes(parseHash().view)) toggleFilters(true, false);
   await pollStatus();
   onRoute();
 }

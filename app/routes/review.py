@@ -25,7 +25,7 @@ def api_quality():
 
 
 @router.get("/api/rotation", dependencies=[access.editor])
-def api_rotation(request: Request, offset: int = 0, limit: int = 200, ids: str = ""):
+def api_rotation(offset: int = 0, limit: int = 200, ids: str = ""):
     """Photos that read as on their side or upside down (rotation.py): {total, items: [{id, turn, op, text, score}],
     dismissed, ready, running, phase, coverage}. op is the lossless rotate that rights it (/api/photos/transform)."""
     from app.ai import rotation

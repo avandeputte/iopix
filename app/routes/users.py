@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/api/users", dependencies=[access.admin])
-def api_users(request: Request):
+def api_users():
     return {"users": users.list_users(), "roles": list(users.ROLES)}
 
 

@@ -12,6 +12,9 @@
 
 One background job ("videos", jobs.py) does the three for every video not yet done, or done with an older file or
 model; the results live in the viewer database (video_info). Nothing is written to any video or to digiKam.
+The job's bookkeeping (progress, the start rule, reset) is the shared ScanJob (scanjob.py); this module keeps the
+to-do query, the loop over the videos and the stamp rule (the file's stamp, and VERSION with the speech model's
+name as the detail, in ai_scans).
 """
 import json
 import logging
@@ -22,7 +25,9 @@ import tempfile
 import threading
 import time
 
-from app import config, jobs, thumbs
+from app import jobs, thumbs
+from app.ai import analysis  # the module, not its names: analysis is still loading when the index imports this (a cycle)
+from app.ai.scanjob import ScanJob
 from app.data import vdb
 from app.digikam.dkdb import chunked
 
@@ -39,8 +44,6 @@ SCENE = 0.3          # ffmpeg scene-change score that counts as a cut
 MAX_SPEECH_S = 20 * 60  # a transcript covers at most this much of a video
 CHUNK_S = 60            # seconds of sound given to the speech model at a time
 VERSION = 1          # bump when the cover or chapter rules change meaning
-progress = jobs.Progress("videos", phase="")
-_running = {"todo": set()}
 _asr = {}
 _lock = threading.Lock()
 _PTS = re.compile(r"pts_time:([0-9.]+)")
@@ -101,9 +104,8 @@ def scene_cuts(src: str, duration: float) -> list:
 
 def _score(im, faces) -> float:
     """How good a frame is as the cover: sharpness (log), a penalty for very dark or blown-out frames, and a face."""
-    from app.ai.analysis import _laplacian_var
     g = np.asarray(im.convert("L").resize((max(16, im.width * 512 // max(im.width, im.height)), max(16, im.height * 512 // max(im.width, im.height)))), np.float32)
-    sharp = float(np.log1p(_laplacian_var(g)))
+    sharp = float(np.log1p(analysis.laplacian_var(g)))
     mean = float(g.mean() / 255)
     dark = max(0.0, 0.18 - mean) * 10 + float((g < 8).mean()) * 2
     blown = max(0.0, mean - 0.85) * 10 + float((g > 247).mean()) * 2
@@ -176,7 +178,7 @@ def _recogniser():
             return None
 
 
-def transcribe(src: str, duration: float) -> dict:
+def transcribe(src: str) -> dict:
     """{text, segments: [{t, end, text}], lang} from the video's sound, or None without a model or sound."""
     rec = _recogniser()
     if rec is None:
@@ -254,22 +256,27 @@ def clean_text(text: str) -> str:
 # the job
 # --------------------------------------------------------------------------
 
-def _stamp(p: dict) -> str:
-    from app.ai.analysis import stamp
-    return stamp(p)
-
-
 def _key(speech_model: str) -> str:
     return f"{VERSION}:{speech_model or '-'}"
 
 
-def _todo(photos: list, key: str) -> list:
-    with vdb.reader() as con:
-        have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'videos'")}
-    return [p for p in photos if p["video"] and have.get(p["id"]) != (_stamp(p), key)]
+def _current_key() -> tuple:
+    """(speech wanted, the ai_scans detail a video done now gets): the detail names the speech model, so a video
+    done without one (or with another) is done again when a model arrives."""
+    from app.ai import models
+    speech = speech_available()
+    return speech, _key(models.chosen("speech_model") if speech else "")
+
+
+def _todo(con, photos: list) -> list:
+    _speech, key = _current_key()
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'videos'")}
+    return [p for p in photos if p["video"] and have.get(p["id"]) != (analysis.stamp(p), key)]
 
 
 def coverage() -> tuple:
+    """(videos done, None): every video is wanted, so there is no total to show against (not the ScanJob's count,
+    whose fallback is a (0, 0) pair)."""
     try:
         with vdb.reader() as con:
             done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'videos'").fetchone()[0]
@@ -278,17 +285,9 @@ def coverage() -> tuple:
         return 0, None
 
 
-def _job(photos: list, gen: int):
-    if not available():
-        return
+def _work(gen: int, todo: list):
     from app.ai import models
-    speech = speech_available()
-    key = _key(models.chosen("speech_model") if speech else "")
-    todo = _todo(photos, key)
-    _running["todo"] = {p["id"] for p in todo}  # one assignment: a start() on another thread never sees it half built
-    progress.update(running=bool(todo), done=0, total=len(todo), phase="")
-    if not todo:
-        return
+    speech, key = _current_key()
     faces = None
     try:
         from app.faces import facedetect
@@ -296,68 +295,49 @@ def _job(photos: list, gen: int):
             faces = lambda im: facedetect.detect_image(im)  # noqa: E731
     except Exception:
         faces = None
-    try:
-        for p in todo:
-            if progress.cancelled(gen):
-                return
-            src = p["path"]
-            if not os.path.isfile(src):
-                progress.step()
-                continue
-            dur = p.get("duration") or 0
-            with vdb.reader() as con:
-                old = con.execute("SELECT stamp, cover_t, chapters, transcript, segments, lang, speech_model FROM video_info WHERE photo_id = ?", (p["id"],)).fetchone()
-            same_file = old is not None and old[0] == _stamp(p)
-            try:
-                if same_file and old[1] is not None:
-                    cover_t, chapters = old[1], json.loads(old[2] or "[]")
-                else:
-                    cover_t, _s = pick_cover(src, dur, faces)
-                    chapters = chapters_for(src, dur)
-                if speech and not (same_file and old[6] == models.chosen("speech_model")):
-                    tr = transcribe(src, dur)
-                elif same_file:
-                    tr = {"text": old[3] or "", "segments": json.loads(old[4] or "[]"), "lang": old[5]}
-                else:
-                    tr = None
-            except Exception as e:
-                log.warning("videos: failed on %s (%s)", src, e)
-                progress.step()
-                continue
-            if progress.cancelled(gen):
-                return
-            with vdb.writer() as con:
-                con.execute("DELETE FROM video_info WHERE photo_id = ?", (p["id"],))
-                con.execute("INSERT INTO video_info (photo_id, stamp, cover_t, chapters, transcript, segments, lang, speech_model, ts) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (p["id"], _stamp(p), cover_t, json.dumps(chapters), (tr or {}).get("text") or None, json.dumps((tr or {}).get("segments") or []),
-                             (tr or {}).get("lang"), models.chosen("speech_model") if (speech and tr is not None) else None, int(time.time())))
-                # speech wanted but failed (a model that would not load, a broken file): recorded as "no speech", so it is tried again
-                con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'videos',?,?)", (p["id"], _stamp(p), key if not (speech and tr is None) else _key("")))
-            if not (same_file and old[1] == cover_t):
-                thumbs.forget(p["id"])  # the thumbnail, preview and embedding are made again from the chosen frame
+    for p in todo:
+        if progress.cancelled(gen):
+            return
+        src = p["path"]
+        if not os.path.isfile(src):
             progress.step()
-    finally:
-        progress.finish(gen)
+            continue
+        dur = p.get("duration") or 0
+        with vdb.reader() as con:
+            old = con.execute("SELECT stamp, cover_t, chapters, transcript, segments, lang, speech_model FROM video_info WHERE photo_id = ?", (p["id"],)).fetchone()
+        same_file = old is not None and old[0] == analysis.stamp(p)
+        try:
+            if same_file and old[1] is not None:
+                cover_t, chapters = old[1], json.loads(old[2] or "[]")
+            else:
+                cover_t, _s = pick_cover(src, dur, faces)
+                chapters = chapters_for(src, dur)
+            if speech and not (same_file and old[6] == models.chosen("speech_model")):
+                tr = transcribe(src)
+            elif same_file:
+                tr = {"text": old[3] or "", "segments": json.loads(old[4] or "[]"), "lang": old[5]}
+            else:
+                tr = None
+        except Exception as e:
+            log.warning("videos: failed on %s (%s)", src, e)
+            progress.step()
+            continue
+        if progress.cancelled(gen):
+            return
+        with vdb.writer() as con:
+            con.execute("DELETE FROM video_info WHERE photo_id = ?", (p["id"],))
+            con.execute("INSERT INTO video_info (photo_id, stamp, cover_t, chapters, transcript, segments, lang, speech_model, ts) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (p["id"], analysis.stamp(p), cover_t, json.dumps(chapters), (tr or {}).get("text") or None, json.dumps((tr or {}).get("segments") or []),
+                         (tr or {}).get("lang"), models.chosen("speech_model") if (speech and tr is not None) else None, int(time.time())))
+            # speech wanted but failed (a model that would not load, a broken file): recorded as "no speech", so it is tried again
+            con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'videos',?,?)", (p["id"], analysis.stamp(p), key if not (speech and tr is None) else _key("")))
+        if not (same_file and old[1] == cover_t):
+            thumbs.forget(p["id"])  # the thumbnail, preview and embedding are made again from the chosen frame
+        progress.step()
 
 
-def start(photos: list):
-    if not config.ANALYSIS or not available():
-        return
-    if progress["running"]:
-        from app.ai import models
-        key = _key(models.chosen("speech_model") if speech_available() else "")
-        if {p["id"] for p in _todo([p for p in photos if p["video"]], key)} <= _running["todo"]:
-            return  # nothing new for the running job
-    gen = progress.cancel()
-    jobs.submit("videos", lambda: _job([p for p in photos if p["video"]], gen))
-
-
-def reset():
-    progress.cancel()
-    _running["todo"] = set()
-    with vdb.writer() as con:
-        con.execute("DELETE FROM video_info")
-        con.execute("DELETE FROM ai_scans WHERE job = 'videos'")
+job = ScanJob("videos", _todo, _work, available=available, tables=("video_info",), phase="")
+progress, start, reset = job.progress, job.start, job.reset
 
 
 # --------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import { FILTER_VIEWS, S, applyFilter, faceUrl, filterParams, go, setOne, toggle
 // photo quality: why a photo looks like a reject (index.REJECT_REASONS)
 export const REJECTS = [['blur', 'Blurry all over'], ['eyes', 'Eyes closed'], ['burst', 'Worse frame of a burst'], ['exposure', 'Nearly black or blown out']];
 
-export const expanded = new Set();
+const expanded = new Set();
 export function toggleFilters(force, remember = true) {
   const el = $('#filters');
   const show = force != null ? !!force : el.hidden;

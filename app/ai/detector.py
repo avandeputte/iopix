@@ -9,6 +9,8 @@ from PIL import Image
 
 from app import config
 from app.ai import models
+from app.data import vdb
+from app.digikam.dkdb import chunked
 
 log = logging.getLogger(__name__)
 SIZE = 640
@@ -110,6 +112,24 @@ class Detector:
                 res.append((CLASSES[int(cls[i])], round(float(conf[i]), 3), round(float(bx1), 4), round(float(by1), 4),
                             round(float(bx2 - bx1), 4), round(float(by2 - by1), 4)))
         return res
+
+
+def person_boxes(ids: list, min_box: float, min_height: float) -> dict:
+    """{photo id: [(x, y, w, h)]}: the people detected in these photos (ai_objects), largest first, as fractions of the
+    upright frame; boxes smaller than `min_box` of the frame or lower than `min_height` of its height are left out
+    (each job that works on a person box, a shirt number or the clothes, has its own idea of too small)."""
+    out = {}
+    with vdb.reader() as con:
+        for part in chunked(ids, 500):
+            for r in con.execute(f"SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({','.join(str(int(i)) for i in part)}) ORDER BY w * h DESC"):
+                if r[3] * r[4] >= min_box and r[4] >= min_height:
+                    out.setdefault(r[0], []).append((r[1], r[2], r[3], r[4]))
+    return out
+
+
+def thousandths(v: float) -> int:
+    """A box coordinate (a fraction of the frame) as the integer the per-person tables key on (ai_jerseys, ai_person_looks)."""
+    return int(round(v * 1000))
 
 
 def load(threads: int = 2):

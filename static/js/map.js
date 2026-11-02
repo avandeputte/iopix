@@ -1,5 +1,5 @@
 /** The map page (Leaflet, loaded on demand). */
-import { $, accuracyChoices, api, date, dfDay, dfTime, errorBox, fill, fmtDist, h, icon, main, nf, plural, store } from './core.js';
+import { $, TOAST_LONG, accuracyChoices, api, date, dfDay, dfTime, errorBox, fill, fmtDist, h, icon, main, nf, plural, store } from './core.js';
 import { S, applyFilter, filterParams, go, toast, toastError } from './state.js';
 import { modal } from './actions.js';
 import { editPhotos } from './editing.js';
@@ -25,7 +25,7 @@ export function loadLeaflet(cluster) {
 // tile provider from the server (OpenStreetMap, or Google Maps with the owner's key); fetched once, OSM until it arrives
 
 
-export async function loadMaps() { if (S.mapsLoaded) return S.MAPS; try { S.MAPS = await api('/api/maps'); if (S.MAPS.error) toast(S.MAPS.error, null, null, 8000); } catch { /* keep OSM */ } S.mapsLoaded = true; return S.MAPS; }
+export async function loadMaps() { if (S.mapsLoaded) return S.MAPS; try { S.MAPS = await api('/api/maps'); if (S.MAPS.error) toast(S.MAPS.error, null, null, TOAST_LONG); } catch { /* keep OSM */ } S.mapsLoaded = true; return S.MAPS; }
 export const tiles = () => window.L.tileLayer(S.MAPS.url, { maxZoom: S.MAPS.maxZoom, attribution: S.MAPS.attribution });
 /** Map and Satellite base layers with a switcher; the choice is remembered. Returns the layer shown. */
 export function baseLayers(map, position = 'topright') {
@@ -170,7 +170,7 @@ async function moveMarker(mk, d, i) {
   const to = mk.getLatLng();
   if (!(await editPhotos([d.id[i]], { gps: { lat: +to.lat.toFixed(7), lon: +to.lng.toFixed(7), alt: was.alt } }))) { mk.setLatLng([was.lat, was.lon]); return; }
   d.lat[i] = to.lat; d.lon[i] = to.lng;
-  toast('Location moved.', 'Undo', async () => { if (await editPhotos([d.id[i]], { gps: was })) { mk.setLatLng([was.lat, was.lon]); d.lat[i] = was.lat; d.lon[i] = was.lon; } }, 8000);
+  toast('Location moved.', 'Undo', async () => { if (await editPhotos([d.id[i]], { gps: was })) { mk.setLatLng([was.lat, was.lon]); d.lat[i] = was.lat; d.lon[i] = was.lon; } }, TOAST_LONG);
 }
 /** The tray of photos without a location: pick some, then click the map or drag them onto it. */
 async function placeTray(map, fp, el) {
