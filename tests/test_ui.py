@@ -520,7 +520,7 @@ def test_lightbox_film_strip_and_remembered_info_panel(page, server, lib):
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] - 20)
     page.wait_for_selector("#lightbox .lb-strip.show", timeout=3000)
     reel.nth(1).hover(force=True)
-    want = reel.nth(1).get_attribute("src").split("/")[-1]
+    want = reel.nth(1).get_attribute("src").split("/")[-1].split("?")[0]  # the strip asks for a small copy (?h=120)
     # (the thumbnail that slid up under the resting pointer may be previewed first: the hovered one replaces it)
     page.wait_for_function(f"document.querySelector('#lightbox .lb-peek')?.dataset.id === '{want}'", timeout=3000)
     assert page.locator("#lightbox .lb-strip .reel img.cur").get_attribute("data-i") == "0", "peeking does not move"

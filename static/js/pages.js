@@ -600,8 +600,8 @@ export async function showBursts(vp) {
 function pagedGrid(items, card, per = 200) {
   const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' });
   const shown = new Set();  // the items with a card on the page (handled ones leave `items`, so a count would drift)
-  const more = h('button', { type: 'button', class: 'pillbtn', style: 'margin:12px 0', onclick: () => fill() });
-  const fill = () => {
+  const more = h('button', { type: 'button', class: 'pillbtn', style: 'margin:12px 0', onclick: () => fillMore() });
+  const fillMore = () => {
     const next = items.filter((x) => !shown.has(x)).slice(0, per);
     next.forEach((x) => shown.add(x));
     grid.append(...next.map(card));
@@ -611,7 +611,7 @@ function pagedGrid(items, card, per = 200) {
   };
   /** A handled suggestion leaves the page and the list (never a neighbour: a second click finds nothing to remove). */
   const drop = (x, el) => { el.remove(); shown.delete(x); const k = items.indexOf(x); if (k >= 0) items.splice(k, 1); };
-  fill();
+  fillMore();
   return [grid, more, drop];
 }
 

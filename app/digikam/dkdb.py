@@ -445,10 +445,11 @@ _sv = {"cheap": None, "full": None, "at": 0.0}
 FULL_CHECK_S = 120  # the checksum scans run at most this often while the cheap check sees nothing
 
 
-def source_version() -> str:
+def source_version(quick: bool = False) -> str:
     """Changes whenever digiKam writes to its database. On MySQL the full answer sums checksums over every row of ten
-    tables; polled every 20 s that was a steady load on the database server, so a cheap look (counts, latest ids and
-    dates) goes first and the sums are only recomputed when it changed or every two minutes."""
+    tables; polled every 20 s that was a steady load on the database server, so the watcher asks for a quick answer:
+    a cheap look (counts, latest ids and dates) goes first and the sums are only recomputed when it changed or every
+    two minutes (an edit in place, a caption say, shows within that). Everyone else gets the full answer at once."""
     if not is_mysql():
         st = os.stat(sqlite_path())
         return f"{st.st_mtime_ns}-{st.st_size}"
@@ -459,7 +460,7 @@ def source_version() -> str:
             "SELECT count(*) FROM ImageTags", "SELECT count(*), max(id) FROM Tags", "SELECT count(*) FROM ImageTagProperties",
             "SELECT count(*), max(id) FROM ImageComments", "SELECT count(*) FROM ImagePositions", "SELECT count(*) FROM ImageCopyright")
             for v in con.execute(sql).fetchone())
-        if _sv["full"] is not None and cheap == _sv["cheap"] and time.time() - _sv["at"] < FULL_CHECK_S:
+        if quick and _sv["full"] is not None and cheap == _sv["cheap"] and time.time() - _sv["at"] < FULL_CHECK_S:
             return _sv["full"]
         scanned = con.execute("SELECT value FROM Settings WHERE keyword = 'Scanned'").fetchone()
         parts = [str(scanned[0]) if scanned else "-"]

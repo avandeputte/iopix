@@ -189,14 +189,13 @@ def run(ref: str = ""):
     already installed, and records its outcome in the data folder (see last_result)."""
     if in_docker():
         raise RuntimeError("In Docker, update by pulling the image: docker compose pull && docker compose up -d")
-    with _run_lock:
-        if progress["running"]:
-            raise RuntimeError("An update is already running")
-        progress["running"] = True  # claimed here, so two calls at once cannot both start update.sh
     ref = (ref or "").strip()[:80]
     if ref and not re.fullmatch(r"[0-9a-f]{7,40}|[A-Za-z0-9][A-Za-z0-9._-]*", ref):  # a commit id or a plain branch name, nothing git could read as an option or a path
         raise RuntimeError("ref must be a commit id or a branch name")
-    progress.start(log="")
+    with _run_lock:  # the check and the claim as one step: two calls at once cannot both start update.sh
+        if progress["running"]:
+            raise RuntimeError("An update is already running")
+        progress.start(log="")
     env = dict(os.environ, IOPIX_RESULT=str(config.DATA_DIR / RESULT_FILE), IOPIX_REPO=REPO, IOPIX_BRANCH=BRANCH)
     if ref:
         env["IOPIX_REF"] = ref

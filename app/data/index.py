@@ -90,7 +90,7 @@ RECT_RE = re.compile(r'x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"')
 
 def source_version() -> str:
     """Changes whenever digiKam writes to its database."""
-    return dkdb.source_version()
+    return dkdb.source_version(quick=True)  # the watcher's 20-second poll: the cheap check first (dkdb)
 
 
 def sync_enabled() -> bool:
