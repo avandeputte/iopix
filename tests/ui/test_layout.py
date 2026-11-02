@@ -196,6 +196,7 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
     # the status poll draws the update card from what the server says, so without this the card drawn below is taken away again
     def with_update(route):
         r = route.fetch(); body = r.json(); body["updateAvailable"] = {"version": "9.9.9", "remote": "r", "message": "v9.9.9: words"}
+        body["digikam"] = dict(body.get("digikam") or {}, none=False, sync=True, reachable=False, since=1760000000)  # the digiKam card too
         route.fulfill(response=r, json=body)
     page.route("**/api/status*", with_update)
     try:

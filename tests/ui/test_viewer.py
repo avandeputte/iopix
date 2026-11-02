@@ -638,6 +638,7 @@ def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, s
             page.wait_for_function("(t) => { const m = document.querySelector('#main'); return Math.abs(m.scrollTop - t) < 2 "
                                    "&& [...document.querySelectorAll('.tile')].some((e) => { const r = e.getBoundingClientRect(); return r.top >= m.getBoundingClientRect().top && r.bottom <= innerHeight; }); }",
                                    arg=int(room * 0.6), timeout=5000)  # scrolled, and the grid has drawn tiles for that place
+            page.wait_for_timeout(400)  # a fixed wait on purpose: the grid settles its rows after a scroll with nothing in the DOM that says when
             top = page.locator("#main").evaluate("m => m.scrollTop")
             tile = page.locator(".tile").nth(page.locator(".tile").count() // 2)  # one in the middle of the screen
             idx = int(tile.get_attribute("data-i"))
@@ -656,6 +657,7 @@ def test_closing_the_viewer_after_an_edit_keeps_the_grid_where_it_was(browser, s
             page.wait_for_selector("#lightbox", state="hidden", timeout=5000)
             page.wait_for_selector(".tile img", timeout=10000)
             page.wait_for_function("(i) => document.querySelector('#main').scrollTop > 100 && !!document.querySelector(`.tile[data-i=\"${i}\"]`)", arg=idx, timeout=5000)  # the grid is drawn again around the photo
+            page.wait_for_timeout(500)  # a fixed wait on purpose: the grid is drawn again around the photo and settles its rows
             now = page.locator("#main").evaluate("m => m.scrollTop")
             assert now > 100, f"closed with {close}: the grid went back to the top ({top} -> {now})"
             y1 = page.locator(f'.tile[data-i="{idx}"]').evaluate("t => t.getBoundingClientRect().top")

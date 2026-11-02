@@ -612,6 +612,7 @@ def test_delete_key_asks_then_moves_to_the_trash_at_once_and_undo_restores(page,
     dialogs = []
     page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
     page.goto(server + "/#/photos?sort=old"); page.wait_for_selector("#grid .tile img", timeout=20000); _wait_flags(page)
+    page.wait_for_timeout(500)  # a fixed wait on purpose: the grid settles its first rows (nothing in the DOM says when) before the selection click
     tile = page.locator("#grid .tile").first
     pid = int(tile.locator("img").get_attribute("src").split("/thumb/")[1].split("?")[0].split("-")[0])
     tile.hover()
