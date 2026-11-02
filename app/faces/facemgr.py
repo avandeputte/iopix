@@ -147,6 +147,7 @@ def _sidecar_worker():
                     for i in res:
                         if i not in bad:
                             _tries.pop(i, None)
+                    _unqueue([i for i in res if i not in bad])
                     if bad:
                         log.warning("face regions not written to the sidecars of %s: %s", bad[:10], {i: res[i] for i in bad[:3]})
                         _retry(bad, db_path)
@@ -173,8 +174,44 @@ def _retry(images, db_path):
         t.start()
 
 
-def queue_sidecars(images: list, db_path=None):
-    """Rewrite these photos' sidecar regions from the database in the background, in order, one worker."""
+def _unqueue(images: list):
+    """These photos' sidecars are written: they leave the queue kept in the viewer database."""
+    if not images:
+        return
+    try:
+        from app.data import vdb
+        with vdb.writer() as con:
+            con.executemany("DELETE FROM face_sidecar_queue WHERE image_id = ?", [(int(i),) for i in images])
+    except Exception as e:
+        log.debug("face sidecar queue: %s", e)
+
+
+def resume_queue():
+    """At start: the sidecar rewrites a restart interrupted (the queue is kept in the viewer database) go on."""
+    try:
+        from app.data import vdb
+        with vdb.reader() as con:
+            images = [r[0] for r in con.execute("SELECT image_id FROM face_sidecar_queue")]
+    except Exception as e:
+        log.debug("face sidecar queue: %s", e)
+        return
+    if images:
+        log.info("face regions: %d sidecar rewrites left from before the restart resume", len(images))
+        queue_sidecars(images, remember=False)
+
+
+def queue_sidecars(images: list, db_path=None, remember: bool = True):
+    """Rewrite these photos' sidecar regions from the database in the background, in order, one worker. The queue is
+    also kept in the viewer database, so a restart in between does not leave regions in digiKam's rows but not in
+    the sidecars."""
+    if remember and images:
+        try:
+            import time
+            from app.data import vdb
+            with vdb.writer() as con:
+                con.executemany("INSERT OR REPLACE INTO face_sidecar_queue (image_id, ts) VALUES (?,?)", [(int(i), int(time.time())) for i in images])
+        except Exception as e:
+            log.debug("face sidecar queue: %s", e)
     with _side_cond:
         for i in images:
             _side_queue[int(i)] = db_path
@@ -374,7 +411,10 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
             con.execute("DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?", (image, person))
         else:
             con.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (image, person))
-        summary.update(tag=person, name=_full(con, person))
+        full = _full(con, person)
+        from app.photos import edits as _edits
+        _edits.drop_pending_tag(image, full)  # a pending edit that adds or removes this very tag would undo the click at the next apply
+        summary.update(tag=person, name=full)
         return summary
     if kind_op == "add":
         new_tag = int(op.get("tag") or 0)

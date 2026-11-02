@@ -98,8 +98,21 @@ def delete(photos: list, check_running: bool = True) -> dict:
     need = sum(int(p.get("size") or 0) for p in photos) * 1.2 + 50 * 1024 ** 2
     if free < need:
         raise dbsync.SyncError(f"Not enough free disk space for the backup of these photos ({need / 1e9:.1f} GB needed); nothing was deleted.")
-    # 1. the backup: files, sidecars, a manifest; and digiKam's database
+    # the index may be behind digiKam (a photo moved or renamed there since the last build): the row decides where the
+    # file is, so the right file is backed up and removed, never a stale path left behind for digiKam to re-add
+    from app.photos import organize
+    with dkdb.reader() as rcon:
+        where = {r["id"]: r["path"] for r in organize._rows(rcon, [int(p["id"]) for p in photos])}
     manifest, ok, failed = [], [], []
+    moved = []
+    for p in photos:
+        now = where.get(int(p["id"]))
+        if now and now != p["path"]:
+            if os.path.exists(now) or not os.path.exists(p["path"]):
+                p = dict(p, path=now)
+        moved.append(p)
+    photos = moved
+    # 1. the backup: files, sidecars, a manifest; and digiKam's database
     for p in photos:
         try:
             files = [p["path"]] + sidecars(p["path"]) if os.path.exists(p["path"]) else sidecars(p["path"])

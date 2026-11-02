@@ -126,6 +126,22 @@ def pending_one(photo_id: int):
         con.close()
 
 
+def drop_pending_tag(photo_id: int, path: str):
+    """A tag the user just set or cleared directly in digiKam's rows (a person without a face box) leaves the photo's
+    remembered edit, so the next apply does not add or remove it again."""
+    with lock:
+        e = pending_one(photo_id)
+        if not e:
+            return
+        changed = False
+        for k in ("add_tags", "remove_tags"):
+            if path in e.get(k, []):
+                e[k] = [t for t in e[k] if t != path]
+                changed = True
+        if changed:
+            save_pending([(photo_id, e)])
+
+
 def pending_count() -> int:
     """How many edits are remembered (what status polls show; cheaper than loading them all)."""
     if not vdb.exists():

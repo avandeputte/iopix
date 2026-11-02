@@ -17,6 +17,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.ai import analysis, models as dlmodels
+from app.faces import facemgr
 from app import config, events, mcp_server, proxyauth, thumbs, updates, users
 from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate
@@ -42,6 +43,7 @@ async def lifespan(_app):
     analysis.on_progress = _kick.set  # fold new analysis results into the index as they arrive
     if tagmanager.pending_jobs():  # finish sidecar updates left over from a previous run
         tagmanager.start_worker()
+    facemgr.resume_queue()  # and the face sidecar rewrites a restart interrupted
     _refresh(initial=True)
     threading.Thread(target=thumbs.prune_previews, daemon=True).start()
     threading.Thread(target=_watch, name="reindex", daemon=True).start()
