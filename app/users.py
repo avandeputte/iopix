@@ -125,7 +125,7 @@ def linked_persons() -> set:
 
 
 _cache = {"any": None, "any_at": 0.0, "tokens": {}}  # asked on every request and several times per status poll
-CACHE_S = 5.0
+CACHE_S = 3.0
 
 
 def invalidate():

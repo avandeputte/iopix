@@ -52,6 +52,9 @@ def clear_accounts(db_path=None):
         con.close()
     from app import users
     users.invalidate()  # the accounts cache must not outlive the rows
+    if db_path is not None:  # another process (the browser tests' server) keeps its own cache: let it expire
+        import time
+        time.sleep(users.CACHE_S + 0.2)
 
 
 def make_admin(target, name: str = "alex", password: str = "correct horse"):
