@@ -162,10 +162,9 @@ def suggestions(ids: list = None) -> dict:
     con.row_factory = sqlite3.Row
     try:
         sql = "SELECT id, ts, day FROM photos WHERE lat IS NULL AND video = 0 AND dprec IS NULL AND year > 1971 AND ts IS NOT NULL"
-        want = [dict(r) for r in con.execute(sql)]
         if ids is not None:
-            keep = set(ids)
-            want = [r for r in want if r["id"] in keep]
+            sql += f" AND id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})"
+        want = [dict(r) for r in con.execute(sql)]
         if not want:
             return {"items": []}
         days = sorted({r["day"] for r in want})

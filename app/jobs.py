@@ -31,6 +31,7 @@ GRACE = 3.0
 MAX_SETTLE = 30.0  # a queue that never goes quiet (rebuild after rebuild) still gets its jobs run
 _progress = {}       # name -> Progress, every background job that reports one
 finished_hook = None  # called when any job's run ends (the index folds the results in once, then)
+idle_hooks = []       # called once the queue has run dry: models are dropped so an idle server keeps its memory small
 
 
 class Progress(dict):
@@ -156,3 +157,12 @@ def _worker():
             traceback.print_exc()
         with _lock:
             _current = _started = None
+            idle = not _queue
+        if idle:
+            for hook in list(idle_hooks):
+                try:
+                    hook()
+                except Exception:
+                    traceback.print_exc()
+            import gc
+            gc.collect()

@@ -50,6 +50,8 @@ def clear_accounts(db_path=None):
         con.execute("DELETE FROM user_accounts"); con.commit()
     finally:
         con.close()
+    from app import users
+    users.invalidate()  # the accounts cache must not outlive the rows
 
 
 def make_admin(target, name: str = "alex", password: str = "correct horse"):

@@ -272,12 +272,10 @@ def dismiss(photos: list, on: bool = True) -> int:
 def findings(ids: list = None) -> dict:
     """{"items": [{id, turn, op, text, score}], "dismissed": n}: the photos read as turned, surest first, the dismissed
     ones left out (unless their file changed since)."""
+    where = f" WHERE photo_id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})" if ids is not None else ""
     with vdb.reader() as con:
-        rows = [tuple(r) for r in con.execute("SELECT photo_id, turn, score, stamp FROM ai_rotation")]
-        acc = dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = 'rotation'").fetchall())
-    if ids is not None:
-        want = set(ids)
-        rows = [r for r in rows if r[0] in want]
+        rows = [tuple(r) for r in con.execute("SELECT photo_id, turn, score, stamp FROM ai_rotation" + where)]
+        acc = dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = 'rotation'" + where.replace(" WHERE", " AND")).fetchall())
     items, dismissed = [], 0
     for pid, turn, score, stamp in rows:
         if acc.get(pid) == stamp:

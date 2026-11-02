@@ -217,19 +217,20 @@ def api_status(request: Request):
         return {"version": _public_version(), "app": _app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
                 "usersExist": users.any_users(), "signedIn": False, "isAdmin": False, "user": None, "readOnly": appstate.read_only(),
                 "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK, "editing": False, "dbWrite": False, "pendingEdits": 0}
-    admin = users.is_admin(user)
+    admin, signed, writer = users.is_admin(user), users.is_signed_in(user), users.can_write(user)
+    dk = index.status()
     return {"version": _public_version(), "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev, "app": _app_stamp(),
             "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
-                       "current": list(prewarmer.current.values())[:3] if users.is_signed_in(user) else []},  # file paths: not for anonymous clients
+                       "current": list(prewarmer.current.values())[:3] if signed else []},  # file paths: not for anonymous clients
             "semantic": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done,
                          "total": semantic.total, "indexed": 0 if semantic.ids is None else int(len(semantic.ids))},
-            "places": places.available(), "editing": edits.available() and users.can_write(user), "pendingEdits": edits.pending_count(),
-            "dbWrite": config.DB_WRITE and not appstate.read_only() and users.can_write(user), "writeFiles": edits.writes_files(),
+            "places": places.available(), "editing": edits.available() and writer, "pendingEdits": edits.pending_count(),
+            "dbWrite": config.DB_WRITE and not appstate.read_only() and writer, "writeFiles": edits.writes_files(),
             "user": ({"id": user["id"], "name": user["name"], "role": user["role"], "person": user.get("person")} if user else None), "usersExist": users.any_users(),
-            "isAdmin": users.is_admin(user), "signedIn": users.is_signed_in(user), "requireLogin": users.require_login(),
-            "updateAvailable": updates.available() if users.is_admin(user) and updates.auto_check_enabled() else None,
+            "isAdmin": admin, "signedIn": signed, "requireLogin": users.require_login(),
+            "updateAvailable": updates.available() if admin and updates.auto_check_enabled() else None,
             "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK,
-            "digikam": index.status() if admin else {k: v for k, v in index.status().items() if k != "error"}, "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
+            "digikam": dk if admin else {k: v for k, v in dk.items() if k != "error"}, "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
             "appVersion": APP_VERSION, "commit": updates.local_commit()[:7], "appName": app_name(),
             "tagJobs": {**tagmanager.progress, "pending": tagmanager.pending_jobs()},
             "analysis": analysis.progress, "jobs": bgjobs.status()}
@@ -457,25 +458,26 @@ def api_photo(photo_id: int, request: Request):
         from app.photos import versions
         d["versions"] = versions.versions_of(photo_id)  # digiKam's version family (ImageRelations), when there is one
         d["quality"] = _quality(d)
-        if d.get("dprec") == 3 and users.can_write(request.state.user):  # a year suggestion from the library's clues (dateclues.py), editors only
+        writer = users.can_write(request.state.user)  # the suggestions below are for editors; asked once
+        if d.get("dprec") == 3 and writer:  # a year suggestion from the library's clues (dateclues.py), editors only
             from app.ai import dateclues
             hit = dateclues.suggestions([photo_id])["items"]
             d["dateSuggestion"] = hit[0] if hit else None
         from app.ai import jerseys
         d["jerseys"] = jerseys.for_photo(photo_id)  # numbers read on shirts, with the player suggested for an unnamed one (editors)
-        if d["jerseys"] and users.can_write(request.state.user):
+        if d["jerseys"] and writer:
             d["jerseySuggestions"] = jerseys.suggestions([photo_id])["items"]
         if d.get("video"):  # the chosen cover frame, chapters and the transcript (videos.py)
             from app.ai import videos
             d["videoInfo"] = videos.info(photo_id)
-        if not d.get("video") and users.can_write(request.state.user):  # on its side or upside down? (rotation.py)
+        if not d.get("video") and writer:  # on its side or upside down? (rotation.py)
             from app.ai import rotation
             hit = rotation.findings([photo_id])["items"]
             d["rotationSuggestion"] = hit[0] if hit else None
-        if not d.get("video") and users.can_write(request.state.user):  # people probably present, by their clothes (clothing.py)
+        if not d.get("video") and writer:  # people probably present, by their clothes (clothing.py)
             from app.ai import clothing
             d["clothingSuggestions"] = clothing.suggestions([photo_id])["items"] if clothing.for_photo(photo_id) else []
-        if d.get("lat") is None and not d.get("video") and users.can_write(request.state.user):  # where it was probably taken (placeguess.py), editors only
+        if d.get("lat") is None and not d.get("video") and writer:  # where it was probably taken (placeguess.py), editors only
             from app.geo import placeguess
             hit = placeguess.suggestions([photo_id])["items"]
             d["placeSuggestion"] = hit[0] if hit else None

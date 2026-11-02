@@ -357,9 +357,21 @@ def _run_organize(fn, *args):
 
 
 
+_after_write = threading.Event()
+
+
 def _rebuild_after_write():
-    """The viewer just wrote into digiKam's database: rebuild the index now rather than wait for the
-    change to be noticed, so applied edits stop showing as waiting at once."""
+    """The viewer just wrote into digiKam's database: rebuild the index soon rather than wait for the change to be
+    noticed, so applied edits stop showing as waiting. Writes that come in a burst (naming faces one after the
+    other) share one rebuild: a single thread waits a second for the burst to end, then builds once."""
+    if not _after_write.is_set():
+        _after_write.set()
+        threading.Thread(target=_rebuild_soon, name="rebuild-after-write", daemon=True).start()
+
+
+def _rebuild_soon():
+    time.sleep(1.0)
+    _after_write.clear()
     try:
         index.build()
     except Exception as e:  # the watcher retries; the cause goes to the log

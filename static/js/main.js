@@ -30,7 +30,14 @@ export function indexMeta(meta) {
  * After a change to digiKam's database, wait for the server to rebuild its index and load the new metadata.
  * `until` can demand more than a version bump (e.g. that a new tag is present). Returns whether it happened.
  */
-export async function awaitReindex(until = () => true, tries = 20, ms = 400) {
+export function awaitReindex(until = () => true, tries = 20, ms = 400) {
+  // many edits in a row (naming faces) share one wait instead of one polling loop each
+  if (S.reindexP && until === S.reindexUntil) return S.reindexP;
+  S.reindexUntil = until;
+  S.reindexP = _awaitReindex(until, tries, ms).finally(() => { if (S.reindexUntil === until) { S.reindexP = null; S.reindexUntil = null; } });
+  return S.reindexP;
+}
+async function _awaitReindex(until, tries, ms) {
   let seen = S.META.version;
   for (let i = 0; i < tries; i++) {
     await sleep(ms);
@@ -202,7 +209,7 @@ function reconnected() {
 }
 const lookAgain = () => { if (NET.lost) pollSoon(300); };
 window.addEventListener('online', lookAgain);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lookAgain(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollSoon(300); });  // back in view: catch up now
 export async function start() {
   await loadUser();
   // the sidebar: the destinations in groups (a gap after Favorites, Places and Map), then Settings and Maintenance at

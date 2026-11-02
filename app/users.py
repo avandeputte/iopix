@@ -124,12 +124,25 @@ def linked_persons() -> set:
         con.close()
 
 
+_cache = {"any": None, "any_at": 0.0, "tokens": {}}  # asked on every request and several times per status poll
+CACHE_S = 5.0
+
+
+def invalidate():
+    """Accounts changed (created, deleted, password or role set, sessions ended): forget what was cached."""
+    _cache.update(any=None, any_at=0.0, tokens={})
+
+
 def any_users() -> bool:
+    if _cache["any"] is not None and time.time() - _cache["any_at"] < CACHE_S:
+        return _cache["any"]
     con = state.connect()
     try:
-        return con.execute("SELECT 1 FROM user_accounts LIMIT 1").fetchone() is not None
+        v = con.execute("SELECT 1 FROM user_accounts LIMIT 1").fetchone() is not None
     finally:
         con.close()
+    _cache.update(any=v, any_at=time.time())
+    return v
 
 
 def list_users() -> list:
@@ -150,6 +163,7 @@ def get(user_id: int):
 
 
 def create(name: str, password: str, role: str, email: str = "") -> dict:
+    invalidate()
     name = name.strip()
     email = clean_email(email)
     if not name or len(name) > 64:
@@ -168,12 +182,14 @@ def create(name: str, password: str, role: str, email: str = "") -> dict:
             raise ValueError("Another account already has that email address")
         cur = con.execute("INSERT INTO user_accounts (name, hash, role, created, email) VALUES (?,?,?,?,?)", (name, hash_password(password) if password else "", role, int(time.time()), email or None))
         con.commit()
+        invalidate()
         return get(cur.lastrowid)
     finally:
         con.close()
 
 
 def update(user_id: int, role: str = None, password: str = None, name: str = None, email: str = None, listed: bool = None):
+    invalidate()
     con = state.connect()
     try:
         if email is not None:
@@ -209,12 +225,14 @@ def update(user_id: int, role: str = None, password: str = None, name: str = Non
         if listed is not None:  # off the sign-in screen's account list: the account signs in through "Other", by name
             con.execute("UPDATE user_accounts SET listed = ? WHERE id = ?", (1 if listed else 0, user_id))
         con.commit()
+        invalidate()
     finally:
         con.close()
     _forget_proxy_identities()
 
 
 def delete(user_id: int):
+    invalidate()
     con = state.connect()
     try:
         r = con.execute("SELECT role FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
@@ -222,6 +240,7 @@ def delete(user_id: int):
             raise ValueError("That is the only admin; make someone else admin first")
         con.execute("DELETE FROM user_accounts WHERE id = ?", (user_id,))
         con.commit()
+        invalidate()
     finally:
         con.close()
     _forget_proxy_identities()
@@ -248,6 +267,7 @@ def authenticate(name: str, password: str):
             con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (hash_password(password), r[0]))
         con.execute("UPDATE user_accounts SET last_login = ? WHERE id = ?", (int(time.time()), r[0]))
         con.commit()
+        invalidate()
         return get(r[0])
     finally:
         con.close()
@@ -269,6 +289,7 @@ def set_person(user_id: int, tag_id):
     try:
         con.execute("UPDATE user_accounts SET person = ? WHERE id = ?", (int(tag_id) if tag_id else None, user_id))
         con.commit()
+        invalidate()
     finally:
         con.close()
 
@@ -296,6 +317,7 @@ def set_settings(user_id: int, changes: dict) -> dict:
     try:
         con.execute("UPDATE user_accounts SET settings = ? WHERE id = ?", (json.dumps(cur), user_id))
         con.commit()
+        invalidate()
     finally:
         con.close()
     return cur
@@ -357,10 +379,12 @@ def _session_salt(user_id: int) -> str:
 
 def end_all_sessions(user_id: int):
     """Every session of this account stops working (the caller sets a fresh cookie for the current one if wanted)."""
+    invalidate()
     con = state.connect()
     try:
         con.execute("UPDATE user_accounts SET session_gen = coalesce(session_gen, 0) + 1 WHERE id = ?", (user_id,))
         con.commit()
+        invalidate()
     finally:
         con.close()
 
@@ -403,6 +427,17 @@ def renew_due(token: str) -> bool:
 
 
 def user_from_token(token: str):
+    hit = _cache["tokens"].get(token)
+    if hit and time.time() - hit[0] < CACHE_S:
+        return hit[1]
+    user = _user_from_token(token)
+    if len(_cache["tokens"]) > 500:
+        _cache["tokens"].clear()
+    _cache["tokens"][token] = (time.time(), user)
+    return user
+
+
+def _user_from_token(token: str):
     try:
         uid, exp, sig = token.split(".")
         if not hmac.compare_digest(hmac.new(_key(), f"{uid}.{exp}|{_session_salt(int(uid))}".encode(), hashlib.sha256).hexdigest(), sig):

@@ -328,15 +328,13 @@ def suggestions(ids: list = None) -> dict:
 def _suggestions(ids: list = None) -> dict:
     con = index.open_index()
     try:
-        rows = con.execute("SELECT id, camera, album_id FROM photos WHERE dprec = 3 AND video = 0").fetchall()
-        if ids is not None:
-            want = set(ids)
-            rows = [r for r in rows if r[0] in want]
+        only = f" AND id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})" if ids is not None else ""
+        rows = con.execute("SELECT id, camera, album_id FROM photos WHERE dprec = 3 AND video = 0" + only).fetchall()
         pids = [r[0] for r in rows]
         cams = {r[0]: r[1] for r in rows}
         win = windows(con, {r[0]: r[2] for r in rows})
         named = {}
-        for pid, tag in con.execute("SELECT f.photo_id, f.tag_id FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.kind = 'confirmed' AND p.dprec = 3 AND p.video = 0"):
+        for pid, tag in con.execute("SELECT f.photo_id, f.tag_id FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.kind = 'confirmed' AND p.dprec = 3 AND p.video = 0" + only.replace(" id IN", " p.id IN")):
             if pid in cams:
                 named.setdefault(pid, []).append(tag)
         try:

@@ -205,12 +205,14 @@ const MARKS = new Map();  // photo id -> the marks its thumbnails were last draw
  *  the favorite heart follows ST.fav. The Photos grid's own lists are patched too, for the tiles it draws later. */
 export function setBadges(ids, patch = {}) {
   const at = G.data && ids.length > 20 ? new Map(G.data.id.map((x, i) => [x, i])) : null;
+  const tilesOf = new Map();  // one pass over the document, not one query per photo
+  for (const t of document.querySelectorAll('.tile[data-id]')) { const k = +t.dataset.id; (tilesOf.get(k) || tilesOf.set(k, []).get(k)).push(t); }
   for (const id of ids) {
     const i = G.data ? (at ? at.get(id) : G.data.id.indexOf(id)) : -1;
     if (i != null && i >= 0) for (const k of ['faces', 'geo']) if (k in patch) patch[k] ? G[k].add(i) : G[k].delete(i);
     const marks = { ...MARKS.get(id), ...patch };
     if (!MARKS.has(id) && G.data && i >= 0) Object.assign(marks, { video: G.data.video[i] });
-    document.querySelectorAll(`.tile[data-id="${id}"]`).forEach((t) => {
+    (tilesOf.get(id) || []).forEach((t) => {
       t.querySelectorAll(':scope > .fbadge, :scope > .vbadge, :scope > .cbadges').forEach((e) => e.remove());
       t.append(...tileBadges(id, marks));
     });

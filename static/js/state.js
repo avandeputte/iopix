@@ -138,7 +138,7 @@ export function applyAppName() {
 
 
 /** Re-check server status soon (after an edit) instead of waiting for the regular poll. */
-export function pollSoon(ms = 1500) { clearTimeout(S.pollTimer); S.pollTimer = setTimeout(pollStatus, ms); }
+export function pollSoon(ms = 1500) { clearTimeout(S.pollTimer); S.pollTimer = setTimeout(pollStatus, document.hidden ? Math.max(ms, 120000) : ms); }  // a hidden tab asks every two minutes at most
 export async function loadState() {
   const s = await api('/api/state');
   ST.rev = s.rev; ST.fav = new Set(s.favorites); ST.albums = s.albums; ST.searches = s.searches || []; ST.canShare = !!s.canShareAlbums; ST.canPrivate = !!s.canPrivateAlbums;

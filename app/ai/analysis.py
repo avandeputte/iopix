@@ -83,6 +83,22 @@ def bump():
 jobs.finished_hook = bump
 
 
+def _drop_models():
+    """The queue ran dry: the loaded models go, so an idle server is small; the next job loads them again in seconds."""
+    global _ocr
+    with _ocr_lock:
+        _ocr = None
+    for mod, fn in (("app.ai.detector", "reset"), ("app.ai.looks", "reset_sessions"), ("app.ai.caption", "reset"), ("app.faces.facedetect", "reset_session"),
+                    ("app.faces.facevecs", "reset_session"), ("app.faces.ages", "reset_session"), ("app.ai.videos", "reset_sessions")):
+        try:
+            getattr(importlib.import_module(mod), fn)()
+        except Exception as e:
+            log.debug("idle unload %s: %s", mod, e)
+
+
+jobs.idle_hooks.append(_drop_models)
+
+
 def signature() -> str:
     """Part of the index version: the results accumulate in steps of 2000 while jobs run (a rebuild every so often,
     never one per batch) and are folded in exactly once when a run ends (the epoch). A job's running flag is

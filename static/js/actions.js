@@ -14,6 +14,12 @@ export function redrawTiles() {
   G.rendered.clear();
   renderGrid(true);
 }
+/** The selection shown on the tiles already drawn, without redrawing them (a redraw decoded every thumbnail again). */
+export function markSelected() {
+  const grid = $('#grid');
+  if (!grid || !G.data) return;
+  for (const t of grid.querySelectorAll('.tile[data-i]')) t.classList.toggle('sel', G.sel.has(G.data.id[+t.dataset.i]));
+}
 export function toggleSelect(i) {
   const id = G.data.id[i];
   G.sel.has(id) ? G.sel.delete(id) : G.sel.add(id);
@@ -26,13 +32,13 @@ export function selectRange(a, b, on) {
   if (on === 'toggle') { on = false; for (let i = a; i <= b; i++) if (!G.sel.has(ids[i])) { on = true; break; } }
   for (let i = a; i <= b; i++) on ? G.sel.add(ids[i]) : G.sel.delete(ids[i]);
   G.lastSel = b;
-  redrawTiles();
+  markSelected();
   updateSelBar();
 }
 export function clearSelection(silent) {
   if (!G.sel.size && silent) { updateSelBar(); return; }
   G.sel.clear(); G.lastSel = -1;
-  if (!silent) redrawTiles();
+  if (!silent) markSelected();
   updateSelBar();
 }
 export function updateSelBar() {

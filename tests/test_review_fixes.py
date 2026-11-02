@@ -114,6 +114,7 @@ def test_old_password_hashes_are_upgraded_at_sign_in(client, fresh):
     salt = secrets.token_bytes(16)
     old = "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(hashlib.scrypt(b"longpassword1", salt=salt, n=2 ** 14, r=8, p=1, dklen=32)).decode()
     con = state.connect(); con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (old, u["id"])); con.commit(); con.close()
+    users.invalidate()
     assert users.needs_rehash(old)
     assert client.post("/api/auth/login", json={"name": "legacy-probe", "password": "longpassword1"}).status_code == 200
     con = state.connect(); h = con.execute("SELECT hash FROM user_accounts WHERE id = ?", (u["id"],)).fetchone()[0]; con.close()

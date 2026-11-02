@@ -310,11 +310,52 @@ def _sqlite_raw(path: Path, timeout: float):
     return raw
 
 
+_tl = threading.local()  # one MySQL connection per thread, kept open: a fresh TCP+auth handshake per query was most of a request
+
+
+class _Kept:
+    """A pooled PyMySQL connection: close() rolls back whatever was not committed and keeps the socket for the
+    next use on this thread; a broken one is dropped so the next connect() opens a new one."""
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
+
+    def close(self):
+        try:
+            self.raw.rollback()
+        except Exception:
+            try:
+                self.raw.close()
+            except Exception:
+                pass
+            if getattr(_tl, "raw", None) is self.raw:
+                _tl.raw = None
+
+
+def _mysql_kept(c: dict):
+    key = (c["host"], c["port"], c["database"], c["user"])
+    raw = getattr(_tl, "raw", None)
+    if raw is not None and getattr(_tl, "key", None) == key:
+        try:
+            raw.ping(reconnect=True)
+            return _Kept(raw)
+        except Exception:
+            try:
+                raw.close()
+            except Exception:
+                pass
+    _tl.raw, _tl.key = _mysql_raw(c), key
+    return _Kept(_tl.raw)
+
+
 def connect(timeout: float = 10, cfg: dict = None) -> VConn:
     """The configured viewer database (or a given configuration, for tests and switching)."""
     c = cfg or settings()
     if c["type"] == "mysql" and (cfg is not None or error is None):
-        return VConn(_mysql_raw(c), True, True)
+        return VConn(_mysql_raw(c) if cfg is not None else _mysql_kept(c), True, True)
     return VConn(_sqlite_raw(SQLITE_FILE, timeout), False, True)
 
 
