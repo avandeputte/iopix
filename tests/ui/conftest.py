@@ -109,6 +109,7 @@ def page(browser, server):
     pg.base = server
     pg.errors = errors
     yield pg
+    pg.unroute_all(behavior="ignoreErrors")  # a mocked route still answering at close would fail the next test's context
     ctx.close()
     assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
 

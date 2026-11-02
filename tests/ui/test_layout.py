@@ -193,6 +193,11 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
     tall column on phones; the update and digiKam cards stack in one corner instead of overlapping."""
     ctx = browser.new_context(bypass_csp=True, viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page()
+    # the status poll draws the update card from what the server says, so without this the card drawn below is taken away again
+    def with_update(route):
+        r = route.fetch(); body = r.json(); body["updateAvailable"] = {"version": "9.9.9", "remote": "r", "message": "v9.9.9: words"}
+        route.fulfill(response=r, json=body)
+    page.route("**/api/status*", with_update)
     try:
         page.goto(server + "/#/explore"); page.wait_for_selector("#nav > a", timeout=10000)
         page.evaluate("() => { import('/js/state.js').then((st) => st.toast('3 photos moved to the trash. 1 could not be: the file is not on disk.', 'Undo', () => {}, 60000)); }")
@@ -209,6 +214,7 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
             assert u["y"] + u["height"] <= d["y"], "the update card sits above the digiKam card, not on it"
         assert page.locator("#updbanner").bounding_box()["width"] > 300
     finally:
+        page.unroute_all(behavior="ignoreErrors")
         ctx.close()
 
 def _units_page(browser, server, locale):

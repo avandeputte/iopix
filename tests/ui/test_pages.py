@@ -933,6 +933,7 @@ def test_a_library_change_does_not_redraw_the_page_being_looked_at(browser, serv
         page.locator("#main").evaluate(f"m => m.scrollTop = {int(room * 0.6)}")
         page.wait_for_function("(t) => Math.abs(document.querySelector('#main').scrollTop - t) < 2", arg=int(room * 0.6), timeout=5000)
         top = page.locator("#main").evaluate("m => m.scrollTop")
+        page.wait_for_function(_WHAT_IS_THERE, timeout=5000)  # the grid draws the rows at the new position a moment after the scroll
         seen = page.evaluate(_WHAT_IS_THERE)
         page.evaluate("document.querySelector('#main').firstElementChild.dataset.old = '1'")  # a redraw replaces this element
         meta = page.evaluate("import('/js/state.js').then((m) => m.S.META.version)")
