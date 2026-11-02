@@ -16,9 +16,9 @@ import tempfile
 import time
 
 from app import config
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import in_chunks
 from app.photos import edits
-from app.data import index
+from app.data import index, vdb
 
 log = logging.getLogger("app.photos.pixelguard")
 _warned = [False]
@@ -93,8 +93,8 @@ class Guard:
 
 def _log_refused(path: str):
     try:
-        from app.photos import history
-        from app.data import index
+        from app.photos import history  # lazy: photos.history -> photos.edits -> photos.pixelguard would be an import cycle
+        from app.data import index  # lazy: data.index -> photos.edits -> photos.pixelguard would be an import cycle
         con = index.open_index()
         try:
             row = con.execute("SELECT id FROM photos WHERE path = ?", (path,)).fetchone()
@@ -113,9 +113,8 @@ def _photo_ids(paths: list) -> dict:
     try:
         con = index.open_index()
         try:
-            for chunk in chunked(paths, 400):
-                for pid, path in con.execute(f"SELECT id, path FROM photos WHERE path IN ({','.join('?' * len(chunk))})", chunk):
-                    out[path] = pid
+            for pid, path in in_chunks(con, "SELECT id, path FROM photos WHERE path IN ({ids})", paths, size=400):
+                out[path] = pid
         finally:
             con.close()
     except Exception:
@@ -127,7 +126,6 @@ def _store(rows: list):
     if not rows:
         return
     try:
-        from app.data import vdb
         ids = _photo_ids([p for p, _h, _t in rows])
         with vdb.writer() as con:
             con.executemany("INSERT OR REPLACE INTO image_data_checksums (photo_id, hash, algorithm, verified) VALUES (?,?,?,?)",

@@ -6,16 +6,8 @@ import time
 
 import pytest
 
+from helpers import wait_for as _wait
 from app import jobs
-
-
-def _wait(pred, timeout=5.0):
-    end = time.time() + timeout
-    while time.time() < end:
-        if pred():
-            return True
-        time.sleep(0.02)
-    return False
 
 
 def test_unknown_key_is_rejected():

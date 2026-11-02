@@ -100,7 +100,7 @@ def delete(photos: list, check_running: bool = True) -> dict:
         raise dbsync.SyncError(f"Not enough free disk space for the backup of these photos ({need / 1e9:.1f} GB needed); nothing was deleted.")
     # the index may be behind digiKam (a photo moved or renamed there since the last build): the row decides where the
     # file is, so the right file is backed up and removed, never a stale path left behind for digiKam to re-add
-    from app.photos import organize
+    from app.photos import organize  # lazy: photos.organize -> photos.deletion would be an import cycle
     with dkdb.reader() as rcon:
         where = {r["id"]: r["path"] for r in organize._rows(rcon, [int(p["id"]) for p in photos])}
     manifest, ok, failed = [], [], []

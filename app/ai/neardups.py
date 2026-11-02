@@ -16,7 +16,7 @@ except ImportError:  # numpy comes with the search/objects extras; without it th
 from app.data import index, state, vdb
 from app import jobs
 from app.ai.semantic import enabled, semantic
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import in_chunks
 
 log = logging.getLogger("app.ai.neardups")
 LEVELS = {"strict": 0.97, "normal": 0.94, "loose": 0.90}  # cosine similarity of the search embeddings
@@ -128,10 +128,9 @@ def groups(limit: int = 300) -> list:
     facts = {}
     icon = index.open_index()
     try:
-        for chunk in chunked(ids, 900):
-            for r in icon.execute(f"SELECT p.id, p.name, p.w, p.h, p.video, p.ts, p.size, p.sharpn, p.hash, a.path FROM photos p JOIN albums a ON a.id = p.album_id "
-                                  f"WHERE p.id IN ({','.join('?' * len(chunk))})", chunk):
-                facts[r[0]] = {"id": r[0], "name": r[1], "w": r[2], "h": r[3], "video": r[4], "ts": r[5], "size": r[6], "sharpn": r[7], "hash": r[8], "album": r[9]}
+        for r in in_chunks(icon, "SELECT p.id, p.name, p.w, p.h, p.video, p.ts, p.size, p.sharpn, p.hash, a.path FROM photos p JOIN albums a ON a.id = p.album_id "
+                                 "WHERE p.id IN ({ids})", ids, size=900):
+            facts[r[0]] = {"id": r[0], "name": r[1], "w": r[2], "h": r[3], "video": r[4], "ts": r[5], "size": r[6], "sharpn": r[7], "hash": r[8], "album": r[9]}
     finally:
         icon.close()
     out = []

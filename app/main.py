@@ -7,7 +7,6 @@ go through the modules that own those writes."""
 import json
 import logging
 import threading
-import os
 import time
 from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
@@ -26,12 +25,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
 from app.routes import auth, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
-from app.core import state, _kick, _refresh, _auto, _watch, resolve, prewarmer, _setup_file_log, _models_arrived
-__all__ = ["app", "state", "_kick", "_refresh", "_auto", "_watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
+from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, setup_file_log, models_arrived
+__all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewarmer"]  # tests and mcp_server reach these through app.main
 
 @asynccontextmanager
 async def lifespan(_app):
-    _setup_file_log()
+    setup_file_log()
     upgraded = config.INDEX_DB.exists()  # an install that has run before (a fresh one has no index yet)
     appstate.init()
     _mcp_first_setting(upgraded)
@@ -40,19 +39,19 @@ async def lifespan(_app):
     tagmanager.init()
     analysis.init()
     consistency.init()
-    analysis.on_progress = _kick.set  # fold new analysis results into the index as they arrive
+    analysis.on_progress = kick.set  # fold new analysis results into the index as they arrive
     if tagmanager.pending_jobs():  # finish sidecar updates left over from a previous run
         tagmanager.start_worker()
     facemgr.resume_queue()  # and the face sidecar rewrites a restart interrupted
-    _refresh(initial=True)
+    refresh(initial=True)
     threading.Thread(target=thumbs.prune_previews, daemon=True).start()
-    threading.Thread(target=_watch, name="reindex", daemon=True).start()
+    threading.Thread(target=watch, name="reindex", daemon=True).start()
     scanner.start(events.after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
     if dkdb.no_digikam() and scanner.enabled():
         scanner.run_soon()  # no digiKam to have found what was added while iopix was stopped: a pass right after start-up
     updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them
-        dlmodels.auto_download(config.AUTO_MODELS, on_done=_models_arrived)
+        dlmodels.auto_download(config.AUTO_MODELS, on_done=models_arrived)
     async with mcp_server.server.session_manager.run():  # the MCP endpoint (/mcp) lives in this process
         yield
 
@@ -85,7 +84,7 @@ def _mcp_first_setting(upgraded: bool):
 
 def mcp_enabled() -> bool:
     """Settings › Viewer › MCP server: off unless an admin turns it on (or MCP=1 in the environment)."""
-    if os.environ.get("MCP", "").strip() == "1":
+    if config.MCP_FORCED:
         return True
     return appstate.get_setting("mcp_enabled", "0") == "1"
 

@@ -3,16 +3,8 @@ another, unknown keys ignored, and the completion hook sees what arrived."""
 import threading
 import time
 
+from helpers import wait_for as _wait
 from app.ai import models
-
-
-def _wait(pred, timeout=5.0):
-    end = time.time() + timeout
-    while time.time() < end:
-        if pred():
-            return True
-        time.sleep(0.02)
-    return False
 
 
 def test_auto_download_sequences_missing_models(monkeypatch):

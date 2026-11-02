@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
 
-from app.core import json_body
+from app.http import json_body
 from app import access, users
 
 from app.routes.auth import person_tag

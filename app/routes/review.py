@@ -9,8 +9,10 @@ from app import access, config, events
 from app.digikam import dbsync
 from app.photos import filecheck, history, picklabels
 from app.data import state as appstate
-from app.core import DB_ERRORS, json_body
+from app.http import json_body
+from app.runtime import DB_ERRORS
 from app.faces import facequality
+from app.ai import rotation
 
 
 router = APIRouter()
@@ -28,7 +30,6 @@ def api_quality():
 def api_rotation(offset: int = 0, limit: int = 200, ids: str = ""):
     """Photos that read as on their side or upside down (rotation.py): {total, items: [{id, turn, op, text, score}],
     dismissed, ready, running, phase, coverage}. op is the lossless rotate that rights it (/api/photos/transform)."""
-    from app.ai import rotation
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     out = rotation.findings(want)
     items = out["items"]
@@ -39,7 +40,6 @@ def api_rotation(offset: int = 0, limit: int = 200, ids: str = ""):
 @router.post("/api/rotation/dismiss", dependencies=[access.editor_write])
 async def api_rotation_dismiss(request: Request):
     """Body {photos: [ids], on: true}: these photos are the right way up; they leave the list until the file changes."""
-    from app.ai import rotation
     body = await json_body(request)
     n = await run_in_threadpool(rotation.dismiss, body.get("photos") or [], bool(body.get("on", True)))
     return {"dismissed": n}

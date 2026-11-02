@@ -15,7 +15,7 @@ from app.faces import facevecs
 def _enable(monkeypatch, rev="rev-A"):
     monkeypatch.setattr(semantic, "_HAVE", True)
     monkeypatch.setattr(semantic.config, "SEMANTIC", True)
-    monkeypatch.setattr(semantic, "_ready", lambda name: True)
+    monkeypatch.setattr(semantic, "ready", lambda name: True)
     cur = {"rev": rev}
     monkeypatch.setattr(semantic.Engine, "installed_revision", lambda self: cur["rev"])
     return cur

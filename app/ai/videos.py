@@ -26,7 +26,7 @@ import threading
 import time
 
 from app import jobs, thumbs
-from app.ai import analysis  # the module, not its names: analysis is still loading when the index imports this (a cycle)
+from app.ai import analysis, models  # the module, not its names: analysis is still loading when the index imports this (a cycle)
 from app.ai.scanjob import ScanJob
 from app.data import vdb
 from app.digikam.dkdb import chunked
@@ -56,7 +56,6 @@ def available() -> bool:
 def speech_available() -> bool:
     """A speech model is installed and the recogniser package with it."""
     import importlib.util
-    from app.ai import models
     if importlib.util.find_spec("onnx_asr") is None:
         return False
     try:
@@ -156,7 +155,6 @@ def reset_sessions():
 
 def _recogniser():
     """The loaded speech model, once; None when it cannot be loaded."""
-    from app.ai import models
     key = models.chosen("speech_model")
     with _lock:
         s = _asr.get("s")
@@ -263,7 +261,6 @@ def _key(speech_model: str) -> str:
 def _current_key() -> tuple:
     """(speech wanted, the ai_scans detail a video done now gets): the detail names the speech model, so a video
     done without one (or with another) is done again when a model arrives."""
-    from app.ai import models
     speech = speech_available()
     return speech, _key(models.chosen("speech_model") if speech else "")
 
@@ -286,11 +283,10 @@ def coverage() -> tuple:
 
 
 def _work(gen: int, todo: list):
-    from app.ai import models
     speech, key = _current_key()
     faces = None
     try:
-        from app.faces import facedetect
+        from app.faces import facedetect  # lazy: faces.facedetect -> data.index -> ai.videos would be an import cycle
         if facedetect.available():
             faces = lambda im: facedetect.detect_image(im)  # noqa: E731
     except Exception:

@@ -89,6 +89,32 @@ def make_admin(target, name: str = "alex", password: str = "correct horse"):
     return r.json()
 
 
+def login(client, name: str, pw: str):
+    """A fresh session signed in as `name` with a password (the TestClient's cookies are cleared first); the answer."""
+    client.cookies.clear()
+    r = client.post("/api/auth/login", json={"name": name, "password": pw})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def backups():
+    """The copies of digiKam's database under the data folder (db-backups), oldest first."""
+    from app import config
+    d = config.DATA_DIR / "db-backups"
+    return sorted(d.glob("digikam4-*.db")) if d.exists() else []
+
+
+def wait_for(pred, timeout=5.0):
+    """Poll pred() until it is truthy or `timeout` seconds pass (a background thread's doing); whether it became so."""
+    import time
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return False
+
+
 # --- library probes used by more than one module --------------------------------------------------
 
 def forget_identity(ids):

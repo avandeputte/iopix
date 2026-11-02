@@ -1,4 +1,4 @@
-"""The viewer's own log (data/viewer.log, rotating; see main._setup_file_log), read for Maintenance ›
+"""The viewer's own log (data/viewer.log, rotating; see runtime.setup_file_log), read for Maintenance ›
 Server log and the MCP server_log tool."""
 from app import config
 

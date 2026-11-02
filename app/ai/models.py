@@ -36,6 +36,8 @@ from email.utils import parsedate_to_datetime
 from importlib.metadata import PackageNotFoundError, version as package_version
 
 from app import config, jobs
+from app.data import state
+from app.geo import places
 
 MODEL_DIR = config.DATA_DIR / "models"
 RECORD = MODEL_DIR / "downloads.json"
@@ -145,7 +147,6 @@ def options(group: str) -> list:
 def chosen(group: str) -> str:
     """The model key the owner picked for this feature (a setting), else the default."""
     try:
-        from app.data import state
         key = state.get_setting(group, "")
     except Exception:
         key = ""
@@ -231,7 +232,6 @@ def local(key: str) -> dict:
         return {"installed": True, "revision": "+".join(shas), "at": max(ats)}
     if m["kind"] in ("url", "zip", "data"):
         if m["kind"] == "data":
-            from app.geo import places
             paths = [places.DIR / f for f in places.FILES]
         else:
             paths = files(key)
@@ -403,7 +403,7 @@ def download(key: str):
             elif key in ("aesthetic", "eyes", "yunet", "scrfd", "retinaface"):  # photo quality picks up what it could not do before
                 _recompute_looks()
             elif key == "mivolo":
-                from app.faces import ages
+                from app.faces import ages  # lazy: faces.ages -> ai.models would be an import cycle
                 ages.start()
         except Exception as e:
             progress.fail(e)
@@ -420,14 +420,14 @@ def _recompute(key: str):
     group = REGISTRY[key].get("choice")
     try:
         if group == "face_vectors":
-            from app.faces import facevecs
+            from app.faces import facevecs  # lazy: faces.facevecs -> ai.models would be an import cycle
             facevecs.start()
         elif group == "search_model":
-            from app import core
-            from app.ai.semantic import semantic
-            con = core.db()
+            from app import runtime  # lazy: core -> ai.models would be an import cycle
+            from app.ai.semantic import semantic  # lazy: ai.semantic -> ai.models would be an import cycle
+            con = runtime.db()
             try:
-                rows = [dict(r) for r in con.execute(f"SELECT {core.THUMB_COLS} FROM photos ORDER BY ts DESC")]
+                rows = [dict(r) for r in con.execute(f"SELECT {runtime.THUMB_COLS} FROM photos ORDER BY ts DESC")]
             finally:
                 con.close()
             semantic.start(rows)
@@ -438,8 +438,8 @@ def _recompute(key: str):
 def _recompute_looks():
     """A photo quality model arrived: queue the analysis, which fills in the scores it could not compute before."""
     try:
-        from app import core
-        core.run_analysis_soon()
+        from app import runtime  # lazy: core -> ai.models would be an import cycle
+        runtime.run_analysis_soon()
     except Exception as e:
         logging.getLogger(__name__).warning("models: photo quality was not restarted after the download: %s", e)
 
@@ -449,34 +449,33 @@ def reset(key: str):
     group = REGISTRY.get(key, {}).get("choice")
     try:
         if group == "search_model":
-            from app.ai.semantic import semantic
+            from app.ai.semantic import semantic  # lazy: ai.semantic -> ai.models would be an import cycle
             e = semantic.engines.get(key)
             if e is not None:
                 e.unload()
         elif group == "caption_model":
-            from app.ai import caption, florence
+            from app.ai import caption, florence  # lazy: ai.caption -> ai.models would be an import cycle
             caption.reset()
             florence.reset()
         elif group == "object_model":
-            from app.ai import detector
+            from app.ai import detector  # lazy: ai.detector -> ai.models would be an import cycle
             detector.reset()
         elif group == "face_vectors":
-            from app.faces import facevecs
+            from app.faces import facevecs  # lazy: faces.facevecs -> ai.models would be an import cycle
             facevecs.reset_session()
         elif group == "face_detector":
-            from app.faces import facedetect
+            from app.faces import facedetect  # lazy: faces.facedetect -> ai.models would be an import cycle
             facedetect.reset_session()
         elif group == "speech_model":
-            from app.ai import videos
+            from app.ai import videos  # lazy: ai.videos -> ai.models would be an import cycle
             videos.reset_sessions()
         elif key in ("aesthetic", "eyes"):
-            from app.ai import looks
+            from app.ai import looks  # lazy: ai.looks -> ai.models would be an import cycle
             looks.reset_sessions()
         elif key == "mivolo":
-            from app.faces import ages
+            from app.faces import ages  # lazy: faces.ages -> ai.models would be an import cycle
             ages.reset_session()
         elif key == "geonames":
-            from app.geo import places
             places.reset()  # loaded again from the new files on the next lookup
     except Exception:  # the download itself succeeded; the old objects simply stay until a restart
         traceback.print_exc()
@@ -522,10 +521,10 @@ def _download_here(key: str):
     socket.setdefaulttimeout(120)  # a stalled connection ends instead of holding the download for the parent's two hours
     m = REGISTRY[key]
     if m.get("choice") == "search_model":
-        from app.ai import semantic
+        from app.ai import semantic  # lazy: ai.semantic -> ai.models would be an import cycle
         semantic.download_models(key)
     elif key == "florence2":
-        from app.ai import florence
+        from app.ai import florence  # lazy: ai.florence -> ai.models would be an import cycle
         florence.download()
     elif m.get("choice") == "caption_model":
         from transformers import BlipForConditionalGeneration, BlipProcessor
@@ -551,10 +550,9 @@ def _download_here(key: str):
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
         os.replace(part, d)
-        from app.ai import videos
+        from app.ai import videos  # lazy: ai.videos -> ai.models would be an import cycle
         videos.reset_sessions()
     elif key == "geonames":
-        from app.geo import places
         places.fetch()
     elif key == "ocr":
         # a uv-created venv has no pip; try uv first, then pip (Docker image)

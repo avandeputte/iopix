@@ -33,8 +33,9 @@ from app import config, thumbs
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history
 from app.faces import facemgr
-from app.data import index
+from app.data import index, vdb
 from app.digikam.dbsync import SyncError
+from app.photos.pixelguard import Guard
 
 log = logging.getLogger("app.photos.lossless")
 
@@ -269,7 +270,6 @@ def _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_region
 
 def forget_checksum(pid: int):
     try:
-        from app.data import vdb
         with vdb.writer() as con:
             con.execute("DELETE FROM image_data_checksums WHERE photo_id = ?", (int(pid),))
     except Exception:
@@ -319,7 +319,6 @@ def transform_one(pid: int, op: str, check_running: bool = True) -> dict:
         w, h = p["w"], p["h"]
         orientation = compose(p["orientation"], op)
         if edits.can_write_file(p["path"]):
-            from app.photos.pixelguard import Guard
             with Guard([p["path"]]) as g:
                 _file_orientation(p["path"], orientation)
                 if g.verify():

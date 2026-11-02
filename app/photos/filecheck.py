@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 
-from app import core, jobs, thumbs
+from app import jobs, runtime, thumbs
 from app.data import vdb
 from app.digikam.dkdb import chunked
 from app.photos import history, lossless
@@ -258,9 +258,9 @@ def _stamp(p: dict) -> str:
 
 
 def _photos() -> list:
-    con = core.db()
+    con = runtime.db()
     try:
-        return [dict(r) for r in con.execute(f"SELECT {core.THUMB_COLS} FROM photos WHERE video = 0 ORDER BY ts DESC")]
+        return [dict(r) for r in con.execute(f"SELECT {runtime.THUMB_COLS} FROM photos WHERE video = 0 ORDER BY ts DESC")]
     finally:
         con.close()
 

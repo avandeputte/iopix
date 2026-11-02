@@ -11,15 +11,17 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.ai import analysis, jobs_meta, models as dlmodels
+from app.ai import analysis, clothing, jerseys, jobs_meta, models as dlmodels, rotation, videos
 from app import access, config, events, jobs as bgjobs, logs, updates, users
 from app.digikam import dbsync, dkdb, merge
 from app.faces import ages, facedetect, facevecs
 from app.photos import edits, paths, scanner
 from app.data import index, state as appstate, vdb
 from app.geo import maps
-from app.ai.semantic import _ready as semantic_ready, enabled as semantic_enabled, ENGINES, semantic
-from app.core import _compute_tag_covers, _face_detect_allowed, _start_prewarm, app_name, db, DB_ERRORS, state, json_body
+from app.ai.semantic import ready as semantic_ready, enabled as semantic_enabled, ENGINES, semantic
+from app.guards import face_detect_allowed
+from app.http import json_body
+from app.runtime import DB_ERRORS, app_name, compute_tag_covers, db, start_prewarm, state
 
 from app.routes.settings import db_settings_public
 
@@ -134,10 +136,10 @@ async def api_update_run(request: Request):
             raise HTTPException(409, str(e))
         return {"ok": True}
     if action == "token":  # admin: the MCP update token (shown once here, never in /api/update)
-        from app.main import mcp_enabled
-        return {"token": updates.admin_token(), "fromEnv": bool(os.environ.get("MCP_ADMIN_TOKEN")), "mcpEnabled": mcp_enabled()}
+        from app.main import mcp_enabled  # lazy: main -> routes.maintenance would be an import cycle
+        return {"token": updates.admin_token(), "fromEnv": bool(config.mcp_admin_token_env()), "mcpEnabled": mcp_enabled()}
     if action == "regenerate_token":
-        if os.environ.get("MCP_ADMIN_TOKEN"):
+        if config.mcp_admin_token_env():
             raise HTTPException(400, "The token comes from MCP_ADMIN_TOKEN in the environment; change it there")
         return {"token": updates.regenerate_token()}
     raise HTTPException(400, "action must be check, run, token or regenerate_token")
@@ -185,8 +187,8 @@ def api_maintenance(request: Request):
             "embeddings": sum(e.file.stat().st_size for e in semantic.engines.values() if e.file.exists()),
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
-        "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": os.environ.get("MCP", "").strip() == "1",
-        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": os.environ.get("UPDATE_CHECK", "").strip() == "0", "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "")), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
+        "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": config.MCP_FORCED,
+        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": config.update_check_locked(), "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or config.GOOGLE_SERVER_KEY), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),
         "scanner": _scanner_state(),
@@ -229,14 +231,14 @@ async def api_maintenance_run(request: Request):
     action = body.get("action")
     if action == "reindex":
         await run_in_threadpool(index.build)
-        state["version"] = None  # so _refresh treats the new index as a change
+        state["version"] = None  # so runtime.refresh treats the new index as a change
         events.kick()
     elif action in ("thumbs", "previews", "faces"):
         await run_in_threadpool(shutil.rmtree, config.CACHE_DIR / {"thumbs": "t", "previews": "p", "faces": "f"}[action], ignore_errors=True)
         if action == "thumbs":
-            await run_in_threadpool(_start_prewarm)
+            await run_in_threadpool(start_prewarm)
     elif action == "covers":
-        threading.Thread(target=_compute_tag_covers, args=(state.get("source"),), daemon=True).start()
+        threading.Thread(target=compute_tag_covers, args=(state.get("source"),), daemon=True).start()
     else:
         raise HTTPException(400, "Unknown action")
     return {"ok": True}
@@ -277,7 +279,7 @@ async def api_analysis_run(request: Request):
 def start_analysis(job: str = "all", reset: bool = False) -> dict:
     """What the Run / Run again buttons do (and the MCP tool run_analysis): queue one analysis, or all of them."""
     if job == "facedetect":  # writes faces into digiKam's database, so only ever on request
-        _face_detect_allowed()
+        face_detect_allowed()
         if reset:
             facedetect.reset()
         n = facedetect.start(after=events.after_write)
@@ -292,19 +294,15 @@ def start_analysis(job: str = "all", reset: bool = False) -> dict:
         elif job == "ages":
             ages.reset()
         elif job == "jerseys":
-            from app.ai import jerseys
             jerseys.reset()
         elif job == "clothing":
-            from app.ai import clothing
             clothing.reset()
         elif job == "rotation":
-            from app.ai import rotation
             rotation.reset()
         elif job == "videos":
-            from app.ai import videos
             videos.reset()
         else:
             raise HTTPException(400, "Choose one analysis to run again from scratch")
-    _start_prewarm()
+    start_prewarm()
     events.kick()
     return {"ok": True}

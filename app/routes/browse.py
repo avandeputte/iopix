@@ -21,13 +21,19 @@ from app import __version__ as APP_VERSION, access, config, jobs as bgjobs, upda
 from app.photos import edits, lossless, tagmanager
 from app.faces import facedetect
 from app.data import index, state as appstate
+from app.digikam.dkdb import in_chunks
 from app.geo import places
 from app.ai.semantic import enabled as semantic_enabled, semantic
 from app.data.query import SORTS
-from app.core import _app_stamp, _public_version, _tag_covers, app_name, CACHES, db, jresp, prewarmer, resolve, state
+from app.http import jresp
+from app.runtime import CACHES, app_name, app_stamp, db, prewarmer, public_version, resolve, state, tag_covers
 
+from app import videostream
+from app.ai import clothing, dateclues, jerseys, rotation, videos
+from app.geo import placeguess
+from app.photos import dateprecision, versions
 from app.routes.faces import api_people_groups
-from app.data.index import REJECT_REASONS, _parse_dt
+from app.data.index import REJECT_REASONS, parse_dt
 
 router = APIRouter()
 
@@ -41,7 +47,7 @@ HAS_PEOPLE = ("(EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = photos.id AND f
 
 
 @lru_cache(maxsize=64)
-def _photos_cached(version: str, key: str) -> bytes:
+def photos_cached(version: str, key: str) -> bytes:
     items = parse_qsl(key.split("|", 1)[1], keep_blank_values=True)
     where, params, rank = resolve(items)
     d = dict(items)
@@ -100,9 +106,7 @@ def api_badges(ids: str = ""):
         return {"geo": [], "faces": [], "video": {}, "focus": {}}
     con = db()
     try:
-        rows = con.execute(
-            f"SELECT id, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, focus "
-            f"FROM photos WHERE id IN ({','.join('?' * len(want))})", want).fetchall()
+        rows = list(in_chunks(con, f"SELECT id, video, duration, lat IS NOT NULL, {HAS_PEOPLE}, focus FROM photos WHERE id IN ({{ids}})", want))
     finally:
         con.close()
     return {"geo": [r[0] for r in rows if r[3]], "faces": [r[0] for r in rows if r[4]],
@@ -148,7 +152,7 @@ def api_photos(request: Request):
         headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Accept-Encoding, Cookie"}
         if etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]:
             return Response(status_code=304, headers=headers)
-        body = _photos_cached(state["version"], key)
+        body = photos_cached(state["version"], key)
     except sqlite3.OperationalError as e:
         raise HTTPException(400, f"Bad query: {e}")
     if "gzip" in request.headers.get("accept-encoding", ""):
@@ -167,7 +171,7 @@ def _meta(version: str) -> dict:
             "SELECT c.anc, p.id, max(p.rating * 1e11 + p.ts - (p.pick = 1) * 1e13) FROM tag_closure c "
             "JOIN photo_tags pt ON pt.tag_id = c.tag JOIN photos p ON p.id = pt.photo_id "
             "WHERE p.video = 0 GROUP BY c.anc")}
-        covers.update(_tag_covers)
+        covers.update(tag_covers)
         # a thumbnail chosen in digiKam (or here) beats the automatic pick
         covers.update({r[0]: r[1] for r in q("SELECT id, icon FROM tags WHERE icon IS NOT NULL")})
         # whose face to show for a people tag: its own, or its most-photographed member's
@@ -208,7 +212,7 @@ def _meta(version: str) -> dict:
 
 @router.get("/api/meta", dependencies=[access.public])
 def api_meta(request: Request):
-    return jresp(request, {**_meta(state["version"]), "version": _public_version()})
+    return jresp(request, {**_meta(state["version"]), "version": public_version()})
 
 
 
@@ -216,12 +220,12 @@ def api_meta(request: Request):
 def api_status(request: Request):
     user = request.state.user
     if user is None and users.require_login():  # the sign-in screen: only what it needs, nothing about the library or the server
-        return {"version": _public_version(), "app": _app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
+        return {"version": public_version(), "app": app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
                 "usersExist": users.any_users(), "signedIn": False, "isAdmin": False, "user": None, "readOnly": appstate.read_only(),
                 "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK, "editing": False, "dbWrite": False, "pendingEdits": 0}
     admin, signed, writer = users.is_admin(user), users.is_signed_in(user), users.can_write(user)
     dk = index.status()
-    return {"version": _public_version(), "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev, "app": _app_stamp(),
+    return {"version": public_version(), "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev, "app": app_stamp(),
             "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
                        "current": list(prewarmer.current.values())[:3] if signed else []},  # file paths: not for anonymous clients
             "semantic": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done,
@@ -327,37 +331,9 @@ def api_explore(request: Request, md: str = "", n: int = 36, pairs: int = 3):
     /api/people/groups). md: the viewer's own today as MM-DD; without it, onThisDay is null."""
     on_this_day = None
     if re.fullmatch(r"\d\d-\d\d", md or ""):
-        on_this_day = orjson.loads(gzip.decompress(_photos_cached(state["version"], f"{appstate.rev}.{semantic.key}|md={md}")))
+        on_this_day = orjson.loads(gzip.decompress(photos_cached(state["version"], f"{appstate.rev}.{semantic.key}|md={md}")))
     return jresp(request, {"random": api_random(n), "thenAndNow": api_then_and_now(pairs),
                            "events": _events(state["version"]), "onThisDay": on_this_day, "peopleGroups": api_people_groups(request)})
-
-
-@router.get("/api/bursts", dependencies=[access.public])
-def api_bursts(request: Request, offset: int = 0, limit: int = 40):
-    """Bursts within the current filters, newest first, each with its frames and best pick."""
-    items = [(k, v) for k, v in request.query_params.multi_items() if k not in ("offset", "limit")]
-    where, params, _ = resolve(items)
-    con = db()
-    try:
-        ids = [r[0] for r in con.execute(
-            f"SELECT burst FROM photos WHERE burst IS NOT NULL AND {where} GROUP BY burst ORDER BY max(ts) DESC", params)]
-        page = ids[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
-        rows = con.execute(
-            f"SELECT id, burst, burst_best, w, h, ts, sharpn, faceq, pick, rating, aesth, focusn, eyes_checked, eyes_closed, reject FROM photos "
-            f"WHERE burst IN ({','.join(map(str, page)) or 'NULL'}) ORDER BY ts, name").fetchall()
-        total_photos = con.execute(f"SELECT count(*) FROM photos WHERE burst IS NOT NULL AND {where}", params).fetchone()[0]
-    except sqlite3.OperationalError as e:
-        raise HTTPException(400, f"Bad query: {e}")
-    finally:
-        con.close()
-    groups = {b: [] for b in page}
-    for r in rows:
-        groups[r["burst"]].append({"id": r["id"], "best": r["burst_best"], "w": r["w"], "h": r["h"], "ts": r["ts"],
-                                   "sharpn": r["sharpn"], "faceq": r["faceq"], "pick": r["pick"], "rating": r["rating"],
-                                   "aesthetic": r["aesth"], "focusn": r["focusn"], "eyesChecked": r["eyes_checked"], "eyesClosed": r["eyes_closed"],
-                                   "reject": [w for w in (r["reject"] or "").split(",") if w]})
-    return jresp(request, {"bursts": len(ids), "photos": total_photos, "offset": offset,
-                           "groups": [{"burst": b, "items": groups[b]} for b in page]})
 
 
 @router.get("/api/trail", dependencies=[access.public])
@@ -405,7 +381,7 @@ def _overlay_pending(con, d: dict):
             d[k] = e[k] or None
     if e.get("taken"):
         d["taken"] = e["taken"]
-        dt = _parse_dt(e["taken"])
+        dt = parse_dt(e["taken"])
         if dt:
             d["ts"] = dt[0]
     if "gps" in e:
@@ -414,8 +390,7 @@ def _overlay_pending(con, d: dict):
     rem, add = set(e.get("remove_tags") or []), [t for t in e.get("add_tags") or [] if t not in {x["full"] for x in d["tags"]}]
     d["tags"] = [t for t in d["tags"] if t["full"] not in rem]
     if add:
-        d["tags"] += [dict(r) for r in con.execute(
-            f"SELECT id, name, full, person FROM tags WHERE full IN ({','.join('?' * len(add))})", add)]
+        d["tags"] += [dict(r) for r in in_chunks(con, "SELECT id, name, full, person FROM tags WHERE full IN ({ids})", add)]
 
 
 def _quality(d: dict):
@@ -442,7 +417,6 @@ def api_photo(photo_id: int, request: Request):
         d["extra"] = json.loads(d["extra"]) if d["extra"] else {}
         if d["video"]:
             # whether Apple's players take the original as it is (/orig/<id>); if not, /video/<id>.mp4 is a copy they play
-            from app import videostream
             v = d["extra"].get("video") or {}
             d["playable"] = videostream.playable(d["name"], v.get("codec"), v.get("audio"))
         album = con.execute("SELECT id, path, name FROM albums WHERE id = ?", (d["album_id"],)).fetchone()
@@ -457,7 +431,6 @@ def api_photo(photo_id: int, request: Request):
             "SELECT f.tag_id AS tag, f.kind, f.x, f.y, f.w, f.h, (SELECT name FROM tags t WHERE t.id = f.tag_id) AS name "
             "FROM faces f WHERE f.photo_id = ? AND f.kind != 'confirmed' ORDER BY f.x", (photo_id,))]
         _overlay_pending(con, d)
-        from app.photos import dateprecision
         d["datePrecision"] = dateprecision.of_paths([t["full"] for t in d["tags"]])  # None: the date is exact
         d["dprec"] = dateprecision.LEVELS.get(d["datePrecision"])
         d.pop("hash", None)
@@ -467,30 +440,23 @@ def api_photo(photo_id: int, request: Request):
         d["similar"] = semantic_enabled()
         d["concepts"] = concepts.for_photo(photo_id) if semantic_enabled() else []
         d["boxes"] = analysis.boxes(photo_id)
-        from app.photos import versions
         d["versions"] = versions.versions_of(photo_id)  # digiKam's version family (ImageRelations), when there is one
         d["quality"] = _quality(d)
         writer = users.can_write(request.state.user)  # the suggestions below are for editors; asked once
         if d.get("dprec") == 3 and writer:  # a year suggestion from the library's clues (dateclues.py), editors only
-            from app.ai import dateclues
             hit = dateclues.suggestions([photo_id])["items"]
             d["dateSuggestion"] = hit[0] if hit else None
-        from app.ai import jerseys
         d["jerseys"] = jerseys.for_photo(photo_id)  # numbers read on shirts, with the player suggested for an unnamed one (editors)
         if d["jerseys"] and writer:
             d["jerseySuggestions"] = jerseys.suggestions([photo_id])["items"]
         if d.get("video"):  # the chosen cover frame, chapters and the transcript (videos.py)
-            from app.ai import videos
             d["videoInfo"] = videos.info(photo_id)
         if not d.get("video") and writer:  # on its side or upside down? (rotation.py)
-            from app.ai import rotation
             hit = rotation.findings([photo_id])["items"]
             d["rotationSuggestion"] = hit[0] if hit else None
         if not d.get("video") and writer:  # people probably present, by their clothes (clothing.py)
-            from app.ai import clothing
             d["clothingSuggestions"] = clothing.suggestions([photo_id])["items"] if clothing.for_photo(photo_id) else []
         if d.get("lat") is None and not d.get("video") and writer:  # where it was probably taken (placeguess.py), editors only
-            from app.geo import placeguess
             hit = placeguess.suggestions([photo_id])["items"]
             d["placeSuggestion"] = hit[0] if hit else None
         if d.get("burst"):
@@ -555,4 +521,4 @@ def api_manifest():
     return JSONResponse(data, media_type="application/manifest+json")
 
 
-CACHES.extend([_photos_cached, _facets_cached, _meta, _events])
+CACHES.extend([photos_cached, _facets_cached, _meta, _events])

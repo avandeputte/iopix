@@ -13,6 +13,7 @@ from app import jobs
 from app.digikam import dbsync
 from app.photos import edits, tagmanager
 from app.data import index
+from app.digikam.dkdb import in_chunks
 from app.digikam.dbsync import SyncError
 
 ROOT = "Places"
@@ -76,7 +77,7 @@ def run(photo_ids: list = None):
             con = index.open_index()
             try:
                 by_full = {r[1]: r[0] for r in con.execute("SELECT id, full FROM tags")}
-                paths = {r[0]: r[1] for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({','.join(str(i) for i, _ in p['_todo']) or 'NULL'})")}
+                paths = {r[0]: r[1] for r in in_chunks(con, "SELECT id, path FROM photos WHERE id IN ({ids})", [i for i, _ in p["_todo"]])}
             finally:
                 con.close()
             groups = {}
@@ -92,7 +93,7 @@ def run(photo_ids: list = None):
             if stale:
                 con = index.open_index()
                 try:
-                    allp = {r[0]: r[1] for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({','.join(str(i) for v in stale.values() for i in v)})")}
+                    allp = {r[0]: r[1] for r in in_chunks(con, "SELECT id, path FROM photos WHERE id IN ({ids})", [i for v in stale.values() for i in v])}
                 finally:
                     con.close()
                 for tags, ids in stale.items():

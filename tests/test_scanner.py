@@ -222,7 +222,7 @@ def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(l
     import sqlite3
     from app.digikam import dbsync, dkdb
     from app.photos import scanner
-    from app.faces.facemgr import _special
+    from app.faces.facemgr import special_tags
     d = {"ImageWidth": 1000, "ImageHeight": 500, "TagsList": ["People/Zz Fam/Zz Kw Person"],
          "RegionInfo": {"AppliedToDimensions": {"W": 1000, "H": 500}, "RegionList": [
              {"Name": "Zz Kw Person", "Type": "Face", "Area": {"X": 0.5, "Y": 0.5, "W": 0.1, "H": 0.2}},
@@ -237,7 +237,7 @@ def test_faces_from_a_file_use_its_own_keyword_and_unnamed_faces_assign_no_tag(l
     try:
         rows = scanner.rows_for(str(probe), d, 1)
         with dbsync.write_transaction(dkdb.sqlite_path(), False) as con:
-            scanner.write_rows(con, iid, rows, scanner.Tags(con), _special(con), full=True)
+            scanner.write_rows(con, iid, rows, scanner.Tags(con), special_tags(con), full=True)
         dk = sqlite3.connect(lib["db"])
         tags = {r[1]: r[0] for r in dk.execute("SELECT id, name FROM Tags WHERE name = 'Zz Kw Person'")}
         assert len(dk.execute("SELECT id FROM Tags WHERE name = 'Zz Kw Person'").fetchall()) == 1, "one tag, not two"

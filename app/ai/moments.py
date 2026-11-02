@@ -16,7 +16,7 @@ def _similarity():
     """(id, id) -> cosine similarity from the content embeddings, or None when there are none
     (then bursts are decided by time and device alone)."""
     try:
-        from app.ai.semantic import semantic, enabled
+        from app.ai.semantic import semantic, enabled  # lazy: ai.semantic -> thumbs -> photos.edits -> data.index -> ai.moments would be an import cycle
         if not enabled():
             return None
         import numpy as np

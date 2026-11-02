@@ -15,7 +15,7 @@ import threading
 import time
 
 from app import config
-from app.ai.semantic import semantic, enabled, _unit
+from app.ai.semantic import semantic, enabled, unit
 
 try:
     import numpy as np
@@ -313,7 +313,7 @@ def representative(photo_ids: list, text: str = None):
         return None
     sub = vecs[rows]
     with np.errstate(all="ignore"):
-        score = sub @ _unit(sub.mean(axis=0))
+        score = sub @ unit(sub.mean(axis=0))
         if text:
             try:
                 score = score + 2.0 * (sub @ semantic.text_vector(semantic.cfg["prompt"].format(text)))

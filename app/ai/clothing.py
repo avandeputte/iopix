@@ -19,15 +19,17 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 from app import jobs, thumbs
-from app.ai import detector
+from app.ai import detector, dismissed
+from app.ai.analysis import stamp
 from app.ai.scanjob import ScanJob
 from app.data import index, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 
 try:
     import numpy as np
 except ImportError:  # optional: the AI packages
     np = None
+from app.ai.semantic import enabled, semantic
 
 log = logging.getLogger(__name__)
 MIN_BOX = 0.015      # of the frame
@@ -39,12 +41,10 @@ ALONE = 0.88         # with a single person named in the event there is nobody t
 
 
 def available() -> bool:
-    from app.ai.semantic import enabled
     return np is not None and enabled()
 
 
 def _engine():
-    from app.ai.semantic import semantic
     return semantic.active
 
 
@@ -57,7 +57,6 @@ def _model_key() -> str:
 
 def _todo(con, photos: list) -> list:
     """Still photos with people detected whose boxes are not embedded with the current model, or whose file changed."""
-    from app.ai.analysis import stamp
     model = _model_key()
     have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'clothing'")}
     objects = {r[0] for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'")}
@@ -83,7 +82,6 @@ def crops(im, boxes: list) -> list:
 
 
 def _work(gen: int, todo: list):
-    from app.ai.analysis import stamp
     engine = _engine()
     model = engine.name
     with ThreadPoolExecutor(max(1, min(4, jobs.threads())), thread_name_prefix="clothing") as pool:
@@ -135,22 +133,21 @@ progress, start, reset, coverage = job.progress, job.start, job.reset, job.cover
 def _events(con, ids: list = None) -> dict:
     """{(album, day): [photo ids]} for the photos with embedded people (or those among `ids` and their event mates)."""
     if ids is not None:  # one photo's event: its folder and day, and the photos of that day with embedded people
-        keys = {(r[0], r[1]) for r in con.execute(f"SELECT album_id, day FROM photos WHERE dprec IS NULL AND id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})")}
+        keys = {(r[0], r[1]) for r in in_chunks(con, "SELECT album_id, day FROM photos WHERE dprec IS NULL AND id IN ({ids})", map(int, ids))}
         events = defaultdict(list)
         for album, day in keys:
             mates = [r[0] for r in con.execute("SELECT id FROM photos WHERE album_id = ? AND day = ? AND dprec IS NULL", (album, day))]
             if not mates:
                 continue
             with vdb.reader() as vcon:
-                have = {r[0] for part in chunked(mates, 500) for r in vcon.execute(f"SELECT DISTINCT photo_id FROM ai_person_looks WHERE photo_id IN ({','.join(str(i) for i in part)})")}
+                have = {r[0] for r in in_chunks(vcon, "SELECT DISTINCT photo_id FROM ai_person_looks WHERE photo_id IN ({ids})", mates)}
             events[(album, day)] = [i for i in mates if i in have]
         return events
     with vdb.reader() as vcon:
         have = sorted({r[0] for r in vcon.execute("SELECT DISTINCT photo_id FROM ai_person_looks")})
     meta = {}
-    for part in chunked(have, 500):
-        for pid, album, day in con.execute(f"SELECT id, album_id, day FROM photos WHERE dprec IS NULL AND id IN ({','.join(str(i) for i in part)})"):  # an approximate date has no day to make an event of
-            meta[pid] = (album, day)
+    for pid, album, day in in_chunks(con, "SELECT id, album_id, day FROM photos WHERE dprec IS NULL AND id IN ({ids})", have):  # an approximate date has no day to make an event of
+        meta[pid] = (album, day)
     events = defaultdict(list)
     for pid, key in meta.items():
         events[key].append(pid)
@@ -161,9 +158,8 @@ def _boxes_of(ids: list) -> list:
     """[(photo, (x, y, w, h), vec)] for the photos given."""
     out = []
     with vdb.reader() as con:
-        for part in chunked(ids, 500):
-            for pid, px, py, pw, ph, vec in con.execute(f"SELECT photo_id, px, py, pw, ph, vec FROM ai_person_looks WHERE photo_id IN ({','.join(str(i) for i in part)})"):
-                out.append((pid, (px / 1000, py / 1000, pw / 1000, ph / 1000), np.frombuffer(vec, np.float32)))
+        for pid, px, py, pw, ph, vec in in_chunks(con, "SELECT photo_id, px, py, pw, ph, vec FROM ai_person_looks WHERE photo_id IN ({ids})", ids):
+            out.append((pid, (px / 1000, py / 1000, pw / 1000, ph / 1000), np.frombuffer(vec, np.float32)))
     return out
 
 
@@ -234,7 +230,6 @@ def suggestions(ids: list = None) -> dict:
         events = _events(con, ids)
         names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
         albums = {r[0]: r[1] for r in con.execute("SELECT id, name FROM albums")}
-        from app.ai import dismissed
         no = dismissed.ids("clothing")
         items = []
         for (album, day), pids in events.items():
@@ -243,9 +238,8 @@ def suggestions(ids: list = None) -> dict:
             boxes = _boxes_of(pids)
             faces = _named_faces(con, pids)
             tagged = defaultdict(set)
-            for part in chunked(pids, 500):
-                for pid, tag in con.execute(f"SELECT photo_id, tag_id FROM photo_tags WHERE photo_id IN ({','.join(str(i) for i in part)})"):
-                    tagged[pid].add(tag)
+            for pid, tag in in_chunks(con, "SELECT photo_id, tag_id FROM photo_tags WHERE photo_id IN ({ids})", pids):
+                tagged[pid].add(tag)
             seen = set()
             for s in match_event(boxes, faces, tagged):
                 if s["tag"] not in names or (s["id"], s["tag"]) in seen or (ids is not None and s["id"] not in set(ids)) or (s["id"], s["tag"]) in no:

@@ -78,7 +78,7 @@ ANALYSIS_WORKERS = int(os.environ["ANALYSIS_WORKERS"]) if os.environ.get("ANALYS
 # process on this machine; "none" (Docker, a container, digiKam on another machine: it cannot be
 # seen) does not check. "ask", the old name for the container mode, now means "none".
 DIGIKAM_CHECK = os.environ.get("DIGIKAM_CHECK", "pgrep").strip().lower()
-if DIGIKAM_CHECK == "ask":
+if DIGIKAM_CHECK == "ask":  # the old name for the container mode; remove after v1.120
     DIGIKAM_CHECK = "none"
 # Describe every photo in a sentence with a local captioning model (BLIP base), for search.
 CAPTIONS = os.environ.get("CAPTIONS", "1") not in ("0", "false", "no")
@@ -95,3 +95,64 @@ SYSTEM_DIRS = frozenset({"_gsdata_", "@eaDir", "#recycle", "@Recycle", "@Recentl
 def is_system_folder(rel: str) -> bool:
     """A library-relative folder path ("/2017/_gsdata_/_saved_") inside one of SYSTEM_DIRS or a dot folder."""
     return any(seg in SYSTEM_DIRS or seg.startswith(".") for seg in (rel or "").split("/") if seg)
+
+
+# --------------------------------------------------------------------------
+# The other environment names the app honours, read once here so iopix.env is documented in one
+# place. The functions at the end are the few an admin (or the test suite) may change while the
+# process runs; they read the environment on every call.
+# --------------------------------------------------------------------------
+# digiKam's database (dkdb.py): the environment is the starting point, Settings › digiKam database can override it
+DIGIKAM_DB_TYPE = os.environ.get("DIGIKAM_DB_TYPE", "sqlite").lower()  # sqlite, mysql, or none (no digiKam at all)
+DIGIKAM_DB_HOST = os.environ.get("DIGIKAM_DB_HOST", "127.0.0.1")
+DIGIKAM_DB_PORT = os.environ.get("DIGIKAM_DB_PORT", "3306")
+DIGIKAM_DB_NAME = os.environ.get("DIGIKAM_DB_NAME", "digikam")
+DIGIKAM_DB_USER = os.environ.get("DIGIKAM_DB_USER", "digikam")
+DIGIKAM_DB_PASSWORD = os.environ.get("DIGIKAM_DB_PASSWORD", "")
+# auto (a full copy before destructive operations) or skip (never); "daily", the old name, means auto: remove after v1.120
+DIGIKAM_DB_BACKUP = os.environ.get("DIGIKAM_DB_BACKUP", "auto")
+# a command that writes a full MySQL dump to stdout, used instead of mysqldump (e.g. through docker exec)
+DIGIKAM_DB_DUMP = os.environ.get("DIGIKAM_DB_DUMP", "").strip()
+# the GitHub repository and branch update.sh follows and the update check compares against;
+# the DIGIKAM_VIEWER_* names from before the rename are still honoured: remove after v1.120
+IOPIX_REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or "avandeputte/iopix"
+IOPIX_BRANCH = os.environ.get("IOPIX_BRANCH") or os.environ.get("DIGIKAM_VIEWER_BRANCH") or "main"
+MCP_FORCED = os.environ.get("MCP", "").strip() == "1"  # MCP=1: the MCP endpoint is on whatever the setting says
+VIEWER_URL = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # the address MCP results link to
+ADMIN_USER = os.environ.get("ADMIN_USER", "").strip()  # with ADMIN_PASSWORD: the first admin account, created on an empty users table
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")  # the browser-facing key, when not entered in Settings
+GOOGLE_SERVER_KEY = os.environ.get("GOOGLE_SERVER_KEY", "")  # the key for the APIs this server calls, when not entered in Settings
+SCANNER_LOOP = os.environ.get("SCANNER_LOOP", "1") != "0"  # SCANNER_LOOP=0 (the test suite): file scanner passes only on request
+EXIFTOOL = os.environ.get("EXIFTOOL")  # a particular exiftool binary; else the one on PATH or digiKam's bundled copy
+
+
+def update_check_locked() -> bool:
+    """UPDATE_CHECK=0: the daily update check is off and Settings cannot turn it on."""
+    return os.environ.get("UPDATE_CHECK", "").strip() == "0"
+
+
+def mcp_admin_token_env() -> str:
+    """MCP_ADMIN_TOKEN: the token MCP clients use for admin actions; set, it wins over the generated one."""
+    return os.environ.get("MCP_ADMIN_TOKEN", "").strip()
+
+
+def sidecar_compat_env() -> bool:
+    """SIDECAR_COMPAT=1: new sidecars are named photo.xmp (digiKam's "compatible file name" setting)."""
+    return os.environ.get("SIDECAR_COMPAT", "").strip() in ("1", "true", "yes")
+
+
+def mysql_dates_env() -> str:
+    """DIGIKAM_MYSQL_DATES: "utc" or "local" settles how a MySQL library stores its dates; empty: detected."""
+    return os.environ.get("DIGIKAM_MYSQL_DATES", "").strip().lower()
+
+
+def proxy_env(name: str):
+    """One of proxyauth.KEYS (AUTH_PROXY, CF_ACCESS_TEAM...) from iopix.env, or None when not set there."""
+    v = os.environ.get(name)
+    return v if v not in (None, "") else None
+
+
+def viewer_db_env(key: str):
+    """VIEWER_DB_TYPE/HOST/PORT/DATABASE/USER/PASSWORD: the viewer's own database, when not in data/viewer-db.json."""
+    return os.environ.get("VIEWER_DB_" + key.upper()) or None

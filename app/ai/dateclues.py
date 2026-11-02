@@ -26,8 +26,12 @@ import statistics
 import threading
 import time
 
+from app import config
+from app.ai.semantic import enabled, semantic
 from app.data import index, vdb
+from app.digikam.dkdb import in_chunks
 from app.faces import ages
+from app.photos import history
 
 log = logging.getLogger(__name__)
 FIRST_REAL_YEAR = ages.FIRST_REAL_YEAR
@@ -57,7 +61,6 @@ def hints() -> dict:
 
 def set_hint(album_id: int, not_before=None, not_after=None):
     """Keep a folder's hint (both empty: removed)."""
-    from app.photos import history
     nb = int(not_before) if not_before not in (None, "") else None
     na = int(not_after) if not_after not in (None, "") else None
     for v in (nb, na):
@@ -81,11 +84,8 @@ def windows(con, albums_of: dict) -> dict:
         return {}
     want = sorted(set(albums_of.values()))
     anc = {}
-    for part in range(0, len(want), 500):
-        chunk = want[part:part + 500]
-        for album, a, depth in con.execute(
-                f"SELECT c.album, c.anc, length(x.path) FROM album_closure c JOIN albums x ON x.id = c.anc WHERE c.album IN ({','.join('?' * len(chunk))})", chunk):
-            anc.setdefault(album, []).append((depth, a))
+    for album, a, depth in in_chunks(con, "SELECT c.album, c.anc, length(x.path) FROM album_closure c JOIN albums x ON x.id = c.anc WHERE c.album IN ({ids})", want):
+        anc.setdefault(album, []).append((depth, a))
     out = {}
     for pid, album in albums_of.items():
         nb = na = None
@@ -166,10 +166,9 @@ def _people_clues(con, undated: dict, win: dict = None) -> dict:
         return {}
     names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
     by_photo = {}
-    for pid, tag, year in con.execute(  # photos dated to the day, and those dated to the year or month (a used suggestion, a year typed in)
+    for pid, tag, year in in_chunks(con,  # photos dated to the day, and those dated to the year or month (a used suggestion, a year typed in)
             "SELECT f.photo_id, f.tag_id, p.year FROM faces f JOIN photos p ON p.id = f.photo_id "
-            f"WHERE f.kind = 'confirmed' AND (p.dprec IS NULL OR p.dprec IN (1, 2)) AND p.year >= ? AND f.tag_id IN ({','.join('?' * len(tags))})",
-            (FIRST_REAL_YEAR, *tags)):
+            "WHERE f.kind = 'confirmed' AND (p.dprec IS NULL OR p.dprec IN (1, 2)) AND p.year >= ? AND f.tag_id IN ({ids})", tags, params_before=(FIRST_REAL_YEAR,)):
         by_photo.setdefault(pid, (year, set()))[1].add(tag)
     years_of = {}
     for year, ts in by_photo.values():
@@ -209,7 +208,6 @@ def _look_years(con, ids: list, win: dict = None) -> dict:
     embeddings file and index version. win: {pid: window}: only dated photos inside a photo's window are considered."""
     win = win or {}
     try:
-        from app.ai.semantic import semantic, enabled
         if not enabled():
             return {}
         semantic.load()
@@ -286,8 +284,7 @@ def _camera_clues(con, cams: dict, win: dict = None) -> dict:
     if not want:
         return {}
     years = {}
-    for cam, year in con.execute(f"SELECT camera, year FROM photos WHERE dprec IS NULL AND year >= ? AND camera IN ({','.join('?' * len(want))})",
-                                 (FIRST_REAL_YEAR, *want)):
+    for cam, year in in_chunks(con, "SELECT camera, year FROM photos WHERE dprec IS NULL AND year >= ? AND camera IN ({ids})", want, params_before=(FIRST_REAL_YEAR,)):
         years.setdefault(cam, []).append(year)
     out = {}
     for pid, cam in cams.items():
@@ -313,7 +310,6 @@ def suggestions(ids: list = None) -> dict:
     """{"items": [{id, year, lo, hi, clues: [{kind, text, year, sd}], people: [...]}], "people": [...]} for the photos
     marked "Date unknown" (or those of `ids`), best supported first. `people` is the age calibration list."""
     if ids is None:
-        from app import config
         key = (config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, json.dumps(hints(), sort_keys=True), json.dumps(ages.births(), sort_keys=True))
         with _lock:
             if _all_cache["key"] == key and time.time() - _all_cache["at"] < ALL_TTL:

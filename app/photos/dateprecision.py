@@ -85,7 +85,7 @@ def ensure_tags(precision: str):
     The tag manager does the write: digiKam closed, as for any new tag."""
     if precision not in TAGS:
         return
-    from app.photos import tagmanager
+    from app.photos import tagmanager  # lazy: photos.tagmanager -> photos.edits -> photos.dateprecision would be an import cycle
 
     def find(con, full):
         tree = dkdb.tag_tree(con)

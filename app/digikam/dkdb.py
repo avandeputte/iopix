@@ -11,7 +11,8 @@ Settings (environment):
                        viewer's own tables, started fresh on PHOTOS_ROOT, and the file scanner finds the photos)
   DIGIKAM_DB_DIR       folder with digikam4.db          (sqlite)
   DIGIKAM_DB_HOST/PORT/NAME/USER/PASSWORD                (mysql; NAME defaults to "digikam")
-  DIGIKAM_DB_BACKUP    auto (default: a full copy before destructive operations only) or skip (never); daily, the old name, means auto
+  DIGIKAM_DB_BACKUP    auto (default: a full copy before destructive operations only) or skip (never); daily, the old name,
+                       means auto (remove after v1.120)
   DIGIKAM_DB_DUMP      optional: a command that writes a full dump to stdout, used instead of
                        mysqldump, e.g. "docker exec iopix-mariadb mariadb-dump -udigikam -pX digikam"
 """
@@ -31,10 +32,8 @@ from app import config
 
 # The environment is the starting point; the admin can override it from Settings (the
 # `db_*` settings, see settings()). Everything below reads the current values per call.
-ENV = {"type": os.environ.get("DIGIKAM_DB_TYPE", "sqlite").lower(), "sqlite_dir": str(config.DIGIKAM_DB_DIR),
-       "host": os.environ.get("DIGIKAM_DB_HOST", "127.0.0.1"), "port": os.environ.get("DIGIKAM_DB_PORT", "3306"),
-       "database": os.environ.get("DIGIKAM_DB_NAME", "digikam"), "user": os.environ.get("DIGIKAM_DB_USER", "digikam"),
-       "password": os.environ.get("DIGIKAM_DB_PASSWORD", ""), "backup": os.environ.get("DIGIKAM_DB_BACKUP", "auto")}
+ENV = {"type": config.DIGIKAM_DB_TYPE, "sqlite_dir": str(config.DIGIKAM_DB_DIR), "host": config.DIGIKAM_DB_HOST, "port": config.DIGIKAM_DB_PORT,
+       "database": config.DIGIKAM_DB_NAME, "user": config.DIGIKAM_DB_USER, "password": config.DIGIKAM_DB_PASSWORD, "backup": config.DIGIKAM_DB_BACKUP}
 KEYS = tuple(ENV)
 NO_DIGIKAM = ("none", "no", "off")
 BACKUP_DIR = config.DATA_DIR / "db-backups"
@@ -50,7 +49,7 @@ class SyncError(Exception):
 
 def settings() -> dict:
     """The effective connection settings: a `db_<key>` setting wins over the environment."""
-    from app.data import state
+    from app.data import state  # lazy: data.state -> data.vdb -> digikam.dkdb would be an import cycle
     out = dict(ENV)
     for k in KEYS:
         v = state.get_setting("db_" + k, "")
@@ -104,7 +103,7 @@ def is_mysql() -> bool:
 
 def no_digikam() -> bool:
     """DIGIKAM_DB_TYPE=none (or Settings > digiKam database: none): there is no digiKam database at all."""
-    from app.data import state
+    from app.data import state  # lazy: data.state -> data.vdb -> digikam.dkdb would be an import cycle
     return str(state.get_setting("db_type", "") or ENV["type"]).lower() in NO_DIGIKAM
 
 
@@ -130,7 +129,7 @@ _dates = {"utc": None}
 
 
 def mysql_dates_utc() -> bool:
-    forced = os.environ.get("DIGIKAM_MYSQL_DATES", "").strip().lower()
+    forced = config.mysql_dates_env()
     if forced in ("local", "utc"):
         return forced == "utc"
     if not is_mysql():
@@ -180,7 +179,7 @@ def _detect_mysql_dates() -> bool:
         raw.close()
 
 
-def _norm_plain(v):
+def norm_plain(v):
     """Dates as ISO text without any time-zone conversion (the viewer's own database)."""
     if isinstance(v, _dt.datetime):
         return v.strftime("%Y-%m-%dT%H:%M:%S.") + f"{v.microsecond // 1000:03d}"
@@ -220,7 +219,7 @@ def db_datetime(s):
         return s
 
 
-class _Cursor:
+class Cursor:
     """Cursor-like result: fetchone / fetchall / iteration / lastrowid / rowcount."""
 
     def __init__(self, cur, mysql: bool):
@@ -271,15 +270,15 @@ class Conn:
         if self.mysql:
             cur = self.raw.cursor()
             cur.execute(self._sql(sql), self._params(tuple(params)))
-            return _Cursor(cur, True)
-        return _Cursor(self.raw.execute(sql, params), False)
+            return Cursor(cur, True)
+        return Cursor(self.raw.execute(sql, params), False)
 
     def executemany(self, sql: str, rows):
         if self.mysql:
             cur = self.raw.cursor()
             cur.executemany(self._sql(sql), [self._params(tuple(r)) for r in rows])
-            return _Cursor(cur, True)
-        return _Cursor(self.raw.executemany(sql, rows), False)
+            return Cursor(cur, True)
+        return Cursor(self.raw.executemany(sql, rows), False)
 
     def begin_write(self):
         self.execute("START TRANSACTION" if self.mysql else "BEGIN IMMEDIATE")
@@ -312,7 +311,7 @@ class Conn:
 def sync_enabled() -> bool:
     """Settings > Sync with digiKam. Off: the viewer never opens digiKam's database; the library lives in
     the viewer's own tables (library.py) and every change is made there."""
-    from app.data import state
+    from app.data import state  # lazy: data.state -> data.vdb -> digikam.dkdb would be an import cycle
     return not no_digikam() and state.get_setting("digikam_sync", "1") != "0"
 
 
@@ -325,6 +324,16 @@ def chunked(seq, size: int = 500):
     seq = list(seq)
     for i in range(0, len(seq), size):
         yield seq[i:i + size]
+
+
+def in_chunks(con, sql: str, values, params_before=(), params_after=(), size: int = 500):
+    """The rows of a query with one IN list, run once per `size` values: `{ids}` in the SQL
+    becomes that chunk's placeholders, bound between params_before and params_after. Works on
+    any connection whose execute() returns an iterable (sqlite3, dkdb.Conn, vdb.VConn). No
+    values: no rows, the same answer as IN (NULL). A query that orders or groups across the
+    whole list must not be chunked, so it is not written with this."""
+    for part in chunked(values, size):
+        yield from con.execute(sql.replace("{ids}", ",".join("?" * len(part))), (*params_before, *part, *params_after))
 
 
 @contextmanager
@@ -343,7 +352,7 @@ def connect(write: bool = False, db_path=None, real: bool = False) -> Conn:
     viewer's own database instead, through digiKam's table names, so every reader and writer works as is.
     real: digiKam's database whatever the setting (copying it into the library)."""
     if not real and not sync_enabled():
-        from app.digikam import library
+        from app.digikam import library  # lazy: digikam.library -> digikam.dkdb would be an import cycle
         return library.connect(write)
     if is_mysql():
         try:
@@ -385,7 +394,7 @@ def tag_path(tags: dict, tid) -> str:
 def root_overrides() -> dict:
     """{path digiKam recorded: local path} from the `album_roots` setting (Settings > Album roots)."""
     import json
-    from app.data import state
+    from app.data import state  # lazy: data.state -> data.vdb -> digikam.dkdb would be an import cycle
     try:
         d = json.loads(state.get_setting("album_roots", "") or "{}")
         return {str(k).rstrip("/"): str(v).rstrip("/") for k, v in d.items() if v}
@@ -535,7 +544,7 @@ def stamp_files(items: list):
         finally:
             con.close()
         if rows:  # the one write: through the same guarded transaction as every other (schema check, integrity, digiKam not started meanwhile)
-            from app.digikam import dbsync
+            from app.digikam import dbsync  # lazy: digikam.dbsync -> digikam.dkdb would be an import cycle
             if dbsync.digikam_running() and not dbsync._confirmed_closed():
                 # the sidecar workers reach here in the background: with digiKam open its own rescan reads the files back
                 import logging
@@ -584,7 +593,7 @@ def journal_pending(db_path=None) -> bool:
 def last_change_time():
     """When digiKam last changed its database (with sync off: the library), as a unix time, if known."""
     if standalone():
-        from app.digikam import library
+        from app.digikam import library  # lazy: digikam.library -> digikam.dkdb would be an import cycle
         d = library.info()
         return int(d.get("changed") or d.get("taken") or 0) or None
     if not is_mysql():
@@ -633,7 +642,7 @@ def backup(db_path=None, force: bool = False):
         return dst
     if settings()["backup"] == "skip":
         return None
-    custom = os.environ.get("DIGIKAM_DB_DUMP", "").strip()
+    custom = config.DIGIKAM_DB_DUMP
     tool = shutil.which("mysqldump") or shutil.which("mariadb-dump")
     if not tool and not custom:
         raise SyncError("No mysqldump/mariadb-dump on this machine to back the database up first. Install one, set "

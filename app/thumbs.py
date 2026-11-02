@@ -25,6 +25,7 @@ except Exception:  # HEIC files will fall back to a placeholder
 
 from app import config, jobs
 from app.photos import edits
+from app.ai import smartcrop
 
 # a JPEG that ends early (some phones' burst frames lack the closing FFD9 marker, an interrupted copy) decodes as far as
 # its data goes instead of failing: everything that reads pictures (thumbnails, previews, analysis) imports this module
@@ -183,7 +184,7 @@ def make(kind: str, photo: dict) -> Path:
             raise FileNotFoundError(photo["path"])
         try:
             if photo["video"]:
-                from app.ai import videos
+                from app.ai import videos  # lazy: ai.videos -> thumbs would be an import cycle
                 if not video_frame(photo["path"], dst, box_h if kind == "t" else 1080, photo["duration"], at=videos.cover_time(photo["id"])):
                     _placeholder(dst, photo["w"], photo["h"])
             else:
@@ -203,7 +204,6 @@ def make(kind: str, photo: dict) -> Path:
 def make_fit(photo: dict, aspect: float) -> Path:
     """The grid thumbnail cropped to `aspect` (w / h) around the photo's focus point (smartcrop.py), cached as kind
     'c' with the aspect in the name. `photo` needs the THUMB_COLS plus `focus`."""
-    from app.ai import smartcrop
     stamp = stamp_for(photo["hash"], photo["size"], photo["modified"])
     dst = config.CACHE_DIR / "c" / f"{photo['id'] % 256:02x}" / f"{photo['id']}-{stamp}-{aspect:.3f}.jpg"
     if dst.exists():
@@ -328,7 +328,7 @@ def forget(photo_id: int):
     except OSError:
         pass
     try:
-        from app.ai import semantic
+        from app.ai import semantic  # lazy: ai.semantic -> thumbs would be an import cycle
         semantic.remove_ids([int(photo_id)])
     except Exception as e:  # the embedding job is optional; a stale vector is the worst case
         log.debug("embedding not dropped for %s: %s", photo_id, e)

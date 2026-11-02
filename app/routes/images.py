@@ -14,7 +14,8 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
 from app import access, config, thumbs, users, videostream
-from app.core import _cached_image, _form_items, _photo_row, db, IMG_CACHE, resolve, THUMB_COLS
+from app.http import IMG_CACHE, cached_image, form_items, photo_row
+from app.runtime import THUMB_COLS, db, resolve
 from app.photos import edits, export
 
 
@@ -31,7 +32,7 @@ def thumb(photo_id: int, fit: str = "", h: int = 0):
     subject (smartcrop.py: the faces, else the people, else the middle), for tiles that would otherwise crop the centre;
     h=120 (60 to 240) a smaller copy for strips and tiny tiles."""
     if h and not fit:
-        row = _photo_row(photo_id)
+        row = photo_row(photo_id)
         try:
             path = thumbs.make_small(row, max(60, min(int(h), 240)))
         except FileNotFoundError:
@@ -40,14 +41,14 @@ def thumb(photo_id: int, fit: str = "", h: int = 0):
             raise HTTPException(503, f"The file could not be read right now ({type(e).__name__})")
         return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
     if not fit:
-        return _cached_image("t", photo_id)
+        return cached_image("t", photo_id)
     try:
         aw, ah = (1, 1) if fit == "square" else (int(v) for v in fit.lower().split("x"))
         if not (0.2 <= aw / ah <= 5):
             raise ValueError
     except (ValueError, ZeroDivisionError):
         raise HTTPException(400, "fit is square or WxH")
-    row = _photo_row(photo_id, THUMB_COLS + ", focus")
+    row = photo_row(photo_id, THUMB_COLS + ", focus")
     try:
         path = thumbs.make_fit(row, aw / ah)
     except FileNotFoundError:
@@ -60,7 +61,7 @@ def thumb(photo_id: int, fit: str = "", h: int = 0):
 @router.get("/preview/{photo_id}")
 def preview(photo_id: int, dl: int = 0):
     """The screen-size JPEG; dl=1 downloads it under the photo's name (Share > Download preview)."""
-    return _cached_image("p", photo_id, dl=bool(dl))
+    return cached_image("p", photo_id, dl=bool(dl))
 
 
 @router.get("/face/{tag_id}")
@@ -92,7 +93,7 @@ def face(tag_id: int):
 @router.get("/orig/{photo_id}")
 def original(photo_id: int, dl: int = 0):
     """The untouched original file (supports range requests for video)."""
-    row = _photo_row(photo_id, "path, name")
+    row = photo_row(photo_id, "path, name")
     if not os.path.isfile(row["path"]):
         raise HTTPException(404, "Original file is not available")
     mime = mimetypes.guess_type(row["name"])[0] or "application/octet-stream"
@@ -104,7 +105,7 @@ def original(photo_id: int, dl: int = 0):
 @router.get("/video/{photo_id}/frame")
 def video_frame_at(photo_id: int, t: float = 0.0, h: int = 240):
     """One frame of a video at `t` seconds (a chapter thumbnail), cached; h is its height (120-720)."""
-    row = _photo_row(photo_id)
+    row = photo_row(photo_id)
     if not row["video"]:
         raise HTTPException(404, "Not a video")
     h = max(120, min(int(h), 720))
@@ -123,7 +124,7 @@ def video_copy(photo_id: int):
     """A copy of a video that phones play (H.264 and AAC in an MP4, Range requests for seeking), for videos whose
     /api/photo answer says playable: false. Made on the first request: until it is ready the answer is 503 with
     Retry-After and {status: converting}; 422 {status: failed} when it cannot be made."""
-    row = _photo_row(photo_id)
+    row = photo_row(photo_id)
     if not row["video"] or not os.path.isfile(row["path"]):
         raise HTTPException(404, "No such video")
     st = videostream.start(row)
@@ -187,7 +188,7 @@ def _zip_stream(entries):
 async def api_zip_post(request: Request):
     """Same as GET /api/zip, for selections too long for a URL (form-encoded body)."""
     _downloads_allowed(request)
-    items = await _form_items(request)
+    items = await form_items(request)
     d = dict(items)
     return _zip_response(items, 1 if d.get("sidecars") == "1" else 0, d.get("name") or "photos")
 
@@ -240,7 +241,7 @@ def _zip_parts(items, part_mb: int):
 async def api_zip_plan(request: Request):
     """How a download would be split. Body: the filters, form-encoded, plus part_mb."""
     _downloads_allowed(request)
-    items = await _form_items(request)
+    items = await form_items(request)
     parts = _zip_parts(items, int(dict(items).get("part_mb") or 2000))
     return {"files": sum(len(p) for p in parts), "bytes": sum(r[3] or 0 for p in parts for r in p),
             "parts": [{"files": len(p), "bytes": sum(r[3] or 0 for r in p),

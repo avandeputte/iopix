@@ -36,6 +36,7 @@ try:
     import numpy as np
 except ImportError:
     np = None
+from app.data import state as appstate
 try:
     importlib.import_module("fastembed")  # also proves onnxruntime and friends load on this machine
     _HAVE = np is not None
@@ -45,15 +46,18 @@ except Exception:
 
 def enabled() -> bool:
     """fastembed is installed, search is not switched off, and at least one model is on disk."""
-    return _HAVE and config.SEMANTIC and any(_ready(k) for k in ENGINES)
+    return _HAVE and config.SEMANTIC and any(ready(k) for k in ENGINES)
 
 
-def _ready(name: str) -> bool:
+def ready(name: str) -> bool:
     """The model's files are in data/models: the marker written after a download, or (for
     clip, the first model, downloaded before markers existed) its hub cache folder."""
     if (MODEL_DIR / f"{name}.ready").exists():
         return True
     return name == "clip" and (MODEL_DIR / "models--Qdrant--clip-ViT-B-32-vision" / "refs" / "main").exists()
+
+
+_ready = ready  # old private name, still used by older tests; remove after v1.120
 
 
 def download_models(name: str = "clip"):
@@ -70,9 +74,12 @@ def download_models(name: str = "clip"):
     (MODEL_DIR / f"{name}.ready").write_text("ok\n")
 
 
-def _unit(v):
+def unit(v):
     v = np.asarray(v, dtype=np.float32)
     return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9)
+
+
+_unit = unit  # old private name, still used by older tests; remove after v1.120
 
 
 def _read(file):
@@ -192,7 +199,7 @@ class Engine:
             from fastembed import TextEmbedding
             # the model is on disk: never ask the hub (no revision check, no network); decided here, at the load,
             # rather than by an environment variable set at import time
-            self._text = TextEmbedding(self.cfg["text"], cache_dir=str(MODEL_DIR), local_files_only=_ready(self.name))
+            self._text = TextEmbedding(self.cfg["text"], cache_dir=str(MODEL_DIR), local_files_only=ready(self.name))
         return self._text
 
     # ---- indexing
@@ -236,7 +243,7 @@ class Engine:
             n = jobs.threads()
             with self._image_lock:
                 if self._image is None or self._image_threads != n:  # the thread budget is a session option
-                    self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
+                    self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=ready(self.name))
                     self._image_threads = n
             last_save = time.time()
             done = 0
@@ -262,14 +269,14 @@ class Engine:
                         log.warning("embeddings: no thumbnail for %s (%s)", p["path"], e)
                 if batch:
                     try:
-                        vecs = _unit(list(self._image.embed(paths, batch_size=BATCH)))
+                        vecs = unit(list(self._image.embed(paths, batch_size=BATCH)))
                     except Exception as e:
                         # one unreadable image must not cost the whole batch: embed them one by one
                         log.warning("embeddings: batch of %d failed (%s); retrying one at a time", len(batch), e)
                         good, vl = [], []
                         for pid, path in zip(batch, paths):
                             try:
-                                vl.append(_unit(list(self._image.embed([path], batch_size=1))))
+                                vl.append(unit(list(self._image.embed([path], batch_size=1))))
                                 good.append(pid)
                             except Exception as e1:
                                 self.failed.add(pid)
@@ -313,9 +320,9 @@ class Engine:
         n = jobs.threads()
         with self._image_lock:
             if self._image is None or self._image_threads != n:
-                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=_ready(self.name))
+                self._image = ImageEmbedding(self.cfg["image"], cache_dir=str(MODEL_DIR), threads=n, local_files_only=ready(self.name))
                 self._image_threads = n
-            return _unit(list(self._image.embed([im.convert("RGB") for im in images], batch_size=BATCH)))
+            return unit(list(self._image.embed([im.convert("RGB") for im in images], batch_size=BATCH)))
 
     # ---- search
     def _rank(self, query_vec, k: int, exclude=None) -> list:
@@ -341,12 +348,12 @@ class Engine:
         if key not in self._text_cache:
             if len(self._text_cache) > 2000:
                 self._text_cache.clear()
-            self._text_cache[key] = _unit(next(iter(self._text_model().embed([key]))))
+            self._text_cache[key] = unit(next(iter(self._text_model().embed([key]))))
         return self._text_cache[key]
 
     def text_matrix(self, texts: list):
         """Unit embeddings for many texts at once."""
-        return _unit(list(self._text_model().embed([t.lower() for t in texts], batch_size=64)))
+        return unit(list(self._text_model().embed([t.lower() for t in texts], batch_size=64)))
 
     def reset(self):
         """Forget every embedding so the library is indexed again from scratch."""
@@ -378,11 +385,10 @@ class Semantic:
         """Which model the owner picked. Installing SigLIP 2 does not switch to it:
         that is a deliberate choice (it indexes several times slower than CLIP)."""
         try:
-            from app.data import state as appstate
             name = appstate.get_setting("search_model", "clip")
         except Exception:
             name = "clip"
-        return name if name in ENGINES and _ready(name) else "clip"
+        return name if name in ENGINES and ready(name) else "clip"
 
     def _complete(self, e: Engine) -> bool:
         """An index that can answer searches: finished (the marker), or a CLIP index from before markers and
@@ -405,7 +411,7 @@ class Semantic:
         new = self.engines[self.chosen()]
         if self._complete(new):
             return new
-        others = [e for n, e in self.engines.items() if n != new.name and _ready(n) and self._complete(e)]
+        others = [e for n, e in self.engines.items() if n != new.name and ready(n) and self._complete(e)]
         if not others:
             return new
         def age(e):

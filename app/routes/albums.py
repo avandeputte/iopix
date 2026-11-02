@@ -6,8 +6,10 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app.data import state as appstate
+from app.digikam.dkdb import in_chunks
 from app import access, users
-from app.core import db, jresp, json_body
+from app.http import jresp, json_body
+from app.runtime import db
 
 
 router = APIRouter()
@@ -22,7 +24,7 @@ def _with_hashes(ids) -> list:
         return []
     con = db()
     try:
-        return [(r[0], r[1]) for r in con.execute(f"SELECT id, hash FROM photos WHERE id IN ({','.join(map(str, ids))})")]
+        return [(r[0], r[1]) for r in in_chunks(con, "SELECT id, hash FROM photos WHERE id IN ({ids})", ids)]
     finally:
         con.close()
 

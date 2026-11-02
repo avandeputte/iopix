@@ -39,7 +39,7 @@ from app.digikam import dbsync, dkdb
 from app.photos import edits, folders, history, importer
 from app.digikam.dbsync import COLOR_TAGS, PICK_TAGS, SyncError, gps_text
 from app.data import state
-from app.faces.facemgr import _unrotate, rect_xml
+from app.faces.facemgr import rect_xml, special_tags, unrotate
 
 log = logging.getLogger("app.photos.scanner")
 
@@ -238,8 +238,8 @@ def _to_file_grid(area, grid: int, orientation: int):
     the file's own grid (which turns upright by `orientation`)."""
     cx, cy, w, h = area
     inv = {6: 8, 8: 6}.get(grid, grid)
-    ux, uy, uw, uh, *_ = _unrotate(cx - w / 2, cy - h / 2, w, h, 1, 1, inv)  # upright
-    x, y, w, h, *_ = _unrotate(ux, uy, uw, uh, 1, 1, orientation or 1)  # the file's grid
+    ux, uy, uw, uh, *_ = unrotate(cx - w / 2, cy - h / 2, w, h, 1, 1, inv)  # upright
+    x, y, w, h, *_ = unrotate(ux, uy, uw, uh, 1, 1, orientation or 1)  # the file's grid
     return x + w / 2, y + h / 2, w, h
 
 
@@ -296,7 +296,7 @@ def _regions(d: dict) -> list:
 def _upright(rect, file_wh, orientation):
     """A rectangle in the file's pixel grid turned into upright pixels (TagRegion::adjustToOrientation)."""
     inv = {6: 8, 8: 6}.get(orientation or 1, orientation or 1)
-    x, y, w, h, _uw, _uh = _unrotate(*rect, file_wh[0], file_wh[1], inv)
+    x, y, w, h, _uw, _uh = unrotate(*rect, file_wh[0], file_wh[1], inv)
     return int(x), int(y), int(w), int(h)
 
 
@@ -515,8 +515,7 @@ def complete(ids: list, check_running: bool = True) -> dict:
     with dkdb.reader() as con:
         roots = dkdb.root_paths(con)
         version = hash_version(con)
-        q = ",".join(map(str, ids))
-        rows = con.execute(f"SELECT i.id, i.category, i.album, a.albumRoot, a.relativePath, i.name FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({q})").fetchall()
+        rows = list(dkdb.in_chunks(con, "SELECT i.id, i.category, i.album, a.albumRoot, a.relativePath, i.name FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({ids})", ids))
     items = []
     for iid, cat, album, root, rel, name in rows:
         if root in roots:
@@ -528,8 +527,7 @@ def complete(ids: list, check_running: bool = True) -> dict:
     with dbsync.write_transaction(db_path, check_running) as con:
         tags = Tags(con)
         try:
-            from app.faces.facemgr import _special
-            special = _special(con)
+            special = special_tags(con)
         except SyncError:
             special = {}
         for iid, cat, album, path in items:
@@ -694,7 +692,7 @@ def _reread_modified(modified: list, version: int, check_running: bool):
     """Files changed on disk since digiKam last saw them: their metadata rows are read again."""
     meta = read([p for _i, p in modified])
     with dbsync.write_transaction(dkdb.sqlite_path(), check_running) as con:
-        cats = dict(con.execute(f"SELECT id, category FROM Images WHERE id IN ({','.join(str(i) for i, _p in modified)})").fetchall())
+        cats = dict(dkdb.in_chunks(con, "SELECT id, category FROM Images WHERE id IN ({ids})", [i for i, _p in modified]))
         for iid, path in modified:
             if not meta.get(path):  # unreadable right now: left as it is, tried again on the next pass
                 log.warning("scanner: %s could not be read; its rows are left as they are", path)
@@ -725,8 +723,7 @@ def _remove_vanished(vanished: list, check_running: bool) -> list:
 def scan(check_running: bool = True) -> dict:
     """One pass over every album root: snapshot the database, walk the disk, then add, reread and remove.
     Returns the summary (also kept in progress)."""
-    from app.data import state as appstate
-    if appstate.read_only():
+    if state.read_only():
         raise SyncError("The viewer is in read-only mode: the file scanner does not write to digiKam's database")
     if not _lock.acquire(blocking=False):
         raise SyncError("A scan is already running")
@@ -766,7 +763,7 @@ def run_soon():
 def start(after_change):
     """The background loop: a pass every interval() minutes while the setting is on, or when asked.
     SCANNER_LOOP=0 (the test suite) leaves it out: passes then run only when scan() is called."""
-    if os.environ.get("SCANNER_LOOP", "1") == "0":
+    if not config.SCANNER_LOOP:
         return
 
     def loop():

@@ -124,9 +124,9 @@ def test_a_bad_database_setting_does_not_kill_the_index_watcher(client, lib):
     time.sleep(1.5)  # the kick from saving runs the refresh against the bad setting
     _clear()
     appmain.state["version"] = None  # make the next refresh observable
-    appmain._kick.set()
+    appmain.kick.set()
     end = time.time() + 10
     while time.time() < end and not appmain.state.get("version"):
         time.sleep(0.2)
     assert appmain.state.get("version"), "the watcher thread is still alive and refreshed the index"
-    assert any(t.name for t in __import__("threading").enumerate() if t.is_alive() and t._target is appmain._watch) if hasattr(appmain, "_watch") else True
+    assert any(t.name for t in __import__("threading").enumerate() if t.is_alive() and t._target is appmain.watch) if hasattr(appmain, "watch") else True

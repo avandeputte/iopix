@@ -24,13 +24,13 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
 
-from app.ai import analysis, jerseys, moments, smartcrop, videos
+from app.ai import analysis, jerseys, moments, ocrwords, smartcrop, videos
 from app import config
 from app.digikam import dkdb, library
 from app.photos import dateprecision, edits
 from app.geo import places
 from app.data import state as appstate, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 
 log = logging.getLogger("app.data.index")
 SOURCE_ERRORS = (*vdb.Error, OSError, dkdb.SyncError)  # digiKam's database cannot be read right now
@@ -251,11 +251,9 @@ def mirror_tag_paths(image_ids: list) -> dict:
         tags = dkdb.tag_tree(con)
         internal = {r[0] for r in con.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'").fetchall()}
         out = {}
-        for part in chunked(ids, 500):
-            chunk = ",".join(map(str, part))
-            for iid, tid in con.execute(f"SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({chunk})").fetchall():
-                if tid in tags and tid not in internal:
-                    out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
+        for iid, tid in in_chunks(con, "SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({ids})", ids):
+            if tid in tags and tid not in internal:
+                out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
     finally:
         con.close()
     return {iid: out.get(iid, []) for iid in ids}
@@ -365,7 +363,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
         log.warning("digiKam renumbered %d photos; the viewer's data about them follows: %s", len(remap),
                     ", ".join(f"{a}->{b}" for a, b in list(remap.items())[:10]))
         try:
-            from app.ai import semantic
+            from app.ai import semantic  # lazy: ai.semantic -> thumbs -> photos.edits -> data.index would be an import cycle
             semantic.remap_ids(remap)
         except Exception as e:  # the embeddings are recomputed for those photos instead
             log.warning("content-search embeddings were not renumbered (%s); they are recomputed", e)
@@ -389,7 +387,7 @@ def open_index(path: Path = config.INDEX_DB) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
 
 
-def _parse_dt(s):
+def parse_dt(s):
     """digiKam stores naive local 'YYYY-MM-DDTHH:MM:SS.mmm'. The timestamp we
     keep is that wall-clock time as if it were UTC, so it sorts and displays
     as the time on the camera."""
@@ -671,8 +669,8 @@ def _photo_rows(raw: dict, albums: dict, root_path: dict, tags: dict, hidden: se
         if e0 and "gps" in e0:
             lat, lon, alt = (e0["gps"]["lat"], e0["gps"]["lon"], e0["gps"].get("alt")) if e0["gps"] else (None, None, None)
             gps_accuracy = (e0["gps"] or {}).get("accuracy")
-        mdt = _parse_dt(mod)
-        ts, y, mo, d = _parse_dt(created) or mdt or (0, 1970, 1, 1)
+        mdt = parse_dt(mod)
+        ts, y, mo, d = parse_dt(created) or mdt or (0, 1970, 1, 1)
         if not w or not h:
             w, h = 4, 3
         if orient in (5, 6, 7, 8):  # stored size is unrotated; keep the displayed size
@@ -778,7 +776,6 @@ _OCR_COL = [c.split()[0] for c in re.sub(r"\s+", " ", SCHEMA[SCHEMA.index("(") +
 def _clean_ocr(out: SimpleNamespace, tags: dict, albums: dict):
     """Text read in photos, kept to what reads as words (ocrwords.py): the library's names, titles and places count
     as words, as does a word read in several photos. The stored text is untouched."""
-    from app.ai import ocrwords
     texts = [r[_OCR_COL] for r in out.photos]
     if not any(texts) or not ocrwords.dictionary():  # without the word lists (pyspellchecker missing) the text stays as read
         return
@@ -937,7 +934,7 @@ def _embed_signature() -> str:
     """Bursts use the content embeddings, so rebuild when that file changes; not at each save while the job runs
     (one a minute), only once it is done (its end bumps the analysis epoch)."""
     try:
-        from app.ai.semantic import semantic
+        from app.ai.semantic import semantic  # lazy: ai.semantic -> thumbs -> photos.edits -> data.index would be an import cycle
         if semantic.running:
             return _embed_last["v"]
         st = os.stat(semantic.active.file)

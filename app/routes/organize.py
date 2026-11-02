@@ -14,7 +14,9 @@ from app import access, config, events, thumbs, users
 from app.digikam import dbsync, dkdb
 from app.photos import deletion, edits, folders, importer, lossless, organize, versions
 from app.data import index, state as appstate
-from app.core import _organize_allowed, _run_organize, CACHES, db, DB_ERRORS, IMG_CACHE, json_body
+from app.guards import organize_allowed, run_organize
+from app.http import IMG_CACHE, json_body
+from app.runtime import CACHES, DB_ERRORS, db
 import secrets
 import threading
 from app.digikam.dkdb import chunked
@@ -32,7 +34,7 @@ router = APIRouter()
 async def api_photos_transform(request: Request):
     """Body {ids, op: right|left|180|fliph|flipv}: turn or flip photos without loss (JPEG pixels with jpegtran,
     otherwise the orientation flag); face regions turn with them; each is in the change log with Undo."""
-    _organize_allowed()
+    organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
     body = await json_body(request)
@@ -53,7 +55,7 @@ async def api_photos_transform(request: Request):
 async def api_photo_adjust(request: Request):
     """Body {id, exposure, contrast, saturation, warmth, angle, autolevel}: save an adjusted copy as a new version
     (name_v1.jpg beside it, linked as digiKam links versions); the original is not changed."""
-    _organize_allowed()
+    organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
     body = await json_body(request)
@@ -71,7 +73,7 @@ async def api_photo_adjust(request: Request):
 async def api_photos_crop(request: Request):
     """Body {id, rect: [x, y, w, h]} in upright pixels: crop the file (JPEG without loss via jpegtran; PNG, TIFF,
     WebP re-saved), faces shifted or dropped with it, a copy kept for Undo."""
-    _organize_allowed()
+    organize_allowed()
     if not edits.available():
         raise HTTPException(403, "Editing is turned off (EDITING=0 or no exiftool)")
     body = await json_body(request)
@@ -91,14 +93,14 @@ async def api_photos_crop(request: Request):
 @router.post("/api/photos/trash", dependencies=[access.editor_write])
 async def api_photos_trash(request: Request):
     """Body {ids}: move the photos to the trash of their album root, digiKam's way (.dtrash); restorable."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
     ids = [int(i) for i in body.get("ids") or []][:20000]
     if not ids:
         raise HTTPException(400, "Choose photos")
     if body.get("background"):
         return await run_in_threadpool(_trash_in_background, ids)
-    r = await run_in_threadpool(_run_organize, organize.trash, ids)
+    r = await run_in_threadpool(run_organize, organize.trash, ids)
     _rebuild_soon()
     return r
 
@@ -110,7 +112,7 @@ def _trash_in_background(ids: list) -> dict:
     """{background: true}: the photos leave every page at once (out of the index and its caches) and the answer goes
     out; moving the files and writing digiKam's rows happen after, then the index catches up. The result (for Undo,
     and any photo that could not be moved, which comes back) is GET /api/photos/trash/{job}."""
-    _run_organize(dbsync.preflight, dkdb.sqlite_path(), True, "the photos")  # digiKam open, read-only...: refused now, not later
+    run_organize(dbsync.preflight, dkdb.sqlite_path(), True, "the photos")  # digiKam open, read-only...: refused now, not later
     index.drop_photos(ids)
     for c in CACHES:
         c.cache_clear()
@@ -121,7 +123,7 @@ def _trash_in_background(ids: list) -> dict:
 
     def work():
         try:
-            r = _run_organize(organize.trash, ids)
+            r = run_organize(organize.trash, ids)
         except HTTPException as e:
             r = {"trashed": [], "infos": [], "failed": [{"id": i, "error": e.detail} for i in ids]}
         except Exception as e:  # the cause goes to the log; the photos come back
@@ -189,9 +191,9 @@ def api_trash_thumb(request: Request, info: str):
 @router.post("/api/trash/restore", dependencies=[access.editor_write])
 async def api_trash_restore(request: Request):
     """Body {infos: [.dtrashinfo paths]}: put those photos back where they were."""
-    _organize_allowed()
+    organize_allowed()
     infos = [str(i) for i in (await json_body(request)).get("infos") or []][:20000]
-    r = await run_in_threadpool(_run_organize, organize.restore, infos)
+    r = await run_in_threadpool(run_organize, organize.restore, infos)
     await run_in_threadpool(events.after_write)
     return r
 
@@ -199,12 +201,12 @@ async def api_trash_restore(request: Request):
 @router.post("/api/trash/empty", dependencies=[access.editor_write])
 async def api_trash_empty(request: Request):
     """Body {infos: [...]} or {all: true}: delete those trash entries for good."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
     infos = None if body.get("all") is True else [str(i) for i in body.get("infos") or []][:20000]
     if infos is not None and not infos:
         raise HTTPException(400, "Choose what to delete")
-    r = await run_in_threadpool(_run_organize, organize.empty, infos)
+    r = await run_in_threadpool(run_organize, organize.empty, infos)
     await run_in_threadpool(events.after_write)
     return r
 
@@ -212,12 +214,12 @@ async def api_trash_empty(request: Request):
 @router.post("/api/photos/move", dependencies=[access.editor_write])
 async def api_photos_move(request: Request):
     """Body {ids, album}: move the photos (and their sidecars) into that folder; ids and everything attached stay."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
     ids = [int(i) for i in body.get("ids") or []][:20000]
     if not ids or body.get("album") is None:
         raise HTTPException(400, "Choose photos and a folder")
-    r = await run_in_threadpool(_run_organize, organize.move_photos, ids, int(body["album"]))
+    r = await run_in_threadpool(run_organize, organize.move_photos, ids, int(body["album"]))
     await run_in_threadpool(events.after_write)
     return r
 
@@ -225,9 +227,9 @@ async def api_photos_move(request: Request):
 @router.post("/api/photos/rename", dependencies=[access.editor_write])
 async def api_photos_rename(request: Request):
     """Body {id, name}: a new file name (the extension stays)."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
-    r = await run_in_threadpool(_run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
+    r = await run_in_threadpool(run_organize, organize.rename_photo, int(body.get("id") or 0), str(body.get("name") or ""))
     await run_in_threadpool(events.after_write)
     return r
 
@@ -235,7 +237,7 @@ async def api_photos_rename(request: Request):
 @router.post("/api/folders/{album_id}/properties", dependencies=[access.editor_write])
 async def api_folder_properties(album_id: int, request: Request):
     """Body {caption?, date?, category?, icon?}: digiKam's folder properties (Albums caption, date, collection, icon)."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
     try:
         r = await run_in_threadpool(folders.set_properties, album_id, {k: body[k] for k in ("caption", "date", "category", "icon") if k in body})
@@ -248,12 +250,12 @@ async def api_folder_properties(album_id: int, request: Request):
 @router.post("/api/photos/rename-pattern", dependencies=[access.editor_write])
 async def api_photos_rename_pattern(request: Request):
     """Body {ids, pattern: date|date-name|date-seq}: rename the files by the date they were taken (ids kept, undo per photo)."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
     ids = [int(i) for i in (body.get("ids") or [])][:2000]
     if not ids:
         raise HTTPException(400, "No photos")
-    r = await run_in_threadpool(_run_organize, organize.rename_by_pattern, ids, str(body.get("pattern") or ""))
+    r = await run_in_threadpool(run_organize, organize.rename_by_pattern, ids, str(body.get("pattern") or ""))
     await run_in_threadpool(events.after_write)
     return r
 
@@ -261,9 +263,9 @@ async def api_photos_rename_pattern(request: Request):
 @router.post("/api/folders/{album_id}/rename", dependencies=[access.editor_write])
 async def api_folder_rename(album_id: int, request: Request):
     """Body {name}: rename the folder on disk and in the database (subfolders follow)."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
-    r = await run_in_threadpool(_run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
+    r = await run_in_threadpool(run_organize, organize.rename_folder, album_id, str(body.get("name") or ""))
     await run_in_threadpool(events.after_write)
     return r
 
@@ -271,9 +273,9 @@ async def api_folder_rename(album_id: int, request: Request):
 @router.post("/api/folders/{album_id}/move", dependencies=[access.editor_write])
 async def api_folder_move(album_id: int, request: Request):
     """Body {parent}: move the folder (with everything in it) under another folder of the same album root."""
-    _organize_allowed()
+    organize_allowed()
     body = await json_body(request)
-    r = await run_in_threadpool(_run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
+    r = await run_in_threadpool(run_organize, organize.move_folder, album_id, int(body.get("parent") or 0))
     await run_in_threadpool(events.after_write)
     return r
 

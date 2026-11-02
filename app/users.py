@@ -33,7 +33,7 @@ _secret = None
 
 def init():
     # the users table (and its person / email columns) is part of the schema vdb.ensure_schema keeps; state.init ran it
-    name, pw = os.environ.get("ADMIN_USER", "").strip(), os.environ.get("ADMIN_PASSWORD", "")
+    name, pw = config.ADMIN_USER, config.ADMIN_PASSWORD
     if name and pw and not any_users():
         create(name, pw, "admin")
 

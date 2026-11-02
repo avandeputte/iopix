@@ -176,8 +176,7 @@ def reread(pid: int, check_running: bool = True) -> dict:
                                  "('autodetectedFace', 'autodetectedPerson', 'ignoredFace')", (p["id"],)).fetchall()
         tags = scanner.Tags(con)
         try:
-            from app.faces.facemgr import _special
-            special = _special(con)
+            special = facemgr.special_tags(con)
         except SyncError:
             special = {}
         scanner.write_rows(con, p["id"], rows, tags, special, full=True)

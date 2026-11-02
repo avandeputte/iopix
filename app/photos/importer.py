@@ -27,7 +27,7 @@ from app import config
 from app.digikam import dbsync, dkdb
 from app.photos import edits, folders, history
 from app.digikam.dbsync import SyncError
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import in_chunks
 from app.data import index, state
 from app.faces import facemgr
 
@@ -204,10 +204,8 @@ def _same_size(sizes: set) -> dict:
     con = index.open_index()
     try:
         out = {}
-        for part in chunked(sizes, 500):
-            chunk = ",".join(str(int(s)) for s in part)
-            for pid, path, size in con.execute(f"SELECT id, path, size FROM photos WHERE size IN ({chunk})"):
-                out.setdefault(size, []).append((pid, path))
+        for pid, path, size in in_chunks(con, "SELECT id, path, size FROM photos WHERE size IN ({ids})", map(int, sizes)):
+            out.setdefault(size, []).append((pid, path))
         return out
     finally:
         con.close()
@@ -363,7 +361,7 @@ def run(token: str, key: str = None, include: list = None, skip_duplicates: bool
                 skipped.append({"name": it["name"], "reason": str(e)})
         if staged:
             regs = folders.register(album_id, staged, check_running)
-            from app.photos import scanner
+            from app.photos import scanner  # lazy: photos.scanner -> photos.importer would be an import cycle
             scanner.complete([a["id"] for a in regs], check_running)  # the full rows digiKam's scan would write
             sidecars_from_db([a["id"] for a in regs])
             for a, (final, _c, _e, dst, _i) in zip(regs, staged):

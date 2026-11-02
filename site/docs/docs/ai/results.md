@@ -6,7 +6,7 @@
 
 ## Bursts and best shots
 
-Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the one in focus, with the sharpest faces and nobody's eyes closed, with a small say for the aesthetic score. **Show only the best frame of each burst** is a filter.
+Photos taken within two seconds on the same camera that also look alike are grouped as a burst. The best frame is the one in focus, with the sharpest faces and nobody's eyes closed, with a small say for the aesthetic score. **In a burst** and **Show only the best frame of each burst** are filters on the Photos page, and the info panel names a photo's burst.
 
 ## Events and trips
 

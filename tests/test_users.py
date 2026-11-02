@@ -2,13 +2,7 @@
 viewers keep settings and favorites on the server, editors write the library, admins
 manage settings, maintenance and users; sessions are signed cookies."""
 from app import users
-
-
-def _login(client, name, pw):
-    client.cookies.clear()
-    r = client.post("/api/auth/login", json={"name": name, "password": pw})
-    assert r.status_code == 200, r.text
-    return r.json()
+from helpers import login as _login
 
 
 def test_open_until_first_user(client, fresh):

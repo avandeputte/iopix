@@ -37,7 +37,7 @@ def available() -> bool:
     if not config.CAPTIONS:
         return False
     if _florence():
-        from app.ai import florence
+        from app.ai import florence  # lazy: ai.florence -> thumbs -> photos.edits -> data.index -> ai.analysis -> ai.caption would be an import cycle
         return florence.available()
     try:
         return any(MODEL_DIR.glob(f"models--{repo().replace('/', '--')}/snapshots/*/config.json"))
@@ -64,7 +64,7 @@ def _load():
 def describe(paths: list) -> list:
     """One caption per path (None where the file could not be read)."""
     if _florence():
-        from app.ai import florence
+        from app.ai import florence  # lazy: ai.florence -> thumbs -> photos.edits -> data.index -> ai.analysis -> ai.caption would be an import cycle
         return florence.describe(paths)
     st = _load()
     images, keep = [], []

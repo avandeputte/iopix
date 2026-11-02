@@ -26,8 +26,9 @@ from pathlib import Path
 from app import config
 from app.digikam import dkdb
 from app.photos import edits, history
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import in_chunks
 from app.data import index
+from app.data import state as appstate
 
 PICK_TAGS = ["Pick Label None", "Pick Label Rejected", "Pick Label Pending", "Pick Label Accepted"]
 COLOR_TAGS = [f"Color Label {n}" for n in ("None", "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "Gray", "Black", "White")]
@@ -65,7 +66,6 @@ def _confirmed_closed() -> bool:
     """In a container the host's processes are invisible, so the owner confirms instead
     (a short-lived flag set from the UI)."""
     try:
-        from app.data import state as appstate
         return float(appstate.get_setting("digikam_closed_until", "0")) > time.time()
     except Exception:
         return False
@@ -232,9 +232,7 @@ def photo_paths(ids: list) -> list:
     out = []
     con = index.open_index()
     try:
-        for part in chunked(ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            out += [tuple(r) for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({chunk})")]
+        out = [tuple(r) for r in in_chunks(con, "SELECT id, path FROM photos WHERE id IN ({ids})", map(int, ids))]
     finally:
         con.close()
     return out

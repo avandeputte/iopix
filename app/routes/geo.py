@@ -6,8 +6,9 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app import access, thumbs, users
-from app.geo import geocode, maps
-from app.core import db, jresp, json_body
+from app.geo import geocode, maps, placeguess
+from app.http import jresp, json_body
+from app.runtime import db
 
 
 
@@ -58,7 +59,6 @@ def api_placesuggest(request: Request, offset: int = 0, limit: int = 100, ids: s
     """Where the photos without a position were probably taken (placeguess.py), surest first:
     {total, items: [{id, lat, lon, km, place, region, country, basis, text, from: [ids]}]}. Nothing is written; using
     one is /api/edit {gps: {lat, lon, accuracy: km * 1000}}."""
-    from app.geo import placeguess
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     items = placeguess.suggestions(want)["items"]
     return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 1000))]})

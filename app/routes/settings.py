@@ -16,11 +16,12 @@ from app.faces import facevecs
 from app.photos import edits, scanner
 from app.data import index, state as appstate, vdb
 from app.geo import geocode, maps
-from app.ai.semantic import _ready as semantic_ready, ENGINES, semantic
-from app.core import _start_prewarm, json_body
+from app.ai.semantic import ready as semantic_ready, ENGINES, semantic
+from app.http import json_body
+from app.runtime import start_prewarm
 
 
-from app.routes.browse import _photos_cached
+from app.routes.browse import photos_cached
 
 router = APIRouter()
 
@@ -37,16 +38,16 @@ def _settings_public() -> dict:
         "bg_threads": bgjobs.threads(),
         "read_only": appstate.read_only(),
         "require_login": users.require_login(),
-        "mcp_enabled": appstate.get_setting("mcp_enabled", "0") == "1",
+        "mcp_enabled": appstate.get_setting("mcp_enabled") == "1",
         "update_check": updates.auto_check_enabled(),
-        "update_check_locked": os.environ.get("UPDATE_CHECK", "").strip() == "0",
+        "update_check_locked": config.update_check_locked(),
         "digikam_sync": index.sync_enabled(),
-        "app_name": appstate.get_setting("app_name", ""),
+        "app_name": appstate.get_setting("app_name"),
         "database": db_settings_public(),
         "album_roots": dkdb.root_overrides(),
-        "map_provider": appstate.get_setting("map_provider", "osm"),
+        "map_provider": appstate.get_setting("map_provider"),
         "google_maps_key_set": bool(maps.key()),
-        "templates": json.loads(appstate.get_setting("templates", "[]")),
+        "templates": json.loads(appstate.get_setting("templates")),
     }
 
 
@@ -74,7 +75,7 @@ async def api_proxy_set(request: Request):
     """Body: any of proxyauth.KEYS (an empty string clears one). Settings in iopix.env cannot be changed here."""
     body = await json_body(request)
     changes = {k: str(v or "").strip() for k, v in body.items() if k in proxyauth.KEYS}
-    fixed = [k for k in changes if os.environ.get(k) not in (None, "")]
+    fixed = [k for k in changes if config.proxy_env(k) is not None]
     if fixed:
         raise HTTPException(400, f"Set in iopix.env, change it there: {', '.join(fixed)}")
     m = changes.get("AUTH_PROXY")
@@ -106,7 +107,7 @@ def _text(name, limit=None):
 
 def _update_check(value, _body):
     """The daily look at GitHub for a newer version (off: the viewer never contacts GitHub on its own)."""
-    if value and os.environ.get("UPDATE_CHECK", "").strip() == "0":
+    if value and config.update_check_locked():
         raise HTTPException(400, "Switched off by UPDATE_CHECK=0 in the environment")
     appstate.set_setting("update_check", "1" if value else "0")
     if value:
@@ -219,8 +220,8 @@ def _search_model(value, _body):
     if name not in ENGINES or not semantic_ready(name):
         raise HTTPException(400, "That search model is not installed")
     appstate.set_setting("search_model", name)
-    _photos_cached.cache_clear()
-    _start_prewarm()  # starts indexing for the newly chosen model if needed
+    photos_cached.cache_clear()
+    start_prewarm()  # starts indexing for the newly chosen model if needed
 
 
 def _model(group):
@@ -236,7 +237,7 @@ def _model(group):
         if group == "face_vectors":
             facevecs.start()  # every face is embedded again with the new model
         elif group in ("object_model", "caption_model"):
-            _start_prewarm()  # new photos use the new model; "Run again" redoes the rest
+            start_prewarm()  # new photos use the new model; "Run again" redoes the rest
     return f
 
 

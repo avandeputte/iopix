@@ -26,6 +26,7 @@ from app.photos import edits
 from app.data import state as appstate
 from app.digikam.dbsync import SyncError
 from app.faces import facemgr
+from app.photos import history
 
 OPS_BACKUP_DIR = edits.BACKUP_DIR / "tag-ops"
 KEEP_OPS = 8
@@ -103,10 +104,8 @@ def _check_name(name: str) -> str:
 def _photos_with(con, tag_ids, roots):
     """{image id: absolute path} for visible items carrying any of the tags."""
     out = {}
-    ids = ",".join(str(int(t)) for t in tag_ids)
-    for iid, r, rel, name in con.execute(
-            "SELECT DISTINCT i.id, a.albumRoot, a.relativePath, i.name FROM ImageTags it JOIN Images i ON i.id = it.imageid "
-            f"JOIN Albums a ON a.id = i.album WHERE it.tagid IN ({ids}) AND i.status = 1"):
+    for iid, r, rel, name in dkdb.in_chunks(con, "SELECT DISTINCT i.id, a.albumRoot, a.relativePath, i.name FROM ImageTags it JOIN Images i ON i.id = it.imageid "
+                                                 "JOIN Albums a ON a.id = i.album WHERE it.tagid IN ({ids}) AND i.status = 1", map(int, tag_ids)):
         if r in roots:
             out[iid] = roots[r] + rel.rstrip("/") + "/" + name
     return out
@@ -151,7 +150,6 @@ class _Change:
 
     def rewrite(self, photos: dict, what: str):
         """These photos' sidecars are rewritten afterwards, and the edit log says why."""
-        from app.photos import history
         self.jobs = [(self.stamp, path, iid) for iid, path in photos.items()]
         history.record([{"photo_id": iid, "action": "tag", "summary": what, "path": path} for iid, path in photos.items()])
 
@@ -387,7 +385,7 @@ def _after_merge(src: int, dst: int, images: list, db_path):
         c.execute("UPDATE ai_person_references SET tag_id = ? WHERE tag_id = ?", (dst, src))
     appstate.write(go)
     if images:
-        from app.faces import facemgr
+        from app.faces import facemgr  # lazy: faces.facemgr -> photos.tagmanager would be an import cycle
         facemgr.queue_sidecars(images, db_path)
 
 

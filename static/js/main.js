@@ -112,7 +112,7 @@ export async function runUpdate(onState) {
   setTimeout(check, 5000);
   return true;
 }
-const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', 'duplicates', 'detected', 'bursts', 'events', 'favorites'];
+const LIVE_VIEWS = ['photos', 'people', 'places', 'folders', 'albums', 'tags', 'duplicates', 'detected', 'events', 'favorites'];
 /** A list page the library changed under is drawn again in place, keeping what was typed in its filter box. Not while
  *  the user is typing in the page or arranging People: then it waits for the next poll. */
 function redrawLive() {

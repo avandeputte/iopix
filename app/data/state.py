@@ -19,16 +19,78 @@ import time
 
 from app import config
 from app.data import vdb
+from app.digikam.dkdb import in_chunks
 
 STATE_DB = config.DATA_DIR / "viewer.db"  # the SQLite file (vdb.SQLITE_FILE); the legacy migration's target
 LEGACY = (config.DATA_DIR / "state.db", config.DATA_DIR / "analysis.db")
 rev = 0  # bumped on every write so cached query results can be invalidated
 lock = threading.Lock()
 _settings = (-1, {})  # (stamp it was read at, {key: value}); settings are read on every poll and every POST
+log = logging.getLogger("app.data.state")
+
+# Every key of the app_settings table: {key: (default, type, what it is)}. Values are stored as text; the type
+# says how the readers interpret it (a flag is "0"/"1"). get_setting(key) with no default answers the default
+# here, so a reader and the Settings page cannot disagree about it. A key that is not here is a programming
+# error: it is logged once, and the read or write goes ahead (the tests use probe keys on purpose).
+SETTINGS = {
+    "app_name": ("", str, "what the viewer calls itself (Settings › Name); empty: the app's own name"),
+    "read_only": ("0", bool, "nothing in the library may be changed (READ_ONLY=1 in the environment locks it on)"),
+    "require_login": ("0", bool, "visitors must sign in before they see anything"),
+    "write_files": ("0", bool, "metadata edits go into the image files too, not only the sidecars"),
+    "sidecar_compat": ("0", bool, "new sidecars are named photo.xmp, digiKam's compatible file name (SIDECAR_COMPAT=1 locks it on)"),
+    "digikam_sync": ("1", bool, "the viewer reads digiKam's database and writes applied edits into it; off: the library tables"),
+    "digikam_closed_until": ("0", float, "epoch seconds until which the admin vouched that digiKam is closed (dbsync writes without checking)"),
+    "file_scanner": ("0", bool, "watch the album folders for files added, changed or removed outside the viewer (on by default with no digiKam)"),
+    "scan_interval": ("15", int, "minutes between file scanner passes"),
+    "mcp_enabled": ("0", bool, "the MCP endpoint answers (MCP=1 in the environment locks it on); stored once at first start"),
+    "mcp_admin_token": ("", str, "the generated token MCP clients use for admin actions, unless MCP_ADMIN_TOKEN is set"),
+    "update_check": ("1", bool, "look at GitHub daily for a newer version (UPDATE_CHECK=0 locks it off)"),
+    "bg_threads": ("", int, "cores the background jobs may use; empty: BG_THREADS from the environment, half the machine by default"),
+    "search_model": ("clip", str, "the embedding model behind search (clip, siglip2, jinaclip); runtime reads it with default '' to see whether one was chosen"),
+    "face_detector": ("", str, "model key for face detection; empty: the registry's default (app/ai/models.py CHOICES)"),
+    "object_model": ("", str, "model key for object detection; empty: the registry's default"),
+    "caption_model": ("", str, "model key for captions; empty: the registry's default"),
+    "face_vectors": ("", str, "model key for face vectors; empty: the registry's default"),
+    "speech_model": ("", str, "model key for speech in videos; empty: the registry's default"),
+    "face_vectors_built": ("sface", str, "the face vector model the stored vectors were made with (a change rebuilds them)"),
+    "near_dups_level": ("normal", str, "how alike photos must be to count as near duplicates (strict, normal, loose)"),
+    "near_dups_gen": ("", str, "the generation the near-duplicate groups were computed for; empty: compute again"),
+    "import_layout": ("", str, "the folder layout imports go into (importer.LAYOUTS); empty: the first one"),
+    "map_provider": ("osm", str, "osm or google: who draws the map and the Street View links"),
+    "google_maps_key": ("", str, "the browser-facing Google key (GOOGLE_MAPS_API_KEY in the environment otherwise)"),
+    "google_server_key": ("", str, "the Google key for the APIs this server calls (GOOGLE_SERVER_KEY otherwise; else the browser key)"),
+    "album_roots": ("", "json", "{album root id: local path}: where digiKam's album roots are mounted here, when not at their recorded paths"),
+    "templates": ("[]", "json", "the edit templates (owner name and contact) the Edit panel offers"),
+    "recent_tags": ("[]", "json", "the last tags used in the Edit panel, newest first (at most 12)"),
+    # digiKam's database, overriding the DIGIKAM_DB_* environment (dkdb.settings()): one key per dkdb.KEYS
+    "db_type": ("", str, "sqlite, mysql or none; empty: DIGIKAM_DB_TYPE"),
+    "db_sqlite_dir": ("", str, "the folder with digikam4.db; empty: DIGIKAM_DB_DIR"),
+    "db_host": ("", str, "MySQL host; empty: DIGIKAM_DB_HOST"),
+    "db_port": ("", str, "MySQL port; empty: DIGIKAM_DB_PORT"),
+    "db_database": ("", str, "MySQL database name; empty: DIGIKAM_DB_NAME"),
+    "db_user": ("", str, "MySQL user; empty: DIGIKAM_DB_USER"),
+    "db_password": ("", str, "MySQL password; empty: DIGIKAM_DB_PASSWORD"),
+    "db_backup": ("", str, "auto or skip; empty: DIGIKAM_DB_BACKUP"),
+    # sign-in at a reverse proxy (proxyauth.KEYS, lower-cased): the environment wins when set there
+    "auth_proxy": ("", str, "off, or a preset (cloudflare, nginx, ...): the proxy whose identity header is trusted"),
+    "auth_proxy_header": ("", str, "the header that carries the signed-in user, when not the preset's"),
+    "auth_proxy_trusted": ("", str, "the proxy addresses (CIDRs) whose identity headers are believed"),
+    "auth_proxy_create": ("", str, "someone with no account: the sign-in screen (empty), deny, or a viewer or editor account"),
+    "cf_access_team": ("", str, "the Cloudflare Access team domain whose tokens are verified"),
+    "cf_access_aud": ("", str, "the Cloudflare Access application's AUD tag"),
+}
+_unknown_keys = set()  # logged once each
+
+
+def _known(key: str):
+    if key not in SETTINGS and key not in _unknown_keys:
+        _unknown_keys.add(key)
+        log.warning("setting %r is not in state.SETTINGS (add it there with its default)", key)
 
 
 def migrate_legacy():
-    """state.db + analysis.db -> viewer.db, once. Returns where the old files were parked, or None."""
+    """state.db + analysis.db -> viewer.db, once. Returns where the old files were parked, or None.
+    Installs from before v1.8 (2024); remove after v1.120, with LEGACY and the module docstring's last sentence."""
     if STATE_DB.exists() or not any(p.exists() for p in LEGACY):
         return None
     old_state, old_an = LEGACY
@@ -84,7 +146,6 @@ def init():
 
 def write(fn):
     global rev
-    from app.data import vdb
     with lock, vdb.write_lock:  # one writer in the process, the jobs included: a request never waits out SQLite's busy timeout
         con = connect()
         try:
@@ -261,10 +322,13 @@ def _settings_stamp() -> tuple:
     return rev, stamp
 
 
-def get_setting(key: str, default: str = "") -> str:
+def get_setting(key: str, default: str = None) -> str:
     """Settings are tiny and read on every status poll and every POST, so the whole
-    table is cached and re-read only after a write."""
+    table is cached and re-read only after a write. No default: SETTINGS' own."""
     global _settings
+    _known(key)
+    if default is None:
+        default = SETTINGS[key][0] if key in SETTINGS else ""
     stamp, values = _settings
     now = _settings_stamp()  # taken before the query: a write racing with it makes the next call reload
     if stamp != now:
@@ -285,6 +349,7 @@ def read_only() -> bool:
 
 
 def set_setting(key: str, value: str):
+    _known(key)
     write(lambda c: c.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)", (key, value)))
 
 
@@ -304,9 +369,8 @@ def album_item_ids(album_ids: list) -> list:
     vis, vp = _visible(alias="a")
     con = connect()
     try:
-        return [r[0] for r in con.execute(
-            "SELECT i.photo_id FROM viewer_album_photos i JOIN viewer_albums a ON a.id = i.album_id "
-            f"WHERE i.album_id IN ({','.join(str(int(a)) for a in album_ids)}) AND {vis}", vp)]
+        return [r[0] for r in in_chunks(con, "SELECT i.photo_id FROM viewer_album_photos i JOIN viewer_albums a ON a.id = i.album_id "
+                                             f"WHERE i.album_id IN ({{ids}}) AND {vis}", map(int, album_ids), params_after=tuple(vp))]
     finally:
         con.close()
 

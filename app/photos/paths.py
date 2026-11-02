@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from app import config
+from app.data import state
 
 BACKUP_DIR = config.DATA_DIR / "sidecar-backups"
 FILE_BACKUP_DIR = config.DATA_DIR / "file-backups"  # originals of image files before their metadata is rewritten
@@ -34,10 +35,9 @@ def sidecar_candidates(photo_path: str) -> tuple:
 
 def compat_naming() -> bool:
     """Write new sidecars as photo.xmp (digiKam's "compatible file name" setting): SIDECAR_COMPAT=1 or the setting."""
-    if os.environ.get("SIDECAR_COMPAT", "").strip() in ("1", "true", "yes"):
+    if config.sidecar_compat_env():
         return True
     try:
-        from app.data import state
         return state.get_setting("sidecar_compat", "0") == "1"
     except Exception:
         return False

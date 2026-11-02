@@ -2,12 +2,7 @@
 editors and admins; private ones are seen and changed only by the user who made them, whatever their role."""
 from app.data import state
 from app import users
-
-
-def _login(client, name, pw):
-    client.cookies.clear()
-    r = client.post("/api/auth/login", json={"name": name, "password": pw})
-    assert r.status_code == 200, r.text
+from helpers import login as _login
 
 
 def _albums(client):

@@ -1,6 +1,7 @@
 """Turns filter parameters (the same ones the web UI puts in its URLs) into SQL
 against the app's index. Shared by the web API and the MCP server."""
 import re
+from app.data import state
 
 SORTS = {
     "new": "ts DESC, id DESC", "old": "ts ASC, id ASC", "added": "mts DESC, id DESC",
@@ -85,14 +86,12 @@ def _selection(w):
 def _favorites(w):
     """Favorites and the viewer's albums live in the viewer database (SQLite or MySQL): inlined as ids."""
     if w.one("fav") == "1":
-        from app.data import state
         w.ids(state.favorite_ids())
 
 
 def _viewer_albums(w):
     ualbums = _ints(w.all("ualbum"))
     if ualbums:
-        from app.data import state
         w.ids(state.album_item_ids(ualbums))
 
 

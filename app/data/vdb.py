@@ -26,7 +26,7 @@ from pathlib import Path
 
 from app import config
 from app.digikam import library as _library
-from app.digikam.dkdb import Conn, _Cursor, _norm_plain
+from app.digikam.dkdb import Conn, Cursor, norm_plain
 
 log = logging.getLogger("app.data.vdb")
 CONF = config.DATA_DIR / "viewer-db.json"
@@ -185,7 +185,7 @@ def settings() -> dict:
         except (OSError, ValueError):
             pass
         for k in KEYS:
-            v = os.environ.get("VIEWER_DB_" + k.upper())
+            v = config.viewer_db_env(k)
             if v:
                 c[k] = v
         c["port"] = int(c.get("port") or 3306)
@@ -251,7 +251,7 @@ def _row_class(keys: tuple):
     return type("Row", (_Row,), {"__slots__": (), "_keys": keys})
 
 
-class _VCursor(_Cursor):
+class _VCursor(Cursor):
     def __init__(self, cur, mysql: bool):
         super().__init__(cur, mysql)
         desc = getattr(cur, "description", None)
@@ -260,7 +260,7 @@ class _VCursor(_Cursor):
     def _fix(self, row):
         if row is None or not self._mysql:
             return row
-        return self._cls(_norm_plain(v) for v in row)
+        return self._cls(norm_plain(v) for v in row)
 
 
 class VConn(Conn):
@@ -552,7 +552,7 @@ def _old_ai_shape(con: VConn) -> bool:
 
 
 def _migrate_ai_tables(con: VConn):
-    """v1.43: one ai_scans table says which version of each photo every job looked at (it was a stamp column in
+    """v1.43 (remove after v1.120, with _old_ai_shape and the backup it takes): one ai_scans table says which version of each photo every job looked at (it was a stamp column in
     four result tables plus two marker tables); ai_text_and_faces is split into ai_text and ai_face_count;
     image_data_checksums is keyed by photo rather than file path. Every row is carried over; a SQLite snapshot
     of the whole database is written to db-backups first."""

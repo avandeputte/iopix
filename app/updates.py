@@ -14,9 +14,7 @@ import urllib.request
 from app import __version__, config, jobs
 from app.data import state
 
-# IOPIX_*; the DIGIKAM_VIEWER_* names from before the rename are still honoured
-REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or "avandeputte/iopix"
-BRANCH = os.environ.get("IOPIX_BRANCH") or os.environ.get("DIGIKAM_VIEWER_BRANCH") or "main"
+REPO, BRANCH = config.IOPIX_REPO, config.IOPIX_BRANCH  # the repository and branch followed (IOPIX_REPO / IOPIX_BRANCH)
 _run_lock = threading.Lock()
 progress = jobs.Progress("update", log="", finished=None)
 _checked = {}
@@ -32,7 +30,7 @@ RESULT_FILE = "update-result.txt"  # in the data folder; update.sh writes the ou
 def admin_token() -> str:
     """The token that lets an MCP client run the update (the endpoint itself has no sign-in).
     MCP_ADMIN_TOKEN in the environment wins; otherwise one is generated once and kept in settings."""
-    env = os.environ.get("MCP_ADMIN_TOKEN", "").strip()
+    env = config.mcp_admin_token_env()
     if env:
         return env
     tok = state.get_setting("mcp_admin_token", "")
@@ -91,7 +89,7 @@ DAILY = 24 * 3600
 
 def auto_check_enabled() -> bool:
     """Settings › Viewer › Check for updates daily (on unless switched off; UPDATE_CHECK=0 locks it off)."""
-    if os.environ.get("UPDATE_CHECK", "").strip() == "0":
+    if config.update_check_locked():
         return False
     return state.get_setting("update_check", "1") == "1"
 

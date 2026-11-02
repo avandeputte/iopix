@@ -10,11 +10,15 @@ from starlette.concurrency import run_in_threadpool
 
 from app import access, config, events, thumbs, users
 from app.digikam import dbsync
+from app.digikam.dkdb import in_chunks
 from app.photos import edits
 from app.faces import ages, facedetect, facemgr, facevecs
-from app.ai import neardups
+from app.ai import clothing, dateclues, dismissed, jerseys, neardups
+from app.ai.semantic import enabled as semantic_enabled
 from app.data import state as appstate
-from app.core import _face_detect_allowed, _photo_row, db, DB_ERRORS, IMG_CACHE, jresp, json_body
+from app.guards import face_detect_allowed
+from app.http import IMG_CACHE, jresp, json_body, photo_row
+from app.runtime import DB_ERRORS, db
 
 
 router = APIRouter()
@@ -24,7 +28,7 @@ async def api_faces_detect(request: Request):
     """Body: {ids: [...]} | {album: id} | {all: true}, optional redo. Up to five photos are looked at now and
     the answer says what was found; a folder, the library or a larger selection runs in the background."""
     body = await json_body(request)
-    _face_detect_allowed()
+    face_detect_allowed()
     ids = [int(i) for i in body.get("ids") or []][:50000]
     if ids and len(ids) <= 5:
         photos = await run_in_threadpool(facedetect.select_photos, ids)
@@ -116,7 +120,7 @@ async def api_people_group_update(group_id: int, request: Request):
         members = [int(t) for t in members][:5000]
         con = db()
         try:
-            people = {r[0] for r in con.execute(f"SELECT id FROM tags WHERE person = 1 AND id IN ({','.join(map(str, members)) or 'NULL'})")}
+            people = {r[0] for r in in_chunks(con, "SELECT id FROM tags WHERE person = 1 AND id IN ({ids})", members)}
         finally:
             con.close()
         members = [t for t in members if t in people]  # people only; a tag that is no longer a person drops out
@@ -202,7 +206,7 @@ def api_faces_queue(kind: str = "suggested", tag: int = None, offset: int = 0, l
 @router.get("/facecrop/{photo_id}/{x}/{y}/{w}/{h}.jpg")
 def facecrop(photo_id: int, x: int, y: int, w: int, h: int):
     """A square crop around any face rectangle (upright pixels), for the face queues."""
-    row = _photo_row(photo_id)
+    row = photo_row(photo_id)
     pw, ph = row.get("w") or 0, row.get("h") or 0
     if w < 8 or h < 8 or x < 0 or y < 0 or (pw and ph and (x + w > pw * 1.05 or y + h > ph * 1.05)):  # a rectangle that is not in the photo makes no crop (and no cache file)
         raise HTTPException(400, "The rectangle is not inside the photo")
@@ -292,8 +296,6 @@ def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str
     {total, items: [{id, year, lo, hi, clues: [{kind, text, year, sd}], people: [{tag, name, age, year}]}],
     people: [{tag, name, birth, entered, basis, n}], ready, sources: {ages, look}, faces: [done, wanted]}.
     Nothing is written; using a year is /api/edit {date_precision: "year", taken: "YYYY"}."""
-    from app.ai import dateclues
-    from app.ai.semantic import enabled as semantic_enabled
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     out = dateclues.suggestions(want)
     items = out["items"]
@@ -307,7 +309,6 @@ def api_jerseys(request: Request, offset: int = 0, limit: int = 200, ids: str = 
     """Jersey numbers (jerseys.py): {total, items: [{id, number, tag, name, basis: folder|year, n, text, box}], players:
     [{tag, name, numbers}], read, named, ready, coverage: [done, total]}. Each item is a person without a named face whose
     number names a player; using one is /api/edit {add_tags: [tag]} on the photo. Nothing is written here."""
-    from app.ai import jerseys
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     out = jerseys.suggestions(want)
     items = out["items"]
@@ -320,7 +321,6 @@ def api_clothing(request: Request, offset: int = 0, limit: int = 200, ids: str =
     """Clothing matches (clothing.py): {total, items: [{id, tag, name, n, score, lead, box, event, text}], ready, coverage}.
     Each item is a person without a named face dressed like a named person in the same event; using one is
     /api/edit {add_tags: [tag]} on the photo. Nothing is written here."""
-    from app.ai import clothing
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     items = clothing.suggestions(want)["items"]
     return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 2000))],
@@ -331,7 +331,6 @@ def api_clothing(request: Request, offset: int = 0, limit: int = 200, ids: str =
 async def api_suggestions_dismiss(request: Request):
     """Body {kind: jersey|clothing, pairs: [[photo id, tag id]], on: true}: "Not them": the person is never suggested for
     that photo again (on: false takes it back). Viewer database only."""
-    from app.ai import dismissed
     body = await json_body(request)
     try:
         pairs = [(int(p), int(t)) for p, t in body.get("pairs") or []]
@@ -345,7 +344,6 @@ async def api_suggestions_dismiss(request: Request):
 def api_datehints(request: Request):
     """The folders holding photos marked "Date unknown" (and every folder with a hint), each with its hint:
     {folders: [{album, path, n, not_before, not_after}]}. A hint covers the folder's subfolders."""
-    from app.ai import dateclues
     h = dateclues.hints()
     con = db()
     try:
@@ -360,7 +358,6 @@ def api_datehints(request: Request):
 async def api_datehints_set(request: Request):
     """Body {album, not_before, not_after} (null or "" clears a bound; both clear: the hint is removed): nothing in
     this folder, subfolders included, was taken outside these years. Viewer database only."""
-    from app.ai import dateclues
     body = await json_body(request)
     try:
         album = int(body["album"])

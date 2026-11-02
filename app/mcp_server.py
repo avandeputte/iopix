@@ -25,15 +25,17 @@ from app.photos import consistency, datecheck, dateprecision, edits, organize, r
 from app.data import index, state as appstate
 from app.data.query import DATE_RE, SORTS, build_where
 from app.ai.semantic import semantic, enabled as semantic_enabled
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 from app.digikam import dbsync, dkdb
-from app.ai import models
+from app.ai import clothing, dateclues, jerseys, models, rotation
 from app.ai.analysis import progress as analysis_progress
-from app.faces import facemgr, facequality
+from app.faces import ages, facemgr, facequality
+from app.geo import placeguess
 from app.digikam.dbsync import SyncError
-from app.routes.editing import _current_dates
+from app.routes.editing import current_dates
+from app.routes.maintenance import start_analysis
 
-VIEWER = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # for the links in results
+VIEWER = config.VIEWER_URL  # for the links in results
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 PICKS = ["none", "rejected", "pending", "accepted"]
 MONTH_DAY_RE = re.compile(r"^\d\d-\d\d$")
@@ -534,7 +536,7 @@ def job_queue(token: str) -> dict:
            "analysis": {k: {"running": v["running"], "done": v["done"], "total": v["total"]} for k, v in analysis_progress.items()},
            "search": {"running": semantic.running, "done": semantic.done, "total": semantic.total}}
     try:  # the thumbnail prewarmer lives in the web app; present when this runs inside it
-        from app.main import prewarmer
+        from app.main import prewarmer  # lazy: main -> mcp_server would be an import cycle
         out["thumbnails"] = {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total,
                              "idle_seconds": round(now - prewarmer.last) if prewarmer.last else None, "current": list(prewarmer.current.values())[:3]}
     except Exception:
@@ -710,7 +712,7 @@ def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, c
         raise ToolError("Nothing to change")
     con = db()
     try:
-        photos = [dict(r) for r in con.execute(f"SELECT id, path FROM photos WHERE id IN ({','.join(str(int(i)) for i in photo_ids) or 'NULL'})")]
+        photos = [dict(r) for r in in_chunks(con, "SELECT id, path FROM photos WHERE id IN ({ids})", map(int, photo_ids))]
     finally:
         con.close()
     res = edits.apply(photos, ch)
@@ -856,7 +858,7 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
         try:
             for chunk in chunked(todo, 100):
                 ch, per = {}, {}
-                dateprecision.prepare(chunk, precision, "", ch, per, _current_dates([p["id"] for p in chunk]))
+                dateprecision.prepare(chunk, precision, "", ch, per, current_dates([p["id"] for p in chunk]))
                 r = edits.apply(chunk, ch, per)
                 _precision_job["done"] += r["edited"]
                 if r["failed"]:
@@ -889,9 +891,6 @@ def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, 
     photo_ids limits it to those photos. Read-only: using a suggestion is edit_photos with taken "YYYY" (a year-only date)
     or the page's Use button. Needs the admin token."""
     _need_token(token)
-    from app.ai import dateclues
-    from app.ai.semantic import enabled as semantic_enabled
-    from app.faces import ages
     out = dateclues.suggestions(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 500))], "people": out["people"],
@@ -904,7 +903,6 @@ def place_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100,
     [{id, lat, lon, km (how far off it may be), place, region, country, basis: between|near|day|day-time|stay, text, from}]}.
     Read-only: using one is a GPS edit with that accuracy (the page's Use button). Needs the admin token."""
     _need_token(token)
-    from app.geo import placeguess
     items = placeguess.suggestions(photo_ids)["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 1000))]}
 
@@ -916,7 +914,6 @@ def jersey_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200
     numbers}], read, named, coverage}. Read-only: using one is edit_photos / the page's Tag button, which adds the person's
     tag to the photo. Needs the admin token."""
     _need_token(token)
-    from app.ai import jerseys
     out = jerseys.suggestions(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "players": out["players"],
@@ -930,7 +927,6 @@ def clothing_suggestions(token: str, photo_ids: list[int] = None, limit: int = 2
     lead, box, event, text}], coverage}. Read-only: using one adds the person's tag to the photo (edit_photos / the page's
     Tag button). Needs the admin token."""
     _need_token(token)
-    from app.ai import clothing
     items = clothing.suggestions(photo_ids)["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "coverage": list(clothing.coverage())}
 
@@ -942,7 +938,6 @@ def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200,
     dismissed, coverage, phase}. Read-only: righting one is the web app's Rotate button (POST /api/photos/transform).
     Needs the admin token."""
     _need_token(token)
-    from app.ai import rotation
     out = rotation.findings(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 2000))], "dismissed": out["dismissed"],
@@ -955,7 +950,6 @@ def set_date_hint(token: str, folder: str, not_before: Optional[int] = None, not
     or id) was taken before not_before or after not_after. Both empty removes the hint. Written to iopix's own
     database only; the suggestions then keep to the window. Needs the admin token."""
     _need_token(token)
-    from app.ai import dateclues
     con = db()
     try:
         album = _resolve_album(con, folder)
@@ -976,7 +970,6 @@ def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
     admin token."""
     _need_token(token, writes=(job == "facedetect"))
     from fastapi import HTTPException
-    from app.routes.maintenance import start_analysis
     try:
         return start_analysis(job, reset)
     except HTTPException as e:

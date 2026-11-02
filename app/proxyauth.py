@@ -22,11 +22,10 @@ Settings (environment, iopix.env):
 """
 import ipaddress
 import logging
-import os
 import threading
 import time
 from app.data import state
-from app import users
+from app import config, users
 
 log = logging.getLogger("app.proxyauth")
 
@@ -46,12 +45,11 @@ seen = {}  # the last Cloudflare Access token seen (unverified claims), to set t
 def opt(name: str):
     """A setting: the environment (iopix.env) wins, else what an admin saved (Settings, or the MCP tool), re-read every
     few seconds."""
-    if os.environ.get(name) not in (None, ""):
-        return os.environ.get(name)
+    if config.proxy_env(name) is not None:
+        return config.proxy_env(name)
     now = time.time()
     if now - _opts["at"] > 5:
         try:
-            from app.data import state
             _opts["values"] = {k: state.get_setting(k.lower(), "") for k in KEYS}
         except Exception:
             _opts["values"] = {}
@@ -300,7 +298,7 @@ def user(request):
 def status() -> dict:
     """For Settings and diagnostics: how proxy sign-in is set up (no secrets)."""
     team, aud = cf_settings()
-    return {"values": {k: (opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if os.environ.get(k) not in (None, "")],
+    return {"values": {k: (opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if config.proxy_env(k) is not None],
             "mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
             "team": team, "aud": aud,
             "cloudflareVerified": bool(team), "create": (opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}

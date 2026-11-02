@@ -9,13 +9,13 @@ expects (restrict the key to this viewer's address in the Google Cloud console);
 server never prints it back in Settings.
 """
 import json
-import os
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from app import config as appconfig  # "config" is the map configuration function below
 from app.data import state
 
 SESSION_URL = "https://tile.googleapis.com/v1/createSession"
@@ -55,13 +55,13 @@ def provider() -> str:
 
 def key() -> str:
     """The browser-facing key (tiles, Street View): restrict it by HTTP referrer in the Google Cloud console."""
-    return state.get_setting("google_maps_key", "") or os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    return state.get_setting("google_maps_key") or appconfig.GOOGLE_MAPS_API_KEY
 
 
 def server_key() -> str:
     """The key for the APIs this server calls (Geocoding, Places, Elevation, Vision): one restricted by API and by
     this server's address, when the owner entered a second one; else the browser key."""
-    return state.get_setting("google_server_key", "") or os.environ.get("GOOGLE_SERVER_KEY", "") or key()
+    return state.get_setting("google_server_key") or appconfig.GOOGLE_SERVER_KEY or key()
 
 
 def _create_session(k: str, map_type: str = "roadmap") -> dict:

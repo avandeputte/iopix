@@ -11,12 +11,13 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app import access, config, events
-from app.photos import consistency, edits, metaedit, placetags, tagmanager
+from app.photos import consistency, dateprecision, edits, metaedit, placetags, tagmanager
 from app.digikam import dbsync, dkdb
 from app.geo import gpx
 from app.data import state as appstate
-from app.core import _form_items, db, DB_ERRORS, resolve, json_body
-from app.digikam.dkdb import chunked
+from app.http import form_items, json_body
+from app.runtime import DB_ERRORS, db, resolve
+from app.digikam.dkdb import in_chunks
 
 
 router = APIRouter()
@@ -105,7 +106,6 @@ async def api_edit(request: Request):
         ch["taken"] = t
     prec = raw.get("date_precision")
     if prec is not None:
-        from app.photos import dateprecision
         if prec not in dateprecision.CHOICES:
             raise HTTPException(400, f"date_precision is one of {', '.join(dateprecision.CHOICES)}")
         if raw.get("shift"):
@@ -148,12 +148,11 @@ async def api_edit(request: Request):
             except (TypeError, ValueError):
                 raise HTTPException(400, "Tags are given by id")
             if tag_ids:
-                rows = con.execute(f"SELECT id, full FROM tags WHERE person = 0 AND id IN ({','.join(map(str, tag_ids))})").fetchall()
+                rows = list(in_chunks(con, "SELECT id, full FROM tags WHERE person = 0 AND id IN ({ids})", tag_ids))
                 if len(rows) != len(set(tag_ids)):
                     raise HTTPException(400, "Only existing keyword tags can be edited here (people tags stay in digiKam)")
                 ch[k] = _current_tag_paths([r[0] for r in rows], {r[0]: r[1] for r in rows})
-        photos = [dict(r) for r in con.execute(
-            f"SELECT id, path FROM photos WHERE id IN ({','.join(map(str, ids)) or 'NULL'})")]
+        photos = [dict(r) for r in in_chunks(con, "SELECT id, path FROM photos WHERE id IN ({ids})", ids)]
     finally:
         con.close()
     if prec is not None and photos:
@@ -161,7 +160,7 @@ async def api_edit(request: Request):
         # placeholder date (1 January, or the 1st of the month) built from the date given or each photo's own
         try:
             await run_in_threadpool(dateprecision.ensure_tags, prec)
-            dateprecision.prepare(photos, prec, known, ch, per_photo, _current_dates([p["id"] for p in photos]) if len(known) < 19 else {})
+            dateprecision.prepare(photos, prec, known, ch, per_photo, current_dates([p["id"] for p in photos]) if len(known) < 19 else {})
         except dbsync.SyncError as e:
             raise HTTPException(409, str(e))
         except ValueError as e:
@@ -173,13 +172,12 @@ async def api_edit(request: Request):
     return result
 
 
-def _current_dates(ids: list) -> dict:
+def current_dates(ids: list) -> dict:
     """{photo: "YYYY-MM-DDTHH:MM:SS"}: the date each photo has now, a pending edit's before the index's."""
     con = db()
     try:
         out = {}
-        for chunk in chunked(ids, 500):
-            out.update({r[0]: r[1] for r in con.execute(f"SELECT id, taken FROM photos WHERE id IN ({','.join(str(int(x)) for x in chunk)})")})
+        out.update(in_chunks(con, "SELECT id, taken FROM photos WHERE id IN ({ids})", map(int, ids)))
     finally:
         con.close()
     pend = edits.pending()
@@ -221,7 +219,7 @@ def api_consistency(field: str = None, offset: int = 0, limit: int = 100):
 async def api_consistency_scan(request: Request):
     """Body: the usual filters (form-encoded) to scan a subset, or nothing for the whole library;
     rescan_all=0 only compares photos not checked since they last changed."""
-    items = await _form_items(request)
+    items = await form_items(request)
     d = dict(items)
 
     def rows_for():  # the whole library's rows: not on the event loop
@@ -311,7 +309,7 @@ async def api_gpx_preview(request: Request):
     only_missing = str(form.get("only_missing", "1")) == "1"
     con = db()
     try:
-        rows = con.execute(f"SELECT id, ts, lat, name FROM photos WHERE video = 0 AND id IN ({','.join(map(str, ids)) or 'NULL'})").fetchall()
+        rows = list(in_chunks(con, "SELECT id, ts, lat, name FROM photos WHERE video = 0 AND id IN ({ids})", ids))
     finally:
         con.close()
     photos = [{"id": r["id"], "ts": r["ts"], "name": r["name"]} for r in rows if not (only_missing and r["lat"] is not None)]
@@ -340,7 +338,7 @@ async def api_gpx_apply(request: Request):
     ids = [int(i) for i in body.get("ids", [])][:20000]
     con = db()
     try:
-        rows = con.execute(f"SELECT id, ts, lat, path FROM photos WHERE video = 0 AND id IN ({','.join(map(str, ids)) or 'NULL'})").fetchall()
+        rows = list(in_chunks(con, "SELECT id, ts, lat, path FROM photos WHERE video = 0 AND id IN ({ids})", ids))
     finally:
         con.close()
     only_missing = bool(body.get("only_missing", True))

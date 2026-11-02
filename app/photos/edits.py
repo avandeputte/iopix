@@ -30,7 +30,7 @@ from pathlib import Path
 from app import config
 from app.digikam import dkdb
 from app.data import index, state as appstate, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 from app.photos.paths import BACKUP_DIR, FILE_BACKUP_DIR, rel, backup_path, file_backup_path, sidecar_path  # the path helpers keep their edits.* names too
 from app.photos import consistency, dateprecision, pixelguard
 
@@ -44,7 +44,7 @@ lock = threading.RLock()
 
 
 def _find_exiftool():
-    env = os.environ.get("EXIFTOOL")
+    env = config.EXIFTOOL
     # any exiftool works (apt/brew/pip); digiKam's bundled copy is only a convenient fallback on a Mac
     for cand in (env, shutil.which("exiftool"), "/Applications/digiKam.org/digikam.app/Contents/bin/exiftool"):
         if cand and os.path.isfile(cand):
@@ -234,7 +234,7 @@ def _resolved(ids, index):
     try:
         con = index.open_index()
         try:
-            rows = con.execute(f"SELECT path FROM photos WHERE id IN ({','.join(map(str, ids))})").fetchall()
+            rows = list(in_chunks(con, "SELECT path FROM photos WHERE id IN ({ids})", ids))
         finally:
             con.close()
         for (path,) in rows:
@@ -442,7 +442,6 @@ def write_args(ch: dict, tag_paths, in_file: bool) -> list:
             a += (_set("IFD0:ModifyDate", x) + _set("ExifIFD:DateTimeOriginal", x)
                   + _set("IPTC:DateCreated", x[:10]) + _set("IPTC:TimeCreated", x[11:19] + "+00:00"))
     if "date_precision" in ch:  # an approximate date: IPTC Core's Date Created holds only the known part (dateprecision.py)
-        from app.photos import dateprecision
         v = dateprecision.xmp_date(ch["date_precision"], ch.get("taken"))
         if v is not None:
             a += _set("XMP-photoshop:DateCreated", v)
@@ -511,11 +510,9 @@ def digikam_tag_paths(image_ids: list) -> dict:
         tags = dkdb.tag_tree(src)
         internal = {r[0] for r in src.execute("SELECT tagid FROM TagProperties WHERE property = 'internalTag'")}
         out = {}
-        for part in chunked(image_ids, 500):
-            chunk = [int(x) for x in part]
-            for iid, tid in src.execute(f"SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({','.join(map(str, chunk))})"):
-                if tid in tags and tid not in internal:
-                    out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
+        for iid, tid in in_chunks(src, "SELECT imageid, tagid FROM ImageTags WHERE imageid IN ({ids})", map(int, image_ids)):
+            if tid in tags and tid not in internal:
+                out.setdefault(iid, []).append(dkdb.tag_path(tags, tid))
         return {iid: out.get(iid, []) for iid in (int(x) for x in image_ids)}
     finally:
         src.close()
@@ -682,7 +679,7 @@ def apply(photos: list, changes: dict, per_photo: dict = None) -> dict:
                 failed.append({"id": p["id"], "error": str(e)})
                 continue
             paths = effective_tags(db_tags.get(p["id"], []), merged[p["id"]]) if tags_changed else None
-            from app.photos import history
+            from app.photos import history  # lazy: photos.history -> photos.edits would be an import cycle
             snaps[p["id"]] = history.snapshot(p["id"], side)
             jobs.append((side, write_args(mine[p["id"]], paths, False)))
             owner[side] = p["id"]
@@ -728,7 +725,7 @@ def _current_values(ids: list) -> dict:
 
 
 def _log_edits(ok: list, photos: list, mine: dict, before: dict, snaps: dict, in_files: bool):
-    from app.photos import history
+    from app.photos import history  # lazy: photos.history -> photos.edits would be an import cycle
     paths = {p["id"]: p["path"] for p in photos}
     rows = []
     for pid in ok:
@@ -751,7 +748,6 @@ def _log_edits(ok: list, photos: list, mine: dict, before: dict, snaps: dict, in
 def recheck(ids: list):
     """The metadata consistency results of these photos are out of date: compare them again."""
     try:
-        from app.photos import consistency
         consistency.recheck(ids)
     except Exception:  # never fail an edit over the report
         pass
@@ -789,11 +785,9 @@ def db_state(image_ids: list) -> dict:
     except Exception:
         return vals
     try:  # the position at full precision (db_values rounds it for comparing)
-        for part in chunked(image_ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            for pid, lat, lon, alt in src.execute(f"SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({chunk})"):
-                if pid in vals and lat is not None and lon is not None:
-                    vals[pid]["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(alt) if alt is not None else None}
+        for pid, lat, lon, alt in in_chunks(src, "SELECT imageid, latitudeNumber, longitudeNumber, altitude FROM ImagePositions WHERE imageid IN ({ids})", map(int, image_ids)):
+            if pid in vals and lat is not None and lon is not None:
+                vals[pid]["gps"] = {"lat": float(lat), "lon": float(lon), "alt": float(alt) if alt is not None else None}
     finally:
         src.close()
     return vals
@@ -816,7 +810,7 @@ def revert(photos: list) -> dict:
     the viewer wrote into it) get digiKam's values again for every field the edit changed, and the face regions and
     tag list are rewritten from the database, so face changes made since (which are in the database) stay."""
     done, failed = [], []
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> photos.edits would be an import cycle
     with lock:
         edits = pending()
         db = db_state([p["id"] for p in photos])
@@ -859,7 +853,7 @@ def revert(photos: list) -> dict:
     keep = [pid for pid in done if pid in paths and os.path.exists(sidecar_path(paths[pid]))]
     if keep:
         facemgr.write_regions_many(keep)
-    from app.photos import history
+    from app.photos import history  # lazy: photos.history -> photos.edits would be an import cycle
     history.record([{"photo_id": pid, "action": "revert", "summary": "Viewer edits undone: the sidecar (and file) say what digiKam's database says again",
                      "path": paths.get(pid)} for pid in done])
     return {"reverted": len(done), "failed": failed}

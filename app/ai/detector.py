@@ -10,7 +10,7 @@ from PIL import Image
 from app import config
 from app.ai import models
 from app.data import vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import in_chunks
 
 log = logging.getLogger(__name__)
 SIZE = 640
@@ -120,8 +120,7 @@ def person_boxes(ids: list, min_box: float, min_height: float) -> dict:
     (each job that works on a person box, a shirt number or the clothes, has its own idea of too small)."""
     out = {}
     with vdb.reader() as con:
-        for part in chunked(ids, 500):
-            for r in con.execute(f"SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({','.join(str(int(i)) for i in part)}) ORDER BY w * h DESC"):
+        for r in in_chunks(con, "SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({ids}) ORDER BY w * h DESC", map(int, ids)):
                 if r[3] * r[4] >= min_box and r[4] >= min_height:
                     out.setdefault(r[0], []).append((r[1], r[2], r[3], r[4]))
     return out

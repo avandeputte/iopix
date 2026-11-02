@@ -91,8 +91,7 @@ function drawFilters(el, f, p) {
     ].filter(Boolean), 9),
     section('Bursts', f.extras.bursts ? [
       frow('In a burst', f.extras.bursts, p.get('bursts') === '1', () => applyFilter((q) => setOne(q, 'bursts', '1'))),
-      frow('Show only the best frame of each burst', null, p.get('bestonly') === '1', () => applyFilter((q) => setOne(q, 'bestonly', '1'))),
-      frow('Review these bursts', null, false, () => go('bursts', p), icon('dup'))] : [], 9),
+      frow('Show only the best frame of each burst', null, p.get('bestonly') === '1', () => applyFilter((q) => setOne(q, 'bestonly', '1')))] : [], 9),
     section('People in the picture', f.npeople.sort((a, b) => a[0] - b[0]).reduce((acc, [n, c]) => { const k = n >= 5 ? '5+' : String(n); const e = acc.find((x) => x[0] === k); e ? e[1] += c : acc.push([k, c]); return acc; }, [])
       .map(([k, c]) => frow(k === '0' ? 'No people' : k === '1' ? '1 person' : `${k} people`, c, p.get('npeople') === k, () => applyFilter((q) => setOne(q, 'npeople', k)))), 8),
     section('Objects', multi('obj', f.objects), 8),

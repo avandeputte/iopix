@@ -54,7 +54,7 @@ def test_create_folder_and_upload(client, lib, tmp_path):
 
 def _wait_gone(client, path, timeout=10):
     from app import main as appmain
-    appmain._kick.set()
+    appmain.kick.set()
     end = time.time() + timeout
     while time.time() < end:
         if not any(a["path"] == path for a in client.get("/api/meta").json()["albums"]):

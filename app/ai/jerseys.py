@@ -19,10 +19,10 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 from app import jobs, thumbs
-from app.ai import detector
+from app.ai import analysis, detector  # analysis as a module, not its names: it is still loading when the index imports this (a cycle)
 from app.ai.scanjob import ScanJob
 from app.data import index, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 
 log = logging.getLogger(__name__)
 MIN_BOX = 0.02        # of the frame: smaller people carry no readable number
@@ -46,8 +46,7 @@ AGREE = 0.8           # the share of sightings the leading player needs
 
 
 def available() -> bool:
-    from app.ai.analysis import vision_available
-    return vision_available()
+    return analysis.vision_available()
 
 
 def shirt_colour(crop) -> tuple:
@@ -119,8 +118,7 @@ def _todo(con, photos: list) -> list:
     """Still photos with people detected that this job has not read yet (or whose file or detection changed since)."""
     have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'jerseys'")}
     objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'objects'")}
-    from app.ai.analysis import stamp
-    return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != (stamp(p), VERSION)]
+    return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != (analysis.stamp(p), VERSION)]
 
 
 def _counts(con) -> tuple:
@@ -130,8 +128,7 @@ def _counts(con) -> tuple:
 
 
 def _work(gen: int, todo: list):
-    from app.ai.analysis import ocr_engine, stamp
-    ocr = ocr_engine()  # loaded already: available() was checked before the run
+    ocr = analysis.ocr_engine()  # loaded already: available() was checked before the run
     if ocr is None:
         return
     n = max(1, min(4, jobs.threads()))
@@ -165,7 +162,7 @@ def _work(gen: int, todo: list):
                 con.executemany("DELETE FROM ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
                 con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
                                 [(p["id"], detector.thousandths(b[0]), detector.thousandths(b[1]), detector.thousandths(b[2]), detector.thousandths(b[3]), num, sc, *col) for p, found in ready for b, num, sc, col in found])
-                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], stamp(p), VERSION) for p, _ in ready])
+                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], analysis.stamp(p), VERSION) for p, _ in ready])
             progress.step(len(chunk))
 
 
@@ -262,12 +259,11 @@ def suggestions(ids: list = None) -> dict:
             if tag is not None and colour and colour[0] is not None:
                 kits[("a", album, number, tag)].append(colour)
                 kits[("y", year, number, tag)].append(colour)
-        from app.ai import dismissed
+        from app.ai import dismissed  # lazy: ai.dismissed -> photos.history -> data.index -> ai.jerseys would be an import cycle
         no = dismissed.ids("jersey")
         tagged = defaultdict(set)
-        for part in chunked(sorted({s[0] for s in candidates}), 500):
-            for pid, tag in con.execute(f"SELECT photo_id, tag_id FROM photo_tags WHERE photo_id IN ({','.join(str(i) for i in part)})"):
-                tagged[pid].add(tag)
+        for pid, tag in in_chunks(con, "SELECT photo_id, tag_id FROM photo_tags WHERE photo_id IN ({ids})", sorted({s[0] for s in candidates})):
+            tagged[pid].add(tag)
     finally:
         con.close()
     items, seen = [], set()

@@ -21,11 +21,14 @@ import time
 
 from app import config, jobs, thumbs
 from app.data import index, vdb
+from app.digikam.dkdb import in_chunks
 
 try:
     import numpy as np
 except ImportError:  # optional: the AI packages
     np = None
+from app.ai.semantic import enabled, semantic
+from app.photos import history
 
 log = logging.getLogger(__name__)
 SAMPLE = 500          # photos the classifier learns from (each in four turns)
@@ -38,12 +41,10 @@ _lock = threading.Lock()
 
 
 def available() -> bool:
-    from app.ai.semantic import enabled
     return np is not None and enabled()
 
 
 def _engine():
-    from app.ai.semantic import semantic
     return semantic.active
 
 
@@ -245,7 +246,6 @@ def coverage() -> tuple:
     try:
         with vdb.reader() as con:
             done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'rotation'").fetchone()[0]
-        from app.ai.semantic import semantic
         total = len(semantic.ids) if available() and semantic.ids is not None else 0
         return int(done), int(total)
     except Exception:
@@ -258,11 +258,10 @@ def coverage() -> tuple:
 
 def dismiss(photos: list, on: bool = True) -> int:
     """These photos are fine as they are (on: false takes it back); a dismissal lasts until the file changes."""
-    from app.photos import history
     want = [int(p) for p in photos]
     with vdb.writer() as con:
         if on:
-            stamps = dict(con.execute(f"SELECT photo_id, stamp FROM ai_rotation WHERE photo_id IN ({','.join(str(p) for p in want) or 'NULL'})").fetchall())
+            stamps = dict(in_chunks(con, "SELECT photo_id, stamp FROM ai_rotation WHERE photo_id IN ({ids})", want))
             con.executemany("INSERT OR REPLACE INTO quality_accepted (photo_id, check_name, signature, user_name, ts) VALUES (?,'rotation',?,?,?)",
                             [(p, stamps[p], history.actor(), int(time.time())) for p in want if p in stamps])
             return sum(1 for p in want if p in stamps)

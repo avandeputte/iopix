@@ -26,7 +26,7 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.data import index, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 from app.photos import edits, history
 from app import config, jobs
 
@@ -272,15 +272,13 @@ def accepted_ids(check: str) -> dict:
 def ignore_unnamed(photos: list) -> dict:
     """Mark every unnamed face on these photos as not a face to name (digiKam's Ignored), through the normal
     face operations (change log, undo). Returns {ignored, failed}."""
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> faces.facequality would be an import cycle
     with dkdb.reader() as con:
         ops = []
-        for part in chunked(photos, 500):
-            chunk = ",".join(str(int(p)) for p in part)
-            for img, val in con.execute(f"SELECT imageid, value FROM ImageTagProperties WHERE property = 'autodetectedFace' AND imageid IN ({chunk})"):
-                r = _rect(val)
-                if r:
-                    ops.append({"op": "ignore", "image": img, "rect": list(r)})
+        for img, val in in_chunks(con, "SELECT imageid, value FROM ImageTagProperties WHERE property = 'autodetectedFace' AND imageid IN ({ids})", map(int, photos)):
+            r = _rect(val)
+            if r:
+                ops.append({"op": "ignore", "image": img, "rect": list(r)})
     out = {"ignored": 0, "failed": 0}
     for chunk in chunked(ops, 200):
         for r in facemgr.apply_many(chunk, background=True):
@@ -415,7 +413,7 @@ def fix_files(after=None) -> int:
 
 
 def _run_files(todo: list):
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> faces.facequality would be an import cycle
     for batch in chunked(todo, 50):
         regions = _file_regions([p for _i, p in batch])
         dirty = [(pid, p) for pid, p in batch if p in regions and _has_duplicates(*regions[p])]
@@ -437,7 +435,7 @@ def fit_inside(photos: list = None) -> dict:
     """Face rectangles that stick out of their photo are trimmed to its edges, and empty ones removed (all of
     them, or those on the given photos). Through the normal face operations, so each is in the change log
     with undo. Returns {fitted, removed, failed}."""
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> faces.facequality would be an import cycle
     want = {int(p) for p in photos} if photos else None
     ops = []
     for it in scan()["invalid"]:
@@ -492,7 +490,7 @@ def fix_near_duplicates(after=None, check_running: bool = True) -> int:
 
 
 def _run(todo: dict, db_path: Path, check_running: bool):
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> faces.facequality would be an import cycle
     backup = dkdb.backup(db_path, force=True)  # thousands of regions removed in one go: one full copy first
     progress["backup"] = str(backup) if backup else None
     photos = list(todo)

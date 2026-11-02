@@ -4,6 +4,8 @@ import sqlite3
 
 import pytest
 
+from helpers import login
+
 from app.digikam import dkdb
 from app.digikam.dbsync import SyncError
 
@@ -116,10 +118,10 @@ def test_old_password_hashes_are_upgraded_at_sign_in(client, fresh):
     con = state.connect(); con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (old, u["id"])); con.commit(); con.close()
     users.invalidate()
     assert users.needs_rehash(old)
-    assert client.post("/api/auth/login", json={"name": "legacy-probe", "password": "longpassword1"}).status_code == 200
+    login(client, "legacy-probe", "longpassword1")
     con = state.connect(); h = con.execute("SELECT hash FROM user_accounts WHERE id = ?", (u["id"],)).fetchone()[0]; con.close()
     assert h.startswith("scrypt2$65536$8$1$") and not users.needs_rehash(h)
-    assert client.post("/api/auth/login", json={"name": "legacy-probe", "password": "longpassword1"}).status_code == 200
+    login(client, "legacy-probe", "longpassword1")
     client.post("/api/auth/logout", json={})
 
 

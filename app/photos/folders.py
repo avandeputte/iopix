@@ -32,7 +32,7 @@ FORMATS = {"jpg": "JPG", "jpeg": "JPG", "png": "PNG", "gif": "GIF", "tif": "TIFF
 MAX_UPLOAD = 2 * 1024 ** 3
 
 
-def _album(con, album_id: int) -> dict:
+def album_of(con, album_id: int) -> dict:
     r = con.execute("SELECT id, albumRoot, relativePath FROM Albums WHERE id = ?", (album_id,)).fetchone()
     if not r:
         raise SyncError("That folder no longer exists in digiKam.")
@@ -77,7 +77,7 @@ def set_properties(album_id: int, props: dict, check_running: bool = True) -> di
     an image id; None for automatic). Only the keys given change."""
     import re as _re
     with dkdb.reader() as con:
-        _album(con, album_id)
+        album_of(con, album_id)
         if props.get("icon") is not None and not con.execute("SELECT 1 FROM Images WHERE id = ? AND status = 1", (int(props["icon"]),)).fetchone():
             raise SyncError("That photo is not in the library")
     sets, vals = [], []
@@ -105,7 +105,7 @@ def create(parent_id: int, name: str, check_running: bool = True) -> dict:
     """mkdir under the parent folder and the Albums row digiKam's New Album would add."""
     name = clean_name(name, "folder")
     with dkdb.reader() as con:
-        parent = _album(con, parent_id)
+        parent = album_of(con, parent_id)
         rel = ("" if parent["rel"] == "/" else parent["rel"]) + "/" + name
         if con.execute("SELECT 1 FROM Albums WHERE albumRoot = ? AND relativePath = ?", (parent["root"], rel)).fetchone():
             raise SyncError("A folder with that name already exists there.")
@@ -186,7 +186,7 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
     """files: [(name, bytes or an open binary file)]. Each goes into the folder (a taken name gets ' (2)'), then one
     transaction adds their rows; an open file is copied in chunks. Returns {added: [{id, name}], skipped: [{name, reason}]}."""
     with dkdb.reader() as con:
-        folder = _album(con, album_id)
+        folder = album_of(con, album_id)
     if not folder["dir"].is_dir():
         raise SyncError(f"The folder is not on disk here: {folder['dir']}")
     db_path = dkdb.sqlite_path()
@@ -212,7 +212,7 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
                     shutil.copyfileobj(data, out, 1024 * 1024)
             tmp.replace(folder["dir"] / final)
             path = folder["dir"] / final
-            from app.photos import importer
+            from app.photos import importer  # lazy: photos.importer -> photos.folders would be an import cycle
             importer.make_sidecar(str(path))  # the file's own metadata in a sidecar, as digiKam would write one
             staged.append((final, cat, ext, path, probe(path)))  # exiftool runs here, not inside the write lock below
         except (SyncError, OSError) as e:
@@ -221,7 +221,7 @@ def upload(album_id: int, files: list, check_running: bool = True) -> dict:
         return {"added": [], "skipped": skipped}
     added = register(album_id, staged, check_running)
     scanner.complete([a["id"] for a in added], check_running)  # camera, place, keywords, faces, digiKam's hash, as digiKam's scan would
-    from app.photos import importer
+    from app.photos import importer  # lazy: photos.importer -> photos.folders would be an import cycle
     importer.sidecars_from_db([a["id"] for a in added])
     history.record([{"photo_id": a["id"], "action": "added", "summary": f"Uploaded into {folder.get('rel') or folder['dir']} (sidecar created)", "path": str(folder["dir"] / a["name"])} for a in added])
     return {"added": added, "skipped": skipped}

@@ -3,7 +3,7 @@ whether it is enabled and can be run again. The Maintenance page and the MCP ser
 from app import config, jobs as bgjobs
 from app.ai import analysis, caption, detector, looks, models as dlmodels
 from app.ai.semantic import enabled as semantic_enabled, ENGINES, semantic
-from app.core import prewarmer
+from app.runtime import prewarmer
 from app.ai import clothing, jerseys, rotation, videos
 from app.faces import ages, facedetect, facevecs
 

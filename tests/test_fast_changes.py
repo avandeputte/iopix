@@ -2,14 +2,9 @@
 straight from digiKam's database, and the viewer's copy of the library follows in the background."""
 import time
 
-from app import config
+from helpers import backups as _backups
 from app.data import index
 from app.digikam import library
-
-
-def _backups():
-    d = config.DATA_DIR / "db-backups"
-    return sorted(d.glob("digikam4-*.db")) if d.exists() else []
 
 
 def test_new_person_is_in_the_index_at_once_and_the_copy_follows(client, lib):
@@ -38,4 +33,4 @@ def test_new_person_is_in_the_index_at_once_and_the_copy_follows(client, lib):
     finally:
         con.close()
     from app import main
-    main._refresh(initial=True)  # the server's own view of the index, for the tests that follow
+    main.refresh(initial=True)  # the server's own view of the index, for the tests that follow

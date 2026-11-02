@@ -22,7 +22,7 @@ import pickle
 import threading
 import zipfile
 
-from app.ai import models
+from app.ai import analysis, models  # analysis as a module, not its names: it is still loading when it imports this (a cycle)
 from app.faces import facedetect
 
 try:
@@ -150,7 +150,6 @@ def aesthetic(batch, threads: int) -> list:
 def focus(im) -> float:
     """The second-sharpest cell of a 6x6 grid over a 1024 px greyscale copy (Laplacian variance): high when
     something in the frame is crisp, even with a soft background; low only when the whole frame is soft."""
-    from app.ai.analysis import laplacian_var
     g = im.convert("L")
     scale = 1024 / max(g.size)
     if scale < 1:
@@ -162,7 +161,7 @@ def focus(im) -> float:
         for j in range(6):
             c = a[i * h // 6:(i + 1) * h // 6, j * w // 6:(j + 1) * w // 6]
             if c.shape[0] > 8 and c.shape[1] > 8 and float(c.std()) > 2:  # a flat patch (sky, a wall) says nothing about focus
-                cells.append(laplacian_var(c))
+                cells.append(analysis.laplacian_var(c))
     if not cells:
         return 0.0
     cells.sort(reverse=True)

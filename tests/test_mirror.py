@@ -80,11 +80,11 @@ def test_index_builds_from_the_copy_while_digikam_is_unreachable_and_edits_still
         return
     # back online and digiKam closed (vouched, DIGIKAM_CHECK=ask): the queued edit goes into digiKam's database
     from app import main
-    main._auto["at"] = 0
+    main.auto["at"] = 0
     monkeypatch.setattr(edits, "newest_pending", lambda: int(time.time()) - 120)
-    main._refresh(initial=True)  # initial: no 'digiKam wrote seconds ago' wait, the scratch file is brand new
+    main.refresh(initial=True)  # initial: no 'digiKam wrote seconds ago' wait, the scratch file is brand new
     assert main.state["error"] is None, main.state["error"]
-    assert main._auto["at"] > 0, "the automatic apply ran"
+    assert main.auto["at"] > 0, "the automatic apply ran"
     con = sqlite3.connect(dbf)
     assert con.execute("SELECT rating FROM ImageInformation WHERE imageid = ?", (photo_id,)).fetchone()[0] == 4
     con.close()
@@ -100,7 +100,7 @@ def test_sync_off_everything_works_on_the_viewers_own_library(client, lib, photo
     def rebuilt():  # what the watcher does after a change: rebuild, and drop the cached answers
         index.build()
         main.state["version"] = None
-        main._refresh(initial=True)
+        main.refresh(initial=True)
     index.ensure_fresh()
     dbf = Path(lib["db"])
     dk_before = sqlite3.connect(dbf).execute("SELECT count(*) FROM Tags").fetchone()[0]

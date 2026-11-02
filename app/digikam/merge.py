@@ -15,6 +15,8 @@ import logging
 import time
 
 from app.digikam import dbsync, dkdb, library
+from app.data import index, state
+from app.ai import semantic
 
 log = logging.getLogger("app.digikam.merge")
 
@@ -274,7 +276,6 @@ class _Merge:
 def _renumber(remap: dict):
     """The viewer's data follows uploaded photos to their digiKam ids. digiKam has the rows now: whatever fails
     here is logged, the merge itself is done."""
-    from app.data import index, state
     try:
         with state.lock:
             c = state.connect()
@@ -286,7 +287,6 @@ def _renumber(remap: dict):
     except Exception as e:
         log.warning("the viewer's data about %d uploaded photos was not renumbered (%s); the next index build renumbers by file", len(remap), e)
     try:
-        from app.ai import semantic
         semantic.remap_ids(remap)
     except Exception as e:
         log.warning("embeddings of uploaded photos were not renumbered: %s", e)
@@ -309,7 +309,6 @@ def apply(check_running: bool = True) -> dict:
     if remap:
         _renumber(remap)
     library.discard_local_changes()
-    from app.data import index
     index.refresh_library()
     index.conflict["digikam"] = None
     log.info("merged the changes made with sync off into digiKam's database in %.1fs: %s (%d conflicts, %d photos renumbered)", time.time() - t0, m.applied, m.conflicts, len(remap))

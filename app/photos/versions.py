@@ -203,9 +203,8 @@ def versions_of(pid: int) -> list:
                 todo.append(s)
         if len(seen) == 1:
             return []
-        q = ",".join(map(str, seen))
-        status = dict(con.execute(f"SELECT id, status FROM Images WHERE id IN ({q})").fetchall())
-        parents = {s for (s,) in con.execute(f"SELECT subject FROM ImageRelations WHERE subject IN ({q}) AND type = ?", (DERIVED_FROM,))}
+        status = dict(dkdb.in_chunks(con, "SELECT id, status FROM Images WHERE id IN ({ids})", seen))
+        parents = {s for (s,) in dkdb.in_chunks(con, "SELECT subject FROM ImageRelations WHERE subject IN ({ids}) AND type = ?", seen, params_after=(DERIVED_FROM,))}
         for x in sorted(seen):
             if status.get(x) == 1:
                 out.append({"id": x, "role": "version" if x in parents else "original"})

@@ -23,7 +23,7 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history, tagmanager
-from app.data import index
+from app.data import index, vdb
 from app.digikam.dbsync import SyncError
 from app.faces.facequality import NEAR
 
@@ -38,13 +38,16 @@ def rect_xml(x, y, w, h) -> str:
     return f'<rect x="{int(x)}" y="{int(y)}" width="{int(w)}" height="{int(h)}"/>'
 
 
-def _special(con) -> dict:
+def special_tags(con) -> dict:
     out = {}
     for tid, prop in con.execute("SELECT tagid, property FROM TagProperties WHERE property IN ('unknownPerson', 'ignoredPerson', 'unconfirmedPerson')"):
         out[prop] = tid
     if len(out) < 3:
         raise SyncError("digiKam's Unknown / Unconfirmed / Ignored face tags were not found in the database")
     return out
+
+
+_special = special_tags  # old private name, still used by older tests; remove after v1.120
 
 
 def _is_person(con, tid: int) -> bool:
@@ -179,7 +182,6 @@ def _unqueue(images: list):
     if not images:
         return
     try:
-        from app.data import vdb
         with vdb.writer() as con:
             con.executemany("DELETE FROM face_sidecar_queue WHERE image_id = ?", [(int(i),) for i in images])
     except Exception as e:
@@ -189,7 +191,6 @@ def _unqueue(images: list):
 def resume_queue():
     """At start: the sidecar rewrites a restart interrupted (the queue is kept in the viewer database) go on."""
     try:
-        from app.data import vdb
         with vdb.reader() as con:
             images = [r[0] for r in con.execute("SELECT image_id FROM face_sidecar_queue")]
     except Exception as e:
@@ -207,7 +208,6 @@ def queue_sidecars(images: list, db_path=None, remember: bool = True):
     if remember and images:
         try:
             import time
-            from app.data import vdb
             with vdb.writer() as con:
                 con.executemany("INSERT OR REPLACE INTO face_sidecar_queue (image_id, ts) VALUES (?,?)", [(int(i), int(time.time())) for i in images])
         except Exception as e:
@@ -267,7 +267,7 @@ def apply_many(ops: list, db_path=None, check_running: bool = True, background: 
     with lock:
         backup = None  # face changes take no full database copy; each is in the change log
         with dbsync.write_transaction(db_path, check_running) as con:
-            sp = _special(con)
+            sp = special_tags(con)
             for op in ops:
                 try:
                     results.append(_apply_one(con, sp, op))
@@ -412,8 +412,7 @@ def _apply_one(con, sp: dict, op: dict) -> dict:
         else:
             con.execute("REPLACE INTO ImageTags (imageid, tagid) VALUES (?,?)", (image, person))
         full = _full(con, person)
-        from app.photos import edits as _edits
-        _edits.drop_pending_tag(image, full)  # a pending edit that adds or removes this very tag would undo the click at the next apply
+        edits.drop_pending_tag(image, full)  # a pending edit that adds or removes this very tag would undo the click at the next apply
         summary.update(tag=person, name=full)
         return summary
     if kind_op == "add":
@@ -502,7 +501,7 @@ def create_person(name: str, parent: int = 0) -> int:
 # sidecar regions (what digiKam writes with "Save face tags" on)
 # --------------------------------------------------------------------------
 
-def _unrotate(x, y, w, h, up_w, up_h, orientation):
+def unrotate(x, y, w, h, up_w, up_h, orientation):
     """TagRegion::reverseToOrientation: an upright rectangle back to the file's own pixel grid."""
     o = orientation or 1
     if o == 1:
@@ -576,7 +575,7 @@ def _region_args(src, image: int, roots: dict, tags: dict, persons: set):
         if r is None:
             mp.append({"PersonDisplayName": name})
             continue
-        x, y, rw, rh, fw, fh = _unrotate(*r, up_w, up_h, orient)
+        x, y, rw, rh, fw, fh = unrotate(*r, up_w, up_h, orient)
         mwg.append({"Area": {"X": round((x + rw / 2) / fw, 6), "Y": round((y + rh / 2) / fh, 6), "W": round(rw / fw, 6), "H": round(rh / fh, 6), "Unit": "normalized"}, "Name": name, "Type": "Face"})
         mp.append({"PersonDisplayName": name, "Rectangle": f"{x / fw:.6g}, {y / fh:.6g}, {rw / fw:.6g}, {rh / fh:.6g}"})
     args = []

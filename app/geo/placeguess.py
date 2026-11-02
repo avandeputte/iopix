@@ -21,6 +21,8 @@ import math
 import threading
 
 from app.data import index
+from app.digikam.dkdb import in_chunks
+from app.ai.semantic import semantic, enabled
 
 log = logging.getLogger(__name__)
 GROUP_KM = 2.0         # positions this close on one day are one place
@@ -89,7 +91,6 @@ def _by_time(me: dict, rows: list):
 def _look_sims(ids: list, others: list) -> dict:
     """{(id, other id): cosine similarity} from the content embeddings, for the pairs given; {} without them."""
     try:
-        from app.ai.semantic import semantic, enabled
         if not enabled():
             return {}
         semantic.load()
@@ -176,10 +177,8 @@ def suggestions(ids: list = None) -> dict:
                 continue
             around.update((dd + timedelta(days=k)).isoformat() for k in (-1, 0, 1))
         positioned = {}
-        for part in range(0, len(around), 500):
-            chunk = sorted(around)[part:part + 500]
-            for r in con.execute(f"SELECT id, ts, day, lat, lon, place, region, country FROM photos WHERE lat IS NOT NULL AND day IN ({','.join('?' * len(chunk))})", chunk):
-                positioned.setdefault(r["day"], []).append(dict(r))
+        for r in in_chunks(con, "SELECT id, ts, day, lat, lon, place, region, country FROM photos WHERE lat IS NOT NULL AND day IN ({ids})", sorted(around)):
+            positioned.setdefault(r["day"], []).append(dict(r))
     finally:
         con.close()
     groups_of = {d: _groups(rows) for d, rows in positioned.items()}

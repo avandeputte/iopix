@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from app import config, jobs, thumbs
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 from app.data import vdb
 from app.ai import caption, detector as det, looks
 
@@ -99,7 +99,7 @@ def signature() -> str:
     counts = _counts()
     if counts is None:
         return "a0"
-    from app.ai import jerseys
+    from app.ai import jerseys  # lazy: ai.jerseys -> ai.analysis would be an import cycle
     j = jerseys.coverage()[0]
     return f"a{_epoch['n']}." + ".".join(str(n // 2000 * 2000) for n in counts.values()) + f".j{j // 2000 * 2000}"
 
@@ -309,10 +309,8 @@ def face_regions(photo_ids: list) -> dict:
         return out
     con = sqlite3.connect(f"file:{quote(str(config.INDEX_DB))}?mode=ro", uri=True)
     try:
-        for part in chunked(photo_ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({chunk})"):
-                out.setdefault(pid, []).append((x, y, w, h))
+        for pid, x, y, w, h in in_chunks(con, "SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({ids})", map(int, photo_ids)):
+            out.setdefault(pid, []).append((x, y, w, h))
     finally:
         con.close()
     return out
@@ -475,10 +473,8 @@ def _looks_faces(ids: list) -> dict:
         return out
     con = sqlite3.connect(f"file:{quote(str(config.INDEX_DB))}?mode=ro", uri=True)
     try:
-        for part in chunked(ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE kind != 'ignored' AND photo_id IN ({chunk})"):
-                out.setdefault(pid, []).append((x, y, w, h))
+        for pid, x, y, w, h in in_chunks(con, "SELECT photo_id, x, y, w, h FROM faces WHERE kind != 'ignored' AND photo_id IN ({ids})", map(int, ids)):
+            out.setdefault(pid, []).append((x, y, w, h))
     finally:
         con.close()
     return out
@@ -537,10 +533,9 @@ def _looks_job(photos: list, gen: int):
                 if progress["looks"].cancelled(gen):
                     return
                 with vdb.writer() as con:
-                    old = {r[0]: r for r in con.execute(
-                        f"SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks WHERE photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
-                    have = {r[0]: (r[1], r[2]) for r in con.execute(
-                        f"SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks' AND photo_id IN ({','.join(str(int(r[0]['id'])) for r in ready) or 'NULL'})")}
+                    done = [int(r[0]["id"]) for r in ready]
+                    old = {r[0]: r for r in in_chunks(con, "SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks WHERE photo_id IN ({ids})", done)}
+                    have = {r[0]: (r[1], r[2]) for r in in_chunks(con, "SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks' AND photo_id IN ({ids})", done)}
                     rows, scans = [], []
                     for p, need, out, _clip in ready:
                         st = stamp(p)
@@ -584,13 +579,13 @@ def start(photos: list):
     if config.CAPTIONS:
         jobs.submit("captions", lambda: _caption_job(photos, gens["captions"]))
     jobs.submit("looks", lambda: _looks_job(photos, gens["looks"]))
-    from app.ai import jerseys
+    from app.ai import jerseys  # lazy: ai.jerseys -> ai.analysis would be an import cycle
     jerseys.start(photos)  # numbers on shirts, after object detection has found the people
-    from app.ai import clothing
+    from app.ai import clothing  # lazy: ai.clothing -> ai.analysis would be an import cycle
     clothing.start(photos)  # what each detected person wears, for matches within an event
-    from app.ai import rotation
+    from app.ai import rotation  # lazy: ai.rotation -> data.index -> ai.analysis would be an import cycle
     rotation.start()  # photos stored on their side, from the search embeddings
-    from app.ai import videos
+    from app.ai import videos  # lazy: ai.videos -> ai.analysis would be an import cycle
     videos.start(photos)  # cover frame, chapters and speech for videos
 
 
@@ -611,9 +606,8 @@ def results() -> dict:
                 out.setdefault(r[0], {}).update(objects={}, npeople=0)
             for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks"):
                 out.setdefault(r[0], {}).update(aesth=r[1], focus=r[2], eyes_checked=r[3], eyes_closed=r[4])
-            from app.ai.caption import tidy  # descriptions stored before the filler was trimmed get it trimmed here
-            for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):
-                out.setdefault(r[0], {}).update(caption_ai=tidy(r[1]))
+            for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):  # descriptions stored before the filler was trimmed get it trimmed here
+                out.setdefault(r[0], {}).update(caption_ai=caption.tidy(r[1]))
             for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
                 out.setdefault(pid, {}).setdefault("persons", []).append((x, y, w, h))  # for the focus point of a cropped thumbnail (smartcrop.py)
             for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):

@@ -10,7 +10,7 @@ from app.data import state
 def _fresh(tmp_path, monkeypatch, clip_index: bool):
     monkeypatch.setattr(semantic, "_HAVE", True)
     monkeypatch.setattr(semantic.config, "SEMANTIC", True)
-    monkeypatch.setattr(semantic, "_ready", lambda name: name == "siglip2" or clip_index)
+    monkeypatch.setattr(semantic, "ready", lambda name: name == "siglip2" or clip_index)
     s = semantic.Semantic()
     for e in s.engines.values():
         e.file = tmp_path / e.cfg["file"]

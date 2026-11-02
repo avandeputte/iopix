@@ -53,7 +53,7 @@ def _file_copy(path):
     if not path:
         return None
     try:
-        from app.photos import edits
+        from app.photos import edits  # lazy: photos.edits -> photos.consistency -> photos.history would be an import cycle
         b = edits.file_backup_path(path)
         return str(b) if b.exists() else None
     except Exception:
@@ -151,7 +151,7 @@ def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str
         total = con.execute(f"SELECT count(*) FROM photo_history{w}", params).fetchone()[0]
         rows = con.execute(f"SELECT id, photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM photo_history{w} "
                            f"ORDER BY id DESC LIMIT ? OFFSET ?", params + [int(limit), int(offset)]).fetchall()
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> photos.history would be an import cycle
     known_paths = _paths([r[1] for r in rows if not r[9]])
     out = []
     for r in rows:
@@ -181,7 +181,7 @@ def _paths(ids: list) -> dict:
     if not ids:
         return {}
     try:
-        from app.digikam import dbsync
+        from app.digikam import dbsync  # lazy: digikam.dbsync -> photos.history would be an import cycle
         return dict(dbsync.photo_paths(list(set(ids))))
     except Exception:
         return {}
@@ -214,7 +214,7 @@ def restore(entry_id: int, kind: str) -> dict:
     if kind == "deleted":
         return _restore_deleted(e)
     if kind == "trash":  # back out of the trash
-        from app.photos import organize
+        from app.photos import organize  # lazy: photos.organize -> photos.history would be an import cycle
         info = (e["details"] or {}).get("info")
         if not info or not os.path.isfile(info):
             raise FileNotFoundError("That photo is no longer in the trash")
@@ -223,23 +223,23 @@ def restore(entry_id: int, kind: str) -> dict:
             raise ValueError(r["failed"][0]["error"] if r["failed"] else "Could not restore it")
         return {"restored": "trash", "id": r["restored"][0]}
     if kind == "undo" and e["action"] == "moved" and (e["undo"] or {}).get("move"):
-        from app.photos import organize
+        from app.photos import organize  # lazy: photos.organize -> photos.history would be an import cycle
         back = e["undo"]["move"]
         r = organize.move_photos([pid], int(back["album"]), True, back.get("name"))
         if r["failed"]:
             raise ValueError(r["failed"][0]["error"])
         return {"undone": 1}
     if kind == "undo" and e["action"] == "lossless":
-        from app.photos import lossless
+        from app.photos import lossless  # lazy: photos.lossless -> photos.history would be an import cycle
         return lossless.undo(e)
     if kind == "undo" and e["action"] == "filerepair":
-        from app.photos import filecheck
+        from app.photos import filecheck  # lazy: photos.filecheck -> photos.history would be an import cycle
         return filecheck.undo(e)
     photo = _photo(pid)
     if not photo:
         raise LookupError("That photo is not in the library any more")
     if kind == "undo" and e["action"] == "face":
-        from app.faces import facemgr
+        from app.faces import facemgr  # lazy: faces.facemgr -> photos.history would be an import cycle
         ops = (e["undo"] or {}).get("face_ops") or facemgr.inverse_ops(e["details"] or {})
         if not ops:
             raise ValueError("This face change cannot be undone")
@@ -274,8 +274,8 @@ def restore(entry_id: int, kind: str) -> dict:
             later = vcon.execute("SELECT count(*) FROM photo_history WHERE photo_id = ? AND action = 'lossless' AND id > ?", (pid, entry_id)).fetchone()[0]
         if later:  # putting the old pixels back under those rows would leave them wrong: those edits are undone first, each restoring its rows
             raise ValueError(f"Undo the {later} later rotate/crop {'edit' if later == 1 else 'edits'} of this photo first (each puts its size and face regions back), then restore the original")
-        from app.photos import lossless
-        from app.digikam import dbsync, dkdb
+        from app.photos import lossless  # lazy: photos.lossless -> photos.history would be an import cycle
+        from app.digikam import dbsync, dkdb  # lazy: digikam.dbsync -> photos.history would be an import cycle
         db_path = dkdb.sqlite_path()
         dbsync.preflight(db_path, True, "the photo")  # the row changes too: refused while digiKam runs, before the file is touched
         keep = lossless.copy_before(photo["path"])  # what the file is now (rotations and crops since), kept with this entry
@@ -305,7 +305,7 @@ def _pending_from_sidecar(photo: dict):
     pending edit (merged into any edit already pending; a field the sidecar does not hold is left alone). People are
     not taken from it: faces live in digiKam's database, and the sidecar's regions and tag list are written again
     from there, so an old sidecar can never take a person or a face box off the photo."""
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> photos.history would be an import cycle
     side = edits.sidecar_path(photo["path"])
     vals = consistency.exif_read([side]).get(side) or {}
     con = index.open_index()
@@ -337,7 +337,7 @@ def _pending_from_sidecar(photo: dict):
 def _restore_deleted(e: dict) -> dict:
     """Put a deleted photo's files back where they were and add it to the library again, with its
     rating, title, caption and tags (they are in the restored sidecar, and queued as edits)."""
-    from app.photos import deletion, edits, folders
+    from app.photos import deletion, edits, folders  # lazy: photos.deletion -> photos.history would be an import cycle
     d = e["details"] or {}
     backup = Path(d.get("backup") or "")
     files = d.get("files") or []
@@ -367,7 +367,7 @@ def _restore_deleted(e: dict) -> dict:
     finally:
         con.close()
     record([{"photo_id": new_id, "action": "restore", "summary": f"Restored from deleted-photos ({backup.name})", "path": str(main_file)}])
-    from app.photos import scanner
+    from app.photos import scanner  # lazy: photos.scanner -> photos.history would be an import cycle
     scanner.complete([new_id])  # its full rows, as for an upload: dates, position, tags and faces from the file and sidecar
     ch = {k: d.get(k) for k in ("rating", "title", "caption") if d.get(k) not in (None, "")}
     if d.get("tags"):

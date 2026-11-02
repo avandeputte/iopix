@@ -1,5 +1,5 @@
 /** The pages: explore, people, places, folders, albums, tags, import and the trash. */
-import { $, MONTHS, SETTINGS, api, date, dfDay, dfTime, del, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, send, store } from './core.js';
+import { $, MONTHS, SETTINGS, api, date, dfDay, del, errorBox, fill, fmtBytes, fmtKnown, h, icon, loadingBox, main, nf, norm, plural, post, send, store } from './core.js';
 import { NAV, S, ST, VIEW_FNS, applyBadgePref, applyTheme, avatarOf, brandName, faceUrl, filterParams, go, hashFor, loadState, onRoute, photosWith, pollSoon, toast, toastError } from './state.js';
 import { crumbs, placeHash } from './search.js';
 import { confirmDialog, folderPicker, modal, pickedShared, promptDialog, sharingPick } from './actions.js';
@@ -93,7 +93,7 @@ export async function showExplore() {
       S.USER?.person && S.tagById.get(S.USER.person) ? pill('Photos of me', S.tagById.get(S.USER.person).nAll, { tag: S.USER.person }) : null,
       pill('Untagged', null, { untagged: 1 }),
       pill('No location', S.META.total - S.META.geotagged, { geo: 0 }), pill('Favorites', ST.fav.size, { fav: 1 }),
-      h('a', { class: 'pill', href: '#/duplicates' }, 'Duplicate files'), h('a', { class: 'pill', href: '#/bursts' }, 'Bursts & best shots'),
+      h('a', { class: 'pill', href: '#/duplicates' }, 'Duplicate files'),
       h('a', { class: 'pill', href: '#/events' }, 'Events & trips'), pill('Contains text', null, { hastext: 1 }), pill('Blurry', null, { blurry: 1 }),
       pill('Best looking', null, { looks: 'top', sort: 'looks' }), pill('Likely rejects', null, { rejects: 1 }),
       S.EDITING ? h('a', { class: 'pill', href: '#/datesuggest' }, 'Date suggestions') : null,
@@ -552,50 +552,6 @@ export async function showEvents() {
   draw('');
 }
 
-export async function showBursts(vp) {
-  const qs = new URLSearchParams(vp || '');
-  main.replaceChildren(h('div', { class: 'empty' }, 'Finding bursts…'));
-  const list = h('div');
-  let offset = 0, total = 0, src = { id: [] };
-  const more = h('button', { class: 'pillbtn', style: 'margin:20px auto;display:flex', onclick: () => load() }, 'Show more bursts');
-  const pct = (v) => (v == null ? '' : `${Math.round(v * 100)}`);
-  const group = (g) => {
-    const best = g.items.find((x) => x.best) || g.items[0];
-    const others = (keep) => g.items.filter((x) => x.id !== keep.id).map((x) => x.id);
-    const start = src.id.length;
-    g.items.forEach((x) => src.id.push(x.id));
-    const row = h('div', { class: 'duprow' }, g.items.map((x, k) => h('div', { class: 'dupitem burstitem' + (x.best ? ' best' : '') + '' },
-      h('div', { class: 'tile', 'data-id': x.id, style: `width:${Math.round(150 * Math.min(2, x.w / (x.h || 1)))}px;height:150px`, onclick: () => openLightbox(src, start + k, true) },
-        h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' }), x.best ? h('span', { class: 'bestbadge' }, icon('star'), 'Best') : null),
-      h('div', { class: 'sb' }, [x.focusn != null ? `focus ${pct(x.focusn)}` : x.sharpn != null ? `sharpness ${pct(x.sharpn)}` : null, x.faceq != null ? `faces ${pct(x.faceq)}` : null,
-        x.aesthetic != null ? `looks ${x.aesthetic.toFixed(1)}` : null, x.eyesClosed ? 'eyes closed' : null].filter(Boolean).join(' · ') || ' '),)));
-    return h('div', { class: 'dupgroup' }, h('div', { style: 'display:flex;gap:14px;align-items:baseline;flex-wrap:wrap' },
-      h('span', null, dfDay.format(date(g.items[0].ts)), ' ', h('span', { class: 'muted' }, `${dfTime.format(date(g.items[0].ts))} · ${g.items.length} frames`)),
-      h('a', { class: 'lnk', href: hashFor('photos', photosWith({ burst: g.burst, sort: 'old' })) }, 'Open in grid')), row);
-  };
-  const load = async () => {
-    qs.set('offset', offset);
-    let d;
-    try { d = await api('/api/bursts?' + qs.toString()); } catch { list.append(h('div', { class: 'empty' }, 'Could not load bursts.')); return; }
-    if (S.route.view !== 'bursts') return;
-    total = d.bursts;
-    if (!offset) head.textContent = d.bursts ? `${nf.format(d.bursts)} bursts covering ${nf.format(d.photos)} photos. The best frame is picked by focus, how sharp the faces are, closed eyes and, when the photo quality model is installed, how good it looks; check it before rejecting the rest.` : 'No bursts found here.';
-    list.append(...d.groups.map(group));
-    badgeTiles(list);
-    offset += d.groups.length;
-    more.hidden = offset >= total;
-    syncLightbox();
-  };
-  const head = h('div', { class: 'muted intro' });
-  const scoped = [...qs.keys()].length > 0;  // bursts within a search, rather than the whole library
-  main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Bursts & best shots', null]]),
-    pageTitle('dup', 'indigo', 'Bursts & best shots'), head,
-    scoped ? h('div', { class: 'enote', style: 'max-width:760px' }, 'Showing bursts within your current search only. ', h('a', { class: 'lnk', href: '#/bursts' }, 'Show all bursts')) : null,
-    list, more));
-  more.hidden = true;
-  await load();
-}
-
 /** A grid of cards shown 200 at a time, with a "Show more" button: the suggestion pages can hold thousands. */
 function pagedGrid(items, card, per = 200) {
   const grid = h('div', { class: 'duprow', style: 'flex-wrap:wrap;gap:16px' });
@@ -646,8 +602,9 @@ async function suggestionPage({ view, loading, endpoint, trail, icon: ic, hue, t
   };
   /** The heading's button for the whole list (or group): confirmed first, then every photo in turn. */
   const allBtn = (list, g) => actAll && act.can && list.length >= (actAll.min || 1) ? h('button', { class: 'pillbtn', onclick: async (e) => {
+    const b = e.currentTarget;  // read before the await: currentTarget is null once the handler has yielded
     if (!(await confirmDialog(actAll.confirm(list.length, g), { ok: actAll.ok }))) return;
-    await run(list, e.currentTarget); redraw();
+    await run(list, b); redraw();
   } }, actAll.label(list.length, g)) : null;
   /** A paged grid of cards, each card dropping itself from this grid's list when handled. */
   const gridOf = (list) => { const g = {}; [g.grid, g.more, g.drop] = pagedGrid(list, (x) => card(x, g)); return [g.grid, g.more]; };
@@ -729,7 +686,7 @@ export async function loadUser() {
   renderUserMenu();
 }
 // which bar item a view belongs to: Explore's sub-pages light Explore, the Faces page People, Maintenance's pages Maintenance
-const NAV_OF = { duplicates: 'explore', detected: 'explore', bursts: 'explore', events: 'explore', faces: 'people', analysis: 'maintenance', history: 'maintenance', consistency: 'maintenance', quality: 'maintenance', trash: 'folders', import: 'folders' };
+const NAV_OF = { duplicates: 'explore', detected: 'explore', events: 'explore', faces: 'people', analysis: 'maintenance', history: 'maintenance', consistency: 'maintenance', quality: 'maintenance', trash: 'folders', import: 'folders' };
 export const MORE_VIEWS = ['favorites', 'folders', 'albums', 'tags', 'map', 'events', 'settings', 'maintenance'];
 export function currentNav() {
   const fp = filterParams();

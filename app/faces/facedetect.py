@@ -29,7 +29,7 @@ import time
 from app.ai import analysis, models
 from app.data import index, vdb, vdb as v
 from app import jobs, thumbs
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 
 try:
     import numpy as np
@@ -249,10 +249,7 @@ def select_photos(ids: list = None, album: int = None) -> list:
     try:
         sql = "SELECT p.id, p.path, p.name, p.w, p.h, p.hash, p.size, p.modified FROM photos p WHERE p.video = 0"
         if ids is not None:
-            rows = []
-            for part in chunked(ids, 500):
-                chunk = ",".join(str(int(x)) for x in part)
-                rows += con.execute(sql + f" AND p.id IN ({chunk})").fetchall()
+            rows = list(in_chunks(con, sql + " AND p.id IN ({ids})", map(int, ids)))
         elif album is not None:
             rows = con.execute(sql + " AND p.album_id IN (SELECT album FROM album_closure WHERE anc = ?) ORDER BY p.ts DESC", (int(album),)).fetchall()
         else:
@@ -267,10 +264,8 @@ def _existing(ids: list) -> dict:
     out = {}
     con = index.open_index()
     try:
-        for part in chunked(ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            for pid, x, y, w, h in con.execute(f"SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({chunk})"):
-                out.setdefault(pid, []).append((x, y, w, h))
+        for pid, x, y, w, h in in_chunks(con, "SELECT photo_id, x, y, w, h FROM faces WHERE photo_id IN ({ids})", map(int, ids)):
+            out.setdefault(pid, []).append((x, y, w, h))
     finally:
         con.close()
     return out
@@ -303,7 +298,7 @@ def reset():
 # ---- running
 def _write(found: dict) -> int:
     """{photo: [(x, y, w, h)]} new unknown faces into digiKam's database, one transaction per batch."""
-    from app.faces import facemgr
+    from app.faces import facemgr  # lazy: faces.facemgr -> data.index -> ai.analysis -> ai.looks -> faces.facedetect would be an import cycle
     ops = [{"op": "detected", "image": pid, "rect": list(r[:4])} for pid, rects in found.items() for r in rects]
     if not ops:
         return 0

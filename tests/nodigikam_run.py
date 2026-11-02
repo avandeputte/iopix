@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
-from app.core import _refresh, state  # noqa: E402
+from app.runtime import refresh, state  # noqa: E402
 from app.data import index  # noqa: E402
 from app.digikam import library  # noqa: E402
 from app.photos import scanner  # noqa: E402
@@ -34,7 +34,7 @@ from app.photos import scanner  # noqa: E402
 def rebuild():
     index.build()
     state["version"] = None
-    _refresh()
+    refresh()
 
 
 out = {}

@@ -25,7 +25,7 @@ from app.ai import analysis
 from app.digikam import dbsync, dkdb
 from app.photos import edits, history
 from app.data import index, vdb
-from app.digikam.dkdb import chunked
+from app.digikam.dkdb import chunked, in_chunks
 
 CHECK_VERSION = 2  # bumped when the check compares more: every photo is looked at again by "Check new and changed photos"
 FIELDS = ["rating", "title", "caption", "tags", "taken", "gps"]  # what the viewer shows and edits (digiKam's pick and colour labels are not offered)
@@ -362,7 +362,7 @@ def recheck(photo_ids: list):
         return
     con = vdb.connect(timeout=READ_TIMEOUT)
     try:
-        known = {r[0] for r in con.execute(f"SELECT photo_id FROM metadata_check WHERE photo_id IN ({','.join(map(str, ids))})")}
+        known = {r[0] for r in in_chunks(con, "SELECT photo_id FROM metadata_check WHERE photo_id IN ({ids})", ids)}
     finally:
         con.close()
     if not known:
@@ -370,7 +370,7 @@ def recheck(photo_ids: list):
     icon = index.open_index()
     try:
         icon.row_factory = sqlite3.Row
-        photos = [dict(r) for r in icon.execute(f"SELECT id, path, name, hash, size, modified, video FROM photos WHERE id IN ({','.join(map(str, known))})")]
+        photos = [dict(r) for r in in_chunks(icon, "SELECT id, path, name, hash, size, modified, video FROM photos WHERE id IN ({ids})", known)]
     finally:
         icon.close()
 
@@ -430,11 +430,9 @@ def sync(photo_ids: list, source: str, targets: list, fields: list = None) -> di
     con = vdb.connect(timeout=READ_TIMEOUT)
     try:
         stored = {}
-        for part in chunked(photo_ids, 500):
-            chunk = ",".join(str(int(x)) for x in part)
-            for pid, data in con.execute(f"SELECT photo_id, data FROM metadata_check WHERE photo_id IN ({chunk})"):
-                if data:  # photos that agree have no stored report (nothing to copy anyway)
-                    stored[pid] = json.loads(data)
+        for pid, data in in_chunks(con, "SELECT photo_id, data FROM metadata_check WHERE photo_id IN ({ids})", map(int, photo_ids)):
+            if data:  # photos that agree have no stored report (nothing to copy anyway)
+                stored[pid] = json.loads(data)
     finally:
         con.close()
     done, skipped = [], []

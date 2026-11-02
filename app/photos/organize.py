@@ -26,9 +26,9 @@ from pathlib import Path
 
 from app.digikam import dbsync, dkdb
 from app.digikam.dbsync import SyncError
-from app.photos import deletion, edits, export, folders
-from app.digikam.dkdb import chunked
-from app.photos.folders import _album, clean_name
+from app.photos import deletion, edits, export, folders, history, scanner
+from app.digikam.dkdb import in_chunks
+from app.photos.folders import album_of, clean_name
 from app.data import index
 
 log = logging.getLogger("app.photos.organize")
@@ -40,14 +40,11 @@ def _rows(con, ids: list) -> list:
     """[{id, album, name, root, rel, dir, path}] for these Images ids (status 1), with their folder on disk."""
     roots = dkdb.root_paths(con)
     out = []
-    for part in chunked(ids, 500):
-        chunk = ",".join(str(int(x)) for x in part)
-        for iid, album, name, root, rel in con.execute(
-                f"SELECT i.id, i.album, i.name, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({chunk}) AND i.status = 1"):
-            if root not in roots:
-                continue
-            d = Path(roots[root]) / rel.strip("/")
-            out.append({"id": iid, "album": album, "name": name, "root": root, "rel": rel, "dir": d, "path": str(d / name), "root_path": str(roots[root]).rstrip("/")})
+    for iid, album, name, root, rel in in_chunks(con, "SELECT i.id, i.album, i.name, a.albumRoot, a.relativePath FROM Images i JOIN Albums a ON a.id = i.album WHERE i.id IN ({ids}) AND i.status = 1", map(int, ids)):
+        if root not in roots:
+            continue
+        d = Path(roots[root]) / rel.strip("/")
+        out.append({"id": iid, "album": album, "name": name, "root": root, "rel": rel, "dir": d, "path": str(d / name), "root_path": str(roots[root]).rstrip("/")})
     return out
 
 
@@ -136,7 +133,6 @@ def trash(ids: list, check_running: bool = True) -> dict:
             for r in moved:
                 _move_back([(r["trash"], r["path"]), *zip(r["sides"], r["sides_from"])], r["info"])
             raise
-        from app.photos import history
         history.record([{"photo_id": r["id"], "action": "trashed", "summary": "Moved to the trash", "path": r["path"],
                          "details": {"trash": r["trash"], "info": r["info"], "album": r["album"], "name": r["name"]}} for r in moved])
     return {"trashed": [r["id"] for r in moved], "infos": [r["info"] for r in moved], "failed": failed}
@@ -302,12 +298,10 @@ def _restore_new(done: list, ids: list, check_running: bool):
     if done:
         fresh = [t for t in done if t.get("new")]
         if fresh:
-            from app.photos import scanner
             for t in fresh:
                 added = folders.register(t["album"], [folders.staged_entry(t["dest"])], check_running)
                 ids += [a["id"] for a in added]
                 scanner.complete([a["id"] for a in added], check_running)  # dates, position, tags, faces from file and sidecar
-        from app.photos import history
         history.record([{"photo_id": t["id"], "action": "restore", "summary": "Restored from the trash", "path": str(t["dest"])} for t in done if t["id"] and not t.get("new")])
     return ids
 
@@ -337,7 +331,6 @@ def empty(infos: list = None, check_running: bool = True) -> dict:
         except OSError as e:
             failed.append({"info": t["info"], "error": str(e)})
     if ids:
-        from app.photos import history
         history.record([{"photo_id": t["id"], "action": "deleted", "summary": "Deleted for good from the trash", "path": t["path"]} for t in items if t["id"]])
         deletion.forget(ids)
     return {"deleted": len(gone), "failed": failed}
@@ -352,7 +345,7 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
     dbsync.preflight(db_path, check_running, "the photos")
     with dkdb.reader() as con:
         rows = _rows(con, ids)
-        folders = {a: _album(con, a) for a in ({int(album_id)} if album_id is not None else {r["album"] for r in rows})}
+        folders = {a: album_of(con, a) for a in ({int(album_id)} if album_id is not None else {r["album"] for r in rows})}
     for f in folders.values():
         if not f["dir"].is_dir():
             raise SyncError(f"The folder is not on disk here: {f['dir']}")
@@ -386,7 +379,6 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
                 shutil.move(s, sdst)
                 moves.append((s, sdst))
             if str(dst) != r["path"]:
-                from app.photos import edits
                 edits.move_backups(r["path"], str(dst))
             moved.append({**r, "dst": str(dst), "final": final, "to_album": folder["id"], "to_rel": folder["rel"], "moves": moves})
         except (OSError, SyncError) as e:
@@ -401,13 +393,11 @@ def move_photos(ids: list, album_id, check_running: bool = True, new_name: str =
                         deletion.drop_rows(con, stale)
                     con.execute("UPDATE Images SET album = ?, name = ? WHERE id = ?", (r["to_album"], r["final"], r["id"]))
         except BaseException:  # the database refused: the files go back
-            from app.photos import edits
             for r in moved:
                 _move_back([(dst, src) for src, dst in r["moves"]], None)
                 if r["dst"] != r["path"]:
                     edits.move_backups(r["dst"], r["path"])
             raise
-        from app.photos import history
         history.record([{"photo_id": r["id"], "action": "moved", "summary": (f"Renamed to {r['final']}" if r["to_album"] == r["album"] else f"Moved to {r['to_rel']}") + (f" (was {r['name']})" if r["final"] != r["name"] and r["to_album"] != r["album"] else ""),
                          "path": r["dst"], "details": {"from": r["path"], "to": r["dst"]}, "undo": {"move": {"album": r["album"], "name": r["name"]}}} for r in moved])
     return {"moved": [{"id": r["id"], "name": r["final"], "path": r["dst"]} for r in moved], "failed": failed}
@@ -423,7 +413,7 @@ def rename_photo(photo_id: int, new_name: str, check_running: bool = True) -> di
 
 # ---- folders
 def _folder(con, album_id: int) -> dict:
-    return _album(con, int(album_id))
+    return album_of(con, int(album_id))
 
 
 def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> dict:
@@ -434,9 +424,9 @@ def rename_by_pattern(ids: list, pattern: str, check_running: bool = True) -> di
         raise SyncError("Unknown naming pattern")
     con = index.open_index()
     try:
-        rows = {r[0]: r for r in con.execute(f"SELECT id, album_id, name, ts FROM photos WHERE id IN ({','.join(str(int(i)) for i in ids)})")}
+        rows = {r[0]: r for r in in_chunks(con, "SELECT id, album_id, name, ts FROM photos WHERE id IN ({ids})", map(int, ids))}
         taken = {}
-        for aid, name in con.execute(f"SELECT album_id, name FROM photos WHERE album_id IN ({','.join(str(r[1]) for r in rows.values()) or '0'})"):
+        for aid, name in in_chunks(con, "SELECT album_id, name FROM photos WHERE album_id IN ({ids})", {r[1] for r in rows.values()}):
             taken.setdefault(aid, set()).add(name.lower())
     finally:
         con.close()

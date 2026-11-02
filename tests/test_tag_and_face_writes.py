@@ -4,8 +4,7 @@ what digiKam would not allow, and keep the index in step."""
 
 import pytest
 
-from helpers import need_tool
-from app import config
+from helpers import backups as _backups, need_tool
 from app.digikam import dkdb
 from app.faces import facemgr
 from app.photos import tagmanager
@@ -24,11 +23,6 @@ def dk(lib):
 
 def _people_root(con):
     return con.execute("SELECT id FROM Tags WHERE name = 'People' AND pid = 0").fetchone()[0]
-
-
-def _backups():
-    d = config.DATA_DIR / "db-backups"
-    return sorted(d.glob("digikam4-*.db")) if d.exists() else []
 
 
 def test_ordinary_changes_take_no_backup_destructive_ones_do_and_are_capped(dk, client):

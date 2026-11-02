@@ -49,7 +49,7 @@ def test_every_get_route_answers_without_a_server_error(client, lib):
 
 
 @pytest.mark.parametrize("page", ["explore", "photos", "people", "places", "folders", "albums", "tags", "map", "duplicates", "detected",
-                                  "bursts", "events", "history", "analysis", "settings", "maintenance", "consistency", "quality", "trash",
+                                  "events", "history", "analysis", "settings", "maintenance", "consistency", "quality", "trash",
                                   "import", "faces", "favorites"])
 def test_every_page_is_routed(page):
     from pathlib import Path

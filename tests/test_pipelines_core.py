@@ -2,7 +2,7 @@
 on changed: the tags' photo counts or the search index."""
 import sqlite3
 
-from app import core
+from app import runtime as core
 
 
 def _index(path, counts: dict):
@@ -41,24 +41,24 @@ def test_tag_covers_are_skipped_when_nothing_they_depend_on_changed(tmp_path, mo
     monkeypatch.setattr(core, "semantic_enabled", lambda: True)
     monkeypatch.setattr(core, "semantic", Sem())
     monkeypatch.setattr(core.concepts, "representative", lambda ids, text=None: calls.append((tuple(ids), text)) or ids[0])
-    monkeypatch.setattr(core, "_tag_covers", {})
-    monkeypatch.setattr(core, "_tag_covers_from", {"sig": None})
+    monkeypatch.setattr(core, "tag_covers", {})
+    monkeypatch.setattr(core, "tag_covers_from", {"sig": None})
     monkeypatch.setitem(core.state, "source", "v1")
 
-    core._compute_tag_covers("v1")
-    assert core._tag_covers == {1: 10, 2: 12} and len(calls) == 2
-    core._compute_tag_covers("v1")
+    core.compute_tag_covers("v1")
+    assert core.tag_covers == {1: 10, 2: 12} and len(calls) == 2
+    core.compute_tag_covers("v1")
     assert len(calls) == 2, "the same tags with the same counts and the same index: nothing recomputed"
     _index(db, {1: [10, 11, 13], 2: [12]})  # a photo tagged
-    core._compute_tag_covers("v1")
-    assert len(calls) == 4 and core._tag_covers == {1: 10, 2: 12}
+    core.compute_tag_covers("v1")
+    assert len(calls) == 4 and core.tag_covers == {1: 10, 2: 12}
     core.semantic.key = "clip:2"  # more embeddings saved: the covers may be better now
-    core._compute_tag_covers("v1")
+    core.compute_tag_covers("v1")
     assert len(calls) == 6
     _index(db, {1: [10, 11, 13], 2: [12, 14]})
     monkeypatch.setitem(core.state, "source", "v2")  # the library changed under the computation: it stops and records nothing
-    core._compute_tag_covers("v1")
+    core.compute_tag_covers("v1")
     assert len(calls) == 6
     monkeypatch.setitem(core.state, "source", "v1")
-    core._compute_tag_covers("v1")
+    core.compute_tag_covers("v1")
     assert len(calls) == 8, "an interrupted run leaves the next one to do the work"
