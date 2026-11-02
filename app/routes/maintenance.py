@@ -268,7 +268,11 @@ async def api_analysis_run(request: Request):
     """Body: {job: all|embeddings|quality|vision|objects, reset: bool}. Without reset it only
     picks up photos that are new or changed; with reset that analysis starts over."""
     body = await request.json()
-    job, reset = body.get("job", "all"), bool(body.get("reset"))
+    return await run_in_threadpool(start_analysis, body.get("job", "all"), bool(body.get("reset")))
+
+
+def start_analysis(job: str = "all", reset: bool = False) -> dict:
+    """What the Run / Run again buttons do (and the MCP tool run_analysis): queue one analysis, or all of them."""
     if job == "facedetect":  # writes faces into digiKam's database, so only ever on request
         _face_detect_allowed()
         if reset:
@@ -284,10 +288,8 @@ async def api_analysis_run(request: Request):
             facevecs.reset()
         elif job == "ages":
             ages.reset()
-        elif job == "facedetect":
-            facedetect.reset()
         else:
             raise HTTPException(400, "Choose one analysis to run again from scratch")
-    await run_in_threadpool(_start_prewarm)
+    _start_prewarm()
     events.kick()
     return {"ok": True}

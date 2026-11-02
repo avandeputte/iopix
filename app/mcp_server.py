@@ -882,6 +882,37 @@ def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
     return datecheck.wrongfolder(detail=detail, limit=limit)
 
 
+@server.tool(annotations=READ_ONLY)
+def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
+    """Year suggestions for the photos marked "Date unknown" (Explore > Date suggestions), best supported first:
+    {total, items: [{id, year, lo, hi, clues: [{kind: ages|people|look|camera, text, year, sd}], people}], people, sources}.
+    photo_ids limits it to those photos. Read-only: using a suggestion is edit_photos with taken "YYYY" (a year-only date)
+    or the page's Use button. Needs the admin token."""
+    _need_token(token)
+    from app.ai import dateclues
+    from app.ai.semantic import enabled as semantic_enabled
+    from app.faces import ages
+    out = dateclues.suggestions(photo_ids)
+    items = out["items"]
+    return {"total": len(items), "items": items[offset:offset + max(1, min(limit, 500))], "people": out["people"],
+            "sources": {"ages": ages.available(), "look": semantic_enabled()}, "faces": list(ages.coverage())}
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
+    """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
+    captions, looks, faces, ages or facedetect (facedetect writes faces into digiKam's database). Without reset only
+    new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Needs the
+    admin token."""
+    _need_token(token, writes=(job == "facedetect"))
+    from fastapi import HTTPException
+    from app.routes.maintenance import start_analysis
+    try:
+        return start_analysis(job, reset)
+    except HTTPException as e:
+        raise ToolError(e.detail)
+
+
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
 def face_cleanup(token: str, files: bool = False) -> dict:
     """Remove the near-duplicate face regions, exactly as Maintenance > Face quality > Remove duplicates: one region

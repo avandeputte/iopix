@@ -287,14 +287,19 @@ def api_faces_summary():
 
 @router.get("/api/datesuggest", dependencies=[access.editor])
 def api_datesuggest(request: Request, offset: int = 0, limit: int = 60, ids: str = ""):
-    """Suggested years for the photos marked "Date unknown", from the ages of the named people in them:
-    {total, items: [{id, year, lo, hi, people: [{tag, name, age, year}]}], people: [{tag, name, birth, entered, basis, n}],
-    ready, faces: [done, wanted]}. Nothing is written; using a year is /api/edit {date_precision: "year", taken: "YYYY"}."""
+    """Suggested years for the photos marked "Date unknown", from every clue about them (dateclues.py: the ages of the
+    named people, the years those people are photographed in, dated look-alikes, the camera):
+    {total, items: [{id, year, lo, hi, clues: [{kind, text, year, sd}], people: [{tag, name, age, year}]}],
+    people: [{tag, name, birth, entered, basis, n}], ready, sources: {ages, look}, faces: [done, wanted]}.
+    Nothing is written; using a year is /api/edit {date_precision: "year", taken: "YYYY"}."""
+    from app.ai import dateclues
+    from app.ai.semantic import enabled as semantic_enabled
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
-    out = ages.suggestions(want)
+    out = dateclues.suggestions(want)
     items = out["items"]
+    sources = {"ages": ages.available(), "look": semantic_enabled()}
     return jresp(request, {"total": len(items), "offset": offset, "items": items[max(0, offset):max(0, offset) + max(1, min(limit, 500))],
-                           "people": out["people"], "ready": ages.available(), "faces": list(ages.coverage())})
+                           "people": out["people"], "ready": any(sources.values()), "sources": sources, "faces": list(ages.coverage())})
 
 
 @router.post("/api/people/birth", dependencies=[access.signed_in])

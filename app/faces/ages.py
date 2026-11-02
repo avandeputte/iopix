@@ -342,7 +342,7 @@ def suggestions(ids: list = None) -> dict:
         hi = min(this_year, year + half)
         if floor is not None and lo < floor:  # pushed up by a birth year: the range moves up with it, as wide as before
             year, lo, hi = max(year, floor), floor, min(this_year, floor + (hi - lo))
-        items.append({"id": pid, "year": year, "lo": lo, "hi": max(year, hi),
+        items.append({"id": pid, "year": year, "lo": lo, "hi": max(year, hi), "floor": floor,
                       "people": [{"tag": e["tag"], "name": e["name"], "age": e["age"], "year": round(e["year"])} for e in sorted(est, key=lambda e: e["name"])]})
     items.sort(key=lambda i: (i["hi"] - i["lo"], -len(i["people"]), i["id"]))
     people = [{"tag": t, "name": names.get(t, ""), "birth": c["birth"] if c else entered.get(t), "entered": t in entered,

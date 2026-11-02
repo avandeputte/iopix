@@ -888,13 +888,14 @@ export function filterFromLightbox(obj) {
   LB.pushed = false;
   go('photos', photosWith(obj));
 }
-/** A year for a photo whose date is unknown, from the ages of the people in it (ages.py): shown, with the button that uses it. */
+/** A year for a photo whose date is unknown, from the library's clues about it (dateclues.py: ages, the people's dated
+ * years, look-alikes, the camera): shown with its clues and the button that uses it. */
 function suggestRow(d) {
   const g = d.dateSuggestion;
-  const who = g.people.map((p) => `${p.name} (looks about ${p.age})`).join(', ');
+  const why = (g.clues || []).map((c) => c.text).join(' · ');
   return h('div', { class: 'irow' }, icon('spark'), h('div', null,
     h('div', { class: 'a' }, `Looks like about ${g.year}`, h('span', { class: 'muted' }, ` (${g.lo}–${g.hi})`)),
-    h('div', { class: 'b' }, `From how old ${g.people.length === 1 ? 'this person looks' : 'these people look'}: ${who}. `,
+    h('div', { class: 'b' }, `${why}. `,
       S.EDITING ? h('button', { type: 'button', class: 'lnk', title: `Save the date as the year ${g.year} only (undo from the edit log)`, onclick: () => editPhotos([d.id], { date_precision: 'year', taken: String(g.year) }) }, `Use ${g.year}`) : null,
       ' · ', h('a', { class: 'lnk', href: '#/datesuggest' }, 'All suggestions'))));
 }

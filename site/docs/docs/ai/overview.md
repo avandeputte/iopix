@@ -11,7 +11,7 @@ iopix can look at your photos and learn what is in them. **All of it runs on you
 - **Places**: town, region and country from GPS positions.
 - **Faces**: look-alike groups, "looks like" suggestions, and finding unmarked faces.
 - **Photo quality**: sharpness, exposure, focus, an aesthetic score and closed eyes, to find the best shots and suggest rejects.
-- **Date suggestions**: a year for photos whose date is unknown, from how old the people in them look.
+- **Date suggestions**: a year for photos whose date is unknown, from how old the people in them look, when those people are photographed, what the photo looks like and the camera.
 
 Each is optional. Choose them during install, or later from **Maintenance › AI analysis and models**.
 

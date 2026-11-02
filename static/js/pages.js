@@ -593,7 +593,8 @@ export async function showBursts(vp) {
   await load();
 }
 
-/** Explore › Date suggestions: a year for each photo marked "Date unknown", from how old its named people look (ages.py).
+/** Explore › Date suggestions: a year for each photo marked "Date unknown", from every clue the library has (dateclues.py:
+ * how old its named people look, the years those people are photographed in, dated look-alikes and the camera).
  * Nothing is written until a year is used; birth years entered here help people with few dated photos. */
 export async function showDateSuggest() {
   main.replaceChildren(loadingBox('Working out the years…'));
@@ -623,7 +624,7 @@ export async function showDateSuggest() {
       h('div', { class: 'tile', 'data-id': x.id, style: 'width:220px;height:165px', onclick: () => openLightbox({ id: items.map((i) => i.id) }, items.indexOf(x), true) },
         h('img', { src: `/thumb/${x.id}`, loading: 'lazy', alt: '' })),
       h('div', null, h('b', null, `About ${x.year}`), h('span', { class: 'muted' }, ` (${x.lo}–${x.hi})`)),
-      h('div', { class: 'sb' }, x.people.map((p) => `${p.name} looks ${p.age}`).join(' · ')),
+      h('div', { class: 'sb' }, x.clues.map((c) => c.text).join(' · ')),
       S.EDITING ? h('button', { type: 'button', class: 'pillbtn', style: 'margin-top:4px', title: `Save the date as the year ${x.year} only (undo from the edit log)`,
         onclick: async (e) => { if (await use([x], e.currentTarget)) { el.remove(); items.splice(items.indexOf(x), 1); } } }, `Use ${x.year}`) : null);
     return el;
@@ -634,14 +635,15 @@ export async function showDateSuggest() {
     if (!(await confirmDialog(`Use the suggested year for the ${nf.format(close.length)} ${close.length === 1 ? 'photo' : 'photos'} whose range is four years or less? Each is saved as a year-only date, with undo in the edit log.`, { ok: 'Use them' }))) return;
     if (await use(close, e.currentTarget)) showDateSuggest();
   } }, `Use the ${nf.format(close.length)} closest suggestions`) : null;
-  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” under Maintenance › AI analysis and models to get suggestions.')
+  const waiting = !d.ready ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” or a content-search model under Maintenance › AI analysis and models to get suggestions.')
+    : d.sources && !d.sources.ages ? h('div', { class: 'enote' }, 'Install “MiVOLO v2 (age)” under Maintenance › AI analysis and models for suggestions from how old the people look.')
     : d.faces[0] < d.faces[1] ? h('div', { class: 'enote' }, `Estimating ages: ${nf.format(d.faces[0])} of ${nf.format(d.faces[1])} faces so far; more suggestions appear as it goes.`) : null;
   main.replaceChildren(h('div', { class: 'page' }, crumbs([['Explore', '#/explore'], ['Date suggestions', null]]),
     pageTitle('calendar', 'amber', 'Date suggestions ', h('span', { class: 'muted' }, nf.format(items.length))),
-    h('div', { class: 'muted intro' }, 'A year for each photo marked “Date unknown”, from how old the named people in it look. Each person’s photos with a known date teach the age model how that person ages; a birth year you enter helps someone with few dated photos. Ages from faces are rough, so every suggestion is a range. Nothing is saved until you use a year: it is then saved as a year-only date, with undo in the edit log.'),
+    h('div', { class: 'muted intro' }, 'A year for each photo marked “Date unknown”, from every clue the library has about it: how old the named people in it look, the years those people are photographed in (together, when they are), the photos with a date that look most like it, and the camera. Each person’s photos with a known date teach the age model how that person ages; a birth year you enter helps someone with few dated photos. Every suggestion is a range and lists its clues. Nothing is saved until you use a year: it is then saved as a year-only date, with undo in the edit log.'),
     waiting, d.people.length ? [h('h3', null, 'People'), people] : null,
     items.length ? [h('h3', { style: 'display:flex;gap:12px;align-items:center' }, 'Photos', useClose), grid]
-      : h('div', { class: 'empty' }, d.ready ? 'No suggestions: no photo marked “Date unknown” shows a named person with enough to go on.' : 'No suggestions yet.')));
+      : h('div', { class: 'empty' }, d.ready ? 'No suggestions: no photo marked “Date unknown” has a clue to go on.' : 'No suggestions yet.')));
   badgeTiles(grid);
   syncLightbox();
 }

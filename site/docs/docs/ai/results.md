@@ -36,7 +36,14 @@ The **Photo quality** job adds:
 
 ## Date suggestions
 
-For photos marked **Date unknown**, **Explore › Date suggestions** (for editors) proposes a year from how old the named people in them look. Each person's photos with a known date teach the age model how that person ages; photos dated only to the year or month count too, with less weight. A birth year you enter on the page helps someone with few dated photos, and no suggestion is ever earlier than an entered birth year. Every suggestion is a range with the people and ages behind it, and **Use** saves it as a year-only date, with undo in the edit log. The info panel of an undated photo shows its suggestion too.
+For photos marked **Date unknown**, **Explore › Date suggestions** (for editors) proposes a year from every clue the library has about them:
+
+- **how old the named people look**: each person's photos with a known date teach the age model how that person ages; photos dated only to the year or month count too, with less weight. A birth year you enter on the page helps someone with few dated photos, and no suggestion is ever earlier than an entered birth year;
+- **when the same people are photographed**: the years with a date in which the photo's named people appear, together when they are photographed together often enough, else each on their own;
+- **what it looks like**: the dated photos that look most like it, from the content-search model (film grain, colour, clothes and the scene itself place a print or a scan in its years);
+- **the camera**: the years the same camera took dated photos.
+
+Each clue gives a year with an uncertainty; the suggestion is their weighted mean, shown as a range with the clues it came from, and the closest ranges come first. A photo without named people still gets a suggestion from how it looks or the camera. **Use** saves it as a year-only date, with undo in the edit log; nothing is written before that. The info panel of an undated photo shows its suggestion and clues too.
 
 ## Text in photos
 
