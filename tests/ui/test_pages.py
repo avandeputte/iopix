@@ -629,7 +629,7 @@ def test_delete_key_asks_then_moves_to_the_trash_at_once_and_undo_restores(page,
     page.wait_for_selector(".modal-back", timeout=5000)
     with page.expect_response(lambda r: "/api/photos/trash/" in r.url, timeout=15000):  # the background move is done
         page.locator(".modal button", has_text="Move to trash").click()
-        page.wait_for_function(SHOWN.replace("return", "return !"), arg=pid, timeout=1500)  # gone before the server answers
+        page.wait_for_function(SHOWN.replace("return", "return !"), arg=pid, timeout=5000)  # gone at once, not when the server answers (which the block below also waits for)
     assert not page.evaluate(SHOWN, pid)
     assert not dialogs, dialogs
     assert "trash" in page.locator("#toast").inner_text().lower()

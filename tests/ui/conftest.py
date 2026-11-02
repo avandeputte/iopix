@@ -165,8 +165,8 @@ def _viewer_ready(page):
     """The viewer shows its picture (or video) and has the photo's details: /api/photo/{id} has arrived, which the title
     line shows by carrying the date. The mouse then rests on the toolbar, which hides 2.8 s after the last mouse move: a
     slow load must not hide it before the test clicks."""
-    page.wait_for_selector(LIGHTBOX_MEDIA, timeout=15000)
-    page.wait_for_function("!!document.querySelector('#lightbox .lb-top .ttl small')", timeout=15000)
+    page.wait_for_selector(LIGHTBOX_MEDIA, timeout=30000)  # 30 s: in a full run the server is still indexing what earlier tests changed
+    page.wait_for_function("!!document.querySelector('#lightbox .lb-top .ttl small')", timeout=30000)
     page.mouse.move(420, 40)
 
 
