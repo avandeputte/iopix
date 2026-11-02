@@ -270,6 +270,10 @@ def restore(entry_id: int, kind: str) -> dict:
         b = Path(e["file_copy"]) if e.get("file_copy") and os.path.isfile(e["file_copy"]) else edits.file_backup_path(photo["path"])
         if not b.exists():
             raise FileNotFoundError("The original of this file is no longer in file-backups")
+        with vdb.reader() as vcon:  # a rotate or crop made since changed the size, orientation and face regions in digiKam too:
+            later = vcon.execute("SELECT count(*) FROM photo_history WHERE photo_id = ? AND action = 'lossless' AND id > ?", (pid, entry_id)).fetchone()[0]
+        if later:  # putting the old pixels back under those rows would leave them wrong: those edits are undone first, each restoring its rows
+            raise ValueError(f"Undo the {later} later rotate/crop {'edit' if later == 1 else 'edits'} of this photo first (each puts its size and face regions back), then restore the original")
         from app.photos import lossless
         from app.digikam import dbsync, dkdb
         db_path = dkdb.sqlite_path()

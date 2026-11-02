@@ -536,6 +536,11 @@ def stamp_files(items: list):
             con.close()
         if rows:  # the one write: through the same guarded transaction as every other (schema check, integrity, digiKam not started meanwhile)
             from app.digikam import dbsync
+            if dbsync.digikam_running() and not dbsync._confirmed_closed():
+                # the sidecar workers reach here in the background: with digiKam open its own rescan reads the files back
+                import logging
+                logging.getLogger("app.digikam.dkdb").info("file dates left to digiKam's rescan (digiKam is running)")
+                return 0
             with dbsync.write_transaction(sqlite_path(), check_running=False) as wcon:
                 wcon.executemany("UPDATE Images SET modificationDate = ? WHERE id = ?", rows)
     except Exception as e:  # digiKam then rescans these files once; nothing is lost
