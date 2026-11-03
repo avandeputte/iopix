@@ -152,6 +152,7 @@
  "POST /api/users": "admin",
  "POST /api/users/{user_id}": "admin",
  "POST /api/viewerdb/switch": "admin",
+ "POST /api/viewerdb/retry": "admin",
  "POST /api/viewerdb/test": "admin",
  "POST /api/zip": "public",
  "POST /api/zip/plan": "public"

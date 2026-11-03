@@ -19,22 +19,10 @@ from app.data import vdb
 router = APIRouter()
 
 
-def _without_token(db_file):
-    """The MCP admin token is left out of a backup copy: it can be generated again and need not travel with the data."""
-    con = sqlite3.connect(str(db_file))
-    try:
-        con.execute("DELETE FROM app_settings WHERE key = 'mcp_admin_token'")
-        con.commit()
-    except sqlite3.Error:
-        pass
-    finally:
-        con.close()
-
-
 @router.get("/api/backup/{which}", dependencies=[access.admin])
 def api_backup(which: str, request: Request):
     """A download of digiKam's database (a consistent copy of the SQLite file, or a fresh mysqldump)
-    or of the viewer's own state database. Admins only; the copy is also kept in db-backups."""
+    or of the viewer's own data (a mysqldump plus the content-search index). Admins only; the copy is also kept in db-backups."""
     if request.headers.get("sec-fetch-site") == "cross-site":  # a link on another site must not start a multi-hundred-MB dump
         raise HTTPException(403, "Open this from the viewer itself")
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -58,14 +46,14 @@ def api_backup(which: str, request: Request):
         tmp.mkdir(exist_ok=True)
         try:
             with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
-                vdb.snapshot_sqlite(tmp / "viewer.db")  # a SQLite copy even when the viewer runs on MySQL
-                _without_token(tmp / "viewer.db")
-                z.write(tmp / "viewer.db", "viewer.db")
+                vdb.dump(tmp / "viewer.sql")  # mysqldump of the viewer's database, the MCP admin token left out
+                z.write(tmp / "viewer.sql", "viewer.sql")
                 for f in sorted(config.DATA_DIR.glob("embeddings*.npz")) + sorted(config.DATA_DIR.glob("embeddings*.npz.complete")):
                     z.write(f, f.name)
-                z.writestr("README.txt", "iopix backup. Restore by stopping the viewer and copying these files into its data folder "
-                           "(viewer.db: users, albums, favorites, settings, pending edits, and the analysis results: sharpness, text, objects, "
-                           "captions, consistency report; embeddings*.npz: the content-search index). digiKam's own database is a separate download.\n")
+                z.writestr("README.txt", "iopix backup. Restore by stopping the viewer, loading viewer.sql into its MariaDB database "
+                           "(mariadb <database> < viewer.sql: users, albums, favorites, settings, pending edits, and the analysis results: sharpness, "
+                           "text, objects, captions, consistency report) and copying embeddings*.npz (the content-search index) into its data folder. "
+                           "digiKam's own database is a separate download.\n")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         dkdb.prune("viewer-backup-*.zip")

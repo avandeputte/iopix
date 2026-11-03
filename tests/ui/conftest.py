@@ -51,8 +51,10 @@ def server(lib):
     its own copy of the library (the `lib` above). Its stderr goes to a file (a pipe nobody reads would stall
     the server once full), so a server that dies can say why."""
     port = _free_port()
+    import mariadb  # tests/mariadb.py: the browser tests' server gets a database of its own on the test MariaDB
+    UI_DB.update(mariadb.fresh_database(mariadb.UI_DB))
     env = dict(os.environ, DATA_DIR=str(Path(os.environ["DATA_DIR"]).parent / "data-ui"),
-               DIGIKAM_DB_DIR=str(Path(lib["db"]).parent), PHOTOS_ROOT=str(lib["root"]))
+               DIGIKAM_DB_DIR=str(Path(lib["db"]).parent), PHOTOS_ROOT=str(lib["root"]), **mariadb.env_for(UI_DB))
     log = tempfile.NamedTemporaryFile(prefix="iopix-ui-server-", suffix=".log", delete=False)
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
                             cwd=str(APP), env=env, stdout=subprocess.DEVNULL, stderr=log)
@@ -93,8 +95,8 @@ def browser():
 
 @pytest.fixture(autouse=True)
 def _ui_no_users(server):
-    """The browser tests' own server keeps its users in its own viewer.db: start each test in open mode."""
-    clear_accounts(ui_viewer_db())
+    """The browser tests' own server keeps its users in a database of its own: start each test in open mode."""
+    clear_accounts(UI_DB)
     yield
 
 
@@ -114,9 +116,14 @@ def page(browser, server):
     assert not errors, "uncaught JS errors: " + "; ".join(errors)[:500]
 
 
-def ui_viewer_db() -> Path:
-    """The browser tests' server's own viewer database (users, settings, dismissed suggestions)."""
-    return Path(os.environ["DATA_DIR"]).parent / "data-ui" / "viewer.db"
+UI_DB: dict = {}  # the browser tests' server's own viewer database (vdb-style settings), filled by the server fixture
+
+
+def ui_db():
+    """A connection (autocommit) to the browser tests' server's own viewer database, for a test that reads or seeds
+    a row behind the server's back (dismissed suggestions, the digiKam-closed stamp)."""
+    import pymysql
+    return pymysql.connect(host=UI_DB["host"], port=int(UI_DB["port"]), database=UI_DB["database"], user=UI_DB["user"], password=UI_DB["password"], autocommit=True, connect_timeout=5)
 
 
 # --- talking to the server from the test -------------------------------------------------------------

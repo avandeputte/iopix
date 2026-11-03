@@ -1,7 +1,6 @@
 """The pages: the photo grid, Explore, People, Folders and Albums, the quality and suggestion pages, the map, the import page,
 Settings and Maintenance."""
 import json
-import sqlite3
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -13,7 +12,7 @@ from helpers import need_tool
 need_tool("playwright", module_level=True)
 from playwright.sync_api import TimeoutError as PWTimeout, expect  # noqa: E402
 
-from ui.conftest import _eventually, _get, _open_photo, _post, _viewer_ready, _wait_flags, ui_viewer_db  # noqa: E402
+from ui.conftest import _eventually, _get, _open_photo, _post, _viewer_ready, _wait_flags, ui_db  # noqa: E402
 
 
 def test_grid_renders_thumbnails(page, server, lib):
@@ -80,7 +79,7 @@ def test_database_row_tests_a_connection(page, server, lib):
 def test_container_mode_writes_without_a_confirmation(page, server):
     """DIGIKAM_CHECK=ask/none (the browser tests' server runs that way): the viewer cannot see digiKam,
     so a database write goes through without asking whether digiKam is closed."""
-    con = sqlite3.connect(ui_viewer_db()); con.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('digikam_closed_until', '0')"); con.commit(); con.close()
+    con = ui_db(); con.cursor().execute("REPLACE INTO app_settings (`key`, value) VALUES ('digikam_closed_until', '0')"); con.close()
     assert _get(server, "/api/status")["digikamCheck"] == "none"
     dialogs = []
     def on_dialog(d):
@@ -1058,9 +1057,11 @@ def test_suggestion_cards_tag_all_and_not_them(page, server, lib):
 
 def _dismissed(kind):
     """{(photo id, tag id)} in the browser tests' server's dismissal store (app.data.dismissed; read, never written here)."""
-    con = sqlite3.connect(f"file:{ui_viewer_db()}?mode=ro", uri=True)
+    con = ui_db()
     try:
-        return {(r[0], r[1]) for r in con.execute("SELECT photo_id, tag_id FROM suggestion_dismissed WHERE kind = ?", (kind,))}
+        with con.cursor() as cur:
+            cur.execute("SELECT photo_id, tag_id FROM suggestion_dismissed WHERE kind = %s", (kind,))
+            return {(r[0], r[1]) for r in cur.fetchall()}
     finally:
         con.close()
 

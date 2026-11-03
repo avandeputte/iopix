@@ -15,6 +15,8 @@ digiKam can keep its database on a MariaDB or MySQL server, which suits a librar
 
 The same can be set in **Settings › digiKam and server**, which tests the connection before saving.
 
+The same server can also hold [iopix's own database](iopix-database.md): create a second database on it (for example `iopix`) and point the `VIEWER_DB_*` variables at it. Do not give iopix digiKam's database for its own data.
+
 !!! tip "Server on the Docker host"
     From a container, use `DIGIKAM_DB_HOST: host.docker.internal` to reach a MariaDB server on the same machine.
 

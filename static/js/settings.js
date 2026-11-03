@@ -364,35 +364,7 @@ function serverTab(c) {
       draw();
       return row('Album roots', `Where each album root digiKam knows is mounted here. Leave a field empty to use the default (PHOTOS_ROOT for a single-root library, else the path digiKam recorded); enter a path when the folder is mounted elsewhere, e.g. /photos in a container. Changing it rebuilds the index.`, body);
     })() : null,
-    S.IS_ADMIN ? (() => {  // the viewer's own database: SQLite file (default) or MySQL/MariaDB, with a one-time copy of the data
-      const body = h('div', { class: 'muted note' }, 'Loading…');
-      const wrap = row(`${S.APP_NAME} database`, `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits and the AI results. SQLite in the data folder by default, or a MySQL/MariaDB database of its own (not digiKam’s). Switching copies every row across and restarts ${S.APP_NAME}; the configuration is kept in data/viewer-db.json, outside the database.`, body);
-      (async () => {
-        let d; try { d = await api('/api/viewerdb'); } catch (e) { fill(body, e.message); return; }
-        const inp = (k, ph, type = 'text', w = 160) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : (d[k] ?? ''), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
-        const type = h('select', null, h('option', { value: 'sqlite', selected: d.type !== 'mysql' }, 'SQLite file (viewer.db in the data folder)'), h('option', { value: 'mysql', selected: d.type === 'mysql' }, 'MySQL / MariaDB'));
-        const f = { host: inp('host', 'host'), port: inp('port', 'port', 'text', 70), database: inp('database', 'database'), user: inp('user', 'user'), password: inp('password', d.password_set ? 'password (stored; leave empty to keep)' : 'password', 'password', 220) };
-        const my = h('div', { class: 'toolbar tight mt6',}, f.host, f.port, f.database, f.user, f.password);
-        const copy = h('input', { type: 'checkbox', checked: true }), drop = h('input', { type: 'checkbox' });  // dropping is opt-in: the target may be a database in use
-        const opts = h('div', { style: 'display:grid;gap:4px;margin-top:8px;font-size:13px' },
-          h('label', { class: 'chk',}, copy, 'Copy all the data from the current database to the new one'),
-          h('label', { class: 'chk',}, drop, `Drop and recreate ${S.APP_NAME}’s tables at the target first (a clean slate; anything already there is lost)`));
-        const show = () => { my.hidden = type.value !== 'mysql'; }; type.onchange = show; show();
-        const payload = () => ({ type: type.value, host: f.host.value, port: f.port.value, database: f.database.value, user: f.user.value, password: f.password.value });
-        const result = h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' });
-        fill(body, h('div', null, `Currently: ${d.type === 'mysql' ? `MySQL ${d.user}@${d.host}:${d.port}/${d.database}` : `SQLite file ${d.sqlite_file}`}`, d.error ? h('span', { class: 'warn' }, ` · the configured MySQL database could not be used (${d.error}); the SQLite file is in use meanwhile`) : null),
-          h('div', { class: 'mt8',}, type), my, opts,
-          h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
-            btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/viewerdb/test', payload()); const t = Object.entries(r.tables); fill(result, `OK: ${r.version}. ${t.length ? `${S.APP_NAME} tables already there: ` + t.map(([k, n]) => `${k} (${nf.format(n)})`).join(', ') : 'No viewer tables there yet.'}`); } catch (e) { fill(result, e.message); } }),
-            btn('Switch', async () => {
-              const p = payload();
-              if (!await confirmDialog(`Switch ${S.APP_NAME} to ${p.type === 'mysql' ? `MySQL ${p.user}@${p.host}:${p.port}/${p.database}` : 'the SQLite file'}?` + (copy.checked ? '\n\nEvery row is copied there first' + (drop.checked ? `, after dropping and recreating ${S.APP_NAME}’s tables at the target.` : ' (existing rows with the same ids are replaced).') : `\n\nThe data is NOT copied; ${S.APP_NAME} starts empty there unless the tables already hold data.`) + `\n\n${S.APP_NAME} restarts when the copy is done; the page reloads by itself.`)) return;
-              fill(result, 'Copying… this can take a minute on a large library.');
-              try { const r = await post('/api/viewerdb/switch', { ...p, copy: copy.checked, drop: drop.checked }); fill(result, `Switched to ${r.database}: ` + Object.entries(r.copied).map(([k, n]) => `${k} ${nf.format(n)}`).join(', ') + '. Restarting…'); setTimeout(() => location.reload(), 6000); } catch (e) { fill(result, e.message); }
-            }, true)), result);
-      })();
-      return wrap;
-    })() : null,
+    S.IS_ADMIN ? row(`${S.APP_NAME} database`, `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits, the AI results and its copy of the library: a MariaDB or MySQL database of its own (not digiKam’s). Moving to another one copies every row across and restarts ${S.APP_NAME}; the connection is kept in data/viewer-db.json, outside the database.`, viewerDbPanel()) : null,
     S.IS_ADMIN ? row('Check for updates daily', m.updateCheckLocked ? `Switched off by UPDATE_CHECK=0 in the environment: ${S.APP_NAME} never contacts GitHub on its own.`
       : `Once a day ${S.APP_NAME} asks GitHub whether a newer version of ${S.APP_NAME} exists and, if so, shows admins a banner. Only the public list of changes is fetched; nothing about this install or its photos is sent. Off: it never contacts GitHub on its own (Maintenance › ${S.APP_NAME} can still check on request).`,
       switchField('update_check', !!m.updateCheck, { label: 'Check daily', disabled: !!m.updateCheckLocked, on: `${S.APP_NAME} will check for updates once a day.`, off: `${S.APP_NAME} will not contact GitHub on its own.`, after: () => pollSoon(2000) })) : null,
@@ -620,4 +592,42 @@ async function settingsPage(view) {
     viewerTab(c),
     ])));
   settingsTabs(main.querySelector('.spage'), view);
+}
+
+/** The viewer's own database (MariaDB/MySQL): where it is, whether it answers, and the fields to test and move to
+ *  another one. The same panel serves Settings and the set-up page the app shows while it has no database at all
+ *  (main.js), where `setup` makes the button say so and the page reload once the viewer restarts. */
+export function viewerDbPanel({ setup = false } = {}) {
+  const body = h('div', { class: 'muted note' }, 'Loading…');
+  const btn = (label, fn, primary) => h('button', { class: 'pillbtn' + (primary ? ' on' : ''), onclick: fn }, label);
+  (async () => {
+    let d; try { d = await api('/api/viewerdb'); } catch (e) { fill(body, e.message); return; }
+    const inp = (k, ph, type = 'text', w = 160) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : (d[k] ?? ''), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
+    const f = { host: inp('host', 'host'), port: inp('port', 'port', 'text', 70), database: inp('database', 'database'), user: inp('user', 'user'),
+      password: inp('password', d.password_set ? 'password (stored; leave empty to keep)' : 'password', 'password') };
+    const fields = h('div', { class: 'toolbar tight mt6' }, f.host, f.port, f.database, f.user, f.password);
+    const hasData = d.configured && !d.error;
+    const copy = h('input', { type: 'checkbox', checked: true }), drop = h('input', { type: 'checkbox' });  // dropping is opt-in: the target may be a database in use
+    const copyLabel = hasData ? 'Copy all the data from the current database to the new one' : d.legacy_sqlite ? `Import everything from the ${S.APP_NAME} file of before (${d.legacy_sqlite}); the file is renamed afterwards` : null;
+    const opts = h('div', { style: 'display:grid;gap:4px;margin-top:8px;font-size:13px' },
+      copyLabel ? h('label', { class: 'chk' }, copy, copyLabel) : null,
+      h('label', { class: 'chk' }, drop, `Drop and recreate ${S.APP_NAME}’s tables at the target first (a clean slate; anything already there is lost)`));
+    const payload = () => ({ host: f.host.value, port: f.port.value, database: f.database.value, user: f.user.value, password: f.password.value });
+    const result = h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' });
+    const restartThen = (msg) => { fill(result, msg + ' Restarting…'); setTimeout(() => { if (setup) location.reload(); else pollSoon(2000); }, 4000); };
+    const current = !d.configured ? `No database yet: ${S.APP_NAME} needs a MariaDB or MySQL database of its own. Create an empty one with a user that owns it, enter its details and press Use this database.`
+      : `${d.error ? 'Configured' : 'Currently'}: MySQL ${d.user}@${d.host}:${d.port}/${d.database}`;
+    fill(body, h('div', null, current, d.error && d.configured ? h('span', { class: 'warn' }, ` · not answering: ${d.error}`) : null),
+      fields, opts,
+      h('div', { class: 'btnrow', style: 'margin-top:8px' },
+        btn('Test connection', async () => { fill(result, 'Testing…'); try { const r = await post('/api/viewerdb/test', payload()); const t = Object.entries(r.tables); fill(result, `OK: ${r.version}. ${t.length ? `${S.APP_NAME} tables already there: ` + t.map(([k, n]) => `${k} ${nf.format(n)}`).join(', ') : 'An empty database.'}`); } catch (e) { fill(result, e.message); } }),
+        d.configured && d.error ? btn('Retry the configured database', async () => { fill(result, 'Trying…'); try { await post('/api/viewerdb/retry', {}); restartThen('It answers now.'); } catch (e) { fill(result, e.message); } }) : null,
+        btn(d.configured ? 'Switch' : 'Use this database', async () => {
+          const p = payload();
+          if (!await confirmDialog(`${d.configured ? 'Switch' : 'Set up'} ${S.APP_NAME} on MySQL ${p.user}@${p.host}:${p.port}/${p.database}?` + (copyLabel && copy.checked ? `\n\nEvery row is copied there first${drop.checked ? ', after dropping and recreating the tables there' : ''}.` : drop.checked ? '\n\nThe tables there are dropped and created again.' : '') + `\n\n${S.APP_NAME} restarts on the new database.`, { ok: d.configured ? 'Switch' : 'Use it' })) return;
+          fill(result, 'Copying… this can take a minute on a large library.');
+          try { const r = await post('/api/viewerdb/switch', { ...p, copy: !!copyLabel && copy.checked, drop: drop.checked }); restartThen(`Set up on ${r.database}: ` + Object.entries(r.copied).map(([k, n]) => `${k} ${nf.format(n)}`).join(', ') + '.'); } catch (e) { fill(result, e.message); }
+        }, true)), result);
+  })();
+  return body;
 }

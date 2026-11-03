@@ -7,8 +7,11 @@
 #
 # Flags (each one skips its question): --photos DIR  --sqlite DIR | --mysql HOST:PORT/DB:USER:PASS | --no-digikam
 #   (--no-digikam: you don't use digiKam; iopix keeps the library itself and finds the photos in the folder)
-#   --iopix-db sqlite | HOST:PORT/DB:USER:PASS   iopix's own database (favorites, albums, AI results...): a SQLite
-#   file in the data folder (the default) or MySQL/MariaDB; the database is created when the user may
+#   --iopix-db local | HOST:PORT/DB:USER:PASS   iopix's own database (settings, accounts, favorites, albums, AI
+#   results...) is always on MySQL/MariaDB: "local" installs mariadb-server on this machine with apt (Debian,
+#   Ubuntu, Proxmox; run as root) and creates the database `iopix` and a user with a random password; otherwise
+#   the details of an existing server (digiKam's, for instance); the database is created when the user may.
+#   Written as VIEWER_DB_* to iopix.env; a later run keeps them. Without any, the viewer's set-up page asks.
 #   --features search,places,objects,ocr,captions  --search-model clip|siglip2  --port N
 #   --admin NAME:PASSWORD | --no-admin   --service | --no-service   --data DIR   --python PATH
 #   --system-deps | --no-system-deps   install (or skip) python3, exiftool, ffmpeg and the MariaDB client with brew/apt/dnf/zypper/pacman
@@ -30,7 +33,7 @@ while [ $# -gt 0 ]; do
     --features) FEATURES="$2"; shift 2;; --search-model) SEARCH_MODEL="$2"; shift 2;; --port) PORT="$2"; shift 2;;
     --admin) ADMIN="$2"; shift 2;; --no-admin) NO_ADMIN=1; shift;; --service) SERVICE=1; shift;; --no-service) SERVICE=0; shift;;
     --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
@@ -38,7 +41,8 @@ done
 [ -n "$ADMIN" ] || ADMIN="${IOPIX_ADMIN:-}"
 [ -n "$MYSQL" ] || MYSQL="${IOPIX_MYSQL:-}"
 [ -n "$VIEWERDB" ] || VIEWERDB="${IOPIX_VIEWER_DB:-}"
-if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != sqlite ] && [ -n "${IOPIX_VIEWER_DB_PASSWORD:-}" ]; then
+[ "$VIEWERDB" != sqlite ] || die "iopix's own database is on MySQL/MariaDB only since v1.113 (no SQLite file any more): --iopix-db local installs MariaDB here, or give HOST:PORT/DB:USER:PASS"
+if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != local ] && [ -n "${IOPIX_VIEWER_DB_PASSWORD:-}" ]; then
   case "${VIEWERDB#*/}" in *:*:*) ;; *) VIEWERDB="$VIEWERDB:$IOPIX_VIEWER_DB_PASSWORD";; esac
 fi
 if [ -n "$MYSQL" ] && [ -n "${IOPIX_MYSQL_PASSWORD:-}" ]; then
@@ -139,14 +143,58 @@ if [ "$NODK" = 0 ] && [ -z "$MYSQL" ] && [ -z "$SQLITE" ]; then
 fi
 [ -z "$SQLITE" ] || [ -f "$SQLITE/digikam4.db" ] || die "digikam4.db not found in $SQLITE"
 ask DATA "Folder for the viewer's own data (index, thumbnails, models, backups)" "${DATA:-$APP/data}"
-# iopix's own database: favorites, albums, users, AI results. Asked once; a later run keeps what data/viewer-db.json says
-if [ -z "$VIEWERDB" ] && [ ! -f "$DATA/viewer-db.json" ]; then
-  if yesno "Keep iopix's own database (favorites, albums, users, AI results) on MySQL/MariaDB too (no: a SQLite file in the data folder)?" n; then
-    if [ -n "$MYSQL" ]; then dhp=${MYSQL%%/*}; drest=${MYSQL#*/}; drest=${drest#*:}; dh=${dhp%%:*}; dp=${dhp##*:}; du=${drest%%:*}; else dh=127.0.0.1; dp=3306; du=iopix; fi
-    ask VH "MySQL host for iopix's database" "$dh"; ask VP "port" "$dp"; ask VD "database (created if the user may)" "iopix"; ask VU "user" "$du"; secret VW "password"
-    VIEWERDB="$VH:$VP/$VD:$VU:$VW"
+# iopix's own database (settings, accounts, favorites, albums, AI results, and the library without digiKam) lives on
+# MySQL/MariaDB. Asked once: a later run keeps the VIEWER_DB_* lines of iopix.env (or data/viewer-db.json, written by
+# the Settings page or by an upgraded install).
+ENVF="$APP/iopix.env"
+OLDVDB="$(grep '^VIEWER_DB_' "$ENVF" 2>/dev/null || true)"
+CANLOCAL=0; [ "$OS" != Darwin ] && [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1 && CANLOCAL=1  # Debian, Ubuntu, Proxmox as root
+if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ] && [ ! -f "$DATA/viewer-db.json" ]; then
+  if [ "$CANLOCAL" = 1 ]; then
+    ask VH "iopix's own database: 'local' installs MariaDB on this machine, or the host of an existing MySQL/MariaDB server" "local"
+    [ "$VH" != local ] || VIEWERDB=local
+  elif [ "$YES" = 1 ] || [ -z "$TTY" ]; then
+    echo "note: no --iopix-db given: iopix's own database is not configured yet; the viewer's set-up page asks for a MySQL/MariaDB server"
   else
-    VIEWERDB=sqlite
+    echo "iopix keeps its own database (settings, accounts, favorites, albums, AI results) on MySQL/MariaDB; the database is created if the user may."
+    if [ -n "$MYSQL" ]; then dhp=${MYSQL%%/*}; dh=${dhp%%:*}; else dh=127.0.0.1; fi
+    ask VH "MySQL/MariaDB host for iopix's database" "$dh"
+  fi
+  if [ -z "$VIEWERDB" ] && [ -n "${VH:-}" ]; then
+    if [ -n "$MYSQL" ]; then dhp=${MYSQL%%/*}; drest=${MYSQL#*/}; drest=${drest#*:}; dp=${dhp##*:}; du=${drest%%:*}; else dp=3306; du=iopix; fi
+    ask VP "port" "$dp"; ask VD "database (created if the user may)" "iopix"; ask VU "user" "$du"; secret VW "password"
+    VIEWERDB="$VH:$VP/$VD:$VU:$VW"
+  fi
+elif [ -z "$VIEWERDB" ]; then
+  echo "iopix's own database: kept as configured ($([ -n "$OLDVDB" ] && echo "$ENVF" || echo "$DATA/viewer-db.json"); Settings › Database switches)"
+fi
+if [ "$VIEWERDB" = local ]; then
+  [ "$CANLOCAL" = 1 ] || die "--iopix-db local needs apt (Debian, Ubuntu, Proxmox) and root; give --iopix-db HOST:PORT/DB:USER:PASS of a MySQL/MariaDB server instead"
+  say "MariaDB for iopix's database"
+  if ! command -v mariadbd >/dev/null 2>&1 && [ ! -x /usr/sbin/mariadbd ]; then
+    echo "apt-get install mariadb-server"
+    env DEBIAN_FRONTEND=noninteractive sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends mariadb-server >/dev/null' || die "could not install mariadb-server"
+  fi
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then systemctl enable --now mariadb >/dev/null 2>&1 || true; else service mariadb start >/dev/null 2>&1 || true; fi
+  VW="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)"  # letters and digits only: safe in SQL, the env file and the DSN
+  # root connects over the socket without a password (unix_socket authentication, the Debian default); the SQL goes
+  # in on standard input, so the new password is not in the process list. A re-run sets a fresh password.
+  mariadb <<SQL || die "could not create the database and user on the local MariaDB (is it running? systemctl status mariadb)"
+CREATE DATABASE IF NOT EXISTS \`iopix\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'iopix'@'localhost' IDENTIFIED BY '$VW'; ALTER USER 'iopix'@'localhost' IDENTIFIED BY '$VW';
+CREATE USER IF NOT EXISTS 'iopix'@'127.0.0.1' IDENTIFIED BY '$VW'; ALTER USER 'iopix'@'127.0.0.1' IDENTIFIED BY '$VW';
+GRANT ALL PRIVILEGES ON \`iopix\`.* TO 'iopix'@'localhost'; GRANT ALL PRIVILEGES ON \`iopix\`.* TO 'iopix'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+  echo "  created the database iopix and the user iopix (random password) on this machine's MariaDB"
+  VIEWERDB="127.0.0.1:3306/iopix:iopix:$VW"
+fi
+if [ -n "$VIEWERDB" ]; then  # a quick test with the command-line client, when there is one (the venv's pymysql tests again later and creates the database)
+  vhp=${VIEWERDB%%/*}; vrest=${VIEWERDB#*/}; vrest=${vrest#*:}; VU=${vrest%%:*}; VW=${vrest#*:}; VH=${vhp%%:*}; VP=${vhp##*:}
+  MCLI="$(command -v mariadb 2>/dev/null || command -v mysql 2>/dev/null || { [ -x /opt/homebrew/opt/mysql-client/bin/mysql ] && echo /opt/homebrew/opt/mysql-client/bin/mysql; } || true)"
+  if [ -n "$MCLI" ]; then
+    MYSQL_PWD="$VW" "$MCLI" --protocol=tcp -h "$VH" -P "$VP" -u "$VU" -e "SELECT 1" >/dev/null 2>&1 || die "could not connect to MySQL/MariaDB at $VH:$VP as $VU (checked with $MCLI); check the host, port, user and password"
+    echo "  MySQL/MariaDB at $VH:$VP answers as $VU"
   fi
 fi
 ask PORT "Port" "${PORT:-8600}"
@@ -192,7 +240,6 @@ G="${G#,}"; echo "installing the packages (pyproject.toml${G:+, groups: $G})"; i
 has captions && { echo "installing PyTorch and transformers (large)"; pipi --extra-index-url https://download.pytorch.org/whl/cpu -e ".[captions]"; }
 
 say "Settings"
-ENVF="$APP/iopix.env"
 umask 077  # the settings file holds the database password: private from the first byte
 {
   echo "# iopix settings, written by setup.sh (variable names as in the README). Edit and restart the service."
@@ -207,6 +254,15 @@ umask 077  # the settings file holds the database password: private from the fir
     echo "DIGIKAM_DB_DIR=$SQLITE"
   fi
   echo "DATA_DIR=$DATA"
+  # iopix's own database (MySQL/MariaDB); these win over $DATA/viewer-db.json, which the Settings page writes
+  if [ -n "$VIEWERDB" ]; then
+    vhp=${VIEWERDB%%/*}; vrest=${VIEWERDB#*/}; vdb=${vrest%%:*}; vrest=${vrest#*:}; vus=${vrest%%:*}; vpw=${vrest#*:}
+    echo "VIEWER_DB_TYPE=mysql"; echo "VIEWER_DB_HOST=${vhp%%:*}"; echo "VIEWER_DB_PORT=${vhp##*:}"; echo "VIEWER_DB_DATABASE=$vdb"; echo "VIEWER_DB_USER=$vus"; echo "VIEWER_DB_PASSWORD=$vpw"
+  elif [ -n "$OLDVDB" ]; then
+    printf '%s\n' "$OLDVDB"
+  else
+    echo "# VIEWER_DB_TYPE=mysql VIEWER_DB_HOST= VIEWER_DB_PORT=3306 VIEWER_DB_DATABASE= VIEWER_DB_USER= VIEWER_DB_PASSWORD=: iopix's own database, or $DATA/viewer-db.json (Settings)"
+  fi
   echo "HF_HUB_OFFLINE=1"
   echo "CAPTIONS=$(has captions && echo 1 || echo 0)"
   M=""; has search && M="$M,$SEARCH_MODEL"; has objects && M="$M,yolox"; has places && M="$M,geonames"; has captions && M="$M,blip"
@@ -222,35 +278,32 @@ if [ -n "$MYSQL" ]; then
   "$VPY" -c "from app.digikam import dkdb; r = dkdb.test_connection(); print(f\"  OK: {r['images']} photos, {r['tags']} tags, DBVersion {r['dbVersion']}, root {r['roots']}\")" || die "could not connect to the database with those settings"
 fi
 
-if [ -n "$VIEWERDB" ] && [ "$VIEWERDB" != sqlite ]; then
+VDB_OK=0  # whether iopix's own database answers: the search-model setting and the admin account below need it
+if [ -n "${VIEWER_DB_HOST:-}" ] || [ -f "$DATA/viewer-db.json" ]; then
   echo "iopix's own database on MySQL/MariaDB: testing, creating it if needed"
-  IOPIX_VIEWER_DB_DSN="$VIEWERDB" "$VPY" - <<'PYEOF' || die "could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or switch later in Settings"
-import os, sys
+  "$VPY" - <<'PYEOF' && VDB_OK=1 || echo "  could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or fix it later on the viewer's set-up page"
+import sys
 from app.data import vdb
-hp, rest = os.environ["IOPIX_VIEWER_DB_DSN"].split("/", 1)  # from the environment: the password is not in the process list
-db, user, pw = rest.split(":", 2)
-host, _, port = hp.rpartition(":") if ":" in hp else (hp, "", "3306")
-c = {"type": "mysql", "host": host, "port": int(port or 3306), "database": db, "user": user, "password": pw}
+c = vdb.settings()  # VIEWER_DB_* from iopix.env (exported above; the password is not in the process list), else viewer-db.json
 try:
     vdb.test_connection(c)
 except Exception as e:
     if "1049" not in str(e) and "Unknown database" not in str(e):
         raise SystemExit(f"  {e}")
     import pymysql  # the database is not there yet: create it, if this user may
-    con = pymysql.connect(host=c["host"], port=c["port"], user=user, password=pw, connect_timeout=8)
+    con = pymysql.connect(host=c["host"], port=c["port"], user=c["user"], password=c["password"], connect_timeout=8)
     try:
-        con.cursor().execute(f"CREATE DATABASE IF NOT EXISTS `{db}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        con.cursor().execute(f"CREATE DATABASE IF NOT EXISTS `{c['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
     except Exception as e2:
-        raise SystemExit(f"  the database {db} does not exist and {user} may not create it ({e2}); create it, then run setup.sh again")
+        raise SystemExit(f"  the database {c['database']} does not exist and {c['user']} may not create it ({e2}); create it, then run setup.sh again")
     finally:
         con.close()
-    print(f"  created the database {db}")
+    print(f"  created the database {c['database']}")
 r = vdb.test_connection(c)
-vdb.save_settings(c)
-print(f"  OK: {r['version']}; iopix keeps its data in {db} on {host} ({len(r['tables'])} of its tables already there)")
+print(f"  OK: {r['version']}; iopix keeps its data in {c['database']} on {c['host']}:{c['port']} ({len(r['tables'])} of its tables already there)")
 PYEOF
-elif [ "$VIEWERDB" = sqlite ] && [ -f "$DATA/viewer-db.json" ]; then
-  echo "note: $DATA/viewer-db.json already points iopix at a database; left as it is (Settings › Database switches)"
+else
+  echo "iopix's own database: not configured; the viewer starts with a set-up page that asks for a MySQL/MariaDB server (or run setup.sh --iopix-db ...)"
 fi
 
 say "Models"
@@ -258,9 +311,12 @@ for key in $(echo "$AUTO_MODELS" | tr ',' ' '); do
   echo "downloading $key"
   HF_HUB_OFFLINE=0 "$VPY" -m app.ai.models download "$key" || echo "  download of $key failed; retry later from Maintenance > Models and data"
 done
-[ -n "$SEARCH_MODEL" ] && "$VPY" -c "from app.data import state; state.init(); state.set_setting('search_model', '$SEARCH_MODEL')"
+if [ -n "$SEARCH_MODEL" ] && [ "$VDB_OK" = 1 ]; then "$VPY" -c "from app.data import state; state.init(); state.set_setting('search_model', '$SEARCH_MODEL')"
+elif [ -n "$SEARCH_MODEL" ]; then echo "  the search model ($SEARCH_MODEL) is chosen in Settings once the database is set up"; fi
 
-if [ -n "$ADMIN" ]; then
+if [ -n "$ADMIN" ] && [ "$VDB_OK" = 0 ]; then
+  say "Admin account"; echo "  skipped: the accounts live in iopix's database, which is not set up yet (Settings creates the admin once it is)"
+elif [ -n "$ADMIN" ]; then
   say "Admin account"
   IOPIX_ADMIN_ACCOUNT="$ADMIN" "$VPY" -c "
 import os; from app.data import state; from app import users
@@ -324,4 +380,6 @@ else
   echo "  not installed as a service. Start the viewer with:"
   echo "    cd \"$APP\" && ./run.sh --host 0.0.0.0 --port $PORT"
 fi
-say "Done: http://localhost:$PORT   settings: $ENVF   data: $DATA"
+if [ -n "${VIEWER_DB_HOST:-}" ]; then VDBWHERE="MySQL/MariaDB ${VIEWER_DB_USER}@${VIEWER_DB_HOST}:${VIEWER_DB_PORT:-3306}/${VIEWER_DB_DATABASE} (in $ENVF)"
+elif [ -f "$DATA/viewer-db.json" ]; then VDBWHERE="as in $DATA/viewer-db.json"; else VDBWHERE="not set up yet: the viewer asks on its first page"; fi
+say "Done: http://localhost:$PORT   settings: $ENVF   data: $DATA   iopix database: $VDBWHERE"

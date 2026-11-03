@@ -222,7 +222,7 @@ def test_backup_downloads_are_for_admins(client, fresh, lib):
     assert r.status_code == 200 and r.content.startswith(b"PK") and r.headers["content-disposition"].endswith('.zip"')
     import io, zipfile
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
-    assert "viewer.db" in names and "README.txt" in names and "analysis.db" not in names, names
+    assert "viewer.sql" in names and "README.txt" in names and "viewer.db" not in names, names
     r = client.get("/api/backup/digikam")
     assert r.status_code == 200 and r.content.startswith(b"SQLite format 3") and "digikam4-" in r.headers["content-disposition"]
     assert client.get("/api/backup/other").status_code == 404

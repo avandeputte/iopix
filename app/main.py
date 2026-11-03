@@ -8,22 +8,25 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facemgr
 from app import config, events, mcp, proxyauth, thumbs, updates, users
 from app.auth import auth as auth_shared
 from app.photos import consistency, edits, history, scanner, tagmanager
-from app.data import state as appstate
+from app.data import state as appstate, vdb
 from app.digikam import dkdb
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
 from app.routes import auth, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
-from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, setup_file_log, models_arrived
+from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, setup_file_log, models_arrived, APP_NAME_DEFAULT
+from app import __version__ as APP_VERSION
 __all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewarmer"]  # tests and app.mcp reach these through app.main
 
 @asynccontextmanager
@@ -31,6 +34,11 @@ async def lifespan(_app):
     setup_file_log()
     upgraded = config.INDEX_DB.exists()  # an install that has run before (a fresh one has no index yet)
     appstate.init()
+    if not vdb.ready():  # no viewer database (a fresh install, an upgrade from before v1.113, or its server is down): the set-up page only
+        logging.getLogger("app.main").error("starting without a viewer database (%s): only the database set-up page answers until one is configured", vdb.error)
+        async with mcp.server.session_manager.run():
+            yield
+        return
     _mcp_first_setting(upgraded)
     users.init()
     edits.init()
@@ -113,6 +121,45 @@ def _gate(request: Request):
 # cross-site check on writes: iothing-auth's middleware. What each route needs beyond that (an editor, an admin,
 # an account) is declared on the route (app/access.py).
 app.middleware("http")(auth_shared.middleware(is_open=_open_to_visitors, open_prefixes=("/mcp",), before=_gate))
+
+
+async def _without_database(request: Request, call_next):
+    """The viewer has no usable database of its own (vdb.ready() is false): the app shell and the status answer,
+    the database set-up endpoints are served here directly, as an admin (there is nobody else yet, as on a fresh
+    install; the sign-in middleware and the routes' own checks would need the database), and everything else
+    says what is missing. The viewer restarts once a database is chosen."""
+    path, method = request.url.path, request.method
+    if path == "/api/status":
+        return JSONResponse({"needsDatabase": True, "databaseError": vdb.error, "databaseConfigured": vdb.configured(),
+                             "appVersion": APP_VERSION, "appName": APP_NAME_DEFAULT, "version": "", "app": ""})
+    if path.startswith("/api/viewerdb"):
+        if method not in ("GET", "HEAD", "OPTIONS"):  # the same cross-site rule the sign-in middleware applies
+            origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
+            if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
+                return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
+        try:
+            if path == "/api/viewerdb" and method == "GET":
+                return JSONResponse(settings.api_viewerdb())
+            if path == "/api/viewerdb/test" and method == "POST":
+                return JSONResponse(await settings.api_viewerdb_test(request))
+            if path == "/api/viewerdb/switch" and method == "POST":
+                return JSONResponse(await settings.api_viewerdb_switch(request))
+            if path == "/api/viewerdb/retry" and method == "POST":
+                return JSONResponse(await settings.api_viewerdb_retry())
+        except HTTPException as e:
+            return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    if path in OPEN_PATHS or path.startswith(OPEN_PREFIXES[:3]) or path.endswith((".png", ".svg", ".ico")):  # the shell, not the sign-in API
+        return await call_next(request)
+    return JSONResponse({"detail": f"{APP_NAME_DEFAULT} has no database yet ({vdb.error}); open the viewer to set one up", "needsDatabase": True}, status_code=503)
+
+
+@app.middleware("http")
+async def _database_gate(request: Request, call_next):
+    """Registered last, so it runs first: while the viewer has no database of its own, nothing below it runs."""
+    if not vdb.ready():
+        return await _without_database(request, call_next)
+    return await call_next(request)
 
 
 @app.middleware("http")

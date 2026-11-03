@@ -4,7 +4,7 @@
 #
 # After the framework's own questions (resources, network) it asks about the app: where the photos
 # and digiKam's database are on this host (or MariaDB details, or no digiKam at all), where iopix keeps its own database
-# (SQLite in the container, or MariaDB), which features to install (each
+# (a MariaDB inside the container, installed by the install script, or an existing server), which features to install (each
 # downloads its model), and the admin account. It then creates the container, bind-mounts the
 # library into it and runs the app's own setup.sh inside with those answers, which installs the
 # packages, downloads the models, writes the settings, creates the admin and starts the service.
@@ -65,10 +65,15 @@ ask_app_settings() {
       IOPIX_DB="sqlite:$f"
     fi
   fi
-  if [[ -z "${IOPIX_VIEWER_DB:-}" ]]; then
-    local holds="favorites, albums, users, face groups and AI results"
-    [[ "$IOPIX_DB" == none ]] && holds="the whole library (folders, tags, people and faces, captions, places) plus favorites, albums, users and AI results"
-    if whiptail --backtitle "$bt" --defaultno --yesno "Keep iopix's own database on MySQL/MariaDB?\n\nIt holds $holds.\n\nNo: a SQLite file in the container's data folder (it can be moved to MariaDB later in Settings)." 14 76 3>&1 1>&2 2>&3; then
+  [[ "${IOPIX_VIEWER_DB:-}" != sqlite ]] || { msg_error "iopix's own database is on MySQL/MariaDB only (no SQLite file any more): IOPIX_VIEWER_DB=local, or HOST:PORT/DB:USER:PASS"; exit 1; }
+  if [[ -z "${IOPIX_VIEWER_DB:-}" ]]; then  # IOPIX_VIEWER_DB: local (MariaDB in the container) or HOST:PORT/DB:USER:PASS
+    local holds="settings, accounts, favorites, albums, face groups, the edit log and AI results"
+    [[ "$IOPIX_DB" == none ]] && holds="the whole library (folders, tags, people and faces, captions, places) plus settings, accounts, favorites, albums and AI results"
+    local vkind
+    vkind=$(whiptail --backtitle "$bt" --menu "Where does iopix keep its own database (MySQL/MariaDB)?\n\nIt holds $holds." 16 76 2 \
+      local "MariaDB inside the container (installed and set up for you)" \
+      mysql "An existing MySQL / MariaDB server (digiKam's, for instance)" 3>&1 1>&2 2>&3) || exit 1
+    if [[ "$vkind" == mysql ]]; then
       local vh vp vd vu vw dh="192.168.1.2" dp="3306" du="iopix"
       if [[ "$IOPIX_DB" == mysql:* ]]; then local r="${IOPIX_DB#mysql:}"; dh="${r%%:*}"; r="${r#*:}"; dp="${r%%/*}"; r="${r#*/}"; r="${r#*:}"; du="${r%%:*}"; fi
       vh=$(whiptail --backtitle "$bt" --inputbox "MariaDB host or IP for iopix's database" 9 60 "$dh" 3>&1 1>&2 2>&3) || exit 1
@@ -78,7 +83,7 @@ ask_app_settings() {
       vw=$(whiptail --backtitle "$bt" --passwordbox "Password" 9 60 3>&1 1>&2 2>&3) || exit 1
       IOPIX_VIEWER_DB="$vh:$vp/$vd:$vu:$vw"
     else
-      IOPIX_VIEWER_DB="sqlite"
+      IOPIX_VIEWER_DB="local"
     fi
   fi
   if [[ -z "${IOPIX_FEATURES:-}" ]]; then
@@ -141,19 +146,21 @@ pct reboot "$CTID"; sleep 8
 msg_ok "Mounted the library"
 
 msg_info "Running the app's setup inside the container (packages, models, settings, admin, service)"
-[[ -n "${IOPIX_VIEWER_DB:-}" ]] && SECRETS+="IOPIX_VIEWER_DB=$(printf '%q' "$IOPIX_VIEWER_DB")"$'\n'
+# iopix's own database: "local" means the MariaDB the install script set up in the container; its credentials wait
+# there in /opt/iopix/viewer-db.env (root only) and go into setup.sh's environment the same way as the other secrets
+VDBENV=""; if [[ "${IOPIX_VIEWER_DB:-local}" == local ]]; then VDBENV=". /opt/iopix/viewer-db.env; "; else SECRETS+="IOPIX_VIEWER_DB=$(printf '%q' "$IOPIX_VIEWER_DB")"$'\n'; fi
 [[ -n "${IOPIX_ADMIN:-}" ]] && SECRETS+="IOPIX_ADMIN=$(printf '%q' "$IOPIX_ADMIN")"$'\n'
 # the answers with passwords go in as a root-only file (pushed, read into setup.sh's environment, removed), never as arguments
 SECF="$(mktemp)"; chmod 600 "$SECF"; printf '%s' "$SECRETS" > "$SECF"
 pct push "$CTID" "$SECF" /opt/iopix/setup.env --perms 0600 --user 0 --group 0
 rm -f "$SECF"
 SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DBARG --data /opt/iopix/data --features '${IOPIX_FEATURES:-none}' --service --no-system-deps --port 8600"
-WRAPPED="set -a; . /opt/iopix/setup.env; set +a; rm -f /opt/iopix/setup.env; $SETUP_CMD > /opt/iopix/setup.log 2>&1"
+WRAPPED="set -a; . /opt/iopix/setup.env; ${VDBENV}set +a; rm -f /opt/iopix/setup.env; $SETUP_CMD > /opt/iopix/setup.log 2>&1"
 # the setup's output is kept in the container; on failure the last lines are shown here
 if ! pct exec "$CTID" -- bash -c "$WRAPPED"; then
   msg_error "setup.sh failed inside the container; last lines of /opt/iopix/setup.log:"
   pct exec "$CTID" -- tail -n 40 /opt/iopix/setup.log || true
-  msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_MYSQL=host:port/db:user:password for MariaDB, IOPIX_VIEWER_DB=the same form for iopix's own database) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
+  msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_MYSQL=host:port/db:user:password for MariaDB, IOPIX_VIEWER_DB=the same form for iopix's own database; for the container's own MariaDB it is in /opt/iopix/viewer-db.env) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
   exit 1
 fi
 # the container cannot see digiKam's process on the host: ask before database writes instead of pgrep
@@ -164,4 +171,5 @@ msg_ok "Completed successfully!\n"
 echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
 echo -e "${INFO}${YW}Access it using the following URL:${CL}"
 echo -e "${GATEWAY}${BGN}http://${IP}:8600${CL}"
+[[ "${IOPIX_VIEWER_DB:-local}" == local ]] && echo -e "${INFO}${YW}iopix's own database: MariaDB inside the container (database iopix; the credentials are in /opt/iopix/app/iopix.env).${CL}" || echo -e "${INFO}${YW}iopix's own database: the MySQL/MariaDB server you named (VIEWER_DB_* in /opt/iopix/app/iopix.env).${CL}"
 [[ "${IOPIX_WRITE:-0}" = 1 ]] && echo -e "${INFO}${YW}The library is mounted read/write (sidecar edits, database writes on request).${CL}" || echo -e "${INFO}${YW}The library is mounted read-only (browsing only). To allow edits later: recreate with write access, or make the container privileged and remount without ro=1.${CL}"

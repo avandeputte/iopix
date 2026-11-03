@@ -7,15 +7,17 @@
 As root on the target machine:
 
 ```sh
-sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB
+sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB --iopix-db local
 ```
 
 If you don't use digiKam, give `--no-digikam` instead of `--digikam-db` (see [Using iopix without digiKam](../connect/no-digikam.md)).
 
+iopix keeps its own data in a MariaDB or MySQL database. `--iopix-db local` installs MariaDB on the machine and creates the database and account; `--iopix-db HOST:PORT/DB:USER:PASSWORD` uses a server you already run (the one digiKam uses will do, with a separate database). Without the option the installer asks. See [iopix's own database](../connect/iopix-database.md).
+
 It then:
 
 1. unpacks the app into `/opt/iopix/app`,
-2. installs the system packages iopix needs (Python with venv, ffmpeg, exiftool, libheif, the MariaDB client) with apt, dnf, zypper or pacman,
+2. installs the system packages iopix needs (Python with venv, ffmpeg, exiftool, libheif, the MariaDB client, and the MariaDB server with `--iopix-db local`) with apt, dnf, zypper or pacman,
 3. creates the Python environment and installs the packages,
 4. downloads the models for the features you choose,
 5. creates the admin account,
@@ -32,7 +34,7 @@ A sudoers rule lets the service user run exactly `systemctl restart iopix`, so *
 | `--digikam-db PATH` | the folder with `digikam4.db` |
 | `--mysql HOST:PORT/DB:USER:PASSWORD` | digiKam on MariaDB/MySQL instead |
 | `--no-digikam` | no digiKam: iopix keeps the library itself |
-| `--iopix-db sqlite` or `HOST:PORT/DB:USER:PASSWORD` | where iopix keeps its own database |
+| `--iopix-db local` or `HOST:PORT/DB:USER:PASSWORD` | iopix's own database: MariaDB installed and created on this machine, or a server you name |
 | `--features search,places,objects,ocr,captions,speech` | the AI features; `none` for browsing only |
 | `--captions` | all features, including photo descriptions |
 | `--admin NAME:PASS` | the admin account |
@@ -50,3 +52,6 @@ To keep passwords off the command line, set `IOPIX_ADMIN=NAME:PASS` and `IOPIX_M
 ## Upgrading
 
 Running the installer again upgrades the code and keeps the data folder and the settings file. So does `./update.sh` in `/opt/iopix/app`, or **Update now** in the app.
+
+!!! note "Upgrading from a version before 1.113"
+    An install that still has `viewer.db` in its data folder needs a MariaDB or MySQL database from 1.113 on. Run the installer again with `--iopix-db local` (or a server), then open iopix: its set-up page offers to import the old file. See [iopix's own database](../connect/iopix-database.md).

@@ -14,10 +14,10 @@ Everything iopix builds lives in its own **data folder**, never inside your phot
 
 - thumbnails and previews,
 - the search index,
-- its own database: accounts, settings, favorites, its own albums, the edit log, and the results of AI analysis,
+- downloaded models,
 - backups of anything it changed.
 
-Its own database is a SQLite file by default, or a MariaDB/MySQL database if you prefer. See [iopix's own database](../connect/iopix-database.md) and [Backups and the data folder](../admin/backups.md).
+Its own records (accounts, settings, favorites, its own albums, the edit log, the results of AI analysis, and its copy of the library) live in a **MariaDB or MySQL database** of its own, which the installers set up for you. See [iopix's own database](../connect/iopix-database.md) and [Backups and the data folder](../admin/backups.md).
 
 ## It writes back only when you ask
 
@@ -39,9 +39,8 @@ Every change is recorded in the [edit log](../edit/edit-log.md) with Undo. Detai
  │      iopix         │ ───────────────────────────────▶  digiKam's database (SQLite or MariaDB)
  │  port 8600         │ ───────────────────────────────▶  photo folders and sidecars
  │                    │
- │  data folder:      │
+ │  data folder:      │ ───────────────────────────────▶  iopix's own database (MariaDB or MySQL)
  │  thumbnails, index,│
- │  own database,     │
  │  models, backups   │
  └────────────────────┘
 ```

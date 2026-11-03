@@ -24,10 +24,13 @@ Every setting is an environment variable. `setup.sh` and the installers write th
 
 ## iopix's own database
 
-| Variable | Meaning |
-| --- | --- |
-| `VIEWER_DB_TYPE` | `sqlite` (default) or `mysql` |
-| `VIEWER_DB_HOST`, `VIEWER_DB_PORT`, `VIEWER_DB_DATABASE`, `VIEWER_DB_USER`, `VIEWER_DB_PASSWORD` | the server, when on MariaDB/MySQL |
+iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](../connect/iopix-database.md)). These variables name it; without them iopix reads `viewer-db.json` in the data folder, and without that it shows a set-up page asking for the details.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VIEWER_DB_TYPE` | | `mysql` for MariaDB or MySQL |
+| `VIEWER_DB_HOST` / `VIEWER_DB_PORT` | / `3306` | server |
+| `VIEWER_DB_DATABASE` / `VIEWER_DB_USER` / `VIEWER_DB_PASSWORD` | | database and account; its own database, not digiKam's |
 
 ## Accounts and access
 

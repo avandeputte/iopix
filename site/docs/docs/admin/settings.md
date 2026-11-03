@@ -21,7 +21,7 @@ Display choices are saved with your account when signed in, else in the browser.
 | --- | --- |
 | digiKam database | SQLite folder or MariaDB/MySQL server, with **Test connection** |
 | Album roots | where each of digiKam's photo folders is found on this machine |
-| iopix database | SQLite file, or switch to MariaDB/MySQL |
+| iopix database | the MariaDB/MySQL server holding iopix's own data, with **Test connection** and **Use this database**, which copies everything across and restarts iopix; the same panel is the set-up page shown when no database is configured (see [iopix's own database](../connect/iopix-database.md)) |
 | Sync with digiKam | on, off, and the merge choices when turning it back on |
 | Check for updates daily | a note for admins when a new version is out |
 | Read-only mode | refuse every change, for everyone |

@@ -1,14 +1,15 @@
 # Backups and the data folder
 
-Everything iopix writes lives in its **data folder** (`DATA_DIR`): `/data` in Docker, `/opt/iopix/data` with the installers, `data/` in a checkout. It must not be inside your photo or digiKam folders; iopix refuses to start if it is.
+iopix's own records (accounts, settings, favorites, albums, the edit log, AI results, its copy of the library) live in its [MariaDB or MySQL database](../connect/iopix-database.md). Everything else it writes lives in its **data folder** (`DATA_DIR`): `/data` in Docker, `/opt/iopix/data` with the installers, `data/` in a checkout. It must not be inside your photo or digiKam folders; iopix refuses to start if it is.
 
 ## What is in it
 
 | Path | Contents | Safe to delete? |
 | --- | --- | --- |
-| `viewer.db` | iopix's own database: accounts, settings, favorites, albums, edit log, AI results, its copy of the library (absent when on MariaDB) | **no** |
-| `viewer-db.json` | where iopix's database is, when on MariaDB/MySQL | no |
+| `viewer-db.json` | how to reach iopix's database (server, database, account) | no |
+| `viewer.db.imported` | the SQLite database of a version before 1.113, kept after its one-time import; nothing reads it | yes, once you are sure the import went well |
 | `index.db` | the search index, rebuilt in seconds | yes |
+| `library-base.sqlite` | the snapshot Sync with digiKam compares against, rebuilt when needed | yes |
 | `cache/` | thumbnails, previews and face crops | yes |
 | `embeddings*.npz` | content-search vectors | yes, recomputed |
 | `models/`, `geonames/` | downloaded models | yes, downloaded again |
@@ -17,16 +18,16 @@ Everything iopix writes lives in its **data folder** (`DATA_DIR`): `/data` in Do
 | `file-backups/` | each image file as it was before iopix first wrote into it | your call |
 | `history/` | sidecar copies for the edit log's Restore | your call |
 | `deleted-photos/` | photos deleted for good, with a record of what they were | your call |
-| `db-backups/` | copies of digiKam's database before destructive changes; the last 10 of each kind are kept | your call |
+| `db-backups/` | copies of digiKam's database before destructive changes (the last 10 of each kind are kept), and `.sql` dumps of iopix's own database taken before a version changes its shape | your call |
 | `viewer.log` | iopix's own log | yes |
 
 Sidecar and file backups are never deleted automatically. Allow disk space for them; Maintenance › Storage and backups shows how much each part takes.
 
 ## Backing iopix up
 
-Back up the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives iopix's database as SQLite plus the content-search index and the restore steps. The MCP admin token is not included, so set a new one after a restore if you use the MCP server.
+Back up the database server and the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives `viewer.sql`, a `mysqldump` of iopix's database, plus the content-search embeddings files and the restore steps. The MCP admin token is not included, so set a new one after a restore if you use the MCP server.
 
-To restore: stop iopix, copy the files into the data folder, start it again.
+To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure `viewer-db.json` or the `VIEWER_DB_*` variables point at that database, and start iopix again.
 
 ## Rolling back digiKam's database
 

@@ -13,6 +13,10 @@ iopix is built around digiKam's own database and does not need digiKam itself to
 
 iopix can also keep running when digiKam's database is unreachable, from its own copy of the library. See [Sync and working without digiKam](../connect/sync.md).
 
+## A MariaDB or MySQL server for iopix's own data
+
+iopix keeps its own data (accounts, settings, favorites, albums, the edit log, AI results) in a **MariaDB or MySQL** database of its own. The Docker stack brings one along, the Linux installer and the Proxmox script can install one locally, and any existing server will do, including the one digiKam uses, with a separate database on it. See [iopix's own database](../connect/iopix-database.md).
+
 ## A machine to run it on
 
 | | Minimum | Comfortable |
@@ -34,7 +38,7 @@ The installers add these for you. If you install by hand, have them on the path:
 | exiftool (12.58 or newer recommended) | reading and writing metadata |
 | ffmpeg | video thumbnails and playback |
 | jpegtran (libjpeg-turbo) | lossless rotate, flip and crop |
-| MariaDB client (`mysqldump`) | backing up a MariaDB digiKam database before writes |
+| MariaDB client (`mysqldump`) | backing up iopix's database, and a MariaDB digiKam database before writes |
 
 ## A browser
 

@@ -305,8 +305,18 @@ async def api_db_test(request: Request):
 
 @router.get("/api/viewerdb", dependencies=[access.admin])
 def api_viewerdb():
-    """Where the viewer keeps its own data: SQLite (the default) or MySQL/MariaDB."""
+    """Where the viewer keeps its own data (MariaDB/MySQL): the settings without the password, the current error,
+    and whether a viewer.db from before v1.113 waits to be imported."""
     return vdb.public_settings()
+
+
+@router.post("/api/viewerdb/retry", dependencies=[access.admin])
+async def api_viewerdb_retry():
+    """Try the configured database again (it was unreachable at start); the viewer restarts when it answers now."""
+    if not await run_in_threadpool(vdb.retry):
+        raise HTTPException(400, f"Still unavailable: {vdb.error}")
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+    return {"ok": True, "restarting": True}
 
 
 @router.post("/api/viewerdb/test", dependencies=[access.admin])
@@ -321,8 +331,9 @@ async def api_viewerdb_test(request: Request):
 
 @router.post("/api/viewerdb/switch", dependencies=[access.admin])
 async def api_viewerdb_switch(request: Request):
-    """Body: the settings plus copy (default true: carry every row over) and drop (default true: drop
-    and recreate the viewer's tables at the target first). Saves the configuration and restarts the viewer."""
+    """Body: the settings plus copy (default true: carry every row over, from the current database or from an
+    older install's viewer.db) and drop (default true: drop and recreate the viewer's tables at the target first).
+    Saves the configuration and restarts the viewer."""
     d = await json_body(request)
     try:
         res = await run_in_threadpool(vdb.switch, d, bool(d.get("copy", True)), bool(d.get("drop", True)))

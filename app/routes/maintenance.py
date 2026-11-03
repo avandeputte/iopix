@@ -182,8 +182,8 @@ def api_maintenance(request: Request):
         "paths": {"library": str(config.PHOTOS_ROOT), "digikamDb": dkdb.describe(), "data": str(config.DATA_DIR)},
         "storage": _storage_sizes(request.query_params.get("refresh") == "1") | {
             "index": config.INDEX_DB.stat().st_size if config.INDEX_DB.exists() else 0,
-            "viewerDb": vdb.SQLITE_FILE.stat().st_size if not vdb.is_mysql() and vdb.SQLITE_FILE.exists() else 0,
-            "viewerDbError": vdb.error,  # MySQL configured but unusable at start: the SQLite file is in use instead
+            "viewerDb": vdb.describe(),  # where the viewer's own data lives (a server, not a file in the data folder)
+            "viewerDbError": vdb.error,
             "embeddings": sum(e.file.stat().st_size for e in semantic.engines.values() if e.file.exists()),
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),

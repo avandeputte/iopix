@@ -16,7 +16,7 @@ First about iopix:
 
 1. **Photo folder** on the host.
 2. **digiKam's database**: the folder with `digikam4.db`, a MariaDB host, port, database, user and password, or **I don't use digiKam** (see [Using iopix without digiKam](../connect/no-digikam.md)).
-3. **iopix's own database**: a SQLite file in the container, or MariaDB (the digiKam answers are offered as defaults; use a separate database name).
+3. **iopix's own database**: MariaDB installed inside the container, with the database created for you, or a MariaDB/MySQL server you already run (the digiKam answers are offered as defaults; use a separate database name).
 4. **Writing**: whether iopix may write into the library. Yes mounts the folders read/write and creates a privileged container, because an unprivileged one cannot write files owned by a host user.
 5. **Features**: which AI features to install (each downloads its model).
 6. **Admin account**.
@@ -33,7 +33,7 @@ Set these in the environment to skip the questions:
 | --- | --- |
 | `IOPIX_PHOTOS` | `/tank/photos` |
 | `IOPIX_DB` | `sqlite:/tank/digikamDB`, `mysql:host:3306/digikam:digikam:password` or `none` |
-| `IOPIX_VIEWER_DB` | `sqlite` or `host:3306/iopix:iopix:password` |
+| `IOPIX_VIEWER_DB` | `local` (MariaDB in the container) or `host:3306/iopix:iopix:password` |
 | `IOPIX_WRITE` | `1` or `0` |
 | `IOPIX_FEATURES` | `search,places,objects` |
 | `IOPIX_ADMIN` | `admin:password` |

@@ -2,18 +2,12 @@
 pending-edit and tag-manager queues, and (through analysis.py and consistency.py,
 which share the database) the analysis results.
 
-Everything lives in the viewer's own database (vdb.py: the SQLite file data/viewer.db
-by default, or MySQL/MariaDB), never in digiKam's database. Photos are referenced by
-digiKam image id; the file hash is stored alongside so entries could be re-matched if
-digiKam ever renumbers its images. Installs from before v1.8 had two SQLite files,
-state.db and analysis.db: migrate_legacy() folds them into viewer.db once, keeping
-every row, and parks the old files in db-backups.
+Everything lives in the viewer's own database (vdb.py: MariaDB or MySQL, since v1.113 nothing
+else), never in digiKam's database. Photos are referenced by digiKam image id; the file hash is
+stored alongside so entries could be re-matched if digiKam ever renumbers its images.
 """
 import contextvars
 import logging
-import shutil
-import sqlite3
-from urllib.parse import quote
 import threading
 import time
 
@@ -21,8 +15,6 @@ from app import config
 from app.data import vdb
 from app.digikam.dkdb import in_chunks
 
-STATE_DB = config.DATA_DIR / "viewer.db"  # the SQLite file (vdb.SQLITE_FILE); the legacy migration's target
-LEGACY = (config.DATA_DIR / "state.db", config.DATA_DIR / "analysis.db")
 rev = 0  # bumped on every write so cached query results can be invalidated
 lock = threading.Lock()
 _settings = (-1, {})  # (stamp it was read at, {key: value}); settings are read on every poll and every POST
@@ -88,61 +80,15 @@ def _known(key: str):
         log.warning("setting %r is not in state.SETTINGS (add it there with its default)", key)
 
 
-def migrate_legacy():
-    """state.db + analysis.db -> viewer.db, once. Returns where the old files were parked, or None.
-    Installs from before v1.8 (2024); remove after v1.120, with LEGACY and the module docstring's last sentence."""
-    if STATE_DB.exists() or not any(p.exists() for p in LEGACY):
-        return None
-    old_state, old_an = LEGACY
-    tmp = STATE_DB.with_name(STATE_DB.name + ".migrating")
-    tmp.unlink(missing_ok=True)
-    if old_state.exists():  # the state file is the base: same tables, same ids
-        src = sqlite3.connect(f"file:{quote(str(old_state))}?mode=ro", uri=True)
-        try:
-            dst = sqlite3.connect(tmp)
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-        finally:
-            src.close()
-    con = sqlite3.connect(tmp)
-    try:
-        if old_an.exists():  # the analysis tables are copied over, schema and rows (no name overlaps)
-            con.execute("ATTACH DATABASE ? AS a", (str(old_an),))
-            tables = con.execute("SELECT name, sql FROM a.sqlite_master WHERE type = 'table' AND sql IS NOT NULL").fetchall()
-            for name, sql in tables:
-                con.execute(sql)
-                con.execute(f'INSERT INTO main."{name}" SELECT * FROM a."{name}"')
-            for (sql,) in con.execute("SELECT sql FROM a.sqlite_master WHERE type = 'index' AND sql IS NOT NULL").fetchall():
-                con.execute(sql)
-            con.commit()
-            con.execute("DETACH DATABASE a")
-        con.execute("PRAGMA journal_mode = WAL")
-        con.commit()
-    finally:
-        con.close()
-    tmp.replace(STATE_DB)
-    park = config.DATA_DIR / "db-backups" / ("migrated-" + time.strftime("%Y%m%d-%H%M%S"))
-    park.mkdir(parents=True, exist_ok=True)
-    for f in LEGACY:
-        for g in (f, f.with_name(f.name + "-wal"), f.with_name(f.name + "-shm"), f.with_name(f.name + "-journal")):
-            if g.exists():
-                shutil.move(str(g), str(park / g.name))
-    return park
-
-
 def connect():
-    """The viewer database, SQLite or MySQL as configured (see vdb.py); rows answer to names and indexes."""
+    """The viewer database (see vdb.py); rows answer to names and indexes."""
     return vdb.connect(timeout=10)
 
 
 def init():
-    """Fold the pre-v1.80 state.db / analysis.db into viewer.db if they are still there, then create or migrate every table."""
-    park = migrate_legacy()
-    if park:
-        logging.getLogger("app.data.state").info("state.db and analysis.db were folded into viewer.db; the old files are in %s", park)
-    vdb.init()  # the tables of every module, on whichever database is configured
+    """Open the viewer database and create or migrate every table (vdb.init: never raises; the viewer starts
+    without a database and says so)."""
+    vdb.init()
 
 
 def write(fn):
@@ -319,20 +265,9 @@ def set_album_items(album_id: int, items: list, on: bool):
 
 
 def _settings_stamp() -> tuple:
-    """Changes on every write: rev for this process, and for writes by another one (the stdio
-    MCP server shares this database) the file's mtime on SQLite, or a few-second clock on MySQL,
-    where no cheap change marker exists."""
-    if vdb.is_mysql():
-        return rev, int(time.time() / 5)
-    try:
-        stamp = STATE_DB.stat().st_mtime_ns
-    except OSError:
-        return rev, None
-    try:  # WAL mode: a commit lands in the -wal file and moves the main file only at a checkpoint
-        stamp = max(stamp, STATE_DB.with_name(STATE_DB.name + "-wal").stat().st_mtime_ns)
-    except OSError:
-        pass
-    return rev, stamp
+    """Changes on every write: rev for this process, and for writes by another one (the stdio MCP server
+    shares this database) a few-second clock, since the server offers no cheap change marker."""
+    return rev, int(time.time() / 5)
 
 
 def get_setting(key: str, default: str = None) -> str:
@@ -358,6 +293,8 @@ def get_setting(key: str, default: str = None) -> str:
 
 def read_only() -> bool:
     """Nothing in the library may be changed: READ_ONLY=1 in the environment (locked) or the read_only setting."""
+    if not vdb.ready():  # the set-up page before any database: nothing to read the setting from, and nothing to change yet
+        return bool(config.READ_ONLY)
     return config.READ_ONLY or get_setting("read_only", "0") == "1"
 
 

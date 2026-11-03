@@ -11,13 +11,13 @@ git clone https://github.com/avandeputte/iopix && cd iopix
 
 - Where the **photos** are.
 - Whether you **use digiKam** with those photos and, if so, whether its database is the **SQLite file** or **MariaDB/MySQL** (it tests the connection). Without digiKam, iopix keeps the library itself: see [Using iopix without digiKam](../connect/no-digikam.md).
-- Where iopix keeps **its own database**: a SQLite file, or MariaDB/MySQL (it creates the database if the account may).
+- The MariaDB/MySQL server for **iopix's own database**: host, port, database, user and password (it tests the connection, and creates the database if the account may). The server digiKam uses will do, with a separate database. See [iopix's own database](../connect/iopix-database.md).
 - Which **features** you want: content search, places, objects, text recognition, photo descriptions. Each downloads its model.
 - The **port**, the **admin account**, and whether to **start at login** (launchd on macOS, systemd on Linux).
 
 Then it creates the Python environment, installs the packages, downloads the models, writes `iopix.env`, creates the admin and starts the service.
 
-It also installs the system tools iopix needs when they are missing (Python 3.10+, exiftool, ffmpeg, jpegtran, the MariaDB client): with **Homebrew** on macOS (offering to install Homebrew first), or apt, dnf, zypper or pacman on Linux.
+It also installs the system tools iopix needs when they are missing (Python 3.10+, exiftool, ffmpeg, jpegtran, the MariaDB client): with **Homebrew** on macOS (offering to install Homebrew first), or apt, dnf, zypper or pacman on Linux. It does not install a MariaDB server; on a Mac `brew install mariadb && brew services start mariadb` gives you one.
 
 Run it again at any time to add a feature; it keeps what is there.
 
@@ -33,7 +33,9 @@ Flags skip the questions. `./setup.sh --help` lists them all. For example:
   --admin admin:secret
 ```
 
-Without digiKam: `./setup.sh --yes --photos /srv/photos --no-digikam --admin admin:secret`.
+Without digiKam: `./setup.sh --yes --photos /srv/photos --no-digikam --iopix-db db:3306/iopix:iopix:secret --admin admin:secret`.
+
+Skipped, `--iopix-db` leaves iopix to ask for the database on its set-up page the first time you open it.
 
 ## Running in the foreground
 

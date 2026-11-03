@@ -25,4 +25,7 @@ With **Check for updates daily** on (the default), iopix asks once a day whether
 
 ## Database changes
 
-When a new version needs a different shape for iopix's own database, it converts it on the first start, after taking a copy. digiKam's database is never changed by an update.
+When a new version needs a different shape for iopix's own database, it converts it on the first start, after writing a dump to `db-backups/` in the data folder. digiKam's database is never changed by an update.
+
+!!! note "Upgrading from a version before 1.113"
+    From 1.113 iopix's own data lives on a MariaDB or MySQL server instead of the `viewer.db` file. After the update iopix shows a set-up page asking for a database and offers to import the file. See [iopix's own database](../connect/iopix-database.md).

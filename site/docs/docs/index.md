@@ -16,6 +16,7 @@ hide: [toc]
 <a href="start/how-it-works/"><b>How iopix works</b><span>What it reads, what it writes, and where it keeps its own data.</span></a>
 <a href="install/choosing/"><b>Choosing an install</b><span>Docker, Proxmox, the Linux installer or a plain checkout.</span></a>
 <a href="connect/digikam/"><b>Connecting to digiKam</b><span>Your photo folder and digiKam's database, SQLite or MariaDB.</span></a>
+<a href="connect/iopix-database/"><b>iopix's own database</b><span>The MariaDB or MySQL database iopix keeps its own data in.</span></a>
 </div>
 
 ## Using iopix

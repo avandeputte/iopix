@@ -11,7 +11,7 @@ curl -O https://raw.githubusercontent.com/avandeputte/iopix/main/docker-compose.
 
 It also works as a stack in Dockge or Portainer: paste its contents in.
 
-## 2. Edit the three CHANGE ME spots
+## 2. Edit the CHANGE ME spots
 
 ```yaml
 services:
@@ -35,11 +35,33 @@ services:
       PHOTOS_ROOT: /library/photos
       ADMIN_USER: admin                          # 3. the first admin account
       ADMIN_PASSWORD: change-me-please
+      VIEWER_DB_TYPE: mysql                      # iopix's own database: the iopix-db service below
+      VIEWER_DB_HOST: iopix-db
+      VIEWER_DB_PORT: "3306"
+      VIEWER_DB_DATABASE: iopix
+      VIEWER_DB_USER: iopix
+      VIEWER_DB_PASSWORD: change-me-too          # 4. same as MARIADB_PASSWORD below
       AUTO_MODELS: siglip2,yolox,geonames
       DIGIKAM_CHECK: none
+    depends_on:
+      - iopix-db
+  iopix-db:
+    image: mariadb:11
+    container_name: iopix-db
+    restart: unless-stopped
+    volumes:
+      - iopix-db:/var/lib/mysql
+    environment:
+      MARIADB_DATABASE: iopix
+      MARIADB_USER: iopix
+      MARIADB_PASSWORD: change-me-too
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
 volumes:
   iopix-data:
+  iopix-db:
 ```
+
+The `iopix-db` service is MariaDB for iopix's own data (accounts, settings, favorites, albums, the edit log, AI results); it has nothing to do with digiKam's database. To use a server you already run instead, drop the service and point the `VIEWER_DB_*` lines at it (`host.docker.internal` for a server on the Docker host). See [iopix's own database](../connect/iopix-database.md).
 
 !!! note "No digiKam"
     Set `DIGIKAM_DB_TYPE: none` and remove the other `DIGIKAM_DB_*` lines. iopix then keeps the library itself, in the data volume. Remove `:ro` from the photos line so edits can be saved next to the photos. See [Using iopix without digiKam](../connect/no-digikam.md).
@@ -58,6 +80,9 @@ docker compose up -d
 ```
 
 Open `http://<server>:8600`. On the first start the container downloads the models named in `AUTO_MODELS` (about 1.6 GB by default: content search, object detection and places) into the data volume, one after another. The library is browsable meanwhile, and each feature switches on as its model arrives. Set `AUTO_MODELS: ""` to skip this.
+
+!!! note "Upgrading from a version before 1.113"
+    If the data volume still holds `viewer.db`, add the `iopix-db` service and the `VIEWER_DB_*` lines, then open iopix: its set-up page offers to import the old file into the new database.
 
 ## Allowing edits
 
@@ -96,6 +121,8 @@ To build the image yourself, `docker compose up -d --build` uses the checkout. T
 ```sh
 docker compose pull && docker compose up -d
 ```
+
+The `iopix-db` volume holds iopix's database and survives updates like the data volume does. **Download a backup** in Maintenance includes a dump of it.
 
 **Update now** in Maintenance does not apply in Docker; it tells you to pull instead.
 

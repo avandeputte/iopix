@@ -34,12 +34,22 @@ else:  # no digiKam library to cut a scratch copy from (CI): the tests that need
     (_lib / "db").mkdir(parents=True, exist_ok=True); (_lib / "photos").mkdir(parents=True, exist_ok=True)
     print(f"\nNo test library at {SRC_DB} / {SRC_ROOT} (DIGIKAM_TEST_DB / DIGIKAM_TEST_ROOT): library tests are skipped")
 
+import mariadb  # noqa: E402  (tests/mariadb.py: the MariaDB iopix's own database runs on; Docker or IOPIX_TEST_DB)
+
+if mariadb.server() is None:
+    print(f"\n{mariadb.server.reason}: iopix's own database is MariaDB-only, so every test needs one (Docker, or IOPIX_TEST_DB=host:port:user:password)")
+    pytest.exit("no MariaDB for the tests", returncode=5)
+VIEWER_DB = mariadb.fresh_database(mariadb.API_DB)  # a fresh database for this session (the browser tests' server gets its own)
+AUTH_DB = mariadb.fresh_database(os.environ.get("IOTHING_TEST_AUTH_DB", "auth_test_iopix"))  # the shared accounts (iothing-auth), fresh too
+
 os.environ.update({
+    **mariadb.env_for(VIEWER_DB),
     "DATA_DIR": str(_data), "DIGIKAM_DB_DIR": str(_lib / "db"), "PHOTOS_ROOT": str(LIB["root"] if LIB else _lib / "photos"),
     "PREWARM": "0", "SEMANTIC": "0", "ANALYSIS": "0", "CAPTIONS": "0", "REINDEX_POLL": "3600",
     "DIGIKAM_CHECK": "ask", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0",
-    # the shared accounts (iothing-auth) in a database of their own on the same server, never the suite's `auth`
-    "IOTHING_AUTH_DB_NAME": os.environ.get("IOTHING_TEST_AUTH_DB", "auth_test_iopix"),
+    # the shared accounts (iothing-auth) in a database of their own on the test server, never the suite's `auth`
+    "IOTHING_AUTH_DB_NAME": AUTH_DB["database"], "IOTHING_AUTH_DB_HOST": AUTH_DB["host"], "IOTHING_AUTH_DB_PORT": str(AUTH_DB["port"]),
+    "IOTHING_AUTH_DB_USER": AUTH_DB["user"], "IOTHING_AUTH_DB_PASSWORD": AUTH_DB["password"],
 })
 _data.mkdir(parents=True, exist_ok=True)
 

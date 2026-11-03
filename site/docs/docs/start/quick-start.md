@@ -9,6 +9,7 @@ You need:
 - A **digiKam library**: the folder with your photos and digiKam's database. The database is either a file called `digikam4.db` (SQLite, digiKam's default) or a MariaDB/MySQL server.
 - Or, if you don't use digiKam, just the **folder with your photos**: see [Using iopix without digiKam](../connect/no-digikam.md).
 - A **computer that can see them**, which stays on: a home server, a NAS that runs Docker, a Proxmox host, or the Mac or Linux PC digiKam runs on.
+- A **MariaDB or MySQL database for iopix itself**: Docker brings one along, the Linux installer and the Proxmox script install one for you, and any server you already run will do (the one digiKam uses too, with its own database for iopix). See [iopix's own database](../connect/iopix-database.md).
 
 See [What you need](requirements.md) for the details.
 
@@ -20,7 +21,7 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
 
     ```sh
     curl -O https://raw.githubusercontent.com/avandeputte/iopix/main/docker-compose.yml
-    # edit the three CHANGE ME lines: photo folder, digiKam database, admin password
+    # edit the CHANGE ME lines: photo folder, digiKam database, admin password, database password
     docker compose up -d
     ```
 
@@ -41,9 +42,9 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
     Download `iopix-install.sh` from the [latest release](https://github.com/avandeputte/iopix/releases/latest), then as root:
 
     ```sh
-    sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB
+    sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB --iopix-db local
     # or, without digiKam:
-    sh iopix-install.sh --photos /srv/photos --no-digikam
+    sh iopix-install.sh --photos /srv/photos --no-digikam --iopix-db local
     ```
 
     Full guide: [Linux installer](../install/linux.md).
@@ -57,7 +58,10 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
 
     Full guide: [setup.sh](../install/setup-script.md).
 
-Each of these asks for (or lets you set) the photo folder, digiKam's database (or that you don't use digiKam), and an admin account.
+Each of these asks for (or lets you set) the photo folder, digiKam's database (or that you don't use digiKam), the MariaDB or MySQL database for iopix's own data, and an admin account.
+
+!!! note "Upgrading from a version before 1.113"
+    iopix's own data used to live in a SQLite file, `viewer.db`. From 1.113 it needs a MariaDB or MySQL database. After the update it shows a set-up page asking for one; enter the details, leave **Import the existing data** ticked, and every row of the old file is carried over. See [iopix's own database](../connect/iopix-database.md).
 
 ## 3. Open it
 

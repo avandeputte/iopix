@@ -23,6 +23,18 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    services:
+      mariadb:  # iopix's own database is MariaDB-only: the suite creates its test databases on this one (tests/mariadb.py)
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +51,8 @@ jobs:
       - name: Tests that need no photo library
         # the full suite cuts a scratch copy from a digiKam library, so it runs on a developer machine
         # (.venv/bin/python -m pytest tests); without one, conftest skips those and the rest run here
+        env:
+          IOPIX_TEST_DB: 127.0.0.1:3306:root:test  # the MariaDB service above (host:port:user:password)
         run: |
           python -m pip install -q numpy  # the search-model switch test builds vectors
           sudo apt-get install -y -qq --no-install-recommends libimage-exiftool-perl libjpeg-turbo-progs >/dev/null  # the no-digiKam test scans real files; the damaged-file tests repair them

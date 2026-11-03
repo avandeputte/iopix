@@ -60,21 +60,17 @@ SPEC = {
     "tag_properties": ("TagProperties", [("tagid", "INTEGER", "INT"), ("property", "TEXT", "VARCHAR(255)"), ("value", "TEXT", "TEXT")], "", ", INDEX tag_properties_tag (tagid)"),
     "library_settings": ("Settings", [("keyword", "TEXT", "VARCHAR(191)"), ("value", "TEXT", "TEXT")], ", UNIQUE (keyword)", ", UNIQUE KEY library_settings_key (keyword)"),
 }
-SQLITE_INDEXES = ["CREATE INDEX IF NOT EXISTS comments_image ON comments (imageid)", "CREATE INDEX IF NOT EXISTS copyright_image ON copyright (imageid)",
-                  "CREATE INDEX IF NOT EXISTS face_regions_image ON face_regions (imageid)", "CREATE INDEX IF NOT EXISTS face_regions_tag ON face_regions (tagid)",
-                  "CREATE INDEX IF NOT EXISTS photo_tags_tag ON photo_tags (tagid)", "CREATE INDEX IF NOT EXISTS tag_properties_tag ON tag_properties (tagid)",
-                  "CREATE INDEX IF NOT EXISTS photos_hash ON photos (uniqueHash)"]
 DIGIKAM = {dk: ours for ours, (dk, *_rest) in SPEC.items()}
 _NAMES = re.compile(r"\b(" + "|".join(sorted(DIGIKAM, key=len, reverse=True)) + r")\b")
 _WRITE = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b", re.I)
 
 
 def tables() -> dict:
-    """vdb.TABLES entries for the library tables: name -> (columns, SQLite DDL, MySQL DDL)."""
+    """vdb.TABLES entries for the library tables: name -> (columns, MySQL DDL). The SQLite types in SPEC
+    serve the merge-base file (save_base) only."""
     out = {}
-    for name, (_dk, cols, sq_extra, my_extra) in SPEC.items():
+    for name, (_dk, cols, _sq_extra, my_extra) in SPEC.items():
         out[name] = ([c for c, _s, _m in cols],
-                     f"CREATE TABLE IF NOT EXISTS {name} (" + ", ".join(f"{c} {s}" for c, s, _m in cols) + sq_extra + ")",
                      f"CREATE TABLE IF NOT EXISTS {name} (" + ", ".join(f"`{c}` {m}" for c, _s, m in cols) + my_extra + ")")
     return out
 

@@ -7,6 +7,7 @@ import { G } from './grid.js';
 import { dbDialog } from './editing.js';
 import { moreSheet, showAlbums } from './pages.js';
 import { loadUser, loginDialog, renderUserMenu } from './users.js';
+import { viewerDbPanel } from './settings.js';
 import { M } from './map.js';
 import { toggleFilters } from './filters.js';
 import { LB, details } from './lightbox.js';
@@ -212,6 +213,9 @@ const lookAgain = () => { if (NET.lost) pollSoon(300); };
 window.addEventListener('online', lookAgain);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollSoon(300); });  // back in view: catch up now
 async function start() {
+  let st = null;
+  try { st = await api('/api/status'); } catch { /* the poll below says what is wrong */ }
+  if (st?.needsDatabase) { setupDatabasePage(st); return; }
   await loadUser();
   // the sidebar: the destinations in groups (a gap after Favorites, Places and Map), then Settings and Maintenance at
   // the foot above the status line. On phones the same links are the bottom bar: four of them and More.
@@ -228,6 +232,17 @@ async function start() {
   applyBadgePref(); applyTheme();
   if (S.REQUIRE_LOGIN && !S.USER) { document.body.classList.add('locked'); loginDialog(true); return; }  // boot() runs after sign-in
   await boot();
+}
+/** No database of its own yet (a fresh install without VIEWER_DB_*, an install from before v1.113, or its server is
+ *  down): nothing else works, so the page is the database panel from Settings, and reloads once the viewer restarts. */
+function setupDatabasePage(st) {
+  document.body.classList.add('locked');
+  document.title = st.appName || 'iopix';
+  main.replaceChildren(h('div', { class: 'page' }, h('h1', { class: 'ptitle' }, `${st.appName || 'iopix'} needs its database`),
+    h('div', { class: 'muted intro' }, st.databaseConfigured
+      ? `The configured MariaDB/MySQL database is not answering (${st.databaseError}). Start the server, or point ${st.appName || 'iopix'} at another database below.`
+      : `${st.appName || 'iopix'} keeps its own data (accounts, settings, albums, the edit log, AI results) in a MariaDB or MySQL database. Create an empty database with a user that owns it, then enter its details.`),
+    h('div', { class: 'srow' }, viewerDbPanel({ setup: true }))));
 }
 /** The sidebar docks beside the page on a wide screen, unless its button put it away (remembered). Put away, or on a
  *  narrower screen, it hides off the left edge and the menu button in the top bar slides it over the page; choosing a
