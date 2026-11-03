@@ -150,6 +150,14 @@ export async function showPeople() {
     s.suggested[0] ? h('a', { class: 'pill', href: '#/faces?tab=suggested' }, 'Suggestions to confirm', h('b', null, `${nf.format(s.suggested[1])} in ${nf.format(s.suggested[0])} photos`)) : null,
     s.unknown[0] ? h('a', { class: 'pill', href: '#/faces?tab=unknown' }, 'Unnamed faces', h('b', null, `${nf.format(s.unknown[1])} in ${nf.format(s.unknown[0])} photos`)) : null,
     s.ignored[0] ? h('a', { class: 'pill', href: '#/faces?tab=ignored' }, 'Ignored faces', h('b', null, nf.format(s.ignored[1]))) : null)).catch(() => {});
+  // birthdays in the next month, from ioContacts (Settings › ioContacts): nothing shows when it is off or not reached
+  const bdays = h('div', { class: 'pills bdays' });
+  if (S.USER || !S.USERS_EXIST) api('/api/people/birthdays').then((r) => {
+    const list = r.upcoming.filter((b) => byId.has(b.tag)).slice(0, 12);
+    const when = (b) => b.in === 0 ? 'today' : b.in === 1 ? 'tomorrow' : new Date(`${b.date}T12:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    if (list.length) fill(bdays, h('span', { class: 'muted' }, 'Birthdays'), list.map((b) => h('a', { class: 'pill' + (b.in === 0 ? ' today' : ''), href: `#/photos?tag=${b.tag}`, title: `Photos of ${byId.get(b.tag).name}` },
+      h('img', { src: faceUrl(b.tag), alt: '' }), byId.get(b.tag).name, h('b', null, b.turns != null ? `turns ${b.turns} ${when(b)}` : when(b)))));
+  }).catch(() => {});
   // a change shows at once and is saved behind it; refused by the server, the groups go back to how they were (`was`, a snapshot taken before the change)
   const snap = () => groups.map((g) => ({ ...g, members: [...g.members] }));
   const undo = (was) => { groups = was; draw(); };
@@ -268,7 +276,7 @@ export async function showPeople() {
   const seg = h('div', { class: 'eseg', title: 'Badge size' }, [['s', 'S'], ['m', 'M'], ['l', 'L']].map(([k, l]) => h('button', { class: k === size ? 'on' : '', onclick: (e) => {
     size = k; store.set(PREF.peopleSize, k); pageEl.className = `page psz-${k}`; seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } }, l)));
   main.replaceChildren(pageEl);
-  fill(pageEl, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo,
+  fill(pageEl, pageTitle('person', 'amber', 'People ', h('span', { class: 'muted' }, nf.format(all.length))), todo, bdays,
     h('div', { class: 'toolbar',},
       h('input', { class: 'pagefilter', placeholder: 'Find a person…', style: 'margin:0', oninput: (e) => { filter = norm(e.target.value); draw(); } }), sortSel, withinSel, seg, arrange, newBtn),
     h('div', { style: 'height:14px' }), body);
@@ -631,13 +639,13 @@ async function suggestionPage({ view, loading, endpoint, trail, icon: ic, hue, t
  * how old its named people look, the years those people are photographed in, dated look-alikes and the camera).
  * Nothing is written until a year is used; birth years entered here help people with few dated photos. */
 export function showDateSuggest() {
-  const basis = (p) => p.basis === 'fit' ? `from ${nf.format(p.n)} photos with a date` : p.basis === 'dated' ? `from only ${p.n} photos with a date` : p.basis === 'entered' ? 'birth year you entered' : 'too few photos with a date: enter a birth year';
+  const basis = (p) => p.basis === 'fit' ? `from ${nf.format(p.n)} photos with a date` : p.basis === 'dated' ? `from only ${p.n} photos with a date` : p.basis === 'entered' ? (p.fromContacts ? 'birthday in ioContacts' : 'birth year you entered') : 'too few photos with a date: enter a birth year';
   const birthBtn = (p) => S.EDITING ? h('button', { type: 'button', class: 'lnk', onclick: async () => {
-    const v = await promptDialog(`${p.name}’s year of birth (leave empty to work it out from photos with a date)`, { value: p.entered ? String(p.birth) : '', placeholder: 'e.g. 1942' });
+    const v = await promptDialog(`${p.name}’s year of birth (leave empty to work it out from photos with a date)`, { value: p.entered && !p.fromContacts ? String(p.birth) : '', placeholder: 'e.g. 1942' });
     if (v === null || v === undefined) return;
     try { await post('/api/people/birth', { tag: p.tag, year: v || null }); } catch (e) { toastError(e); return; }
     if (S.route.view === 'datesuggest') showDateSuggest();
-  } }, p.entered ? 'change' : 'enter birth year') : null;
+  } }, p.entered && !p.fromContacts ? 'change' : 'enter birth year') : null;
   const yearIn = (f, k) => h('input', { type: 'number', min: 1800, max: new Date().getFullYear(), value: f[k] ?? '', placeholder: k === 'not_before' ? 'earliest' : 'latest', style: 'width:84px', disabled: !S.EDITING });
   // folder hints: the earliest and latest year anything in a folder (subfolders included) can be from
   const hintRow = (f) => {
@@ -660,7 +668,7 @@ export function showDateSuggest() {
       try { hints = await api('/api/datehints'); } catch { /* shown without */ }
       const people = h('div', { class: 'hlist' }, d.people.map((p) => h('div', { class: 'hrow' },
         h('img', { class: 'avatar', src: faceUrl(p.tag), alt: '' }),
-        h('div', { class: 'hmain' }, h('b', null, p.name), ' · ', p.birth ? `born ${p.entered ? '' : 'about '}${p.birth}` : 'birth year unknown', h('span', { class: 'muted' }, ` (${basis(p)}) `), birthBtn(p)))));
+        h('div', { class: 'hmain' }, h('b', null, p.name), ' · ', p.birth ? `born ${p.entered ? '' : 'about '}${p.birth}` : 'birth year unknown', h('span', { class: 'muted' }, ` (${p.fromContacts && p.basis !== 'entered' ? `${basis(p)}; birth year from ioContacts` : basis(p)}) `), birthBtn(p)))));
       return [hints.folders.length ? [h('h3', null, 'Folder hints'), h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'The earliest and latest year anything in a folder can be from, subfolders included: every suggestion in it keeps to those years, and dated photos outside them are not used as clues.'), h('div', { class: 'hlist' }, hints.folders.map(hintRow))] : null,
         d.people.length ? [h('h3', null, 'People'), people] : null];
     },

@@ -1,6 +1,6 @@
 # Settings
 
-**Settings** is for admins, apart from the display choices every signed-in account can make for itself. It has five tabs.
+**Settings** is for admins, apart from the display choices every signed-in account can make for itself. It has six tabs.
 
 ## Display
 
@@ -38,6 +38,10 @@ Display choices are saved with your account when signed in, else in the browser.
 ## AI and search
 
 The content-search model, background threads (how many cores a job may use), and the switches for each analysis job.
+
+## ioContacts
+
+The optional link to ioContacts, the suite's address book, for the birthdays of the people in your library. See [ioContacts](../integrations/iocontacts.md).
 
 ## Users and sign-in
 

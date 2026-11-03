@@ -219,6 +219,9 @@ body.filters-open #scrub { right: 354px; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r-pill); cursor: pointer; }
 .pill b { font-weight: 400; color: var(--fg2); font-size: var(--fs-s); }
+.bdays { margin: 0 0 4px; align-items: center; } .bdays:empty { display: none; }
+.bdays .pill { padding-left: 4px; } .bdays .pill img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.bdays .pill.today { border-color: var(--accent); }
 /* the summary at the top of Explore: one tinted card per number, each with its own hue */
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0 0; }
 .stat { position: relative; display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--r-l); color: var(--fg); overflow: hidden; text-decoration: none;

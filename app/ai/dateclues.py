@@ -310,7 +310,7 @@ def suggestions(ids: list = None) -> dict:
     """{"items": [{id, year, lo, hi, clues: [{kind, text, year, sd}], people: [...]}], "people": [...]} for the photos
     marked "Date unknown" (or those of `ids`), best supported first. `people` is the age calibration list."""
     if ids is None:
-        key = (config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, json.dumps(hints(), sort_keys=True), json.dumps(ages.births(), sort_keys=True))
+        key = (config.INDEX_DB.stat().st_mtime if config.INDEX_DB.exists() else None, json.dumps(hints(), sort_keys=True), json.dumps(ages.known_births(), sort_keys=True))
         with _lock:
             if _all_cache["key"] == key and time.time() - _all_cache["at"] < ALL_TTL:
                 return _all_cache["value"]

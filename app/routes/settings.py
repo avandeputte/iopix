@@ -10,7 +10,7 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app.ai import models as dlmodels
-from app import access, config, events, jobs as bgjobs, proxyauth, updates, users
+from app import access, config, events, iocontacts, jobs as bgjobs, proxyauth, updates, users
 from app.digikam import dkdb, library
 from app.faces import facevecs
 from app.photos import edits, scanner
@@ -352,3 +352,31 @@ def api_maps(request: Request):
     if users.is_signed_in(request.state.user):
         maps.note_referer(request.headers)  # a visitor's Referer must not steer the key's referrer restriction
     return maps.config()
+
+
+@router.get("/api/iocontacts/settings", dependencies=[access.admin])
+def api_iocontacts_get():
+    """Settings › ioContacts: the address and account (secrets only as whether they are set), which of them
+    iopix.env fixes, and how the last fetch went."""
+    return iocontacts.public_settings()
+
+
+@router.post("/api/iocontacts/settings", dependencies=[access.admin])
+async def api_iocontacts_set(request: Request):
+    """Body: any of url, user, password, cf_client_id, cf_client_secret (an empty string clears one). Saved, then
+    tested when an address is set: {..settings, test: {ok, contacts, matched} or {ok: false, error}}."""
+    body = await json_body(request)
+    url = str(body.get("url") or "").strip()
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "The address starts with http:// or https://")
+    await run_in_threadpool(iocontacts.save_settings, body)
+    test = await run_in_threadpool(iocontacts.refresh) if iocontacts.enabled() else None
+    return {**iocontacts.public_settings(), "test": test}
+
+
+@router.post("/api/iocontacts/test", dependencies=[access.admin])
+async def api_iocontacts_test():
+    """Fetch the contacts now: {ok, contacts, matched} or {ok: false, error}."""
+    if not iocontacts.enabled():
+        raise HTTPException(400, "ioContacts is not set up")
+    return await run_in_threadpool(iocontacts.refresh)

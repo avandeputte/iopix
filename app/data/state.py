@@ -70,6 +70,12 @@ SETTINGS = {
     "auth_proxy_create": ("", str, "someone with no account: the sign-in screen (empty), deny, or a viewer or editor account"),
     "cf_access_team": ("", str, "the Cloudflare Access team domain whose tokens are verified"),
     "cf_access_aud": ("", str, "the Cloudflare Access application's AUD tag"),
+    # ioContacts, for the birthdays of the people here (iocontacts.py): IOCONTACTS_* in the environment wins
+    "iocontacts_url": ("", str, "ioContacts' address; empty: the link is off"),
+    "iocontacts_user": ("", str, "the ioContacts account iopix reads the contacts as"),
+    "iocontacts_password": ("", str, "an app password of that account (stored, never shown back)"),
+    "iocontacts_cf_id": ("", str, "the Cloudflare Access service token's client ID, when ioContacts is behind Access"),
+    "iocontacts_cf_secret": ("", str, "that service token's client secret (stored, never shown back)"),
 }
 _unknown_keys = set()  # logged once each
 

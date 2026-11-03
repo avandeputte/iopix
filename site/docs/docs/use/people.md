@@ -4,6 +4,8 @@
 
 ![People](/img/people.jpg){.shot}
 
+With [ioContacts](../integrations/iocontacts.md) linked, the birthdays in the next month are listed at the top, and the photo info shows how old each person was in the photo.
+
 ## Sorting and groups
 
 Sort people **by group**, **by family name**, **by name** or by **most photos**. Groups (family, friends, a team) let you keep the list tidy; editors can arrange them.

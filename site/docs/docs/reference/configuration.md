@@ -73,5 +73,7 @@ iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](
 | --- | --- |
 | `GOOGLE_MAPS_API_KEY` | Google Maps key (Settings can store one instead) |
 | `GOOGLE_SERVER_KEY` | a separate key for server-side Google calls |
+| `IOCONTACTS_URL`, `IOCONTACTS_USER`, `IOCONTACTS_PASSWORD` | ioContacts' address, and the account and app password iopix reads the birthdays as (see [ioContacts](../integrations/iocontacts.md)) |
+| `IOCONTACTS_CF_CLIENT_ID`, `IOCONTACTS_CF_CLIENT_SECRET` | the Cloudflare Access service token for ioContacts |
 | `UPDATE_CHECK` | `0` turns the daily update check off for good |
 | `EXIFTOOL` | path to exiftool, if not on the path |

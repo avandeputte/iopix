@@ -8,7 +8,7 @@ from fastapi import Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import access, config, events, thumbs, users
+from app import access, config, events, iocontacts, thumbs, users
 from app.digikam import dbsync
 from app.digikam.dkdb import in_chunks
 from app.photos import edits
@@ -374,6 +374,13 @@ async def api_datehints_set(request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+@router.get("/api/people/birthdays", dependencies=[access.signed_in])
+def api_people_birthdays():
+    """The birthdays from ioContacts (Settings › ioContacts) in the next month, today first:
+    {enabled, upcoming: [{tag, month, day, year, turns, in, date, url}]}. Read from what was last fetched."""
+    return {"enabled": iocontacts.enabled(), "upcoming": iocontacts.upcoming()}
 
 
 @router.post("/api/people/birth", dependencies=[access.signed_in])

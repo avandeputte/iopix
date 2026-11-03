@@ -154,7 +154,7 @@ function infoPeople(c) {
           else if (f.kind === 'confirmed' || f.kind === 'tagonly') filterFromLightbox({ tag: f.tag });
         } },
         h('img', { src: f.kind === 'tagonly' ? faceUrl(f.tag) : `/facecrop/${d.id}/${f.x}/${f.y}/${f.w}/${f.h}.jpg`, alt: '' }),
-        h('span', { class: 'nm' }, f.kind === 'confirmed' || f.kind === 'tagonly' ? f.name : f.kind === 'suggested' ? [h('i', null, 'Suggestion: '), f.name] : h('i', null, 'Unknown face')),
+        h('span', { class: 'nm' }, f.kind === 'confirmed' || f.kind === 'tagonly' ? [f.name, d.ages?.[f.tag] ? h('span', { class: 'muted', title: 'Age in this photo, from the birthday in ioContacts' }, ` · ${d.ages[f.tag]}`) : null] : f.kind === 'suggested' ? [h('i', null, 'Suggestion: '), f.name] : h('i', null, 'Unknown face')),
         S.CAN_MANAGE ? h('span', { class: 'muted smaller' }, f.kind === 'tagonly' ? 'no face box ▾' : 'options ▾') : null)))];
 }
 

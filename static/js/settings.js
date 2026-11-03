@@ -233,7 +233,7 @@ function scannerRow(c) {
 const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
-  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['users', 'Users and sign-in']],
+  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['contacts', 'ioContacts'], ['users', 'Users and sign-in']],
   maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['viewer', () => S.APP_NAME]],
 };
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
@@ -317,6 +317,45 @@ function displayTab(c) {
         })));
     })() : null,
   ];
+}
+
+/** Settings › ioContacts: the optional link to the suite's address book, for the birthdays of the people named here
+ * (iocontacts.py). The mirror of ioContacts' own Settings › ioPix: the server reads the contacts, never the browser. */
+function contactsTab(c) {
+  const { row, btn } = c;
+  const box = h('div', null, loadingBox('Loading…'));
+  const draw = (s, test) => {
+    const fixed = new Set(s.fromEnv);
+    const inp = (k, ph, type = 'text', w = 220) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : ({ url: s.url, user: s.user, cf_client_id: s.cfId }[k] || ''),
+      disabled: fixed.has(k), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
+    const f = { url: inp('url', 'https://contacts.example.com', 'text', 320), user: inp('user', 'ioContacts user'),
+      password: inp('password', s.hasPassword ? 'app password (kept; type to replace)' : 'app password', 'password'),
+      cf_client_id: inp('cf_client_id', 'Cloudflare client ID (optional)'),
+      cf_client_secret: inp('cf_client_secret', s.hasCfSecret ? 'client secret (kept; type to replace)' : 'Cloudflare client secret', 'password') };
+    const state = test ? (test.ok ? `Connected: ${nf.format(test.contacts)} contacts, birthdays for ${nf.format(test.matched)} ${test.matched === 1 ? 'person' : 'people'} here.` : `Saved, but ioContacts did not answer: ${test.error}`)
+      : !s.enabled ? 'Off: no birthdays from ioContacts.'
+      : s.error ? `The last try failed: ${s.error}`
+      : s.fetched ? `Connected: birthdays for ${nf.format(s.matched)} ${s.matched === 1 ? 'person' : 'people'} here, from ${nf.format(s.contacts)} contacts.` : 'Not fetched yet.';
+    const save = async (body) => {
+      try { const r = await post('/api/iocontacts/settings', body); draw(r, r.test); } catch (e) { toastError(e); }
+    };
+    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. ${S.APP_NAME} reads the contacts from the server; your browser never needs to reach ioContacts. Use an ioContacts account and an app password made for it (in ioContacts: Settings › Apps and devices). Behind Cloudflare Access, add a service token (Zero Trust › Access › Service auth) and allow it in the ioContacts application’s policy. Leave the address empty to turn this off.${fixed.size ? ' Some fields are set in iopix.env and can only be changed there.' : ''}`,
+      h('div', null,
+        h('div', { class: 'toolbar tight' }, f.url, f.user, f.password),
+        h('div', { class: 'toolbar tight mt6' }, f.cf_client_id, f.cf_client_secret),
+        h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
+          btn('Save and test', () => {
+            const body = { url: f.url.value, user: f.user.value, cf_client_id: f.cf_client_id.value };
+            if (f.password.value) body.password = f.password.value;
+            if (f.cf_client_secret.value) body.cf_client_secret = f.cf_client_secret.value;
+            for (const k of fixed) delete body[k];
+            save(body);
+          }, true),
+          s.enabled && !fixed.has('url') ? btn('Turn off', () => save({ url: '' })) : null),
+        h('div', { class: 'muted', style: `font-size:12.5px;margin-top:6px${(s.error && !test) || (test && !test.ok) ? ';color:var(--warn)' : ''}` }, state))));
+  };
+  api('/api/iocontacts/settings').then((s) => draw(s)).catch((e) => fill(box, e.message));
+  return [stab('contacts'), h('h2', null, 'ioContacts'), box];
 }
 
 /** Settings › digiKam and server: the two databases, album roots, the update check, the MCP server, read-only mode and sync. */
@@ -580,6 +619,7 @@ async function settingsPage(view) {
     S.IS_ADMIN ? serverTab(c) : null,
     S.IS_ADMIN ? stab('ai') : null,
     S.IS_ADMIN ? analysisSection(view, 'prefs') : null,
+    S.IS_ADMIN ? contactsTab(c) : null,
     S.IS_ADMIN && S.USERS_EXIST ? stab('users') : null,
     S.IS_ADMIN && S.USERS_EXIST ? usersSection() : null,
     S.IS_ADMIN && S.EDITING ? editingTab(c) : null,

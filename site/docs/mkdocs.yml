@@ -107,6 +107,7 @@ nav:
   - Connect more:
       - MCP server for AI assistants: integrations/mcp.md
       - Google Maps and Cloud Vision: integrations/google.md
+      - ioContacts birthdays: integrations/iocontacts.md
   - Reference:
       - Configuration variables: reference/configuration.md
       - Keyboard shortcuts: reference/keyboard.md

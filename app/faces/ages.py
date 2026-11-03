@@ -18,7 +18,7 @@ import math
 import threading
 import time
 
-from app import config, jobs, thumbs
+from app import config, iocontacts, jobs, thumbs
 from app.ai import models
 from app.data import index, vdb
 
@@ -217,6 +217,11 @@ def births() -> dict:
         return {int(r[0]): int(r[1]) for r in con.execute("SELECT tag_id, birth_year FROM person_births")}
 
 
+def known_births() -> dict:
+    """The birth years the suggestions go by: those from ioContacts' birthdays, and over them the ones entered here."""
+    return {**iocontacts.birth_years(), **births()}
+
+
 def set_birth(tag: int, year):
     with vdb.writer() as con:
         if year is None:
@@ -302,12 +307,14 @@ def year_for(c: dict, age: float) -> tuple:
 
 
 def suggestions(ids: list = None) -> dict:
-    """{"items": [{id, year, lo, hi, people: [{tag, name, age, year}]}], "people": [{tag, name, birth, entered, basis, n}]}
+    """{"items": [{id, year, lo, hi, people: [{tag, name, age, year}]}], "people": [{tag, name, birth, entered, fromContacts, basis, n}]}
+    (a birth year from ioContacts counts as entered; one entered here wins over it)
     for the photos marked "Date unknown" (or those of `ids`), best supported first. Computed on request from the
     stored ages; a photo none of whose named faces has a calibrated person gets no item."""
     if np is None:
         return {"items": [], "people": []}
-    ages, entered = _ages(), births()
+    ages, typed = _ages(), births()
+    entered = known_births()
     con = index.open_index()
     try:
         names = {r[0]: r[1] for r in con.execute("SELECT id, name FROM tags WHERE person = 1")}
@@ -355,6 +362,7 @@ def suggestions(ids: list = None) -> dict:
                       "people": [{"tag": e["tag"], "name": e["name"], "age": e["age"], "year": round(e["year"])} for e in sorted(est, key=lambda e: e["name"])]})
     items.sort(key=lambda i: (i["hi"] - i["lo"], -len(i["people"]), i["id"]))
     people = [{"tag": t, "name": names.get(t, ""), "birth": c["birth"] if c else entered.get(t), "entered": t in entered,
+               "fromContacts": t in entered and t not in typed,
                "basis": c["basis"] if c else None, "n": c["n"] if c else 0} for t, c in cal.items()]
     people.sort(key=lambda p: p["name"].lower())
     return {"items": items, "people": people}
