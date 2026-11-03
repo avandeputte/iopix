@@ -73,6 +73,9 @@ def test_sidebar_docks_hides_and_slides_over(browser, server):
         assert page.locator("#main").bounding_box()["x"] == 0
         page.reload(); page.wait_for_selector("#menubtn", state="visible", timeout=10000)
         assert not page.evaluate("document.body.classList.contains('side-docked')"), "put away stays put away"
+        # the menu button is in the page from the start but gets its handler when the app has drawn the sidebar's links
+        # (main.js start(), after the status and account calls): click once a link is there, not before
+        page.wait_for_selector("#nav a[data-v=people]", state="attached", timeout=10000)
         page.locator("#menubtn").click(); page.wait_for_selector("body.side-open #nav a[data-v=people]", state="visible", timeout=3000)
         page.locator("#nav a[data-v=people]").click()  # (the click waits for the slide-over to come to rest)
         page.wait_for_function("!document.body.classList.contains('side-open')", timeout=3000)
