@@ -1,7 +1,9 @@
 {
  "DELETE /api/auth/app-passwords/{pid}": "signed_in",
+ "DELETE /api/auth/sessions/{session_id}": "signed_in",
  "DELETE /api/people/groups/{group_id}": "editor",
  "DELETE /api/users/{user_id}": "admin",
+ "DELETE /api/users/{user_id}/sessions": "admin",
  "GET /api/analysis": "public",
  "GET /api/auth/accounts": "public",
  "GET /api/auth/app-passwords": "signed_in",
@@ -69,6 +71,7 @@
  "GET /api/trash/thumb": "public",
  "GET /api/update": "admin",
  "GET /api/users": "admin",
+ "GET /api/users/{user_id}/sessions": "admin",
  "GET /api/viewerdb": "admin",
  "GET /api/zip": "public",
  "PATCH /api/users/{user_id}": "admin",
