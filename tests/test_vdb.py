@@ -34,7 +34,7 @@ def test_sqlite_snapshot_and_copy_keep_every_row(client, tmp_path, fresh):
     vdb.snapshot_sqlite(snap)
     con = sqlite3.connect(snap)
     assert con.execute("SELECT value FROM app_settings WHERE key = 'zz_probe'").fetchone()[0] == "value with ? and %s and `key`"
-    assert con.execute("SELECT count(*) FROM favorite_photos").fetchone()[0] >= 2 and con.execute("SELECT name FROM user_accounts").fetchone()[0] == "alex"
+    assert con.execute("SELECT count(*) FROM favorite_photos").fetchone()[0] >= 2  # (accounts live in the shared auth database now)
     assert con.execute("SELECT sharp FROM ai_quality WHERE photo_id = 1").fetchone()[0] == 0.5
     con.close()
     # copy_all into another SQLite file, then read it through the bridge
@@ -43,7 +43,7 @@ def test_sqlite_snapshot_and_copy_keep_every_row(client, tmp_path, fresh):
     dst = vdb.VConn(vdb._sqlite_raw(dst_path, 5), False, True)
     try:
         counts = vdb.copy_all(src, dst, drop=True)
-        assert counts["user_accounts"] >= 1 and counts["favorite_photos"] >= 2 and counts["viewer_albums"] >= 1
+        assert counts["favorite_photos"] >= 2 and counts["viewer_albums"] >= 1
         r = dst.execute("SELECT id, name FROM viewer_albums WHERE id = ?", (aid,)).fetchone()
         assert r["name"] == "Trip" and r[1] == "Trip", "rows answer to names and indexes"
     finally:

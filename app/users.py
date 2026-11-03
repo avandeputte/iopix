@@ -1,489 +1,100 @@
-"""Users, sessions and permissions.
+"""Users, sessions and permissions: the shared ioThing accounts (iothing-auth), seen from iopix.
 
-Three roles: viewer (signed in; own settings kept on the server; favorites and viewer
-albums), editor (viewer plus every library write: edits, tags, faces, place tags, GPX,
-sync, database apply) and admin (editor plus settings, maintenance and user management).
-Anyone not signed in browses read-only with display settings in the browser. A viewer may
-have no password at all: such an account signs in with one click from the account picker
-(like a media-server profile) and can never be more than a viewer.
+Three roles here: viewer (signed in; own settings kept on the server; favorites and viewer albums), editor (viewer
+plus every library write: edits, tags, faces, place tags, GPX, sync, database apply) and admin (editor plus settings,
+maintenance and user management). An account holds a role per app; a suite admin is admin everywhere. Anyone not
+signed in browses read-only with display settings in the browser. A viewer may have no password at all: such an
+account signs in with one click from the account picker (on the home network only) and can never be more than a
+viewer. Until the first account exists the viewer stays open, so a fresh install is not locked out.
 
-Until the first user exists the viewer stays open as before, so a fresh install is not
-locked out; Settings asks to create the admin, or ADMIN_USER / ADMIN_PASSWORD in the
-environment create one at start (containers, installers). Passwords are scrypt-hashed;
-a session is a signed, HttpOnly cookie (secret in data/secret) valid for 30 days.
+Passwords are scrypt-hashed and sessions are random tokens in an HttpOnly cookie (30 days, renewed in use), both
+in the auth database, so a session begun in another ioThing app is a session here too. This module keeps iopix's
+old names for the rest of the code; the work is done by iothing_auth.
 """
-import base64
-import hashlib
-import hmac
-import json
-import os
-import re
-import secrets
-import threading
-import time
+from iothing_auth import db as authdb, sessions, users as shared
+from iothing_auth.passwords import check_password, hash_password
 
-from app import config, proxyauth
-from app.data import state
+from app.auth import APP, decorate, person_tag, set_person
 
-ROLES = ("viewer", "editor", "admin")
-COOKIE = "iopix_session"
-SESSION_DAYS = 30
-_secret = None
+__all__ = ["check_password", "hash_password", "person_tag", "set_person", "decorate", "APP"]  # re-exported for the rest of the app
+
+ROLES = shared.APP_ROLES
+COOKIE = sessions.COOKIE
+VIA_COOKIE = sessions.VIA_COOKIE
+SESSION_DAYS = sessions.SESSION_DAYS
+CACHE_S = shared.CACHE_S
+_attempts = shared._attempts
+LOCK_AFTER, LOCK_AFTER_NAME, LOCK_BASE, LOCK_MAX = shared.LOCK_AFTER, shared.LOCK_AFTER_NAME, shared.LOCK_BASE, shared.LOCK_MAX
+login_wait, login_failed, login_succeeded = shared.login_wait, shared.login_failed, shared.login_succeeded
+any_users, delete, is_signed_in, can_write, is_admin = shared.any_users, shared.delete, shared.is_signed_in, shared.can_write, shared.is_admin
+end_all_sessions = sessions.end_all
 
 
 def init():
-    """Create the admin account named by ADMIN_USER / ADMIN_PASSWORD on a first start with no users yet."""
-    # the users table (and its person / email columns) is part of the schema vdb.ensure_schema keeps; state.init ran it
-    name, pw = config.ADMIN_USER, config.ADMIN_PASSWORD
-    if name and pw and not any_users():
-        create(name, pw, "admin")
-
-
-def _key() -> bytes:
-    global _secret
-    if _secret is None:
-        p = config.DATA_DIR / "secret"
-        try:
-            _secret = p.read_bytes().strip()
-            if len(_secret) < 32:
-                raise ValueError
-        except (OSError, ValueError):
-            _secret = secrets.token_bytes(32)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(_secret)
-            try:
-                os.chmod(p, 0o600)
-            except OSError:
-                pass
-    return _secret
-
-
-# ---- passwords
-SCRYPT = (2 ** 16, 8, 1)  # n, r, p: 64 MiB per hash (OWASP's floor is 2^17 x 8 x 1; 2^16 keeps a small container responsive)
-
-
-def hash_password(pw: str) -> str:
-    """scrypt2$n$r$p$salt$hash: the parameters travel with the hash, so they can be raised later."""
-    n, r, p = SCRYPT
-    salt = secrets.token_bytes(16)
-    h = hashlib.scrypt(pw.encode(), salt=salt, n=n, r=r, p=p, dklen=32, maxmem=256 * 1024 * 1024)
-    return f"scrypt2${n}${r}${p}$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(h).decode()
-
-
-_DUMMY_HASH = None  # a hash to check an unknown name against (made once, so a miss costs the same as a wrong password)
-
-
-def check_password(pw: str, stored: str) -> bool:
-    """Whether pw matches the stored scrypt hash (either format); False, never an exception, for a malformed hash."""
-    try:
-        parts = stored.split("$")
-        if parts[0] == "scrypt2":
-            n, r, p, s, h = int(parts[1]), int(parts[2]), int(parts[3]), parts[4], parts[5]
-        else:  # the first format: scrypt$salt$hash with n=2^14, r=8, p=1
-            _, s, h = parts
-            n, r, p = 2 ** 14, 8, 1
-        got = hashlib.scrypt(pw.encode(), salt=base64.b64decode(s), n=n, r=r, p=p, dklen=32, maxmem=256 * 1024 * 1024)
-        return hmac.compare_digest(got, base64.b64decode(h))
-    except Exception:
-        return False
-
-
-def needs_rehash(stored: str) -> bool:
-    """An older or weaker hash: replaced with the current one once the password is seen again."""
-    parts = (stored or "").split("$")
-    return bool(stored) and (parts[0] != "scrypt2" or tuple(int(x) for x in parts[1:4]) != SCRYPT)
-
-
-# ---- users
-COLS = "id, name, role, created, last_login, hash, person, email, listed"
-
-
-def row(r) -> dict:
-    """One user_accounts row (selected as COLS) as the dict the API serves; the hash itself is never in it."""
-    return {"id": r[0], "name": r[1], "role": r[2], "created": r[3], "last_login": r[4], "passwordless": not r[5], "person": r[6], "email": r[7] or "", "listed": r[8] != 0}
-
-
-def clean_email(email) -> str:
-    """An optional address: empty, or something@something.tld, at most 254 characters."""
-    email = (email or "").strip().lower()
-    if email and (len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)):
-        raise ValueError("That does not look like an email address")
-    return email
-
-
-def require_login() -> bool:
-    """Settings › Users › Require sign-in: nothing but the sign-in screen for visitors. Only
-    meaningful once an account exists (otherwise nobody could ever sign in)."""
-    return state.get_setting("require_login", "0") == "1" and any_users()
-
-
-def linked_persons() -> set:
-    """The person tags listed accounts are linked to: their face badges are the account picker's avatars,
-    so they stay visible on the sign-in screen even when sign-in is required."""
-    con = state.connect()
-    try:
-        return {r[0] for r in con.execute("SELECT person FROM user_accounts WHERE person IS NOT NULL AND listed = 1")}
-    finally:
-        con.close()
-
-
-_cache = {"any": None, "any_at": 0.0, "tokens": {}}  # asked on every request and several times per status poll
-CACHE_S = 3.0
+    """The auth database's tables, and the admin named by ADMIN_USER / ADMIN_PASSWORD on a first start with no accounts yet."""
+    shared.init()
 
 
 def invalidate():
-    """Accounts changed (created, deleted, password or role set, sessions ended): forget what was cached."""
-    _cache.update(any=None, any_at=0.0, tokens={})
-
-
-def any_users() -> bool:
-    """Whether any account exists (then sign-in is required); cached for CACHE_S seconds, it is asked on every request."""
-    if _cache["any"] is not None and time.time() - _cache["any_at"] < CACHE_S:
-        return _cache["any"]
-    con = state.connect()
-    try:
-        v = con.execute("SELECT 1 FROM user_accounts LIMIT 1").fetchone() is not None
-    finally:
-        con.close()
-    _cache.update(any=v, any_at=time.time())
-    return v
+    shared.invalidate()
 
 
 def list_users() -> list:
-    """Every account, oldest first, as row() dicts."""
-    con = state.connect()
-    try:
-        return [row(r) for r in con.execute(f"SELECT {COLS} FROM user_accounts ORDER BY id")]
-    finally:
-        con.close()
+    return [decorate(u) for u in shared.list_users(APP)]
 
 
 def get(user_id: int):
-    """One account as a row() dict, or None."""
-    con = state.connect()
-    try:
-        r = con.execute(f"SELECT {COLS} FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
-        return row(r) if r else None
-    finally:
-        con.close()
+    return decorate(shared.get(user_id, APP))
 
 
 def create(name: str, password: str, role: str, email: str = "") -> dict:
-    """A new account; returns it as a row() dict. ValueError with the message to show for a bad name, role, password or email."""
-    invalidate()
-    name = name.strip()
-    email = clean_email(email)
-    if not name or len(name) > 64:
-        raise ValueError("A user name is needed (up to 64 characters)")
-    if role not in ROLES:
-        raise ValueError("Unknown role")
-    if password == "" and role != "viewer":
-        raise ValueError("Only a viewer can have no password")
-    if password != "" and len(password) < 8:
-        raise ValueError("The password needs at least 8 characters")
-    con = state.connect()
-    try:
-        if con.execute("SELECT 1 FROM user_accounts WHERE lower(name) = lower(?)", (name,)).fetchone():
-            raise ValueError("That user name is taken")
-        if email and con.execute("SELECT 1 FROM user_accounts WHERE email = ?", (email,)).fetchone():
-            raise ValueError("Another account already has that email address")
-        cur = con.execute("INSERT INTO user_accounts (name, hash, role, created, email) VALUES (?,?,?,?,?)", (name, hash_password(password) if password else "", role, int(time.time()), email or None))
-        con.commit()
-        invalidate()
-        return get(cur.lastrowid)
-    finally:
-        con.close()
+    """A new account with this role in iopix; ValueError with the message to show."""
+    return decorate(shared.create(name, password, role, APP, email=email))
 
 
 def update(user_id: int, role: str = None, password: str = None, name: str = None, email: str = None, listed: bool = None):
-    """Change the given fields of an account (None: unchanged). A new password signs the user's other sessions out. ValueError with the message to show."""
-    invalidate()
-    con = state.connect()
-    try:
-        if email is not None:
-            email = clean_email(email)
-            if email and con.execute("SELECT 1 FROM user_accounts WHERE email = ? AND id != ?", (email, user_id)).fetchone():
-                raise ValueError("Another account already has that email address")
-            con.execute("UPDATE user_accounts SET email = ? WHERE id = ?", (email or None, user_id))
-        if role is not None:
-            if role not in ROLES:
-                raise ValueError("Unknown role")
-            if role != "admin" and con.execute("SELECT count(*) FROM user_accounts WHERE role = 'admin' AND id != ?", (user_id,)).fetchone()[0] == 0 \
-                    and con.execute("SELECT role FROM user_accounts WHERE id = ?", (user_id,)).fetchone()[0] == "admin":
-                raise ValueError("That is the only admin; make someone else admin first")
-            if role != "viewer" and not con.execute("SELECT hash FROM user_accounts WHERE id = ?", (user_id,)).fetchone()[0]:
-                raise ValueError("Set a password first; an account without one can only be a viewer")
-            con.execute("UPDATE user_accounts SET role = ? WHERE id = ?", (role, user_id))
-        if password is not None:
-            if password == "":  # remove the password: one-click sign-in, viewers only
-                if con.execute("SELECT role FROM user_accounts WHERE id = ?", (user_id,)).fetchone()[0] != "viewer":
-                    raise ValueError("Only a viewer can have no password")
-                con.execute("UPDATE user_accounts SET hash = '' WHERE id = ?", (user_id,))
-            else:
-                if len(password) < 8:
-                    raise ValueError("The password needs at least 8 characters")
-                con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (hash_password(password), user_id))
-        if name is not None:
-            name = name.strip()
-            if not name or len(name) > 64:
-                raise ValueError("A user name is needed (up to 64 characters)")
-            if con.execute("SELECT 1 FROM user_accounts WHERE lower(name) = lower(?) AND id != ?", (name, user_id)).fetchone():
-                raise ValueError("That user name is taken")
-            con.execute("UPDATE user_accounts SET name = ? WHERE id = ?", (name, user_id))
-        if listed is not None:  # off the sign-in screen's account list: the account signs in through "Other", by name
-            con.execute("UPDATE user_accounts SET listed = ? WHERE id = ?", (1 if listed else 0, user_id))
-        con.commit()
-        invalidate()
-    finally:
-        con.close()
-    _forget_proxy_identities()
-
-
-def delete(user_id: int):
-    """Remove an account; ValueError when it is the only admin."""
-    invalidate()
-    con = state.connect()
-    try:
-        r = con.execute("SELECT role FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
-        if r and r[0] == "admin" and con.execute("SELECT count(*) FROM user_accounts WHERE role = 'admin'").fetchone()[0] == 1:
-            raise ValueError("That is the only admin; make someone else admin first")
-        con.execute("DELETE FROM user_accounts WHERE id = ?", (user_id,))
-        con.commit()
-        invalidate()
-    finally:
-        con.close()
-    _forget_proxy_identities()
-
-
-def _forget_proxy_identities():
-    """A sign-in through the proxy is remembered for half a minute (proxyauth); a change here must not outlive that."""
-    proxyauth.forget_identities()
+    shared.update(user_id, role=role, app=APP, password=password, name=name, email=email, listed=listed)
 
 
 def authenticate(name: str, password: str):
-    """The account as a row() dict when the password is right, else None; takes the same time for an unknown name as for a wrong password."""
-    con = state.connect()
-    try:
-        r = con.execute("SELECT id, hash FROM user_accounts WHERE name = ?", (name.strip(),)).fetchone()
-        if not r:
-            global _DUMMY_HASH
-            if _DUMMY_HASH is None:
-                _DUMMY_HASH = hash_password("not a real password")
-            check_password(password, _DUMMY_HASH)  # the same work as for a wrong password: an unknown name is not told apart by its timing
-            return None
-        if r[1] and not check_password(password, r[1]):  # an empty hash is a passwordless viewer: one click signs in
-            return None
-        if r[1] and needs_rehash(r[1]):  # the password is known now: stored with the current parameters
-            con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (hash_password(password), r[0]))
-        con.execute("UPDATE user_accounts SET last_login = ? WHERE id = ?", (int(time.time()), r[0]))
-        con.commit()
-        invalidate()
-        return get(r[0])
-    finally:
-        con.close()
+    return decorate(shared.authenticate(name, password, APP))
 
 
 def accounts() -> list:
-    """What the sign-in picker shows to anyone: names and whether a password is asked for. An account taken off
-    the list (Settings › Users › Sign-in list) signs in through "Other", by name."""
-    con = state.connect()
-    try:
-        return [{"id": r[0], "name": r[1], "passwordless": not r[2], "person": r[3]} for r in con.execute("SELECT id, name, hash, person FROM user_accounts WHERE listed = 1 ORDER BY lower(name)")]
-    finally:
-        con.close()
+    """What the sign-in picker shows: listed accounts with access here, whether a password is asked for, and the linked person."""
+    return [decorate(a) for a in shared.accounts(APP)]
 
 
-def set_person(user_id: int, tag_id):
-    """Link the account to a digiKam person tag (None unlinks). The caller checks the tag is a person."""
-    con = state.connect()
-    try:
-        con.execute("UPDATE user_accounts SET person = ? WHERE id = ?", (int(tag_id) if tag_id else None, user_id))
-        con.commit()
-        invalidate()
-    finally:
-        con.close()
+def linked_persons() -> set:
+    """The person tags listed accounts are linked to: their face badges are the account picker's avatars."""
+    rows = authdb.q("SELECT d.v FROM user_data d JOIN users u ON u.id = d.user_id WHERE d.app = %s AND d.k = 'person' AND u.listed = 1", (APP,))
+    return {int(v) for v in (authdb.json_load(r["v"]) for r in rows) if v}
 
 
-# ---- per-user settings: display preferences (sort order, theme, grid size...) stored with the account, so they
-# follow the user to every browser and app instead of living in one browser's localStorage
+def require_login() -> bool:
+    """Settings › Users › Require sign-in: nothing but the sign-in screen for visitors."""
+    return shared.require_login(APP)
+
+
+def set_require_login(on: bool):
+    authdb.set_setting("require_login", "1" if on else "0", APP)
+
+
 def get_settings(user_id: int) -> dict:
-    """The user's own display preferences (a free-form JSON object the apps read and write)."""
-    con = state.connect()
-    try:
-        r = con.execute("SELECT settings FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
-        return json.loads(r[0]) if r and r[0] else {}
-    finally:
-        con.close()
+    return shared.get_settings(user_id, APP)
 
 
 def set_settings(user_id: int, changes: dict) -> dict:
-    """Merge changes into the user's preferences (None removes a key; keys and values are limited in size) and return the result."""
-    cur = get_settings(user_id)
-    for k, v in changes.items():
-        if not isinstance(k, str) or len(k) > 64:
-            continue
-        if v is None:
-            cur.pop(k, None)
-        elif isinstance(v, (str, int, float, bool)) and len(str(v)) <= 2000:
-            cur[k] = v
-    con = state.connect()
-    try:
-        con.execute("UPDATE user_accounts SET settings = ? WHERE id = ?", (json.dumps(cur), user_id))
-        con.commit()
-        invalidate()
-    finally:
-        con.close()
-    return cur
-
-
-# ---- sign-in attempts: a wrong password costs a growing wait, per address and account, so a password cannot be
-# guessed by trying many (the counters live in memory: a restart clears them)
-_attempts = {}  # key -> [failures, locked_until]
-_attempts_lock = threading.Lock()
-LOCK_AFTER = 5         # free tries before the first wait (per address and account)
-LOCK_AFTER_NAME = 20   # free tries per account whatever the addresses: many addresses cannot share the guessing
-LOCK_BASE = 30         # seconds; doubles with every further failure, up to LOCK_MAX
-LOCK_MAX = 15 * 60
-
-
-def login_wait(key: str) -> int:
-    """Seconds this key still has to wait before another try (0: go ahead)."""
-    with _attempts_lock:
-        rec = _attempts.get(key)
-        if not rec:
-            return 0
-        return max(0, int(-(-(rec[1] - time.time()) // 1)))  # rounded up: never tell someone 0 s when a moment remains
-
-
-def login_failed(key: str, free: int = LOCK_AFTER) -> int:
-    """Count a wrong password; returns the wait now imposed (0 while under the free tries)."""
-    with _attempts_lock:
-        if len(_attempts) > 10000:  # never let strangers fill the memory: expired entries go, the live locks stay
-            now = time.time()
-            for k in [k for k, (n, until) in _attempts.items() if until < now - LOCK_MAX]:
-                del _attempts[k]
-            if len(_attempts) > 10000:
-                for k in list(_attempts)[:len(_attempts) // 2]:
-                    del _attempts[k]
-        rec = _attempts.setdefault(key, [0, 0.0])
-        rec[0] += 1
-        over = rec[0] - free
-        wait = min(LOCK_MAX, LOCK_BASE * 2 ** (over - 1)) if over > 0 else 0
-        rec[1] = time.time() + wait
-        return wait
-
-
-def login_succeeded(key: str):
-    """Forget the failed attempts counted against this name or address (the throttle resets on a right password)."""
-    with _attempts_lock:
-        _attempts.pop(key, None)
-
-
-# ---- sessions
-def _session_salt(user_id: int) -> str:
-    """Part of the password hash plus the account's session generation: a changed password, or "sign out
-    everywhere", ends every session that was signed before."""
-    con = state.connect()
-    try:
-        r = con.execute("SELECT hash, session_gen FROM user_accounts WHERE id = ?", (user_id,)).fetchone()
-    finally:
-        con.close()
-    return f"{(r[0] or 'none')[-16:]}:{r[1] or 0}" if r else "none"
-
-
-def end_all_sessions(user_id: int):
-    """Every session of this account stops working (the caller sets a fresh cookie for the current one if wanted)."""
-    invalidate()
-    con = state.connect()
-    try:
-        con.execute("UPDATE user_accounts SET session_gen = coalesce(session_gen, 0) + 1 WHERE id = ?", (user_id,))
-        con.commit()
-        invalidate()
-    finally:
-        con.close()
-
-
-def make_token(user_id: int) -> str:
-    """A session token: user id, expiry and an HMAC over both with the user's session salt, so a password change (new salt) ends every session."""
-    payload = f"{user_id}.{int(time.time()) + SESSION_DAYS * 86400}"
-    sig = hmac.new(_key(), (payload + "|" + _session_salt(user_id)).encode(), hashlib.sha256).hexdigest()
-    return payload + "." + sig
-
-
-VIA_COOKIE = "iopix_via"  # how the session began (password, oneclick, cloudflare, proxy): shown in the account dialog only
-
-
-def set_session(response, user_id: int, via: str, secure: bool = False):
-    """secure: the request came over HTTPS (the proxy said so): the cookie is never sent over plain HTTP then."""
-    response.set_cookie(COOKIE, make_token(user_id), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/", secure=secure)
-    response.set_cookie(VIA_COOKIE, via, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/", secure=secure)
-
-
-def over_https(request) -> bool:
-    """Whether the client reached the viewer over HTTPS: directly, or through a proxy that says so."""
-    return request.url.scheme == "https" or (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower() == "https"
-
-
-def clear_session(response, cloudflare_cookie: bool = False):
-    """cloudflare_cookie: also drop Cloudflare Access's own session cookie for this site (on the home network, where
-    Cloudflare's sign-out page cannot be reached), so the next visit from outside asks Cloudflare's sign-in again."""
-    response.delete_cookie(COOKIE, path="/")
-    response.delete_cookie(VIA_COOKIE, path="/")
-    if cloudflare_cookie:
-        response.delete_cookie("CF_Authorization", path="/")
-
-
-def renew_due(token: str) -> bool:
-    """A session in use is renewed (a fresh 30 days) once a day, so a device used at least once a month stays signed in."""
-    try:
-        return int(token.split(".")[1]) - time.time() < (SESSION_DAYS - 1) * 86400
-    except (ValueError, IndexError, AttributeError):
-        return False
+    return shared.set_settings(user_id, APP, changes)
 
 
 def user_from_token(token: str):
-    """The account a session token stands for, or None; cached briefly, the cookie is checked on every request."""
-    hit = _cache["tokens"].get(token)
-    if hit and time.time() - hit[0] < CACHE_S:
-        return hit[1]
-    user = _user_from_token(token)
-    if len(_cache["tokens"]) > 500:
-        _cache["tokens"].clear()
-    _cache["tokens"][token] = (time.time(), user)
-    return user
-
-
-def _user_from_token(token: str):
-    try:
-        uid, exp, sig = token.split(".")
-        if not hmac.compare_digest(hmac.new(_key(), f"{uid}.{exp}|{_session_salt(int(uid))}".encode(), hashlib.sha256).hexdigest(), sig):
-            return None
-        if int(exp) < time.time():
-            return None
-        return get(int(uid))
-    except (ValueError, AttributeError):
-        return None
-
-
-# ---- permissions
-def can_write(user) -> bool:
-    """Library writes (sidecars, files, digiKam's database)."""
-    return not any_users() or (user is not None and user["role"] in ("editor", "admin"))
-
-
-def is_admin(user) -> bool:
-    """Whether this user may administer; with no accounts at all, everyone may."""
-    return not any_users() or (user is not None and user["role"] == "admin")
-
-
-def is_signed_in(user) -> bool:
-    """Whether this request counts as signed in; with no accounts at all, every request does."""
-    return not any_users() or user is not None
+    return decorate(sessions.user_from_token(token, APP))
 
 
 if __name__ == "__main__":
     import sys
-    state.init(); init()
+    init()
     if len(sys.argv) >= 4 and sys.argv[1] == "create":
         print(create(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "admin"))
     elif sys.argv[1:] == ["list"]:

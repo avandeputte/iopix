@@ -7,17 +7,15 @@ go through the modules that own those writes."""
 import json
 import logging
 import threading
-import time
-from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 
-from starlette.concurrency import run_in_threadpool
 from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facemgr
 from app import config, events, mcp, proxyauth, thumbs, updates, users
+from app.auth import auth as auth_shared
 from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate
 from app.digikam import dkdb
@@ -95,42 +93,10 @@ def _mcp_token_ok(request: Request) -> bool:
     return auth.lower().startswith("bearer ") and updates.token_ok(auth[7:].strip())
 
 
-def _no_access(request: Request, ident: str):
-    """Someone the proxy let in who has no account here, with Settings › Users › Sign-in at a proxy set to deny them."""
-    msg = f"{ident} has no account on this photo library. Ask its owner for access."
-    if request.url.path.startswith("/api/"):
-        return JSONResponse({"detail": msg, "noAccess": True}, status_code=403)
-    from html import escape
-    out = "/cdn-cgi/access/logout" if proxyauth.external(request.headers, proxyauth.peer_of(request)) else None
-    return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>No access</title><style>body{{font:16px system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 16px;color:#222;background:#fff}}
-@media (prefers-color-scheme:dark){{body{{color:#eee;background:#111}}a{{color:#8ab4f8}}}}</style>
-<h1>No access</h1><p>{escape(msg)}</p>{f'<p><a href="{out}">Sign in with another account</a></p>' if out else ''}""", status_code=403)
-
-
-@app.middleware("http")
-async def _auth_guard(request: Request, call_next):
-    """Who is asking (session cookie or the proxy's identity), whether sign-in is required at all, and the
-    cross-site check on writes. What each route needs beyond that (an editor, an admin, an account) is declared
-    on the route (app/access.py)."""
-    session = request.cookies.get(users.COOKIE)
-    user = (await run_in_threadpool(users.user_from_token, session)) if session else None  # a database lookup (cached 3 s): never on the event loop
-    cookie_uid = user["id"] if user else None
-    request.state.via_proxy = False
-    if "cf-access-jwt-assertion" in request.headers and time.time() - proxyauth.seen.get("at", 0) > 60:
-        proxyauth.note(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
-    if proxyauth.mode() != "off":  # signed in at a reverse proxy (Cloudflare Access, Authelia...): that person, when vouched for
-        pu = await run_in_threadpool(proxyauth.user, request)
-        if pu:
-            user, request.state.via_proxy = pu, True
-        elif getattr(request.state, "proxy_ident", None) and proxyauth.deny_unknown() and not request.url.path.startswith("/mcp"):
-            # (MCP clients sign in with the admin token, whatever Cloudflare service token got them through)
-            return _no_access(request, request.state.proxy_ident)
-    if user and not request.state.via_proxy and user.get("passwordless") and proxyauth.external(request.headers, proxyauth.peer_of(request)):
-        user = None  # a passwordless account's session (begun on the LAN) does not work from outside
-        if proxyauth.once(("lan-session", request.cookies.get(users.COOKIE))):
-            proxyauth.authlog.info("a one-click session is not used from outside: shown the sign-in screen (from %s)", proxyauth.source(request))
-    request.state.user = user
+def _gate(request: Request):
+    """Once the user is known (app/auth.py's middleware): who the change history and private albums see, and the
+    MCP endpoint's own gates (the switch, and the admin token on every request)."""
+    user = request.state.user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner
     if request.url.path.startswith("/mcp"):
@@ -140,28 +106,13 @@ async def _auth_guard(request: Request, call_next):
             return JSONResponse({"detail": "The MCP server needs the admin token on every request: 'Authorization: Bearer <token>' "
                                            "(Maintenance › iopix version › MCP update token)"}, status_code=401)
         mcp.token_given.set(True)  # answers may carry file paths: the caller holds the admin token
-    if user is None and users.require_login():
-        path = request.url.path
-        if not path.startswith("/mcp") and not _open_to_visitors(path):
-            return JSONResponse({"detail": "Sign in to use the viewer."}, status_code=401)
-    path = request.url.path
-    if request.method not in ("GET", "HEAD", "OPTIONS"):
-        # a page on another site (or another port) cannot drive this one with the browser's cookies: the request's
-        # Origin, when the browser sends one, has to be this host. Who may call which route is declared on the
-        # route itself (app/access.py), not here.
-        origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
-        if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
-            return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
-    response = await call_next(request)
-    if (user and not request.state.via_proxy and cookie_uid == user["id"] and path not in ("/api/auth/logout", "/api/auth/logout_all", "/api/auth/password")
-            and users.renew_due(session) and "set-cookie" not in response.headers):
-        users.set_session(response, user["id"], request.cookies.get(users.VIA_COOKIE) or "password", users.over_https(request))
-    if request.state.via_proxy and user and cookie_uid != user["id"] and path != "/api/auth/logout":
-        # signed in at the proxy (Cloudflare Access): a session here too, so the same browser stays signed in on the
-        # home network, where requests reach the viewer directly without Cloudflare
-        users.set_session(response, user["id"], "cloudflare" if proxyauth.mode() == "cloudflare" else "proxy", users.over_https(request))
-    return response
+    return None
 
+
+# who is asking (the shared session cookie, the proxy's identity), whether sign-in is required at all, and the
+# cross-site check on writes: iothing-auth's middleware. What each route needs beyond that (an editor, an admin,
+# an account) is declared on the route (app/access.py).
+app.middleware("http")(auth_shared.middleware(is_open=_open_to_visitors, open_prefixes=("/mcp",), before=_gate))
 
 
 @app.middleware("http")

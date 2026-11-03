@@ -127,6 +127,8 @@ Derived from these:
 
 ## Users and permissions
 
+Accounts are the **ioThing suite's shared accounts** (the `iothing-auth` library, a MariaDB database shared with ioNotes and ioContacts): one name, password and session for every app, so someone signed in at `photo.example.com` is signed in at `notes.example.com` too when the apps share a domain (`IOTHING_COOKIE_DOMAIN`). What is iopix's own is kept per app: the role an account holds here, its display settings and the person it is linked to. A *suite admin* is admin in every app; an app admin manages this app's settings and the accounts' roles here. Point iopix at that database with `IOTHING_AUTH_DB_HOST`, `IOTHING_AUTH_DB_NAME`, `IOTHING_AUTH_DB_USER` and `IOTHING_AUTH_DB_PASSWORD` in `iopix.env` (the tables are created at start; `iothing-auth migrate` folds an older install's `user_accounts` table into it).
+
 Out of the box the viewer is open to anyone who can reach it. `setup.sh` asks for the admin account; Settings offers **Create the admin account** later (or set `ADMIN_USER` and `ADMIN_PASSWORD` for a container, or run `.venv/bin/python -m app.users create <name> <password> admin`). Once a user exists:
 
 | Who | Can |
@@ -145,7 +147,7 @@ Out of the box the viewer is open to anyone who can reach it. `setup.sh` asks fo
 
 Each account can be linked to a person from People by an admin (Settings › Users; an admin can also link their own account from the account dialog). Only admins link accounts, because a linked person's face is shown on the sign-in screen. That person's face badge becomes the account's avatar in the account picker and the menu. Each account can also carry an optional email address (Settings › Users). A reverse proxy that authenticates users (Authelia, Authentik, Cloudflare Access…) is mapped onto these accounts by the email it passes (see Sign-in at the proxy).
 
-Sign in from the person icon at the top right: the dialog shows a tile per account; a passwordless viewer signs in with one click, the others ask for their password. An admin can take an account off that list (Settings › Users › Sign-in list, for instance the admin account itself): it then signs in through the “Other” tile, by name and password. Sessions are signed HttpOnly cookies (secret in `data/secret`) valid for 30 days; passwords are scrypt-hashed and never stored in clear. The server enforces all of it: write endpoints answer 401/403 regardless of what the page shows. Read-only mode (an admin setting) still refuses library writes for everyone, editors included.
+Sign in from the person icon at the top right: the dialog shows a tile per account; a passwordless viewer signs in with one click, the others ask for their password. An admin can take an account off that list (Settings › Users › Sign-in list, for instance the admin account itself): it then signs in through the “Other” tile, by name and password. Sessions are random tokens in an HttpOnly cookie (`iothing_session`, shared by the apps on the domain) valid for 30 days and renewed in use; the account dialog's "sign out everywhere" ends them all. Passwords are scrypt-hashed and never stored in clear. The server enforces all of it: write endpoints answer 401/403 regardless of what the page shows. Read-only mode (an admin setting) still refuses library writes for everyone, editors included.
 
 ## Editing
 
@@ -275,6 +277,8 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `AUTO_MODELS` | empty | models to download when missing at start, e.g. `siglip2,yolox,geonames` (keys as in Maintenance › AI analysis and models); set by `setup.sh` and the Docker image |
 | `GOOGLE_MAPS_API_KEY` | unset | Google Maps API key (the Settings page can store one instead); used only when the map provider is set to Google |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | unset | create the admin account at start when no user exists yet (containers, installers) |
+| `IOTHING_AUTH_DB_HOST` / `IOTHING_AUTH_DB_PORT` / `IOTHING_AUTH_DB_NAME` / `IOTHING_AUTH_DB_USER` / `IOTHING_AUTH_DB_PASSWORD` | `127.0.0.1` / `3306` / `auth` / `auth` / `auth` | the ioThing suite's shared account database (MariaDB), see Users and permissions |
+| `IOTHING_COOKIE_DOMAIN` | unset | the domain the session cookie is shared on (e.g. `example.com` for `photo.example.com` and `notes.example.com`); a LAN address or name outside it gets a cookie of its own |
 | `READ_ONLY` | `0` | `1` locks the viewer to browsing: every write endpoint is refused, whatever the settings say |
 | `EDITING` | `1` | `0` removes metadata editing |
 | `DB_WRITE` | `1` | `0` disables "Apply to digiKam database" |
@@ -385,7 +389,7 @@ A sign-in at the proxy also starts a session in the viewer, so the same browser 
 
 The built-in sign-in keeps working alongside: anyone the proxy does not vouch for (on your own network, where the hostname points straight at the server, or someone whose email has no account) gets the viewer's usual sign-in screen. Requests that come through Cloudflare (they carry `Cf-Ray`) never get one-click sign-in: passwordless accounts are left out of the picker and refused, and a passwordless session started at home does not work from outside.
 
-These settings can also be set in the app instead of `iopix.env` (Settings › Users › Sign-in at a proxy, or the MCP tool `proxy_signin`); `iopix.env` wins when both are set.
+These settings can also be set in the app instead of `iopix.env` (Settings › Users › Sign-in at a proxy, or the MCP tool `proxy_signin`); saved that way they are kept in the shared auth database for the whole suite, so one Cloudflare Access application covering every app (`*.example.com`, one AUD tag) is set up once. `iopix.env` wins when both are set.
 
 ### Sidecar file names
 

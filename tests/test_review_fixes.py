@@ -111,16 +111,17 @@ def test_old_password_hashes_are_upgraded_at_sign_in(client, fresh):
     """A hash in the first format (scrypt$salt$hash, n=2^14) still signs in and is replaced by the current one."""
     import base64, hashlib, secrets
     from app import users
-    from app.data import state
+    from iothing_auth import db as authdb
+    from iothing_auth.passwords import needs_rehash
     u = users.create("legacy-probe", "longpassword1", "viewer")
     salt = secrets.token_bytes(16)
     old = "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(hashlib.scrypt(b"longpassword1", salt=salt, n=2 ** 14, r=8, p=1, dklen=32)).decode()
-    con = state.connect(); con.execute("UPDATE user_accounts SET hash = ? WHERE id = ?", (old, u["id"])); con.commit(); con.close()
+    authdb.ex("UPDATE users SET hash = %s WHERE id = %s", (old, u["id"]))
     users.invalidate()
-    assert users.needs_rehash(old)
+    assert needs_rehash(old)
     login(client, "legacy-probe", "longpassword1")
-    con = state.connect(); h = con.execute("SELECT hash FROM user_accounts WHERE id = ?", (u["id"],)).fetchone()[0]; con.close()
-    assert h.startswith("scrypt2$65536$8$1$") and not users.needs_rehash(h)
+    h = authdb.one("SELECT hash FROM users WHERE id = %s", (u["id"],))["hash"]
+    assert h.startswith("scrypt2$65536$8$1$") and not needs_rehash(h)
     login(client, "legacy-probe", "longpassword1")
     client.post("/api/auth/logout", json={})
 

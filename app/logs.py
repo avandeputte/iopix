@@ -26,7 +26,7 @@ def tail(lines: int = 300, contains: str = "", level: str = "any", requests: boo
         c = contains.lower()
         out = [l for l in out if c in l.lower()]
     if level == "auth":  # sign-ins, failed attempts, sign-outs
-        out = [l for l in out if " app.auth: " in l]
+        out = [l for l in out if " iothing_auth.auth: " in l]
     if level == "warning":
         out = [l for l in out if " WARNING " in l or " ERROR " in l or " CRITICAL " in l or "Traceback" in l]
     elif level == "error":

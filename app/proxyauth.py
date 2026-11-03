@@ -1,324 +1,86 @@
-"""Sign-in done by a reverse proxy in front of the viewer: Cloudflare Access (a Cloudflare Tunnel with an Access
-policy), or HAProxy, nginx, Caddy or Traefik with an authentication step (Authelia, Authentik, oauth2-proxy, basic
-auth...). The proxy passes who signed in in a request header; the viewer takes that person as signed in when the
-account exists (matched on the account's email address, then its name).
+"""Sign-in done by a reverse proxy in front of the viewer (Cloudflare Access, HAProxy, nginx, Caddy or Traefik with
+an authentication step): iothing_auth.proxyauth does the work, with the settings stored once for the whole suite
+(or per app) in the auth database; the environment (iopix.env) still wins. This module keeps iopix's old names:
 
-The header is believed only from the proxy itself, never from anyone who can reach the viewer directly:
-- Cloudflare Access: with CF_ACCESS_TEAM and CF_ACCESS_AUD set, the signed token Cloudflare adds to every request
-  (Cf-Access-Jwt-Assertion) is checked against the team's public keys, and the email comes from it.
-- otherwise: the request must come straight from one of AUTH_PROXY_TRUSTED (addresses or networks; by default this
-  machine only, 127.0.0.1 and ::1), the address the proxy connects from.
-
-Settings (environment, iopix.env):
   AUTH_PROXY          off (default) | cloudflare | haproxy | nginx | caddy | traefik | header
-  AUTH_PROXY_HEADER   the header(s) holding the user, comma-separated; defaults: Cf-Access-Authenticated-User-Email
-                      for cloudflare, otherwise Remote-User, X-Forwarded-User, X-Auth-Request-User,
-                      X-Auth-Request-Email, X-Forwarded-Email (the names Authelia, Authentik and oauth2-proxy use)
+  AUTH_PROXY_HEADER   the header(s) holding the user, comma-separated
   AUTH_PROXY_TRUSTED  addresses or networks the proxy connects from (default 127.0.0.1, ::1)
-  AUTH_PROXY_CREATE   a role (viewer or editor) to create an account for someone the proxy lets in who has none
-                      yet; deny: such a person gets no access at all; empty (default): the sign-in screen
+  AUTH_PROXY_CREATE   a role (viewer or editor) to create an account for someone the proxy lets in; deny; or empty
   CF_ACCESS_TEAM      the Cloudflare Access team domain, e.g. myteam.cloudflareaccess.com
   CF_ACCESS_AUD       the Access application's audience (AUD) tag
 """
-import ipaddress
-import logging
-import threading
-import time
-from app.data import state
-from app import config, users
+from iothing_auth import proxyauth as shared
+from iothing_auth.proxyauth import (CF_HEADER, CF_JWT_HEADER, EXTERNAL_HEADERS, GENERIC_HEADERS, KEYS, PRESETS, authlog,
+                                    forget_identities, once, peer_of, remember_peer, seen, _cache, _logged)
 
-log = logging.getLogger("app.proxyauth")
+__all__ = ["CF_HEADER", "CF_JWT_HEADER", "EXTERNAL_HEADERS", "GENERIC_HEADERS", "KEYS", "PRESETS", "authlog", "forget_identities", "once",
+           "peer_of", "remember_peer", "seen", "_cache", "_logged"]  # re-exported for the rest of the app and the tests
 
-PRESETS = ("cloudflare", "haproxy", "nginx", "caddy", "traefik", "header")
-CF_HEADER = "Cf-Access-Authenticated-User-Email"
-CF_JWT_HEADER = "Cf-Access-Jwt-Assertion"
-GENERIC_HEADERS = ("Remote-User", "X-Forwarded-User", "X-Auth-Request-User", "X-Auth-Request-Email", "X-Forwarded-Email")
-_jwks = {"client": None, "team": None}
-_lock = threading.Lock()
+from app.auth import auth
 
-
-KEYS = ("AUTH_PROXY", "AUTH_PROXY_HEADER", "AUTH_PROXY_TRUSTED", "AUTH_PROXY_CREATE", "CF_ACCESS_TEAM", "CF_ACCESS_AUD")
-_opts = {"at": 0.0, "values": {}}
-seen = {}  # the last Cloudflare Access token seen (unverified claims), to set this up from: {iss, aud, email, peer, at}
+_proxy = auth.proxy
+log = shared.log
 
 
 def opt(name: str):
-    """A setting: the environment (iopix.env) wins, else what an admin saved (Settings, or the MCP tool), re-read every
-    few seconds."""
-    if config.proxy_env(name) is not None:
-        return config.proxy_env(name)
-    now = time.time()
-    if now - _opts["at"] > 5:
-        try:
-            _opts["values"] = {k: state.get_setting(k.lower(), "") for k in KEYS}
-        except Exception:
-            _opts["values"] = {}
-        _opts["at"] = now
-    return _opts["values"].get(name) or None
+    return _proxy.opt(name)
 
 
-def save(values: dict):
-    """Store proxy sign-in settings (keys of KEYS; empty removes one). Values in the environment still win."""
-    for k, v in values.items():
-        if k in KEYS:
-            state.set_setting(k.lower(), str(v or "").strip())
-    _opts["at"] = 0.0
-    _cache.clear()
-
-
-def note(headers_in, peer: str):
-    """Remember the claims of a Cloudflare Access token (not verified: only to show which team and application the
-    requests come through, so they can be set up)."""
-    tok = headers_in.get(CF_JWT_HEADER)
-    if not tok or not _from_trusted(peer):  # only what the tunnel itself delivers; anyone else's header is ignored
-        return
-    try:
-        import jwt
-        c = jwt.decode(tok, options={"verify_signature": False})
-        seen.update(iss=c.get("iss"), aud=c.get("aud"), email=c.get("email"), peer=peer, at=int(time.time()))
-    except Exception:
-        pass
-
-
-EXTERNAL_HEADERS = ("cf-ray", "cf-connecting-ip", "cf-access-jwt-assertion")
-
-
-def _public(ip: str) -> bool:
-    try:
-        a = ipaddress.ip_address((ip or "").split("%")[0])
-    except ValueError:
-        return False
-    if a.version == 6 and a.ipv4_mapped:
-        a = a.ipv4_mapped
-    return not (a.is_private or a.is_loopback or a.is_link_local or a.is_unspecified)
-
-
-def external(headers_in, peer: str = "") -> bool:
-    """Did the request come in from outside? Through Cloudflare (its headers), from a public address, or forwarded
-    by a trusted proxy (AUTH_PROXY_TRUSTED) on behalf of a public address. Requests on the LAN reach the viewer
-    directly from private addresses. Outside, one-click sign-in to a passwordless account is not offered: a password
-    is required. A forged header can only take that option away from the one who forges it, never grant anything."""
-    if any(headers_in.get(h) for h in EXTERNAL_HEADERS):
-        return True
-    if peer and _public(peer):
-        return True
-    if peer and _from_trusted(peer):
-        fwd = (headers_in.get("x-forwarded-for") or "").split(",")[0].strip()
-        return bool(fwd) and _public(fwd)
-    return False
-
-
-def peer_of(request) -> str:
-    """The address the connection really came from (before uvicorn's forwarded-header rewrite)."""
-    return request.scope.get("iopix.peer") or (request.client.host if request.client else "")
-
-
-def visitor_of(request) -> str:
-    """The address the sign-in throttle counts by: the visitor's own, as a trusted proxy (the Cloudflare tunnel, a
-    reverse proxy in AUTH_PROXY_TRUSTED) reports it, otherwise the connection's. Behind the tunnel every outside
-    visitor reaches the viewer from the tunnel's address, so counting by that would let one person's failed tries
-    lock everyone outside out; a header from anyone else is ignored, so nobody can escape the count by forging one."""
-    peer = peer_of(request)
-    if peer and _from_trusted(peer):
-        h = request.headers
-        fwd = h.get("cf-connecting-ip") or (h.get("x-forwarded-for") or "").split(",")[0].strip()
-        if fwd:
-            return f"{fwd} via {peer}"
-    return peer
-
-
-def forget_identities():
-    """Drop the remembered proxy identities, so an account change (role, deletion) applies at the next request."""
-    _cache.clear()
-
-
-authlog = logging.getLogger("app.auth")  # sign-ins, failed attempts and sign-outs, for Maintenance › Server log
-_logged = {}  # identity -> when its proxy sign-in was last logged (a page load makes dozens of requests)
-
-
-def once(key, seconds: float = 3600) -> bool:
-    """True when this key has not been logged in the last `seconds` (and records it now): one line per hour, not one per request."""
-    now = time.time()
-    if now - _logged.get(key, 0) > seconds:
-        _logged[key] = now
-        return True
-    return False
-
-
-def source(request) -> str:
-    """Where a request came from, for the log: the visitor's address, and whether it came through Cloudflare."""
-    h = request.headers
-    if any(h.get(x) for x in EXTERNAL_HEADERS):
-        return f"{h.get('cf-connecting-ip') or '?'} through Cloudflare"
-    return peer_of(request) or "?"
+def save(values: dict, suite_wide: bool = True):
+    _proxy.save(values, suite_wide)
 
 
 def mode() -> str:
-    m = (opt("AUTH_PROXY") or "off").strip().lower()
-    return m if m in PRESETS else "off"
+    return _proxy.mode()
 
 
 def headers() -> list:
-    raw = (opt("AUTH_PROXY_HEADER") or "").strip()
-    if raw:
-        return [h.strip() for h in raw.split(",") if h.strip()]
-    return [CF_HEADER] if mode() == "cloudflare" else list(GENERIC_HEADERS)
+    return _proxy.headers()
 
 
 def trusted() -> list:
-    raw = (opt("AUTH_PROXY_TRUSTED") or "").strip() or "127.0.0.1,::1"
-    out = []
-    for part in raw.replace(" ", ",").split(","):
-        if part:
-            try:
-                out.append(ipaddress.ip_network(part, strict=False))
-            except ValueError:
-                log.warning("AUTH_PROXY_TRUSTED: %r is not an address or network", part)
-    return out
+    return _proxy.trusted()
 
 
 def cf_settings():
-    team = (opt("CF_ACCESS_TEAM") or "").strip().removeprefix("https://").rstrip("/")
-    aud = (opt("CF_ACCESS_AUD") or "").strip()
-    return (team, aud) if team and aud else (None, None)
+    return _proxy.cf_settings()
 
 
 def _from_trusted(peer: str) -> bool:
-    try:
-        ip = ipaddress.ip_address((peer or "").split("%")[0])
-    except ValueError:
-        return False
-    if ip.version == 6 and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    return any(ip in net for net in trusted())
+    return _proxy.from_trusted(peer)
 
 
-def _cf_email(token: str, team: str, aud: str):
-    """The email in a Cloudflare Access token, once its signature, audience, issuer and expiry check out."""
-    import jwt
-    with _lock:
-        if _jwks["team"] != team:
-            _jwks.update(team=team, client=jwt.PyJWKClient(f"https://{team}/cdn-cgi/access/certs", cache_keys=True, lifespan=3600))
-        client = _jwks["client"]
-    try:
-        key = client.get_signing_key_from_jwt(token).key
-        claims = jwt.decode(token, key, algorithms=["RS256"], audience=aud, issuer=f"https://{team}", leeway=30, options={"require": ["exp"]})
-    except Exception as e:  # a forged, expired or foreign token: nobody
-        if once("refused", 60):
-            authlog.warning("Cloudflare Access token refused (%s): treated as not signed in", str(e)[:200])
-        return None
-    return (claims.get("email") or claims.get("common_name") or "").strip() or None
+def note(headers_in, peer: str):
+    _proxy.note(headers_in, peer)
+
+
+def external(headers_in, peer: str = "") -> bool:
+    return _proxy.external(headers_in, peer)
+
+
+def visitor_of(request) -> str:
+    return _proxy.visitor_of(request)
+
+
+def source(request) -> str:
+    return _proxy.source(request)
 
 
 def identity(headers_in, peer: str):
-    """Who the proxy says is asking, or None (not configured, not from the proxy, or no user in the request)."""
-    m = mode()
-    if m == "off":
-        return None
-    if m == "cloudflare":
-        team, aud = cf_settings()
-        if not team:  # a bare email header is never believed for Cloudflare: the signed token is what makes it safe
-            if once("cf-unset"):
-                log.warning("AUTH_PROXY=cloudflare without CF_ACCESS_TEAM and CF_ACCESS_AUD: nobody is signed in through the proxy")
-            return None
-        token = headers_in.get(CF_JWT_HEADER) or ""
-        if not token:
-            return None
-        return _cf_email(token, team, aud)
-    if not _from_trusted(peer):
-        return None
-    found = {name: (headers_in.get(name) or "").strip() for name in headers()}
-    values = {v for v in found.values() if v}
-    if len(values) > 1:  # the proxy sets one of these; a second one with another value came from the client and was passed through
-        log.warning("proxy sign-in refused: %s carry different identities (%s)", ", ".join(n for n, v in found.items() if v),
-                    "set AUTH_PROXY_HEADER to the one header your proxy sets")
-        return None
-    return next(iter(values), None)
+    return _proxy.identity(headers_in, peer)
 
 
 def deny_unknown() -> bool:
-    """AUTH_PROXY_CREATE=deny: someone the proxy lets in who has no account here gets no access at all (not even
-    the sign-in screen)."""
-    return (opt("AUTH_PROXY_CREATE") or "").strip().lower() == "deny"
+    return _proxy.deny_unknown()
 
 
 def user_for(ident: str):
-    """The account for this identity (email first, then name, case-insensitively), created with AUTH_PROXY_CREATE's
-    role when there is none and that is allowed; None otherwise."""
-    v = ident.strip().lower()
-    con = state.connect()
-    try:
-        r = con.execute(f"SELECT {users.COLS} FROM user_accounts WHERE lower(email) = ?", (v,)).fetchone() \
-            or con.execute(f"SELECT {users.COLS} FROM user_accounts WHERE lower(name) = ?", (v,)).fetchone()
-    finally:
-        con.close()
-    if r:
-        return users.row(r)
-    role = (opt("AUTH_PROXY_CREATE") or "").strip().lower()
-    if role not in ("viewer", "editor"):
-        return None
-    name = ident.strip()[:64]
-    try:
-        import secrets
-        # a random password nobody knows: this person signs in at the proxy (an admin can set a real one later)
-        u = users.create(name, secrets.token_urlsafe(24), role, email=ident if "@" in ident else "")
-        authlog.info("account %s created for a sign-in through the proxy (%s)", name, role)
-        return u
-    except ValueError as e:
-        log.warning("could not create an account for %s: %s", name, e)
-        return None
-
-
-_cache = {}  # identity -> (user, until): a page load makes dozens of requests
+    return _proxy.user_for(ident)
 
 
 def user(request):
-    """The signed-in user the proxy vouches for, or None."""
-    ident = identity(request.headers, request.scope.get("iopix.peer") or (request.client.host if request.client else ""))
-    request.state.proxy_ident = ident
-    if not ident:
-        return None
-    hit = _cache.get(ident)
-    now = time.time()
-    if hit and hit[1] > now:
-        return hit[0]
-    u = user_for(ident)
-    _cache[ident] = (u, now + 30)
-    if once(ident):  # once an hour per person, not per request
-        how = "Cloudflare Access" if mode() == "cloudflare" else f"the proxy ({mode()})"
-        if u:
-            authlog.info("signed in by %s: %s as %s (%s) from %s", how, ident, u["name"], u["role"], source(request))
-        elif deny_unknown():
-            authlog.warning("%s let in %s, who has no account here: access denied (from %s)", how, ident, source(request))
-        else:
-            authlog.warning("%s let in %s, who has no account here: shown the sign-in screen (from %s)", how, ident, source(request))
-    return u
+    return _proxy.user(request)
 
 
 def status() -> dict:
-    """For Settings and diagnostics: how proxy sign-in is set up (no secrets)."""
-    team, aud = cf_settings()
-    return {"values": {k: (opt(k) or "") for k in KEYS}, "fromEnv": [k for k in KEYS if config.proxy_env(k) is not None],
-            "mode": mode(), "headers": headers(), "trusted": [str(n) for n in trusted()], "seen": dict(seen),
-            "team": team, "aud": aud,
-            "cloudflareVerified": bool(team), "create": (opt("AUTH_PROXY_CREATE") or "").strip().lower() or None}
-
-
-def remember_peer():
-    """uvicorn rewrites the client address from X-Forwarded-For for a trusted proxy (its --forwarded-allow-ips) before
-    the app sees the request; keep the address the connection really came from, which is what proxy sign-in trusts."""
-    try:
-        from uvicorn.middleware import proxy_headers
-    except ImportError:
-        return
-    cls = proxy_headers.ProxyHeadersMiddleware
-    if getattr(cls, "_iopix_peer", False):
-        return
-    original = cls.__call__
-
-    async def call(self, scope, receive, send):
-        if scope.get("type") in ("http", "websocket") and scope.get("client"):
-            scope["iopix.peer"] = scope["client"][0]
-        return await original(self, scope, receive, send)
-    cls.__call__ = call
-    cls._iopix_peer = True
+    return _proxy.status()

@@ -38,6 +38,8 @@ os.environ.update({
     "DATA_DIR": str(_data), "DIGIKAM_DB_DIR": str(_lib / "db"), "PHOTOS_ROOT": str(LIB["root"] if LIB else _lib / "photos"),
     "PREWARM": "0", "SEMANTIC": "0", "ANALYSIS": "0", "CAPTIONS": "0", "REINDEX_POLL": "3600",
     "DIGIKAM_CHECK": "ask", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0",
+    # the shared accounts (iothing-auth) in a database of their own on the same server, never the suite's `auth`
+    "IOTHING_AUTH_DB_NAME": os.environ.get("IOTHING_TEST_AUTH_DB", "auth_test_iopix"),
 })
 _data.mkdir(parents=True, exist_ok=True)
 

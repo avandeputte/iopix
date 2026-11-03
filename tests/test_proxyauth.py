@@ -75,7 +75,7 @@ def test_cloudflare_access_token_is_verified(monkeypatch, account):
 
 def test_requests_through_the_proxy_are_signed_in(client, monkeypatch, account):
     monkeypatch.setenv("AUTH_PROXY", "nginx")
-    monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+    monkeypatch.setattr("iothing_auth.proxyauth.Proxy.from_trusted", lambda self, peer: True)
     me = client.get("/api/auth/me", headers={"Remote-User": "proxy-probe"}).json()
     assert me["user"]["name"] == "proxy-probe" and me["viaProxy"] and me["canWrite"]
     client.cookies.clear()  # (the session the proxy sign-in started would keep this browser signed in)
@@ -91,7 +91,7 @@ def test_the_real_peer_survives_uvicorns_forwarded_rewrite():
     seen = {}
 
     async def inner(scope, receive, send):
-        seen.update(client=scope["client"][0], peer=scope.get("iopix.peer"))
+        seen.update(client=scope["client"][0], peer=scope.get("iothing.peer"))
     mw = ProxyHeadersMiddleware(inner, trusted_hosts="127.0.0.1")
     scope = {"type": "http", "client": ("127.0.0.1", 5000), "headers": [(b"x-forwarded-for", b"203.0.113.9")], "scheme": "http"}
     asyncio.run(mw(scope, None, None))
@@ -137,17 +137,17 @@ def test_from_outside_a_password_is_required(client, monkeypatch, account):
 def test_sign_ins_are_logged(client, monkeypatch, account, caplog):
     import logging
     monkeypatch.delenv("AUTH_PROXY", raising=False)
-    with caplog.at_level(logging.INFO, logger="app.auth"):
+    with caplog.at_level(logging.INFO, logger="iothing_auth.auth"):
         assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "nope"}, headers={"Cf-Connecting-Ip": "203.0.113.9"}).status_code == 401
         assert client.post("/api/auth/login", json={"name": "proxy-probe", "password": "longpassword1"}).status_code == 200
         client.post("/api/auth/logout", json={})
         monkeypatch.setenv("AUTH_PROXY", "nginx")
-        monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+        monkeypatch.setattr("iothing_auth.proxyauth.Proxy.from_trusted", lambda self, peer: True)
         proxyauth._logged.clear()
         for _ in range(3):
             client.get("/api/auth/me", headers={"Remote-User": "proxy-probe"})
             proxyauth._cache.clear()
-    msgs = [r.getMessage() for r in caplog.records if r.name == "app.auth"]
+    msgs = [r.getMessage() for r in caplog.records if r.name == "iothing_auth.auth"]
     assert any("failed sign-in as 'proxy-probe' from 203.0.113.9 through Cloudflare" in m for m in msgs), msgs
     assert any(m.startswith("signed in: proxy-probe (editor, password)") for m in msgs)
     assert any(m.startswith("signed out: proxy-probe") for m in msgs)
@@ -156,7 +156,7 @@ def test_sign_ins_are_logged(client, monkeypatch, account, caplog):
 
 def test_a_proxy_sign_in_carries_over_to_the_home_network(client, monkeypatch, account):
     monkeypatch.setenv("AUTH_PROXY", "nginx")
-    monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+    monkeypatch.setattr("iothing_auth.proxyauth.Proxy.from_trusted", lambda self, peer: True)
     client.cookies.clear()
     outside = {"Remote-User": "proxy-probe", "Cf-Ray": "abc-EWR"}
     me = client.get("/api/auth/me", headers=outside).json()
@@ -176,7 +176,7 @@ def test_a_proxy_sign_in_carries_over_to_the_home_network(client, monkeypatch, a
 
 def test_someone_with_no_account_can_be_denied(client, monkeypatch, account):
     monkeypatch.setenv("AUTH_PROXY", "nginx")
-    monkeypatch.setattr(proxyauth, "_from_trusted", lambda peer: True)
+    monkeypatch.setattr("iothing_auth.proxyauth.Proxy.from_trusted", lambda self, peer: True)
     client.cookies.clear()
     stranger = {"Remote-User": "stranger@example.com"}
     assert client.get("/api/auth/me", headers=stranger).json()["user"] is None, "default: the sign-in screen"

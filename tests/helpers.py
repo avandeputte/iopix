@@ -33,24 +33,15 @@ def need_tool(name: str, available=None, module_level: bool = False):
 
 
 def clear_accounts(db_path=None):
-    """Back to the open mode the app has before the first admin exists. Without a path, the app's own
-    viewer database (SQLite or MySQL, through app.data.state); with one, that SQLite file (the browser
-    tests' server keeps its users in its own viewer.db)."""
-    if db_path is None:
-        from app.data import state
-        from app import users
-        state.init(); users.init()
-        con = state.connect()
-    else:
-        db_path = Path(db_path)
-        if not db_path.exists():
-            return
-        con = sqlite3.connect(db_path)
-    try:
-        con.execute("DELETE FROM user_accounts"); con.commit()
-    finally:
-        con.close()
+    """Back to the open mode the app has before the first admin exists: every account in the shared auth database
+    goes (the tests use a database of their own, auth_test_iopix). `db_path` is kept for the browser tests' server,
+    which shares that database and its own cache: let the cache expire."""
+    from iothing_auth import db as authdb
     from app import users
+    users.init()
+    authdb.ex("DELETE FROM users")
+    authdb.ex("ALTER TABLE users AUTO_INCREMENT = 1")
+    authdb.ex("DELETE FROM settings")
     users.invalidate()  # the accounts cache must not outlive the rows
     if db_path is not None:  # another process (the browser tests' server) keeps its own cache: let it expire
         import time
