@@ -2,7 +2,7 @@
 
 A tool answers from the search index (`db()`), the same SQLite file the web app queries; the
 viewer's own data (favorites, albums, settings) is read through app.data.state. Tools that
-reveal paths or change the library take the admin token (`need_token`), checked here rather
+reveal paths or change the library take the admin token (`need_token`, or the request's bearer header), checked here rather
 than by the transport so the stdio server applies the same rule as the HTTP endpoint.
 """
 import contextvars
@@ -90,9 +90,10 @@ def anon_paths_ok() -> bool:
 
 
 def need_token(token: str, writes: bool = False):
-    """The diagnostics tools reveal paths, log lines and settings; on an endpoint without sign-in
-    they take the same admin token as update_viewer (Maintenance > iopix version). writes: the tool changes the
-    library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
+    """The operator and maintenance tools take the admin token (Maintenance > iopix version) as their `token`
+    argument. Over HTTP every /mcp request also carries it as a bearer header (main.py refuses the rest), so the
+    argument is checked twice there; over stdio (`python -m app.mcp`) it is the only check. writes: the tool changes
+    the library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
     if not updates.token_ok(token):
         raise ToolError("This tool needs the admin token (Maintenance > iopix version > MCP update token)")
     if writes and appstate.read_only():

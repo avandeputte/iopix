@@ -39,4 +39,4 @@ A Cloudflare Tunnel publishes iopix without opening a port at home. Pair it with
 - Do not expose port 8600 directly.
 
 !!! warning "The MCP endpoint"
-    The MCP server's library tools answer without sign-in unless **Require sign-in** is on. On a proxy that faces the internet, turn it on, or keep `/mcp` reachable only from your own network. See [MCP server](../integrations/mcp.md).
+    Every `/mcp` request needs the admin token as a bearer header, the read-only tools included, so the endpoint may face the internet behind the proxy. See [MCP server](../integrations/mcp.md).

@@ -1,12 +1,12 @@
 # MCP server for AI assistants
 
-iopix is also an [MCP](https://modelcontextprotocol.io) server, so an AI assistant such as Claude can search and look at your library through the running app. It is at `/mcp` on the same port. Nothing extra is installed.
+iopix is also an [MCP](https://modelcontextprotocol.io) server, so an AI assistant such as Claude can search and look at your library through the running app. It is at `/mcp` on the same port. Nothing extra is installed. **Every request needs the admin token** from **Maintenance › iopix › MCP update token** (or `MCP_ADMIN_TOKEN`), sent as `Authorization: Bearer <token>`; without it `/mcp` answers 401, whether or not Require sign-in is on.
 
 It is **off on a fresh install**: turn it on in **Settings › MCP server** (or set `MCP=1`). While it is off, `/mcp` does not answer. An install updated from a version before the switch existed keeps it on, and whatever you choose is kept across updates.
 
 ## Library tools (read-only)
 
-These show only what an anonymous visitor sees in the web app:
+What the web app shows, read-only (the token gets the client in; these tools take no further argument for it):
 
 | Tool | Does |
 | --- | --- |
@@ -22,7 +22,7 @@ Results carry links into iopix (set `VIEWER_URL` to your public address).
 
 ## Admin tools
 
-These need the **admin token** from **Maintenance › iopix › MCP update token** (or `MCP_ADMIN_TOKEN`), because they reveal paths, log lines and settings:
+These take the **admin token** as their `token` argument as well (the same one the header carries), because they reveal paths, log lines and settings or change the library:
 
 `diagnostics`, `server_log`, `job_queue`, `photo_file`, `date_suggestions` (the year suggestions for undated photos, with their clues), `set_date_hint` (a folder's earliest and latest possible year), `place_suggestions` (where photos without a position were probably taken), `jersey_suggestions` (players for the shirt numbers read on unnamed people), `clothing_suggestions` (people probably present, by their clothes), `rotation_findings` (photos stored on their side or upside down), `run_analysis` (start a background analysis, as Maintenance does), and `update_viewer`, which installs a new version. `check_for_update` is open.
 
@@ -34,7 +34,7 @@ These need the **admin token** from **Maintenance › iopix › MCP update token
 === "Claude Code"
 
     ```sh
-    claude mcp add --transport http iopix https://photos.example.com/mcp
+    claude mcp add --transport http iopix https://photos.example.com/mcp --header "Authorization: Bearer <token>"
     ```
 
 === "Claude Desktop"
@@ -46,7 +46,8 @@ These need the **admin token** from **Maintenance › iopix › MCP update token
       "mcpServers": {
         "iopix": {
           "command": "npx",
-          "args": ["-y", "mcp-remote", "https://photos.example.com/mcp"]
+          "args": ["-y", "mcp-remote", "https://photos.example.com/mcp",
+                   "--header", "Authorization: Bearer <token>"]
         }
       }
     }
@@ -54,17 +55,8 @@ These need the **admin token** from **Maintenance › iopix › MCP update token
 
     Without HTTPS, use `http://<host>:8600/mcp` and add `"--allow-http"` to the arguments.
 
-=== "With Require sign-in on"
-
-    Every request must carry the admin token:
-
-    ```json
-    "args": ["-y", "mcp-remote", "https://photos.example.com/mcp",
-             "--header", "Authorization: Bearer <token>"]
-    ```
-
 ## Exposing it safely
 
-The library tools answer without sign-in unless **Require sign-in** is on. If iopix is reachable from the internet, turn Require sign-in on (so `/mcp` needs the token), or keep `/mcp` reachable only from your own network. Never expose port 8600 directly.
+Nothing on `/mcp` answers without the admin token, so the endpoint can sit behind the same reverse proxy as the web app. Treat the token like a password: it also runs the updater. Never expose port 8600 directly.
 
 Reverse proxies must not buffer `/mcp`, because it streams. See [HTTPS and a reverse proxy](../install/reverse-proxy.md).

@@ -90,7 +90,7 @@ def mcp_enabled() -> bool:
 
 
 def _mcp_token_ok(request: Request) -> bool:
-    """With sign-in required, the MCP endpoint needs the admin token as a bearer header."""
+    """The MCP endpoint needs the admin token as a bearer header on every request (since v1.111)."""
     auth = request.headers.get("authorization", "")
     return auth.lower().startswith("bearer ") and updates.token_ok(auth[7:].strip())
 
@@ -136,13 +136,13 @@ async def _auth_guard(request: Request, call_next):
     if request.url.path.startswith("/mcp"):
         if not mcp_enabled():  # switched off (the default): as if there were no such endpoint
             return JSONResponse({"detail": "The MCP server is switched off (Settings › Viewer › MCP server)."}, status_code=404)
-        mcp.token_given.set(_mcp_token_ok(request))  # answers with file paths only for the token holder
+        if not _mcp_token_ok(request):  # every request, the read-only tools included: the library is nobody else's business
+            return JSONResponse({"detail": "The MCP server needs the admin token on every request: 'Authorization: Bearer <token>' "
+                                           "(Maintenance › iopix version › MCP update token)"}, status_code=401)
+        mcp.token_given.set(True)  # answers may carry file paths: the caller holds the admin token
     if user is None and users.require_login():
         path = request.url.path
-        if path.startswith("/mcp"):
-            if not _mcp_token_ok(request):
-                return JSONResponse({"detail": "Sign-in is required; MCP clients send the admin token as 'Authorization: Bearer <token>'"}, status_code=401)
-        elif not _open_to_visitors(path):
+        if not path.startswith("/mcp") and not _open_to_visitors(path):
             return JSONResponse({"detail": "Sign in to use the viewer."}, status_code=401)
     path = request.url.path
     if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -205,7 +205,7 @@ app.include_router(review.router)
 app.include_router(organize.router)
 app.include_router(faces.router)
 
-# MCP over HTTP on the same port: an assistant connects to http://host:8600/mcp (read-only tools).
+# MCP over HTTP on the same port: an assistant connects to http://host:8600/mcp with the admin token as a bearer header.
 # DNS-rebinding protection is off because the viewer is reached by LAN name or IP, not localhost only.
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 

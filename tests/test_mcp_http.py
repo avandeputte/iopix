@@ -1,10 +1,16 @@
 """The MCP server is part of the app: the streamable-HTTP endpoint at /mcp answers JSON-RPC
-(initialize, tools/list, a tool call) on the viewer's own port, read-only, without sign-in."""
+(initialize, tools/list, a tool call) on the viewer's own port, to a client that sends the admin token as a bearer
+header on every request (the read-only tools included; since v1.111)."""
 import json
 
 import pytest
 
 HEADERS = {"content-type": "application/json", "accept": "application/json, text/event-stream"}
+
+
+def _auth():
+    from app import updates
+    return dict(HEADERS, authorization=f"Bearer {updates.admin_token()}")
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +25,7 @@ def _mcp_on():
 def test_the_endpoint_is_off_until_switched_on(client):
     from app.data import state
     state.set_setting("mcp_enabled", "0")
-    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=HEADERS)
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=_auth())
     assert r.status_code == 404 and "switched off" in r.json()["detail"]
     assert client.get("/api/settings").json()["mcp_enabled"] is False
     assert client.post("/api/settings", json={"mcp_enabled": True}).status_code == 200
@@ -27,9 +33,21 @@ def test_the_endpoint_is_off_until_switched_on(client):
     assert _rpc(client, "tools/list")["result"]["tools"]
 
 
+def test_every_request_needs_the_token(client, lib):
+    """No users, Require sign-in off: /mcp still refuses a request without the bearer token, tools/list included,
+    and a wrong token is refused the same way; the web app's own API stays open as before."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    r = client.post("/mcp", json=body, headers=HEADERS)
+    assert r.status_code == 401 and "Bearer" in r.json()["detail"]
+    r = client.post("/mcp", json=body, headers=dict(HEADERS, authorization="Bearer nope"))
+    assert r.status_code == 401
+    assert client.get("/api/status").status_code == 200
+    assert _rpc(client, "tools/list")["result"]["tools"]
+
+
 def _rpc(client, method, params=None, id=1):
     body = {"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}}
-    r = client.post("/mcp", json=body, headers=HEADERS)
+    r = client.post("/mcp", json=body, headers=_auth())
     assert r.status_code == 200, (method, r.status_code, r.text[:300])
     text = r.text
     if "text/event-stream" in r.headers.get("content-type", ""):  # one event per response
@@ -46,7 +64,7 @@ def test_initialize_and_tools(client):
     assert len(names) >= 5 and any("search" in n or "photos" in n for n in names), names
 
 
-def test_a_read_only_tool_call_works_anonymously(client, lib):
+def test_a_read_only_tool_call_works_with_the_token(client, lib):
     tools = _rpc(client, "tools/list", id=3)["result"]["tools"]
     name = next((t["name"] for t in tools if t["name"] in ("library_summary", "summary", "stats", "library_stats")), None)
     if name is None:

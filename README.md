@@ -293,7 +293,7 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `EXIFTOOL` | unset | path to exiftool; otherwise the PATH, then digiKam's bundled copy |
 | `HF_HUB_OFFLINE` | unset | the app loads installed models from disk without contacting the model hub (and downloads only through Maintenance › AI analysis and models); set `1` to forbid the hub altogether |
 | `MCP` | unset | `1` switches the MCP endpoint at `/mcp` on regardless of the setting (it is off by default; Settings › MCP server) |
-| `MCP_ADMIN_TOKEN` | unset | the admin token for the MCP diagnostics and update tools (and for `/mcp` when sign-in is required); otherwise one is generated once and shown under Maintenance › iopix version |
+| `MCP_ADMIN_TOKEN` | unset | the admin token every `/mcp` request must carry as a bearer header (the operator tools take it as an argument too); otherwise one is generated once and shown under Maintenance › iopix version |
 | `VIEWER_URL` | `http://localhost:8600` | the address used for the links in MCP results |
 | `VIEWER_DB_TYPE` / `VIEWER_DB_HOST` / `VIEWER_DB_PORT` / `VIEWER_DB_DATABASE` / `VIEWER_DB_USER` / `VIEWER_DB_PASSWORD` | unset | the viewer's own database on MySQL/MariaDB instead of `data/viewer.db` (Settings › Viewer database writes the same thing to `data/viewer-db.json`) |
 | `IOPIX_REPO` / `IOPIX_BRANCH` | `avandeputte/iopix` / `main` | where update checks and `update.sh` fetch from |
@@ -355,7 +355,7 @@ Two things to keep in mind on any proxy:
 
 - `/mcp` streams responses (server-sent events): the proxy must not buffer that path. Caddy passes streams through as is; with nginx / Nginx Proxy Manager add `proxy_buffering off;` and a long `proxy_read_timeout` for `location /mcp`.
 - The MCP endpoint is **off on a fresh install** (an updated install keeps what it had): Settings › MCP server (or `MCP=1` in the environment) turns it on; while off, `/mcp` answers 404.
-- The web app enforces sign-in for every change, but the MCP endpoint's library tools answer **without** sign-in unless Require sign-in (Settings › Users) is on, in which case every `/mcp` request needs the admin token as a Bearer header. On a proxy that faces the internet, turn Require sign-in on, or restrict `/mcp` to your own networks or put basic authentication on it, or leave it LAN-only; otherwise anyone can read the library through it. Large uploads are not involved, but allow request bodies of a few MB for GPX files.
+- Every `/mcp` request needs the admin token (Maintenance › iopix version › MCP update token, or `MCP_ADMIN_TOKEN`) as `Authorization: Bearer <token>`, the read-only tools included; without it `/mcp` answers 401. The token also runs the updater: keep it secret.
 
 With the proxy in place the addresses in this README change from `http://<host>:8600/...` to `https://photos.example.com/...`; set `VIEWER_URL=https://photos.example.com` so links in MCP results use it too.
 
@@ -401,8 +401,8 @@ The admin token the diagnostics and update tools take (Maintenance › iopix ver
 
 The viewer is also an [MCP](https://modelcontextprotocol.io) server, on the same port, at `/mcp` (streamable HTTP), so an assistant such as Claude can search and inspect the library through the running app; nothing is installed or downloaded. It is **off on a fresh install** (an install updated from before v1.85 keeps it on; the choice is stored and kept across updates): switch it under Settings › MCP server (or with `MCP=1`); while off, `/mcp` answers 404. The library tools are read-only and need no sign-in (they show only what an anonymous visitor sees in the web app): `library_overview`, `search_photos` (every filter the web app has, plus `looks_like` text and `similar_to` a photo), `count_by`, `get_photo`, `list_people`, `list_tags`, `list_albums`, `list_places`, `list_app_albums`, `find_duplicates` and `view_photo` (the picture itself); results carry links into the viewer (`VIEWER_URL`). The tools for operating it take the admin token (Maintenance › iopix version › MCP update token, or `MCP_ADMIN_TOKEN`) because they reveal paths, log lines and settings: `diagnostics` (version, platform, database, external tools, disk, job queue, models, settings without secrets), `server_log` (the viewer's rotating `data/viewer.log`, filterable), `job_queue`, `photo_file` (one photo's files, sidecar, cache and backups), and `update_viewer`, the one tool that changes something (it runs `update.sh`; `check_for_update` is open and reports the outcome under `lastUpdate`). With Require sign-in on, every `/mcp` request must carry `Authorization: Bearer <token>` (see Users and permissions).
 
-    claude mcp add --transport http digikam-library http://localhost:8600/mcp
-    claude mcp add --transport http digikam-library https://photos.example.com/mcp     # behind the reverse proxy
+    claude mcp add --transport http digikam-library http://localhost:8600/mcp --header "Authorization: Bearer <token>"
+    claude mcp add --transport http digikam-library https://photos.example.com/mcp --header "Authorization: Bearer <token>"    # behind the reverse proxy
 
 **Claude Desktop on another computer** (same network): Claude Desktop's "custom connectors" are reached from Anthropic's servers, so a LAN address cannot be added there. Use the `mcp-remote` bridge in its local configuration instead, which needs Node.js on that computer. Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`), replacing the address with the viewer's host name or IP, then restart Claude Desktop:
 
@@ -410,12 +410,13 @@ The viewer is also an [MCP](https://modelcontextprotocol.io) server, on the same
       "mcpServers": {
         "digikam-library": {
           "command": "npx",
-          "args": ["-y", "mcp-remote", "https://photos.example.com/mcp"]
+          "args": ["-y", "mcp-remote", "https://photos.example.com/mcp",
+                   "--header", "Authorization: Bearer <token>"]
         }
       }
     }
 
-That is the form behind the reverse proxy; without one, use `http://<host>:8600/mcp` and add `"--allow-http"` to the arguments, since the viewer itself speaks plain HTTP. The tools then appear in Claude Desktop's tool menu. To reach the endpoint from outside the home network it must sit behind the HTTPS proxy with Require sign-in on, so that `/mcp` answers only with the admin token (`"--header", "Authorization: Bearer <token>"` in the `mcp-remote` arguments); do not expose port 8600 to the internet as it is.
+That is the form behind the reverse proxy; without one, use `http://<host>:8600/mcp` and add `"--allow-http"` to the arguments, since the viewer itself speaks plain HTTP. The tools then appear in Claude Desktop's tool menu. Every request carries the admin token (Maintenance › iopix version › MCP update token), so behind the HTTPS proxy the endpoint can be reached from outside the home network.
 
 Other clients that take an MCP URL use `http://<host>:8600/mcp` directly (set `VIEWER_URL` if links in results should use a different address). Clients that only spawn stdio servers on the machine running the viewer can use `.venv/bin/python -m app.mcp` from the checkout; it is the same code.
 
