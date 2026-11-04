@@ -261,3 +261,12 @@ def test_a_session_in_use_is_renewed(client, fresh):
     assert r.json()["user"]["name"] == "alex"
     assert r.cookies.get(users.COOKIE) == client.cookies.get(users.COOKIE), r.headers.get("set-cookie")  # the cookie is set again, for another 30 days
     assert authdb.one("SELECT expires FROM sessions")["expires"] > now + 29 * 86400
+
+def test_registers_in_the_suite(client, fresh):
+    """The first request lists iopix in the suite's apps (suite_apps), with its name and version, for the start page."""
+    from iothing_auth import suite
+    from app import __version__
+    assert suite.get("iopix") is None
+    client.get("/api/status")
+    app = suite.get("iopix")
+    assert app["name"] == "iopix" and app["version"] == __version__ and app["color"] == "#3b4a8c"

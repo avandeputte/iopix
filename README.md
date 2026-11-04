@@ -280,6 +280,7 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `ADMIN_USER` / `ADMIN_PASSWORD` | unset | create the admin account at start when no user exists yet (containers, installers) |
 | `IOTHING_AUTH_DB_HOST` / `IOTHING_AUTH_DB_PORT` / `IOTHING_AUTH_DB_NAME` / `IOTHING_AUTH_DB_USER` / `IOTHING_AUTH_DB_PASSWORD` | `127.0.0.1` / `3306` / `auth` / `auth` / `auth` | the ioThing suite's shared account database (MariaDB), see Users and permissions |
 | `IOTHING_COOKIE_DOMAIN` | unset | the domain the session cookie is shared on (e.g. `example.com` for `photo.example.com` and `notes.example.com`); a LAN address or name outside it gets a cookie of its own |
+| `PUBLIC_URL` | unset | the address people reach the viewer at (e.g. `https://photo.example.com`), listed in the suite's list of apps for the start page and the other apps; unset, the best address it has been reached at is listed |
 | `READ_ONLY` | `0` | `1` locks the viewer to browsing: every write endpoint is refused, whatever the settings say |
 | `EDITING` | `1` | `0` removes metadata editing |
 | `DB_WRITE` | `1` | `0` disables "Apply to digiKam database" |

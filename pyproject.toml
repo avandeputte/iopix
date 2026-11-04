@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.114.2"
+version = "1.115.0"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,7 @@ dependencies = [
   "python-multipart<1",
   "mcp<3",
   "pyjwt[crypto]<3",   # Cloudflare Access tokens (proxy sign-in)
-  "iothing-auth @ git+https://github.com/avandeputte/iothing-auth.git@v0.2.0",   # the ioThing suite's shared accounts and sessions (pinned: bump to pick up a new one)
+  "iothing-auth @ git+https://github.com/avandeputte/iothing-auth.git@8f66960c4e46a56f3b030732092c8af0f1876fbf",   # the ioThing suite's shared accounts and sessions (pinned: bump to pick up a new one)
 ]
 
 [project.optional-dependencies]
