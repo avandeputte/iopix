@@ -742,7 +742,7 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
 
 def import_sqlite(path: Path, dst: VConn, drop: bool = True) -> dict:
     """Every row of a viewer.db from before v1.113 into `dst` (the one-time import of an upgraded install). Its
-    user_accounts rows are not among them: accounts live in the suite's auth database since v1.112."""
+    user_accounts rows are not among them: accounts live in the Shared ioSuite database since v1.112."""
     src = _sqlite_source(path)
     try:
         if "undo" in columns(src, "photo_history"):  # v1.24 named the column after a reserved word; the file may predate the rename

@@ -127,7 +127,7 @@ Derived from these:
 
 ## Users and permissions
 
-Accounts are the **ioThing suite's shared accounts** (the `iothing-auth` library, a MariaDB database shared with ioNotes and ioContacts): one name, password and session for every app, so someone signed in at `photo.example.com` is signed in at `notes.example.com` too when the apps share a domain (`IOTHING_COOKIE_DOMAIN`). What is iopix's own is kept per app: the role an account holds here, its display settings and the person it is linked to. A *suite admin* is admin in every app; an app admin manages this app's settings and the accounts' roles here. Point iopix at that database with `IOTHING_AUTH_DB_HOST`, `IOTHING_AUTH_DB_NAME`, `IOTHING_AUTH_DB_USER` and `IOTHING_AUTH_DB_PASSWORD` in `iopix.env` (the tables are created at start; `iothing-auth migrate` folds an older install's `user_accounts` table into it).
+Accounts are the **ioThing suite's shared accounts** in the **Shared ioSuite database** (the `iothing-auth` library; a MariaDB database shared with ioNotes, ioContacts and the other apps, holding accounts, sessions, roles, the suite-wide settings and the list of apps): one name, password and session for every app, so someone signed in at `photo.example.com` is signed in at `notes.example.com` too when the apps share a domain (`IOTHING_COOKIE_DOMAIN`). What is iopix's own is kept per app: the role an account holds here, its display settings and the person it is linked to. A *suite admin* is admin in every app; an app admin manages this app's settings and the accounts' roles here. Point iopix at that database with `IOSUITE_SHARED_DB_HOST`, `IOSUITE_SHARED_DB_NAME`, `IOSUITE_SHARED_DB_USER` and `IOSUITE_SHARED_DB_PASSWORD` in `iopix.env` (the older `IOTHING_AUTH_DB_*` names still work (the tables are created at start; `iothing-auth migrate` folds an older install's `user_accounts` table into it).
 
 Out of the box the viewer is open to anyone who can reach it. `setup.sh` asks for the admin account; Settings offers **Create the admin account** later (or set `ADMIN_USER` and `ADMIN_PASSWORD` for a container, or run `.venv/bin/python -m app.users create <name> <password> admin`). Once a user exists:
 
@@ -278,7 +278,7 @@ All settings are environment variables; `setup.sh` writes the ones it asks about
 | `AUTO_MODELS` | empty | models to download when missing at start, e.g. `siglip2,yolox,geonames` (keys as in Maintenance › AI analysis and models); set by `setup.sh` and the Docker image |
 | `GOOGLE_MAPS_API_KEY` | unset | Google Maps API key (the Settings page can store one instead); used only when the map provider is set to Google |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | unset | create the admin account at start when no user exists yet (containers, installers) |
-| `IOTHING_AUTH_DB_HOST` / `IOTHING_AUTH_DB_PORT` / `IOTHING_AUTH_DB_NAME` / `IOTHING_AUTH_DB_USER` / `IOTHING_AUTH_DB_PASSWORD` | `127.0.0.1` / `3306` / `auth` / `auth` / `auth` | the ioThing suite's shared account database (MariaDB), see Users and permissions |
+| `IOSUITE_SHARED_DB_HOST` / `IOSUITE_SHARED_DB_PORT` / `IOSUITE_SHARED_DB_NAME` / `IOSUITE_SHARED_DB_USER` / `IOSUITE_SHARED_DB_PASSWORD` | `127.0.0.1` / `3306` / `iosuite` / `iosuite` / `iosuite` | the Shared ioSuite database (MariaDB): accounts, sessions, roles, suite-wide settings and the list of apps, see Users and permissions. The older `IOTHING_AUTH_DB_*` names still work |
 | `IOTHING_COOKIE_DOMAIN` | unset | the domain the session cookie is shared on (e.g. `example.com` for `photo.example.com` and `notes.example.com`); a LAN address or name outside it gets a cookie of its own |
 | `PUBLIC_URL` | unset | the address people reach the viewer at (e.g. `https://photo.example.com`), listed in the suite's list of apps for the start page and the other apps; unset, the best address it has been reached at is listed |
 | `READ_ONLY` | `0` | `1` locks the viewer to browsing: every write endpoint is refused, whatever the settings say |
@@ -391,7 +391,7 @@ A sign-in at the proxy also starts a session in the viewer, so the same browser 
 
 The built-in sign-in keeps working alongside: anyone the proxy does not vouch for (on your own network, where the hostname points straight at the server, or someone whose email has no account) gets the viewer's usual sign-in screen. Requests that come through Cloudflare (they carry `Cf-Ray`) never get one-click sign-in: passwordless accounts are left out of the picker and refused, and a passwordless session started at home does not work from outside.
 
-These settings can also be set in the app instead of `iopix.env` (Settings › Users › Sign-in at a proxy, or the MCP tool `proxy_signin`); saved that way they are kept in the shared auth database for the whole suite, so one Cloudflare Access application covering every app (`*.example.com`, one AUD tag) is set up once. `iopix.env` wins when both are set.
+These settings can also be set in the app instead of `iopix.env` (Settings › Users › Sign-in at a proxy, or the MCP tool `proxy_signin`); saved that way they are kept in the Shared ioSuite database for the whole suite, so one Cloudflare Access application covering every app (`*.example.com`, one AUD tag) is set up once. `iopix.env` wins when both are set.
 
 ### Sidecar file names
 

@@ -149,7 +149,7 @@ def _require_login(value, _body):
     """Visitors get the sign-in screen and nothing else."""
     if value and not users.any_users():
         raise HTTPException(400, "Create an account first, or nobody could sign in")
-    users.set_require_login(bool(value))  # in the auth database, per app
+    users.set_require_login(bool(value))  # in the Shared ioSuite database, per app
 
 
 def _read_only(value, _body):
