@@ -25,7 +25,7 @@ dependencies = [
   "python-multipart<1",
   "mcp<3",
   "pyjwt[crypto]<3",   # Cloudflare Access tokens (proxy sign-in)
-  "iothing-auth @ git+https://github.com/avandeputte/iosuite-shared.git@f2e08ebc35f229fe9f65f6f3db1101278e85ff41",   # 0.4.0, the Shared ioSuite database: the suite's shared accounts and sessions (pinned: bump to pick up a new one)
+  "iothing-auth @ git+https://github.com/avandeputte/iosuite-shared.git@5cc971b3cee5b7db402d2a8461f26e52bb2d697e",   # 0.4.2, the Shared ioSuite database (IOSUITE_DB_*): the suite's shared accounts and sessions (pinned: bump to pick up a new one)
 ]
 
 [project.optional-dependencies]

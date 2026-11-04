@@ -48,8 +48,8 @@ os.environ.update({
     "PREWARM": "0", "SEMANTIC": "0", "ANALYSIS": "0", "CAPTIONS": "0", "REINDEX_POLL": "3600",
     "DIGIKAM_CHECK": "ask", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0",
     # the shared accounts (iothing-auth) in a database of their own on the test server, never the suite's `auth`
-    "IOSUITE_SHARED_DB_NAME": AUTH_DB["database"], "IOSUITE_SHARED_DB_HOST": AUTH_DB["host"], "IOSUITE_SHARED_DB_PORT": str(AUTH_DB["port"]),
-    "IOSUITE_SHARED_DB_USER": AUTH_DB["user"], "IOSUITE_SHARED_DB_PASSWORD": AUTH_DB["password"],
+    "IOSUITE_DB_NAME": AUTH_DB["database"], "IOSUITE_DB_HOST": AUTH_DB["host"], "IOSUITE_DB_PORT": str(AUTH_DB["port"]),
+    "IOSUITE_DB_USER": AUTH_DB["user"], "IOSUITE_DB_PASSWORD": AUTH_DB["password"],
 })
 _data.mkdir(parents=True, exist_ok=True)
 
