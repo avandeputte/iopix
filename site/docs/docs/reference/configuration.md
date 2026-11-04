@@ -37,6 +37,7 @@ iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | unset | create the admin at start when no account exists |
+| `PUBLIC_URL` | unset | the address people reach iopix at (e.g. `https://photo.example.com`), shown on the ioThing suite's start page and in the other apps; unset, the best address iopix has been reached at is used |
 | `READ_ONLY` | `0` | `1` refuses every change, for everyone |
 | `EDITING` | `1` | `0` removes the editing controls |
 | `DB_WRITE` | `1` | `0` never writes to digiKam's database |
