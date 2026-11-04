@@ -42,6 +42,9 @@ def clear_accounts(db_path=None):
     authdb.ex("DELETE FROM users")
     authdb.ex("ALTER TABLE users AUTO_INCREMENT = 1")
     authdb.ex("DELETE FROM settings")
+    authdb.ex("DELETE FROM suite_apps")
+    from app.auth import auth
+    auth._registered = False  # the next request registers iopix in the list of apps again
     users.invalidate()  # the accounts cache must not outlive the rows
     if db_path is not None:  # another process (the browser tests' server) keeps its own cache: let it expire
         import time

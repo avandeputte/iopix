@@ -26,6 +26,9 @@ DATA_DIR = _path("DATA_DIR", APP_DIR / "data")
 INDEX_DB = DATA_DIR / "index.db"
 CACHE_DIR = DATA_DIR / "cache"
 STATIC_DIR = APP_DIR / "static"
+# The address people reach the viewer at (https://photo.example.com), as the suite's start page and the other apps
+# link to it; empty: the best address it has been reached at is noted on its own.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip()
 
 # Grid thumbnails: fixed height, width follows the aspect ratio up to a cap.
 THUMB_HEIGHT = int(os.environ.get("THUMB_HEIGHT", 360))

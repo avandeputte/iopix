@@ -8,6 +8,8 @@ own stays per app: the role an account holds here, its display settings, and the
 from iothing_auth.fastapi import Auth
 from iothing_auth import users as shared
 
+from app import __version__, config
+
 APP = "iopix"
 
 
@@ -16,7 +18,10 @@ def _read_only() -> bool:
     return state.read_only()
 
 
-auth = Auth(APP, read_only=_read_only, read_only_message="The viewer is in read-only mode; nothing in the library can be changed.", app_label="iopix")
+# the version, address, colour and icon register iopix in the suite's list of apps (suite_apps, at the first request),
+# where the start page and the other apps find it
+auth = Auth(APP, read_only=_read_only, read_only_message="The viewer is in read-only mode; nothing in the library can be changed.", app_label="iopix",
+            version=__version__, public_url=config.PUBLIC_URL or None, description="Photos", color="#3b4a8c", icon="/icons/mark.svg")
 auth.deny_exempt = ("/mcp",)  # MCP clients sign in with the admin token, whatever Cloudflare service token got them through
 
 
