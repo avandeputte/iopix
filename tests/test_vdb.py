@@ -55,7 +55,7 @@ def test_copy_to_another_database_keeps_every_row(client, fresh, other_db):
     src, dst = vdb.connect(), vdb.connect(cfg=other_db)
     try:
         counts = vdb.copy_all(src, dst, drop=True)
-        assert counts["favorite_photos"] >= 2 and counts["viewer_albums"] >= 1  # (accounts live in the shared auth database)
+        assert counts["favorite_photos"] >= 2 and counts["viewer_albums"] >= 1  # (accounts live in the Shared ioSuite database)
         r = dst.execute("SELECT id, name FROM viewer_albums WHERE id = ?", (aid,)).fetchone()
         assert r["name"] == "Trip" and r[1] == "Trip", "rows answer to names and indexes"
         assert dst.execute("SELECT value FROM app_settings WHERE key = 'zz_probe'").fetchone()[0] == "value with ? and %s and `key`"

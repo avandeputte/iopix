@@ -1,6 +1,6 @@
 """Sign-in done by a reverse proxy in front of the viewer (Cloudflare Access, HAProxy, nginx, Caddy or Traefik with
 an authentication step): iothing_auth.proxyauth does the work, with the settings stored once for the whole suite
-(or per app) in the auth database; the environment (iopix.env) still wins. This module keeps iopix's old names:
+(or per app) in the Shared ioSuite database; the environment (iopix.env) still wins. This module keeps iopix's old names:
 
   AUTH_PROXY          off (default) | cloudflare | haproxy | nginx | caddy | traefik | header
   AUTH_PROXY_HEADER   the header(s) holding the user, comma-separated
