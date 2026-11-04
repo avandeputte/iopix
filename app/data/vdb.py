@@ -483,9 +483,21 @@ def rename_old_tables(con: VConn):
 
 
 def dump_tool() -> str:
-    """mysqldump or mariadb-dump, wherever it is (Homebrew's mysql-client is not on PATH by default); None without one."""
-    return (shutil.which("mysqldump") or shutil.which("mariadb-dump")
+    """mariadb-dump or mysqldump, wherever it is (Homebrew's mysql-client is not on PATH by default); None without one."""
+    return (shutil.which("mariadb-dump") or shutil.which("mysqldump")
             or next((c for c in ("/opt/homebrew/opt/mysql-client/bin/mysqldump", "/usr/local/opt/mysql-client/bin/mysqldump") if os.access(c, os.X_OK)), None))
+
+
+def _dump_options(tool: str) -> list:
+    """MySQL's own mysqldump 8 reads information_schema.COLUMN_STATISTICS, which MariaDB has not got, and stops after
+    the first table; --column-statistics=0 turns that off (MariaDB's dump and MySQL's before 8 do not know the option)."""
+    try:
+        v = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=20).stdout
+    except Exception:
+        return []
+    m = re.search(r"Distrib (\d+)", v) or re.search(r"Ver (\d+)\.", v)
+    major = int(m.group(1)) if m else 0
+    return ["--column-statistics=0"] if "mariadb" not in v.lower() and major >= 8 else []
 
 
 def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
@@ -496,11 +508,12 @@ def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
     if not tool:
         raise RuntimeError("no mysqldump/mariadb-dump on this machine (install mariadb-client)")
     c = cfg or settings()
-    cmd = [tool, "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", "--skip-extended-insert", c["database"]]
+    cmd = [tool, *_dump_options(tool), "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", "--skip-extended-insert", c["database"]]
     with open(dst, "wb") as f:
         res = subprocess.run(cmd, stdout=subprocess.PIPE if skip_token else f, stderr=subprocess.PIPE, timeout=1800,
                              env={**os.environ, "MYSQL_PWD": c["password"] or ""})  # the password never on the command line
         if res.returncode != 0:
+            f.close(); dst.unlink(missing_ok=True)  # a dump cut short is no backup
             raise RuntimeError(res.stderr.decode(errors="replace")[-300:])
         if skip_token:  # one INSERT per row (--skip-extended-insert), so the token's row is one line
             f.write(b"".join(line for line in res.stdout.splitlines(keepends=True) if b"'mcp_admin_token'" not in line))
