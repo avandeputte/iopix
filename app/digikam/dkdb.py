@@ -11,8 +11,7 @@ Settings (environment):
                        viewer's own tables, started fresh on PHOTOS_ROOT, and the file scanner finds the photos)
   DIGIKAM_DB_DIR       folder with digikam4.db          (sqlite)
   DIGIKAM_DB_HOST/PORT/NAME/USER/PASSWORD                (mysql; NAME defaults to "digikam")
-  DIGIKAM_DB_BACKUP    auto (default: a full copy before destructive operations only) or skip (never); daily, the old name,
-                       means auto (remove after v1.120)
+  DIGIKAM_DB_BACKUP    auto (default: a full copy before destructive operations only) or skip (never)
   DIGIKAM_DB_DUMP      optional: a command that writes a full dump to stdout, used instead of
                        mysqldump, e.g. "docker exec iopix-mariadb mariadb-dump -udigikam -pX digikam"
 """

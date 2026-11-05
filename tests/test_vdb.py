@@ -131,7 +131,7 @@ def test_a_viewer_db_from_before_is_imported_once(tmp_path, other_db, monkeypatc
     monkeypatch.setattr(vdb, "LEGACY_SQLITE", legacy)
     monkeypatch.setattr(vdb, "CONF", tmp_path / "viewer-db.json")
     monkeypatch.setattr(vdb, "_cfg", None)
-    monkeypatch.setattr(vdb.config, "viewer_db_env", lambda k: None)  # the suite's VIEWER_DB_* must not count as "configured"
+    monkeypatch.setattr(vdb.config, "db_env", lambda k: None)  # the suite's DB_* must not count as "configured"
     assert not vdb.configured() and vdb.public_settings()["legacy_sqlite"] == str(legacy)
     with pytest.raises(ValueError):
         vdb.switch({"host": other_db["host"]}, copy=True)  # a database and a user are needed too
@@ -175,7 +175,7 @@ def test_dump_is_the_backup_form_and_leaves_the_token_out(client, fresh, tmp_pat
 def test_without_a_configuration_the_viewer_waits(monkeypatch):
     monkeypatch.setattr(vdb, "CONF", vdb.config.DATA_DIR / "nowhere.json")
     monkeypatch.setattr(vdb, "_cfg", None)
-    monkeypatch.setattr(vdb.config, "viewer_db_env", lambda k: None)
+    monkeypatch.setattr(vdb.config, "db_env", lambda k: None)
     monkeypatch.setattr(vdb, "error", None)
     assert not vdb.configured()
     vdb.init()  # never raises

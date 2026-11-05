@@ -339,7 +339,7 @@ function contactsTab(c) {
     const save = async (body) => {
       try { const r = await post('/api/iocontacts/settings', body); draw(r, r.test); } catch (e) { toastError(e); }
     };
-    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. ${S.APP_NAME} reads the contacts from the server; your browser never needs to reach ioContacts. Use an ioContacts account and an app password made for it (in ioContacts: Settings › Apps and devices). Behind Cloudflare Access, add a service token (Zero Trust › Access › Service auth) and allow it in the ioContacts application’s policy. Leave the address empty to turn this off.${fixed.size ? ' Some fields are set in iopix.env and can only be changed there.' : ''}`,
+    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. ${S.APP_NAME} reads the contacts from the server; your browser never needs to reach ioContacts. Use an ioContacts account and an app password made for it (in ioContacts: Settings › Apps and devices). Behind Cloudflare Access, add a service token (Zero Trust › Access › Service auth) and allow it in the ioContacts application’s policy. Leave the address empty to turn this off.${fixed.size ? ' Some fields are set in config.env and can only be changed there.' : ''}`,
       h('div', null,
         h('div', { class: 'toolbar tight' }, f.url, f.user, f.password),
         h('div', { class: 'toolbar tight mt6' }, f.cf_client_id, f.cf_client_secret),
@@ -645,10 +645,10 @@ export function viewerDbPanel({ setup = false } = {}) {
   const btn = (label, fn, primary) => h('button', { class: 'pillbtn' + (primary ? ' on' : ''), onclick: fn }, label);
   (async () => {
     let d; try { d = await api('/api/viewerdb'); } catch (e) { fill(body, e.message); return; }
-    if (d.locked) {  // configured but not answering, and nobody signed in: only Retry (the connection is changed in data/viewer-db.json or VIEWER_DB_*)
+    if (d.locked) {  // configured but not answering, and nobody signed in: only Retry (the connection is changed in data/viewer-db.json or DB_* in config.env)
       const result = h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' });
       fill(body, h('div', null, `${S.APP_NAME}’s database is configured but not answering: `, h('span', { class: 'warn' }, d.error || ''),
-        h('div', { class: 'muted note mt6' }, 'Start the database server (or wait for it) and retry. To use another server, change data/viewer-db.json or the VIEWER_DB_* variables and restart.')),
+        h('div', { class: 'muted note mt6' }, 'Start the database server (or wait for it) and retry. To use another server, change data/viewer-db.json or the DB_* settings in config.env and restart.')),
         h('div', { class: 'btnrow', style: 'margin-top:8px' },
           btn('Retry the configured database', async () => { fill(result, 'Trying…'); try { await post('/api/viewerdb/retry', {}); fill(result, 'It answers now. Restarting…'); setTimeout(() => location.reload(), 4000); } catch (e) { fill(result, e.message); } }, true)), result);
       return;

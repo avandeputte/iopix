@@ -55,7 +55,7 @@ def init():
 
 def _counts() -> dict:
     """{job: photos analysed so far}, or None when the database is missing or unreadable."""
-    if not vdb.exists():
+    if not vdb.ready():
         return None
     try:
         with vdb.reader(READ_TIMEOUT) as con:
@@ -591,7 +591,7 @@ def start(photos: list):
 
 def results() -> dict:
     """{photo_id: {...}} for the index build."""
-    if not vdb.exists():
+    if not vdb.ready():
         return {}
     out = {}
     try:
@@ -622,7 +622,7 @@ def results() -> dict:
 
 def boxes(photo_id: int) -> list:
     """Detected objects of one photo for the info panel: [{cls, score, x, y, w, h}], best first."""
-    if not vdb.exists():
+    if not vdb.ready():
         return []
     try:
         with vdb.reader(READ_TIMEOUT) as con:

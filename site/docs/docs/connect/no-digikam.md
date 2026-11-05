@@ -8,7 +8,7 @@ Every install offers it:
 
 | Install | How |
 | --- | --- |
-| [Proxmox container](../install/proxmox.md) | answer **I don't use digiKam** when it asks where digiKam's database is (unattended: `IOPIX_DB=none`) |
+| [Proxmox container](../install/proxmox.md) | answer **I don't use digiKam** when it asks where digiKam's database is (unattended: `IOPIX_DIGIKAM_DB=none`) |
 | [Linux installer](../install/linux.md) | `sh iopix-install.sh --photos /srv/photos --no-digikam` |
 | [setup.sh](../install/setup-script.md) | answer **no** to "Do you use digiKam with these photos?" (or `--no-digikam`) |
 | [Docker](../install/docker.md) | `DIGIKAM_DB_TYPE: none`, without the other `DIGIKAM_DB_*` lines |

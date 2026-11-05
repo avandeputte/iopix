@@ -5,6 +5,8 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+# the settings setup.sh writes (they hold the database passwords)
+config.env
 # installer output
 dist/
 # macOS

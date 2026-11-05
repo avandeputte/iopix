@@ -22,7 +22,7 @@ from app.data import index, state as appstate
 from app.data.query import DATE_RE, build_where
 from app.ai.semantic import semantic, enabled as semantic_enabled
 
-VIEWER = config.VIEWER_URL  # for the links in results
+VIEWER = config.BASE_URL  # for the links in results
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 # a tool that changes the library but can be repeated with the same outcome (an edit, a setting, a job start)
 WRITES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)

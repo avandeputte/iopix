@@ -7,8 +7,8 @@ hands back rows that answer to both an index and a column name. Keeping the tran
 rewriting a thousand statements is deliberate: the digiKam side (dkdb.py) still speaks both dialects, and
 the statements stay readable.
 
-Where the connection goes is kept outside the database itself, in data/viewer-db.json (or VIEWER_DB_* in
-the environment), since the settings table lives inside. Without a configuration, or with one the server
+Where the connection goes is kept outside the database itself, in data/viewer-db.json (or DB_* in
+config.env), since the settings table lives inside. Without a configuration, or with one the server
 refuses, the viewer starts in its "database needed" state (main.py): the Settings page asks for the
 details, tests them, and the viewer restarts on them. An install from before v1.113 still has its SQLite
 file (data/viewer.db): the first switch copies every row out of it, once, and the file is renamed. That
@@ -23,7 +23,6 @@ import shutil
 import sqlite3  # only to read a viewer.db from before v1.112 once (import_sqlite)
 import subprocess
 import threading
-import time
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -148,7 +147,7 @@ def settings() -> dict:
         except (OSError, ValueError):
             pass
         for k in KEYS:
-            v = config.viewer_db_env(k)
+            v = config.db_env(k)
             if v:
                 c[k] = v
         c["port"] = int(c.get("port") or 3306)
@@ -191,22 +190,12 @@ def save_settings(c: dict):
     settings()
 
 
-def is_mysql() -> bool:
-    """Always true since v1.113; kept for the modules that asked (remove after v1.120)."""
-    return True
-
-
 def describe() -> str:
     """Where the viewer's own data lives, for status pages (with the error when the server is not answering)."""
     c = settings()
     if not configured():
         return "no database configured"
     return f"MySQL {c['user']}@{c['host']}:{c['port']}/{c['database']}" + (f" (unavailable: {error})" if error else "")
-
-
-def exists() -> bool:
-    """Whether there is a database to read at all. Kept for its callers (remove after v1.120): same as ready()."""
-    return ready()
 
 
 # ---- connections
@@ -284,7 +273,7 @@ def _mysql_raw(c: dict):
     if pymysql is None:
         raise RuntimeError("the viewer database needs the PyMySQL package (pip install pymysql)")
     if not (c.get("host") and c.get("database") and c.get("user")):
-        raise RuntimeError("no viewer database configured (Settings › digiKam and server › iopix database, or VIEWER_DB_*)")
+        raise RuntimeError("no viewer database configured (Settings › digiKam and server › iopix database, or DB_* in config.env)")
     return pymysql.connect(host=c["host"], port=int(c["port"]), database=c["database"], user=c["user"], password=c["password"],
                            charset="utf8mb4", autocommit=False, connect_timeout=8, read_timeout=120, write_timeout=120)
 
@@ -543,78 +532,6 @@ def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
             f.write(b"".join(line for line in res.stdout.splitlines(keepends=True) if b"'mcp_admin_token'" not in line))
 
 
-def _backup_before_migration(tag: str):
-    """A dump of the viewer database before its tables change shape. A copy that cannot be made is logged, not
-    fatal: the migration itself carries every row over."""
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    d = config.DATA_DIR / "db-backups"
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        dst = d / f"viewer-before-{tag}-{stamp}.sql"
-        dump(dst, skip_token=False)
-        log.info("viewer database: copied to %s before the %s migration", dst, tag)
-    except Exception as e:
-        log.warning("viewer database: no copy before the %s migration (%s)", tag, e)
-
-
-def _old_ai_shape(con: VConn) -> bool:
-    """Whether the AI tables are still in their pre-1.43 shape (a stamp column per table, five marker tables)."""
-    have = table_names(con)
-    return ("ai_text_and_faces" in have or "ai_objects_scanned" in have or "ai_faces_scanned" in have
-            or "ai_quality_old" in have or "ai_descriptions_old" in have or "image_data_checksums_old" in have  # a migration that stopped halfway
-            or "stamp" in columns(con, "ai_quality") or "stamp" in columns(con, "ai_descriptions")
-            or "path" in columns(con, "image_data_checksums"))
-
-
-def _migrate_ai_tables(con: VConn):
-    """v1.43 (remove after v1.120, with _old_ai_shape and the backup it takes): one ai_scans table says which version of each photo every job looked at (it was a stamp column in
-    four result tables plus two marker tables); ai_text_and_faces is split into ai_text and ai_face_count;
-    image_data_checksums is keyed by photo rather than file path. Every row is carried over; a dump of the
-    whole database is written to db-backups first."""
-    _backup_before_migration("1.43")
-    have = table_names(con)
-
-    def rename(a, b):
-        con.execute(f"RENAME TABLE `{a}` TO `{b}`")
-
-    old = {}
-    for t in ("ai_quality", "ai_descriptions", "image_data_checksums"):
-        if t + "_old" in have:  # renamed by a run that did not finish: carried on from here
-            old[t] = t + "_old"
-        elif t in have and (("stamp" in columns(con, t)) or (t == "image_data_checksums" and "path" in columns(con, t))):
-            rename(t, t + "_old"); old[t] = t + "_old"
-    for name, (cols, ddl) in TABLES.items():
-        if name.startswith("ai_") or name == "image_data_checksums":
-            con.execute(ddl)
-    if "ai_quality" in old:
-        con.execute("INSERT OR IGNORE INTO ai_quality (photo_id, sharp, bright, clip_lo, clip_hi) SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality_old")
-        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'quality', stamp, NULL FROM ai_quality_old")
-        con.execute("DROP TABLE ai_quality_old")
-    if "ai_descriptions" in old:
-        con.execute("INSERT OR IGNORE INTO ai_descriptions (photo_id, text) SELECT photo_id, text FROM ai_descriptions_old")
-        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'captions', stamp, NULL FROM ai_descriptions_old")
-        con.execute("DROP TABLE ai_descriptions_old")
-    if "ai_text_and_faces" in have:
-        con.execute("INSERT OR IGNORE INTO ai_text (photo_id, text) SELECT photo_id, text FROM ai_text_and_faces")
-        con.execute("INSERT OR IGNORE INTO ai_face_count (photo_id, nfaces, faceq) SELECT photo_id, nfaces, faceq FROM ai_text_and_faces")
-        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'vision', stamp, NULL FROM ai_text_and_faces")
-        con.execute("DROP TABLE ai_text_and_faces")
-    if "ai_objects_scanned" in have:
-        con.execute("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) SELECT photo_id, 'objects', stamp, NULL FROM ai_objects_scanned")
-        con.execute("DROP TABLE ai_objects_scanned")
-    if "ai_faces_scanned" in have:
-        rows = con.execute("SELECT photo_id, stamp, found, added, checked FROM ai_faces_scanned").fetchall()
-        con.executemany("INSERT OR IGNORE INTO ai_scans (photo_id, job, stamp, detail) VALUES (?, 'facedetect', ?, ?)",
-                        [(r[0], r[1], json.dumps({"found": r[2], "added": r[3], "checked": r[4]})) for r in rows])
-        con.execute("DROP TABLE ai_faces_scanned")
-    if "image_data_checksums" in old:
-        # the photo each path stood for is known from photo_identity; paths no photo has any more are dropped
-        con.execute("INSERT OR IGNORE INTO image_data_checksums (photo_id, hash, algorithm, verified) "
-                    "SELECT i.dk_id, c.hash, c.algorithm, c.verified FROM image_data_checksums_old c JOIN photo_identity i ON i.path = c.path WHERE i.dk_id IS NOT NULL")
-        con.execute("DROP TABLE image_data_checksums_old")
-    log.info("viewer database: AI tables restructured (ai_scans, ai_text, ai_face_count; checksums by photo)")
-
-
 def ensure_schema(con: VConn = None):
     """Every table, idempotently, plus the columns older databases lack."""
     own = con is None
@@ -622,8 +539,6 @@ def ensure_schema(con: VConn = None):
     try:
         rename_old_tables(con)
         _drop_old_library_shape(con)
-        if _old_ai_shape(con):
-            _migrate_ai_tables(con)
         for name, (cols, ddl) in TABLES.items():
             con.execute(ddl)
         if "file_copy" not in columns(con, "photo_history"):  # v1.32: the backed-up image file of each change
@@ -650,7 +565,7 @@ def init():
     error = None
     if not configured():
         error = "no viewer database configured"
-        log.error("viewer database: %s; the viewer waits for one (Settings › digiKam and server › iopix database, or VIEWER_DB_*)", error)
+        log.error("viewer database: %s; the viewer waits for one (Settings › digiKam and server › iopix database, or DB_* in config.env)", error)
         return
     try:
         con = connect(cfg=settings())

@@ -69,6 +69,6 @@ The header is believed **only from the proxy's address**. The proxy must replace
     http-request set-header Remote-User %[var(req.auth_response_header.remote_user)]
     ```
 
-These settings can also be made in the app (**Settings › Users and sign-in › Sign-in at a proxy**); `iopix.env` wins when both are set.
+These settings can also be made in the app (**Settings › Users and sign-in › Sign-in at a proxy**); `config.env` wins when both are set.
 
 Turn on **Require sign-in** as well, so nobody gets in without the proxy's sign-in.

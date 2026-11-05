@@ -15,7 +15,7 @@ git clone https://github.com/avandeputte/iopix && cd iopix
 - Which **features** you want: content search, places, objects, text recognition, photo descriptions. Each downloads its model.
 - The **port**, the **admin account**, and whether to **start at login** (launchd on macOS, systemd on Linux).
 
-Then it creates the Python environment, installs the packages, downloads the models, writes `iopix.env`, creates the admin and starts the service.
+Then it creates the Python environment, installs the packages, downloads the models, writes `config.env`, creates the admin and starts the service.
 
 It also installs the system tools iopix needs when they are missing (Python 3.10+, exiftool, ffmpeg, jpegtran, the MariaDB client): with **Homebrew** on macOS (offering to install Homebrew first), or apt, dnf, zypper or pacman on Linux. It does not install a MariaDB server; on a Mac `brew install mariadb && brew services start mariadb` gives you one.
 
@@ -27,15 +27,15 @@ Flags skip the questions. `./setup.sh --help` lists them all. For example:
 
 ```sh
 ./setup.sh --yes --photos /srv/photos \
-  --mysql db:3306/digikam:digikam:secret \
-  --iopix-db db:3306/iopix:iopix:secret \
+  --digikam-db db:3306/digikam:digikam:secret \
+  --db db:3306/iopix:iopix:secret \
   --features search,places \
   --admin admin:secret
 ```
 
-Without digiKam: `./setup.sh --yes --photos /srv/photos --no-digikam --iopix-db db:3306/iopix:iopix:secret --admin admin:secret`.
+Without digiKam: `./setup.sh --yes --photos /srv/photos --no-digikam --db db:3306/iopix:iopix:secret --admin admin:secret`.
 
-Skipped, `--iopix-db` leaves iopix to ask for the database on its set-up page the first time you open it.
+Skipped, `--db` leaves iopix to ask for the database on its set-up page the first time you open it.
 
 ## Running in the foreground
 

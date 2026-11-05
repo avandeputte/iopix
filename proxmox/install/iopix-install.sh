@@ -36,7 +36,7 @@ msg_ok "Installed Dependencies"
 # iopix's own database (settings, accounts, favorites, albums, AI results) is MariaDB-only: a server in the
 # container, with the database `iopix` and a user of the same name under a random password. The credentials wait
 # in a root-only file for setup.sh (the ct script reads it into setup.sh's environment when the answer on the
-# host was "local"; setup.sh then writes VIEWER_DB_* to /opt/iopix/app/iopix.env). CREATE ... IF NOT EXISTS keeps
+# host was "local"; setup.sh then writes DB_* to /opt/iopix/app/config.env). CREATE ... IF NOT EXISTS keeps
 # an existing database; nothing here is run again on an update.
 msg_info "Setting up MariaDB for iopix's database"
 $STD systemctl enable --now mariadb
@@ -49,7 +49,7 @@ GRANT ALL PRIVILEGES ON \`iopix\`.* TO 'iopix'@'localhost'; GRANT ALL PRIVILEGES
 FLUSH PRIVILEGES;
 SQL
 mkdir -p /opt/iopix
-(umask 077; printf 'IOPIX_VIEWER_DB=127.0.0.1:3306/iopix:iopix:%s\n' "$VDB_PASS" > /opt/iopix/viewer-db.env)
+(umask 077; printf 'IOPIX_DB=127.0.0.1:3306/iopix:iopix:%s\n' "$VDB_PASS" > /opt/iopix/viewer-db.env)
 msg_ok "Set up MariaDB (database iopix, user iopix; credentials in /opt/iopix/viewer-db.env, root only)"
 
 msg_info "Fetching iopix"

@@ -25,7 +25,7 @@ lock = threading.RLock()
 
 def signature() -> str:
     """Changes whenever the set of remembered edits changes (part of the index version)."""
-    if not vdb.exists():
+    if not vdb.ready():
         return "e0"
     con = appstate.connect()
     try:
@@ -55,7 +55,7 @@ def save_pending(rows: list):
 
 def pending() -> dict:
     """photo_id -> remembered edit."""
-    if not vdb.exists():
+    if not vdb.ready():
         return {}
     con = appstate.connect()
     try:
@@ -68,7 +68,7 @@ def pending() -> dict:
 
 def pending_one(photo_id: int):
     """The remembered edit of one photo, or None."""
-    if not vdb.exists():
+    if not vdb.ready():
         return None
     con = appstate.connect()
     try:
@@ -98,7 +98,7 @@ def drop_pending_tag(photo_id: int, path: str):
 
 def pending_count() -> int:
     """How many edits are remembered (what status polls show; cheaper than loading them all)."""
-    if not vdb.exists():
+    if not vdb.ready():
         return 0
     con = appstate.connect()
     try:

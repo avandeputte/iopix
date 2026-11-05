@@ -32,8 +32,8 @@ Set these in the environment to skip the questions:
 | Variable | Example |
 | --- | --- |
 | `IOPIX_PHOTOS` | `/tank/photos` |
-| `IOPIX_DB` | `sqlite:/tank/digikamDB`, `mysql:host:3306/digikam:digikam:password` or `none` |
-| `IOPIX_VIEWER_DB` | `local` (MariaDB in the container) or `host:3306/iopix:iopix:password` |
+| `IOPIX_DIGIKAM_DB` | `sqlite:/tank/digikamDB`, `mysql:host:3306/digikam:digikam:password` or `none` |
+| `IOPIX_DB` | `local` (MariaDB in the container) or `host:3306/iopix:iopix:password` |
 | `IOPIX_WRITE` | `1` or `0` |
 | `IOPIX_FEATURES` | `search,places,objects` |
 | `IOPIX_ADMIN` | `admin:password` |

@@ -242,8 +242,10 @@ def setup_file_log():
     diagnostics whatever the platform logs to (journald, launchd, docker)."""
     import logging
     from logging.handlers import RotatingFileHandler
+    if config.LOG_FILE is None:  # LOG_FILE= with nothing after it: no file
+        return
     try:
-        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         h = RotatingFileHandler(config.LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     except OSError:
         return

@@ -745,7 +745,7 @@ export async function showTrash() {
   drawBar(); draw();
   fill(body, bar, grid);
 }
-/** Maintenance › Server log: the end of data/viewer.log, filtered by level and text; page requests hidden unless asked. */
+/** Maintenance › Server log: the end of data/iopix.log, filtered by level and text; page requests hidden unless asked. */
 export function logDialog() {
   const level = h('select', null, h('option', { value: 'any' }, 'Everything'), h('option', { value: 'warning' }, 'Warnings and errors'), h('option', { value: 'error' }, 'Errors only'), h('option', { value: 'auth' }, 'Sign-ins'));
   const text = h('input', { class: 'einput', placeholder: 'Filter, e.g. sync or a file name', style: 'flex:1;min-width:140px', onkeydown: (e) => { e.stopPropagation(); if (e.key === 'Enter') load(); } });

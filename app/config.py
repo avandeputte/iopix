@@ -1,4 +1,5 @@
-"""Paths and tunables. Everything can be overridden with environment variables.
+"""Paths and tunables: config.env in the app folder (setup.sh writes it; config.env.example lists them all), or the
+environment, which wins.
 
 Everything this app writes on its own (index, caches, state, models, backups)
 lives under DATA_DIR, inside the app's own folder by default. The library is
@@ -9,11 +10,15 @@ are backed up first and can be locked out with READ_ONLY=1.
 import os
 from pathlib import Path
 
+from iosuite_shared import config as shared
+
 APP_DIR = Path(__file__).resolve().parent.parent
+shared.load_file(APP_DIR)  # first: iosuite_shared reads its settings (the Shared ioSuite database, COOKIE_DOMAIN) from it too
+env, env_flag, env_int = shared.env, shared.env_flag, shared.env_int
 
 
 def _path(name: str, default: Path) -> Path:
-    return Path(os.environ.get(name, str(default))).expanduser().resolve()
+    return Path(env(name, str(default))).expanduser().resolve()
 
 
 DIGIKAM_DB_DIR = _path("DIGIKAM_DB_DIR", Path.home() / "Pictures" / "digikamDB")
@@ -28,21 +33,33 @@ CACHE_DIR = DATA_DIR / "cache"
 STATIC_DIR = APP_DIR / "static"
 # The address people reach the viewer at (https://photo.example.com), as the suite's start page and the other apps
 # link to it; empty: the best address it has been reached at is noted on its own.
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip()
+PUBLIC_URL = env("PUBLIC_URL").strip().rstrip("/")
+
+# where the server listens (python -m app); every app of the suite has its own default port (iosuite_shared.suite.PORTS)
+HOST = env("HOST", "0.0.0.0")
+PORT = env_int("PORT", 8600)
+# the addresses that may tell the server the visitor's address and scheme (X-Forwarded-For / -Proto): * (any), or a
+# comma-separated list such as the reverse proxy's
+FORWARDED_ALLOW_IPS = env("FORWARDED_ALLOW_IPS", "*")
+# HTTPS served directly instead of behind a reverse proxy: both files
+TLS_CERT_FILE = env("TLS_CERT_FILE")
+TLS_KEY_FILE = env("TLS_KEY_FILE")
+# the address links in MCP results point at
+BASE_URL = PUBLIC_URL or f"http://localhost:{PORT}"
 
 # Grid thumbnails: fixed height, width follows the aspect ratio up to a cap.
-THUMB_HEIGHT = int(os.environ.get("THUMB_HEIGHT", 360))
-THUMB_MAX_WIDTH = int(os.environ.get("THUMB_MAX_WIDTH", 1080))
-THUMB_QUALITY = int(os.environ.get("THUMB_QUALITY", 76))
+THUMB_HEIGHT = env_int("THUMB_HEIGHT", 360)
+THUMB_MAX_WIDTH = env_int("THUMB_MAX_WIDTH", 1080)
+THUMB_QUALITY = env_int("THUMB_QUALITY", 76)
 # Lightbox previews: longest edge.
-PREVIEW_SIZE = int(os.environ.get("PREVIEW_SIZE", 2560))
-PREVIEW_QUALITY = int(os.environ.get("PREVIEW_QUALITY", 86))
+PREVIEW_SIZE = env_int("PREVIEW_SIZE", 2560)
+PREVIEW_QUALITY = env_int("PREVIEW_QUALITY", 86)
 # Previews are only made for photos you open; the oldest are pruned at startup
 # once the folder grows past this many megabytes.
-PREVIEW_CACHE_MAX_MB = int(os.environ.get("PREVIEW_CACHE_MAX_MB", 8000))
+PREVIEW_CACHE_MAX_MB = env_int("PREVIEW_CACHE_MAX_MB", 8000)
 
 # Build all grid thumbnails in the background after startup.
-PREWARM = os.environ.get("PREWARM", "1") not in ("0", "false", "no")
+PREWARM = env_flag("PREWARM", True)
 # cores the one running background job may use (Settings can change it); half the machine by default
 def cpu_count() -> int:
     """The cores this process may use: the container's share under Docker/LXC, not the host's count."""
@@ -56,7 +73,7 @@ BG_THREADS = int(os.environ.get("BG_THREADS", max(1, cpu_count() // 2)))
 PREWARM_WORKERS = int(os.environ["PREWARM_WORKERS"]) if os.environ.get("PREWARM_WORKERS") else None  # None: BG_THREADS
 
 # How often to check whether digiKam changed its database (seconds).
-REINDEX_POLL = int(os.environ.get("REINDEX_POLL", 20))
+REINDEX_POLL = env_int("REINDEX_POLL", 20)
 
 for _d in (DATA_DIR, CACHE_DIR):
     _d.mkdir(parents=True, exist_ok=True)
@@ -66,25 +83,24 @@ for _p in (DIGIKAM_DB_DIR, PHOTOS_ROOT):
 # AUTO_MODELS: models to download on first start when missing, e.g. "siglip2,yolox,geonames"
 # (keys as in app/ai/models.py). Containers and installers set it; the Mac service leaves it empty.
 AUTO_MODELS = [k.strip() for k in os.environ.get("AUTO_MODELS", "").split(",") if k.strip()]
-LOG_FILE = DATA_DIR / "viewer.log"  # rotating copy of the server's own log lines (Maintenance / MCP can show it)
+# rotating copy of the server's own log lines (Maintenance / MCP can show it); LOG_FILE= with nothing after it: none
+LOG_FILE = _path("LOG_FILE", DATA_DIR / "iopix.log") if os.environ.get("LOG_FILE", "x") else None
 # READ_ONLY=1 locks the viewer to browsing: no edits, tags, faces or database writes, whatever the settings say
-READ_ONLY = os.environ.get("READ_ONLY", "0") in ("1", "true", "yes")
+READ_ONLY = env_flag("READ_ONLY")
 # Allow metadata edits (XMP sidecars; image files too when the write_files setting is on).
-EDITING = os.environ.get("EDITING", "1") not in ("0", "false", "no")
+EDITING = env_flag("EDITING", True)
 # Allow "Apply to digiKam database" (only ever runs on request, and only while digiKam is closed).
-DB_WRITE = os.environ.get("DB_WRITE", "1") not in ("0", "false", "no")
-SEMANTIC = os.environ.get("SEMANTIC", "1") not in ("0", "false", "no")
-ANALYSIS = os.environ.get("ANALYSIS", "1") not in ("0", "false", "no")
+DB_WRITE = env_flag("DB_WRITE", True)
+SEMANTIC = env_flag("SEMANTIC", True)
+ANALYSIS = env_flag("ANALYSIS", True)
 # Threads for sharpness scoring and object detection; by default the shared BG_THREADS budget.
 ANALYSIS_WORKERS = int(os.environ["ANALYSIS_WORKERS"]) if os.environ.get("ANALYSIS_WORKERS") else None  # None: BG_THREADS
 # How to tell whether digiKam is running before writing its database: "pgrep" looks for the
 # process on this machine; "none" (Docker, a container, digiKam on another machine: it cannot be
-# seen) does not check. "ask", the old name for the container mode, now means "none".
-DIGIKAM_CHECK = os.environ.get("DIGIKAM_CHECK", "pgrep").strip().lower()
-if DIGIKAM_CHECK == "ask":  # the old name for the container mode; remove after v1.120
-    DIGIKAM_CHECK = "none"
+# seen) does not check.
+DIGIKAM_CHECK = env("DIGIKAM_CHECK", "pgrep").strip().lower()
 # Describe every photo in a sentence with a local captioning model (BLIP base), for search.
-CAPTIONS = os.environ.get("CAPTIONS", "1") not in ("0", "false", "no")
+CAPTIONS = env_flag("CAPTIONS", True)
 
 
 # Folders that sync tools, NAS systems and operating systems keep beside the photos: their contents (GoodSync's
@@ -101,7 +117,7 @@ def is_system_folder(rel: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# The other environment names the app honours, read once here so iopix.env is documented in one
+# The other settings the app honours, read once here so config.env is documented in one
 # place. The functions at the end are the few an admin (or the test suite) may change while the
 # process runs; they read the environment on every call.
 # --------------------------------------------------------------------------
@@ -112,16 +128,14 @@ DIGIKAM_DB_PORT = os.environ.get("DIGIKAM_DB_PORT", "3306")
 DIGIKAM_DB_NAME = os.environ.get("DIGIKAM_DB_NAME", "digikam")
 DIGIKAM_DB_USER = os.environ.get("DIGIKAM_DB_USER", "digikam")
 DIGIKAM_DB_PASSWORD = os.environ.get("DIGIKAM_DB_PASSWORD", "")
-# auto (a full copy before destructive operations) or skip (never); "daily", the old name, means auto: remove after v1.120
+# auto (a full copy before destructive operations) or skip (never)
 DIGIKAM_DB_BACKUP = os.environ.get("DIGIKAM_DB_BACKUP", "auto")
 # a command that writes a full MySQL dump to stdout, used instead of mysqldump (e.g. through docker exec)
 DIGIKAM_DB_DUMP = os.environ.get("DIGIKAM_DB_DUMP", "").strip()
-# the GitHub repository and branch update.sh follows and the update check compares against;
-# the DIGIKAM_VIEWER_* names from before the rename are still honoured: remove after v1.120
-IOPIX_REPO = os.environ.get("IOPIX_REPO") or os.environ.get("DIGIKAM_VIEWER_REPO") or "avandeputte/iopix"
-IOPIX_BRANCH = os.environ.get("IOPIX_BRANCH") or os.environ.get("DIGIKAM_VIEWER_BRANCH") or "main"
-MCP_FORCED = os.environ.get("MCP", "").strip() == "1"  # MCP=1: the MCP endpoint is on whatever the setting says
-VIEWER_URL = os.environ.get("VIEWER_URL", "http://localhost:8600").rstrip("/")  # the address MCP results link to
+# the GitHub repository and branch update.sh follows and the update check compares against
+IOPIX_REPO = env("IOPIX_REPO") or "avandeputte/iopix"
+IOPIX_BRANCH = env("IOPIX_BRANCH") or "main"
+MCP_FORCED = env_flag("MCP")  # MCP=1: the MCP endpoint is on whatever the setting says
 ADMIN_USER = os.environ.get("ADMIN_USER", "").strip()  # with ADMIN_PASSWORD: the first admin account, created on an empty users table
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")  # the browser-facing key, when not entered in Settings
@@ -144,11 +158,16 @@ def mysql_dates_env() -> str:
 
 
 def proxy_env(name: str):
-    """One of proxyauth.KEYS (AUTH_PROXY, CF_ACCESS_TEAM...) from iopix.env, or None when not set there."""
+    """One of proxyauth.KEYS (AUTH_PROXY, CF_ACCESS_TEAM...) from config.env, or None when not set there."""
     v = os.environ.get(name)
     return v if v not in (None, "") else None
 
 
-def viewer_db_env(key: str):
-    """VIEWER_DB_TYPE/HOST/PORT/DATABASE/USER/PASSWORD: the viewer's own database, when not in data/viewer-db.json."""
-    return os.environ.get("VIEWER_DB_" + key.upper()) or None
+# the names of iopix's own database settings in config.env, by vdb.KEYS
+DB_ENV = {"type": "DB_TYPE", "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME", "user": "DB_USER",
+          "password": "DB_PASSWORD"}
+
+
+def db_env(key: str):
+    """DB_TYPE/HOST/PORT/NAME/USER/PASSWORD: iopix's own database, when not in data/viewer-db.json."""
+    return os.environ.get(DB_ENV[key]) or None

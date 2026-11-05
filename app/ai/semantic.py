@@ -57,7 +57,6 @@ def ready(name: str) -> bool:
     return name == "clip" and (MODEL_DIR / "models--Qdrant--clip-ViT-B-32-vision" / "refs" / "main").exists()
 
 
-_ready = ready  # old private name, still used by older tests; remove after v1.120
 
 
 def download_models(name: str = "clip"):
@@ -79,7 +78,6 @@ def unit(v):
     return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9)
 
 
-_unit = unit  # old private name, still used by older tests; remove after v1.120
 
 
 def _read(file):

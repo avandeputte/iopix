@@ -233,7 +233,7 @@ async function start() {
   if (S.REQUIRE_LOGIN && !S.USER) { document.body.classList.add('locked'); loginDialog(true); return; }  // boot() runs after sign-in
   await boot();
 }
-/** No database of its own yet (a fresh install without VIEWER_DB_*, an install from before v1.113, or its server is
+/** No database of its own yet (a fresh install without DB_* in config.env, an install from before v1.113, or its server is
  *  down): nothing else works, so the page is the database panel from Settings, and reloads once the viewer restarts. */
 function setupDatabasePage(st) {
   document.body.classList.add('locked');

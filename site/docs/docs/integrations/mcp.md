@@ -18,7 +18,7 @@ What the web app shows, read-only (the token gets the client in; these tools tak
 | `list_people`, `list_tags`, `list_albums`, `list_places`, `list_app_albums` | the collections |
 | `find_duplicates` | duplicate files |
 
-Results carry links into iopix (set `VIEWER_URL` to your public address).
+Results carry links into iopix (set `PUBLIC_URL` to your public address).
 
 ## Admin tools
 

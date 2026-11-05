@@ -3,11 +3,11 @@
 iopix's own database (settings, accounts, favorites, albums, the edit log, AI results, the library copy) is
 MariaDB-only since v1.113, so the suite needs a server. Two ways:
 
-- IOPIX_TEST_DB=host:port:user:password names one (CI uses a MariaDB service this way). The user must be
+- IOSUITE_TEST_DB=host:port:user:password names one (CI uses a MariaDB service this way). The user must be
   allowed to CREATE and DROP databases: every run starts from empty databases of its own.
-- Otherwise a container is started with Docker, `iopix-test-mariadb` on a free local port, and left running
-  for the next run (a start costs ten seconds; `docker rm -f iopix-test-mariadb` throws it away). Without
-  Docker and without IOPIX_TEST_DB the whole suite is skipped with a message that says so.
+- Otherwise a container is started with Docker, `iosuite-test-mariadb` on a free local port, and left running
+  for the next run (a start costs ten seconds; `docker rm -f iosuite-test-mariadb` throws it away). Without
+  Docker and without IOSUITE_TEST_DB the whole suite is skipped with a message that says so.
 
 A session uses two databases: `iopix_test` for the API tests (the app imported in-process) and
 `iopix_test_ui` for the browser tests' own server (a second process, tests/ui/conftest.py). Both are
@@ -18,9 +18,9 @@ import socket
 import subprocess
 import time
 
-CONTAINER = "iopix-test-mariadb"
+CONTAINER = "iosuite-test-mariadb"
 IMAGE = "mariadb:11"
-ROOT_PASSWORD = "iopix-test"
+ROOT_PASSWORD = "iosuite-test"  # the same container as iosuite_shared.testing
 API_DB, UI_DB = "iopix_test", "iopix_test_ui"
 _server = None
 
@@ -30,7 +30,7 @@ def server() -> dict:
     global _server
     if _server is not None:
         return _server or None
-    given = os.environ.get("IOPIX_TEST_DB", "")
+    given = os.environ.get("IOSUITE_TEST_DB", "")
     if given:
         host, port, user, password = (given.split(":", 3) + ["", "", ""])[:4]
         c = {"host": host, "port": int(port or 3306), "user": user or "root", "password": password}
@@ -51,7 +51,7 @@ def _docker() -> dict:
     try:
         out = subprocess.run(["docker", "port", CONTAINER, "3306/tcp"], capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired) as e:
-        server.reason = f"no Docker ({e}) and no IOPIX_TEST_DB"
+        server.reason = f"no Docker ({e}) and no IOSUITE_TEST_DB"
         return None
     if out.returncode != 0:  # not running: start it (a stopped one of the same name is removed first)
         subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, timeout=30)
@@ -96,5 +96,6 @@ def fresh_database(name: str) -> dict:
 
 
 def env_for(settings: dict) -> dict:
-    """The VIEWER_DB_* variables that point an app process at `settings`."""
-    return {"VIEWER_DB_" + k.upper(): str(v) for k, v in settings.items()}
+    """The DB_* settings that point an app process at `settings` (app.config.DB_ENV's names)."""
+    names = {"type": "DB_TYPE", "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME", "user": "DB_USER", "password": "DB_PASSWORD"}
+    return {names[k]: str(v) for k, v in settings.items()}

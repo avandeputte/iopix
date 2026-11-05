@@ -1,13 +1,13 @@
 #!/bin/sh
 # iopix installer for Linux, version @VERSION@ (self-extracting; built by installer/make-installer.sh).
 #
-#   sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB [options]
+#   sh iopix-install.sh --photos /srv/photos --digikam-sqlite /srv/digikamDB [options]
 #   sh iopix-install.sh --photos /srv/photos --no-digikam [options]      (you don't use digiKam)
 #
 # Options
 #   --photos DIR        the photo folder (required)
-#   --digikam-db DIR    the folder containing digikam4.db (required unless --mysql or --no-digikam)
-#   --mysql HOST:PORT/DB:USER:PASSWORD   digiKam on MySQL/MariaDB instead of SQLite
+#   --digikam-sqlite DIR  the folder containing digikam4.db (required unless --digikam-db or --no-digikam)
+#   --digikam-db HOST:PORT/DB:USER:PASSWORD   digiKam on MySQL/MariaDB instead of SQLite
 #   --no-digikam        no digiKam at all: iopix keeps the library itself and finds the photos in the folder
 #   --prefix DIR        install location            (default /opt/iopix)
 #   --data DIR          the viewer's own data       (default PREFIX/data)
@@ -16,10 +16,12 @@
 #   --user NAME         service user                (default: iopix, created if missing)
 #   --features LIST     search,places,objects,ocr,captions,speech (default: ask; "none" for browsing only)
 #   --admin NAME:PASS   the admin account (default: ask); IOPIX_ADMIN=NAME:PASS in the environment does the
-#                       same without the password in the process list, and IOPIX_MYSQL=HOST:PORT/DB:USER:PASSWORD stands in for --mysql
-#   --iopix-db local|HOST:PORT/DB:USER:PASS  iopix's own database, always MySQL/MariaDB: "local" installs mariadb-server
+#                       same without the password in the process list, and IOPIX_DIGIKAM_DB stands in for --digikam-db
+#   --db local|HOST:PORT/DB:USER:PASS  iopix's own database, always MySQL/MariaDB: "local" installs mariadb-server
 #                       here and creates the database and user with a random password; or an existing server
-#                       (default: ask; local with --yes; IOPIX_VIEWER_DB in the environment does the same)
+#                       (default: ask; local with --yes; IOPIX_DB in the environment does the same)
+#   --suite-db HOST:PORT/DB:USER:PASS  the Shared ioSuite database (IOPIX_SUITE_DB does the same)
+#   --public-url URL    the address people reach iopix at    --cookie-domain DOMAIN  the domain the sign-in is shared on
 #   --models LIST       kept for compatibility: "none" means --features none
 #   --captions          shorthand for all features including captions
 #   --read-only         lock the viewer to browsing (READ_ONLY=1)
@@ -29,36 +31,38 @@
 #
 # What it does: installs the system packages the viewer shells out to (ffmpeg, exiftool,
 # libheif) with apt, dnf, zypper or pacman; unpacks the app under PREFIX/app; creates a
-# Python venv and installs the packages; writes PREFIX/app/iopix.env;
+# Python venv and installs the packages; writes PREFIX/app/config.env;
 # then runs the app's own interactive setup (setup.sh: iopix's MariaDB database, features and model downloads,
 # admin account) and installs a systemd service. The app folder (with its venv) belongs to the service
 # user and a sudoers rule lets that user restart the service, so "Update now" in the web app (update.sh) works.
 # Running it again upgrades the code and keeps DATA. The library is
 # only ever read unless you edit metadata from the viewer, which backs every file up first.
 set -e
-PREFIX=/opt/iopix; DATA=""; PHOTOS=""; DKDB=""; MYSQL=""; NODK=0; VIEWERDB=""; PORT=8600; HOST=0.0.0.0; USER_NAME=iopix
+PREFIX=/opt/iopix; DATA=""; PHOTOS=""; DKDB=""; MYSQL=""; NODK=0; VIEWERDB=""; SUITE=""; PUBURL=""; COOKIE=""; PORT=8600; HOST=0.0.0.0; USER_NAME=iopix
 MODELS=""; FEATURES=""; ADMIN=""; CAPTIONS=0; READ_ONLY=0; SERVICE=1; SYSDEPS=1; YES=0
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --photos) PHOTOS="$2"; shift 2;; --digikam-db) DKDB="$2"; shift 2;; --mysql) MYSQL="$2"; shift 2;; --no-digikam) NODK=1; shift;; --iopix-db) VIEWERDB="$2"; shift 2;;
+    --photos) PHOTOS="$2"; shift 2;; --digikam-sqlite) DKDB="$2"; shift 2;; --digikam-db) MYSQL="$2"; shift 2;; --no-digikam) NODK=1; shift;; --db) VIEWERDB="$2"; shift 2;;
+    --suite-db) SUITE="$2"; shift 2;; --public-url) PUBURL="$2"; shift 2;; --cookie-domain) COOKIE="$2"; shift 2;;
     --prefix) PREFIX="$2"; shift 2;; --data) DATA="$2"; shift 2;; --port) PORT="$2"; shift 2;; --host) HOST="$2"; shift 2;;
     --user) USER_NAME="$2"; shift 2;; --models) MODELS="$2"; shift 2;; --features) FEATURES="$2"; shift 2;; --admin) ADMIN="$2"; shift 2;; --captions) CAPTIONS=1; shift;;
     --read-only) READ_ONLY=1; shift;; --no-service) SERVICE=0; shift;; --no-system-deps) SYSDEPS=0; shift;; --yes) YES=1; shift;;
-    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
 [ -n "$ADMIN" ] || ADMIN="${IOPIX_ADMIN:-}"
-[ -n "$MYSQL" ] || MYSQL="${IOPIX_MYSQL:-}"
-[ -n "$VIEWERDB" ] || VIEWERDB="${IOPIX_VIEWER_DB:-}"
-[ "$VIEWERDB" != sqlite ] || die "iopix's own database is on MySQL/MariaDB only (no SQLite file any more): --iopix-db local, or HOST:PORT/DB:USER:PASS"
+[ -n "$MYSQL" ] || MYSQL="${IOPIX_DIGIKAM_DB:-}"
+[ -n "$VIEWERDB" ] || VIEWERDB="${IOPIX_DB:-}"
+[ -n "$SUITE" ] || SUITE="${IOPIX_SUITE_DB:-}"
+[ "$VIEWERDB" != sqlite ] || die "iopix's own database is on MySQL/MariaDB only (no SQLite file): --db local, or HOST:PORT/DB:USER:PASS"
 [ -n "$VIEWERDB" ] || [ "$YES" = 0 ] || VIEWERDB=local  # no questions: MariaDB on this machine
 [ -n "$PHOTOS" ] || die "--photos DIR is required"
 [ -d "$PHOTOS" ] || die "photo folder not found: $PHOTOS"
 if [ "$NODK" = 0 ] && [ -z "$MYSQL" ]; then
-  [ -n "$DKDB" ] || die "--digikam-db DIR is required (the folder with digikam4.db), or --mysql, or --no-digikam"
+  [ -n "$DKDB" ] || die "--digikam-sqlite DIR is required (the folder with digikam4.db), or --digikam-db, or --no-digikam"
   [ -f "$DKDB/digikam4.db" ] || die "digikam4.db not found in $DKDB"
 fi
 [ -n "$DATA" ] || DATA="$PREFIX/data"
@@ -76,7 +80,7 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 tail -n +$((LINE + 1)) "$0" | tar xzf - -C "$TMP"
 rm -rf "$PREFIX/app.new"; mv "$TMP/iopix" "$PREFIX/app.new"
 if [ -d "$PREFIX/app" ]; then  # a re-run upgrades the code: the settings, the Python environment and the installed commit stay
-  for keep in iopix.env .venv COMMIT; do [ -e "$PREFIX/app/$keep" ] && mv "$PREFIX/app/$keep" "$PREFIX/app.new/$keep"; done
+  for keep in config.env .venv COMMIT; do [ -e "$PREFIX/app/$keep" ] && mv "$PREFIX/app/$keep" "$PREFIX/app.new/$keep"; done
   rm -rf "$PREFIX/app.old"; mv "$PREFIX/app" "$PREFIX/app.old"
 fi
 mv "$PREFIX/app.new" "$PREFIX/app"; rm -rf "$PREFIX/app.old"
@@ -84,12 +88,15 @@ VERSION=$(cat "$PREFIX/app/VERSION")
 
 # --- everything else is the interactive setup script shipped with the app ----------------------
 say "Running the setup"
-set -- --photos "$PHOTOS" --data "$DATA" --port "$PORT" $SD  # the arguments as a list: a folder with a space in its name stays one word
+set -- --photos "$PHOTOS" --data "$DATA" --port "$PORT" $SD
+[ -n "$PUBURL" ] && set -- "$@" --public-url "$PUBURL"
+[ -n "$COOKIE" ] && set -- "$@" --cookie-domain "$COOKIE"  # the arguments as a list: a folder with a space in its name stays one word
 # the passwords go to setup.sh in its environment, not on its command line (visible in the process list)
-if [ "$NODK" = 1 ]; then set -- "$@" --no-digikam; elif [ -n "$MYSQL" ]; then export IOPIX_MYSQL="$MYSQL"; else set -- "$@" --sqlite "$DKDB"; fi
+if [ "$NODK" = 1 ]; then set -- "$@" --no-digikam; elif [ -n "$MYSQL" ]; then export IOPIX_DIGIKAM_DB="$MYSQL"; else set -- "$@" --digikam-sqlite "$DKDB"; fi
+[ -n "$SUITE" ] && export IOPIX_SUITE_DB="$SUITE"
 [ -n "$ADMIN" ] && export IOPIX_ADMIN="$ADMIN"
 # iopix's own database: "local" is a word for setup.sh (it installs MariaDB and creates the database); server details carry a password, so they go in the environment
-if [ "$VIEWERDB" = local ]; then set -- "$@" --iopix-db local; elif [ -n "$VIEWERDB" ]; then export IOPIX_VIEWER_DB="$VIEWERDB"; fi
+if [ "$VIEWERDB" = local ]; then set -- "$@" --db local; elif [ -n "$VIEWERDB" ]; then export IOPIX_DB="$VIEWERDB"; fi
 [ "$MODELS" = none ] && set -- "$@" --features none
 [ -n "$FEATURES" ] && set -- "$@" --features "$FEATURES"
 [ "$CAPTIONS" = 1 ] && set -- "$@" --features search,places,objects,ocr,captions
@@ -101,7 +108,9 @@ if ! id "$USER_NAME" >/dev/null 2>&1; then
 fi
 sh "$PREFIX/app/setup.sh" "$@" --no-service
 # --read-only: lock the viewer to browsing, whatever the settings say (setup.sh does not ask about it)
-[ "$READ_ONLY" = 1 ] && { grep -q '^READ_ONLY=' "$PREFIX/app/iopix.env" || echo "READ_ONLY=1" >> "$PREFIX/app/iopix.env"; }
+[ "$READ_ONLY" = 1 ] && { grep -q '^READ_ONLY=' "$PREFIX/app/config.env" || echo "READ_ONLY=1" >> "$PREFIX/app/config.env"; }
+# --host: where the server listens (0.0.0.0 by default)
+[ "$HOST" = 0.0.0.0 ] || { grep -q '^HOST=' "$PREFIX/app/config.env" || echo "HOST=$HOST" >> "$PREFIX/app/config.env"; }
 # the app folder and its venv belong to the service user: update.sh, run from the web app as that user, replaces
 # the code and refreshes the packages in place
 chown -R "$USER_NAME" "$DATA" "$PREFIX/app" 2>/dev/null || true
@@ -115,10 +124,10 @@ elif [ "$SERVICE" = 1 ]; then
 fi
 if [ "$SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   say "Installing the systemd service"
-  sed -e "s|@PREFIX@|$PREFIX|g" -e "s|@USER@|$USER_NAME|g" -e "s|@HOST@|$HOST|g" -e "s|@PORT@|$PORT|g" "$PREFIX/app/iopix.service" | sed -e "s|EnvironmentFile=.*|EnvironmentFile=$PREFIX/app/iopix.env|" -e "s|ExecStart=.*|ExecStart=\"$PREFIX/app/.venv/bin/python\" -m uvicorn app.main:app --host $HOST --port $PORT|" > /etc/systemd/system/iopix.service
+  sed -e "s|@PREFIX@|$PREFIX|g" -e "s|@USER@|$USER_NAME|g" "$PREFIX/app/iopix.service" > /etc/systemd/system/iopix.service
   systemctl daemon-reload && systemctl enable --now iopix.service && sleep 2
   systemctl is-active --quiet iopix.service && say "iopix $VERSION is running on port $PORT" || say "the service did not start; see: journalctl -u iopix"
 fi
-VDBH=$(sed -n 's/^VIEWER_DB_HOST=//p' "$PREFIX/app/iopix.env" 2>/dev/null); VDBN=$(sed -n 's/^VIEWER_DB_DATABASE=//p' "$PREFIX/app/iopix.env" 2>/dev/null)
-say "Settings: $PREFIX/app/iopix.env   Data: $DATA   iopix database: ${VDBH:+MariaDB $VDBN on $VDBH}${VDBH:-not set up yet (the viewer asks on its first page)}   Logs: journalctl -u iopix"
+VDBH=$(sed -n 's/^DB_HOST=//p' "$PREFIX/app/config.env" 2>/dev/null); VDBN=$(sed -n 's/^DB_NAME=//p' "$PREFIX/app/config.env" 2>/dev/null)
+say "Settings: $PREFIX/app/config.env   Data: $DATA   iopix database: ${VDBH:+MariaDB $VDBN on $VDBH}${VDBH:-not set up yet (the viewer asks on its first page)}   Logs: journalctl -u iopix"
 exit 0
