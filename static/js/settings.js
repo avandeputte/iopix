@@ -565,7 +565,7 @@ function storageTab(c) {
 
 /** Maintenance › the app itself: the edit log, the server log, the version and updates, and restart. */
 /** Maintenance › Updates and logs: the version card, the daily check, the MCP admin token, the server log and Restart, from
- *  iothing-auth's /api/server and /api/log, so the page is the same in every ioThing app. */
+ *  iosuite-shared's /api/server and /api/log, so the page is the same in every ioThing app. */
 function viewerTab(c) {
   const { view, row, btn } = c;
   return [

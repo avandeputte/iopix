@@ -17,7 +17,7 @@ ARG CAPTIONS=0
 # ffmpeg: video thumbnails. exiftool: metadata editing and the consistency checker.
 # libheif1: HEIC decoding for pillow-heif. libglib2.0-0: needed by RapidOCR's headless OpenCV.
 # mariadb-client: mariadb-dump, so "Apply to digiKam database" can back a MySQL/MariaDB digiKam up first.
-# libjpeg-turbo-progs: jpegtran, lossless rotate and crop of JPEGs. git: pip fetches iothing-auth from GitHub.
+# libjpeg-turbo-progs: jpegtran, lossless rotate and crop of JPEGs. git: pip fetches iosuite-shared from GitHub.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libimage-exiftool-perl libjpeg-turbo-progs libheif1 libglib2.0-0 mariadb-client git \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

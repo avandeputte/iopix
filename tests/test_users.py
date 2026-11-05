@@ -250,7 +250,7 @@ def test_an_account_can_be_left_off_the_sign_in_list(client, fresh):
 def test_a_session_in_use_is_renewed(client, fresh):
     """A device that uses its session gets a fresh 30 days (at most once a day): the iPhone app stays signed in."""
     import time as _time
-    from iothing_auth import db as authdb, sessions
+    from iosuite_shared import db as authdb, sessions
     users.create("alex", "correct horse", "admin")
     _login(client, "alex", "correct horse")
     assert "set-cookie" not in client.get("/api/auth/me").headers, "a session from today is not renewed"
@@ -264,7 +264,7 @@ def test_a_session_in_use_is_renewed(client, fresh):
 
 def test_registers_in_the_suite(client, fresh):
     """The first request lists iopix in the suite's apps (suite_apps), with its name and version, for the start page."""
-    from iothing_auth import suite
+    from iosuite_shared import suite
     from app import __version__
     assert suite.get("iopix") is None
     client.get("/api/status")

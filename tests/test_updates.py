@@ -1,4 +1,4 @@
-"""Self-update through iothing_auth's server_router (/api/server): the installed commit is known, GitHub's main branch
+"""Self-update through iosuite_shared's server_router (/api/server): the installed commit is known, GitHub's main branch
 is compared with it (network stubbed), the run is refused in Docker, the ref reaches update.sh, the daily check feeds
 the banner, and the server log answers. The updater itself is tested in iosuite-shared."""
 import json

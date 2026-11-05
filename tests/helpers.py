@@ -36,7 +36,7 @@ def clear_accounts(db_path=None):
     """Back to the open mode the app has before the first admin exists: every account in the Shared ioSuite database
     goes (the tests use a database of their own, iopix_test_auth). `db_path` is kept for the browser tests' server,
     which shares that database and its own cache: let the cache expire."""
-    from iothing_auth import db as authdb
+    from iosuite_shared import db as authdb
     from app import users
     users.init()
     authdb.ex("DELETE FROM users")

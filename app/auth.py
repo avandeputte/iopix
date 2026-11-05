@@ -1,13 +1,13 @@
-"""The shared ioThing accounts (iothing-auth), as iopix uses them.
+"""The shared ioThing accounts (iosuite-shared), as iopix uses them.
 
 Accounts, passwords, sessions and roles live in the Shared ioSuite database (IOSUITE_DB_* in iopix.env), shared
 with ioNotes and ioContacts: one sign-in serves every app on the domain (IOTHING_COOKIE_DOMAIN). What is iopix's
 own stays per app: the role an account holds here, its display settings, and the digiKam person it is linked to
 (the face badge on the sign-in screen), kept as the "person" value of the account's iopix data.
 """
-from iothing_auth.fastapi import Auth
-from iothing_auth import users as shared
-from iothing_auth.updates import Updater
+from iosuite_shared.fastapi import Auth
+from iosuite_shared import users as shared
+from iosuite_shared.updates import Updater
 
 from app import __version__, config
 
@@ -37,7 +37,7 @@ def _set_setting(key: str, value: str) -> None:
 
 
 # updates (the daily check, update.sh, restart), the MCP admin token and the server log, as in every app of the suite
-# (iothing_auth.updates); the daily-check switch and the token are kept with iopix's own settings
+# (iosuite_shared.updates); the daily-check switch and the token are kept with iopix's own settings
 updater = Updater(APP, __version__, config.APP_DIR, repo=config.IOPIX_REPO, branch=config.IOPIX_BRANCH, result_file=config.DATA_DIR / ".update-result",
                   settings=(_get_setting, _set_setting), user_agent="iopix")
 
