@@ -158,7 +158,7 @@ def mysql_dates_env() -> str:
 
 
 def proxy_env(name: str):
-    """One of proxyauth.KEYS (AUTH_PROXY, CF_ACCESS_TEAM...) from config.env, or None when not set there."""
+    """One of iosuite_shared.proxyauth.KEYS (AUTH_PROXY, CF_ACCESS_TEAM...) from config.env, or None when not set there."""
     v = os.environ.get(name)
     return v if v not in (None, "") else None
 

@@ -4,7 +4,9 @@ import time
 
 import pytest
 
-from app import proxyauth, users
+from app import users
+from iosuite_shared import proxyauth
+from app.auth import auth as auth_shared
 
 
 @pytest.fixture
@@ -17,7 +19,7 @@ def account(fresh):
 
 def test_off_by_default(monkeypatch, account):
     monkeypatch.delenv("AUTH_PROXY", raising=False)
-    assert proxyauth.identity({"Remote-User": "proxy-probe"}, "127.0.0.1") is None
+    assert auth_shared.proxy.identity({"Remote-User": "proxy-probe"}, "127.0.0.1") is None
 
 
 @pytest.mark.parametrize("preset", ["haproxy", "nginx", "caddy", "traefik", "header"])
@@ -25,21 +27,21 @@ def test_header_from_the_proxy_only(monkeypatch, account, preset):
     monkeypatch.setenv("AUTH_PROXY", preset)
     monkeypatch.delenv("AUTH_PROXY_HEADER", raising=False)
     monkeypatch.delenv("AUTH_PROXY_TRUSTED", raising=False)
-    assert proxyauth.identity({"Remote-User": "proxy-probe"}, "127.0.0.1") == "proxy-probe"
-    assert proxyauth.identity({"X-Auth-Request-Email": "probe@example.com"}, "::ffff:127.0.0.1") == "probe@example.com"
-    assert proxyauth.identity({"Remote-User": "proxy-probe"}, "192.168.1.50") is None, "not from the proxy: ignored"
+    assert auth_shared.proxy.identity({"Remote-User": "proxy-probe"}, "127.0.0.1") == "proxy-probe"
+    assert auth_shared.proxy.identity({"X-Auth-Request-Email": "probe@example.com"}, "::ffff:127.0.0.1") == "probe@example.com"
+    assert auth_shared.proxy.identity({"Remote-User": "proxy-probe"}, "192.168.1.50") is None, "not from the proxy: ignored"
     monkeypatch.setenv("AUTH_PROXY_TRUSTED", "192.168.1.0/24")
-    assert proxyauth.identity({"Remote-User": "proxy-probe"}, "192.168.1.50") == "proxy-probe"
+    assert auth_shared.proxy.identity({"Remote-User": "proxy-probe"}, "192.168.1.50") == "proxy-probe"
     monkeypatch.setenv("AUTH_PROXY_HEADER", "X-Custom-User")
-    assert proxyauth.identity({"Remote-User": "x", "X-Custom-User": "proxy-probe"}, "192.168.1.50") == "proxy-probe"
-    assert proxyauth.user_for("PROBE@example.com")["id"] == account["id"] and proxyauth.user_for("Proxy-Probe")["id"] == account["id"]
+    assert auth_shared.proxy.identity({"Remote-User": "x", "X-Custom-User": "proxy-probe"}, "192.168.1.50") == "proxy-probe"
+    assert auth_shared.proxy.user_for("PROBE@example.com")["id"] == account["id"] and auth_shared.proxy.user_for("Proxy-Probe")["id"] == account["id"]
 
 
 def test_unknown_people_are_created_only_when_allowed(monkeypatch, account):
     monkeypatch.delenv("AUTH_PROXY_CREATE", raising=False)
-    assert proxyauth.user_for("new-person@example.com") is None
+    assert auth_shared.proxy.user_for("new-person@example.com") is None
     monkeypatch.setenv("AUTH_PROXY_CREATE", "editor")
-    u = proxyauth.user_for("new-person@example.com")
+    u = auth_shared.proxy.user_for("new-person@example.com")
     assert u and u["role"] == "editor" and u["email"] == "new-person@example.com"
 
 
@@ -61,16 +63,16 @@ def test_cloudflare_access_token_is_verified(monkeypatch, account):
         return jwt.encode(claims, k, algorithm="RS256")
     hdr = proxyauth.CF_JWT_HEADER
     # from anywhere: the token is the proof, and the email comes from it, not from a header someone could set
-    assert proxyauth.identity({hdr: token(), proxyauth.CF_HEADER: "someone@else"}, "203.0.113.9") == "probe@example.com"
-    assert proxyauth.identity({hdr: token(k=other)}, "127.0.0.1") is None, "signed by someone else"
-    assert proxyauth.identity({hdr: token(aud=["another-app"])}, "127.0.0.1") is None
-    assert proxyauth.identity({hdr: token(exp=int(time.time()) - 600)}, "127.0.0.1") is None
-    assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None, "no token: nobody"
+    assert auth_shared.proxy.identity({hdr: token(), proxyauth.CF_HEADER: "someone@else"}, "203.0.113.9") == "probe@example.com"
+    assert auth_shared.proxy.identity({hdr: token(k=other)}, "127.0.0.1") is None, "signed by someone else"
+    assert auth_shared.proxy.identity({hdr: token(aud=["another-app"])}, "127.0.0.1") is None
+    assert auth_shared.proxy.identity({hdr: token(exp=int(time.time()) - 600)}, "127.0.0.1") is None
+    assert auth_shared.proxy.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None, "no token: nobody"
     # without the team settings nobody is signed in: for Cloudflare the signed token is the only proof (a plain
     # header from the tunnel's address could be set by anything on that machine)
     monkeypatch.delenv("CF_ACCESS_TEAM")
-    assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None
-    assert proxyauth.identity({proxyauth.CF_HEADER: "probe@example.com"}, "203.0.113.9") is None
+    assert auth_shared.proxy.identity({proxyauth.CF_HEADER: "probe@example.com"}, "127.0.0.1") is None
+    assert auth_shared.proxy.identity({proxyauth.CF_HEADER: "probe@example.com"}, "203.0.113.9") is None
 
 
 def test_requests_through_the_proxy_are_signed_in(client, monkeypatch, account):
@@ -104,18 +106,18 @@ def test_settings_from_the_app_and_the_token_seen(monkeypatch, account):
     import jwt
     for k in proxyauth.KEYS:
         monkeypatch.delenv(k, raising=False)
-    proxyauth.save({"AUTH_PROXY": "nginx", "AUTH_PROXY_TRUSTED": "10.0.0.0/8"})
+    auth_shared.proxy.save({"AUTH_PROXY": "nginx", "AUTH_PROXY_TRUSTED": "10.0.0.0/8"})
     try:
-        assert proxyauth.mode() == "nginx" and proxyauth.identity({"Remote-User": "proxy-probe"}, "10.1.2.3") == "proxy-probe"
+        assert auth_shared.proxy.mode() == "nginx" and auth_shared.proxy.identity({"Remote-User": "proxy-probe"}, "10.1.2.3") == "proxy-probe"
         monkeypatch.setenv("AUTH_PROXY", "off")
-        assert proxyauth.mode() == "off", "the environment wins"
+        assert auth_shared.proxy.mode() == "off", "the environment wins"
         tok = jwt.encode({"iss": "https://myteam.cloudflareaccess.com", "aud": ["aud-x"], "email": "probe@example.com"}, "k", algorithm="HS256")
-        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")  # from the proxy's own address: anyone else's header is ignored
-        proxyauth.seen.clear(); proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "203.0.113.9"); assert not proxyauth.seen, "not from the proxy: not noted"
-        proxyauth.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")
+        auth_shared.proxy.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")  # from the proxy's own address: anyone else's header is ignored
+        proxyauth.seen.clear(); auth_shared.proxy.note({proxyauth.CF_JWT_HEADER: tok}, "203.0.113.9"); assert not proxyauth.seen, "not from the proxy: not noted"
+        auth_shared.proxy.note({proxyauth.CF_JWT_HEADER: tok}, "10.1.2.3")
         assert proxyauth.seen["iss"] == "https://myteam.cloudflareaccess.com" and proxyauth.seen["aud"] == ["aud-x"]
     finally:
-        proxyauth.save({k: "" for k in proxyauth.KEYS})
+        auth_shared.proxy.save({k: "" for k in proxyauth.KEYS})
 
 
 def test_from_outside_a_password_is_required(client, monkeypatch, account):
