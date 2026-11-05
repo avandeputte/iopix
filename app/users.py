@@ -8,7 +8,7 @@ account signs in with one click from the account picker (on the home network onl
 viewer. Until the first account exists the viewer stays open, so a fresh install is not locked out.
 
 Passwords are scrypt-hashed and sessions are random tokens in an HttpOnly cookie (30 days, renewed in use), both
-in the auth database, so a session begun in another ioThing app is a session here too. This module keeps iopix's
+in the Shared ioSuite database, so a session begun in another ioThing app is a session here too. This module keeps iopix's
 old names for the rest of the code; the work is done by iothing_auth.
 """
 from iothing_auth import db as authdb, sessions, users as shared
@@ -31,7 +31,7 @@ end_all_sessions = sessions.end_all
 
 
 def init():
-    """The auth database's tables, and the admin named by ADMIN_USER / ADMIN_PASSWORD on a first start with no accounts yet."""
+    """The Shared ioSuite database's tables, and the admin named by ADMIN_USER / ADMIN_PASSWORD on a first start with no accounts yet."""
     shared.init()
 
 
