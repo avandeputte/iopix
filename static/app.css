@@ -70,16 +70,17 @@ body.noadmin #nav a[data-v="maintenance"] { display: none; }
 #topbar { position: fixed; inset: 0 0 auto var(--nav); height: var(--topbar); display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; background: var(--bg); z-index: var(--z-bar); }
 #menubtn { margin-left: -8px; }
 body.side-docked #menubtn { display: none; }
-.brand { display: flex; align-items: center; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .logo { width: 28px; height: 28px; border-radius: var(--r-s); background: url(icons/mark.svg) center / contain no-repeat; }
 .brand-name { font-size: var(--fs-l); font-weight: 500; white-space: nowrap; color: var(--brand-ink); letter-spacing: .01em; }
 .brand-name:has(.io) { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }  /* the name is iopix: bold and tight, as on the icon */
 .brand-name .io { color: var(--name-io); } .brand-name .pix { color: var(--name-pix); }
-/* the suite's other apps (static/js/suite.js): with other ioThing apps installed, the name top left opens a menu of them */
-.suitebtn { flex: none; display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 12px; border-radius: var(--r-m); }
+/* the suite's other apps (static/js/suite.js): with other ioThing apps installed, the logo top left opens a menu of them */
+.brand-mark { width: 30px; height: 30px; flex: none; }
+#nav .navhead div.brand { padding-left: 12px; }  /* the logo stays where it is when it becomes the button */
+#nav .navhead a.brand-home { display: inline; height: auto; padding: 0; border-radius: 0; }
+.suitebtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 0 -5px; border-radius: var(--r-m); }
 .suitebtn:hover, .suitebtn:focus-visible, .suitebtn[aria-expanded] { background: var(--bg3); }
-.suitebtn .ic { width: 20px; height: 20px; color: var(--fg2); transition: transform .15s; }
-.suitebtn[aria-expanded] .ic { transform: rotate(180deg); }
 #suitebtn { display: none; }
 .suitepop { position: fixed; z-index: var(--z-menu); display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(92px, max-content)); gap: 4px; padding: 8px;
   background: var(--bg); color: var(--fg); border-radius: var(--r-l); box-shadow: var(--shadow); }
@@ -843,8 +844,7 @@ button.lnk:hover { text-decoration: underline; }
   :root { --topbar: 48px; --nav: 0px; }
   #menubtn, #navscrim, .navhead, .navgap, .navsec, .navmanage, .navfoot, #nav a[data-v="settings"], #nav a[data-v="maintenance"] { display: none; }  /* Settings and Maintenance are under More */
   #topbar { gap: 8px; padding: 0 8px; left: 0; }
-  #suitebtn { display: inline-flex; height: 40px; padding: 0 2px 0 6px; }  /* the sidebar is the bottom bar here: the menu of other apps is in the top bar */
-  #suitebtn .brand-name:has(.io) { font-size: 20px; }
+  #suitebtn { display: inline-flex; margin: 0; }  /* the sidebar is the bottom bar here: the logo that opens the other apps is in the top bar */
   #filterbtn span:last-child { display: none; }
   #filterbtn { padding: 0 8px; border: 0; }
   #nav { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: 56px; flex-direction: row; justify-content: flex-start; overflow-x: auto; padding: 0; gap: 0;

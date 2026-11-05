@@ -25,7 +25,7 @@ On Android the installed app is also a **share target**: share photos to iopix a
 
 ## Other ioThing apps
 
-When other apps of the ioThing suite (such as ioContacts or ioNotes) are installed alongside iopix and share its accounts, the **iopix** name at the top of the sidebar opens a menu of them, each with its own icon. Choose one to go to that app. On a phone the same menu is the iopix name at the top left of the page. Each app adds itself to the menu the first time it starts, so there is nothing to set up. With iopix on its own, the name is simply the link to Explore.
+When other apps of the ioThing suite (such as ioContacts or ioNotes) are installed alongside iopix and share its accounts, the **iopix logo** at the top of the sidebar opens a menu of them, each with its own icon. Choose one to go to that app. The name beside the logo still takes you to Explore. On a phone the logo is at the top left of the page. Each app adds itself to the menu the first time it starts, so there is nothing to set up. With iopix on its own, the logo and the name are simply the link to Explore.
 
 ## Native apps for Apple devices
 

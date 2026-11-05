@@ -64,7 +64,7 @@ def test_sidebar_docks_hides_and_slides_over(browser, server):
     ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 860}); page = ctx.new_page()
     try:
         page.goto(server + "/#/photos"); page.wait_for_selector("body.side-docked #nav a.on", timeout=10000)
-        assert page.locator(".navhead .brand-name").is_visible() and page.locator(".navhead .logo").count() == 0
+        assert page.locator(".navhead .brand-name").is_visible() and page.locator(".navhead a.brand img.brand-mark").is_visible()  # the logo beside the name, as in ioContacts
         assert page.locator(".navfoot a[data-v=settings]").is_visible() and not page.locator("#menubtn").is_visible()
         nav, main = page.locator("#nav").bounding_box(), page.locator("#main").bounding_box()
         assert abs(main["x"] - (nav["x"] + nav["width"])) < 1.5, (nav, main)
@@ -306,8 +306,9 @@ def test_inside_the_app_the_web_navigation_steps_aside(browser, server):
 
 
 def test_the_name_opens_the_other_suite_apps(page, server, browser):
-    """With other ioThing apps in suite_apps, the name top left opens a menu of them (static/js/suite.js), each a link to
-    its app; alone, the name stays the link to Explore. On a phone the same menu is in the top bar."""
+    """With other ioThing apps in suite_apps, the logo top left opens a menu of them (static/js/suite.js), each a link to
+    its app, and the name beside it stays the link to Explore; alone, logo and name are one link to Explore. On a phone
+    the logo button is in the top bar."""
     assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok  # signs this context in
     page.goto(server + "/#/explore")
     page.wait_for_selector("#usermenu .avatar", timeout=10000)
@@ -322,7 +323,8 @@ def test_the_name_opens_the_other_suite_apps(page, server, browser):
     page.route("**/api/auth/suite", lambda r: r.fulfill(json=others))
     page.route("https://notes.example.com/**", lambda r: r.fulfill(status=404))  # its icon fails: a coloured letter instead
     page.reload()
-    page.wait_for_selector("#nav .navhead button.suitebtn .brand-name .io", timeout=10000)
+    page.wait_for_selector("#nav .navhead button.suitebtn img.brand-mark", timeout=10000)
+    assert page.locator("#nav .navhead a.brand-home[href='#/explore'] .brand-name .io").count() == 1  # the name is still the way home
     page.locator("#nav .navhead button.suitebtn").click()
     page.wait_for_selector(".suitepop .apptile", timeout=5000)
     tiles = page.locator(".suitepop .apptile")
