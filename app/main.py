@@ -16,7 +16,8 @@ from fastapi import HTTPException
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facemgr
-from app import config, events, mcp, proxyauth, thumbs, users
+from app import config, events, mcp, thumbs, users
+from iosuite_shared import proxyauth
 from app.auth import auth as auth_shared, updater
 from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate, vdb

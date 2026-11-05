@@ -8,8 +8,9 @@ from typing import Literal, Optional
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from app import __version__, config, jobs, proxyauth, thumbs, users
-from app.auth import updater
+from app import __version__, config, jobs, thumbs, users
+from iosuite_shared import proxyauth
+from app.auth import auth as auth_shared, updater
 from iosuite_shared.updates import tail
 from app.photos import consistency, edits, repair
 from app.data import state as appstate
@@ -54,7 +55,7 @@ def diagnostics(token: str) -> dict:
         "models": [{"key": m["key"], "installed": m["installed"], "revision": m.get("revision")} for m in models.listing()["models"]],
         "search": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done, "total": semantic.total, "model": semantic.chosen()},
         "users": {"exist": users.any_users(), "count": len(users.list_users())},
-        "proxySignIn": proxyauth.status(),
+        "proxySignIn": auth_shared.proxy.status(),
         "read_only": appstate.read_only(),
         "settings": _public_settings(),
         "log_file": str(config.LOG_FILE or ""), "log_file_exists": bool(config.LOG_FILE and config.LOG_FILE.exists()),
@@ -141,12 +142,12 @@ def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optiona
     if "AUTH_PROXY" in changes and changes["AUTH_PROXY"] not in ("", "off", *proxyauth.PRESETS):
         raise ToolError("mode: off, cloudflare, haproxy, nginx, caddy, traefik or header")
     if changes:
-        proxyauth.save(changes)
-    out = proxyauth.status()
+        auth_shared.proxy.save(changes)
+    out = auth_shared.proxy.status()
     # which account each person the proxy lets in maps to (matched on email, then name)
     out["accounts"] = [{"name": u["name"], "role": u["role"], "email": u.get("email") or None} for u in users.list_users()]
     if out["seen"].get("email"):
-        u = proxyauth.user_for(out["seen"]["email"]) if proxyauth.mode() != "off" else None
+        u = auth_shared.proxy.user_for(out["seen"]["email"]) if auth_shared.proxy.mode() != "off" else None
         out["seen"]["account"] = u["name"] if u else None
     return out
 
