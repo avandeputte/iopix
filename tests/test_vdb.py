@@ -30,9 +30,9 @@ def _seed():
     state.set_favorites([(1, "h1"), (2, "h2")], True)
     aid = state.create_album("Trip"); state.set_album_items(aid, [(1, "h1")], True)
     with vdb.writer() as con:
-        con.execute("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", (1, 0.5, 0.4, 0, 0))
-        con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,?,?,?)", (1, "quality", "2026-10-15T00:00:00.000", None))
-        con.execute("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", (1, "a dog on a beach"))
+        con.execute("INSERT OR REPLACE INTO pix_ai_quality VALUES (?,?,?,?,?)", (1, 0.5, 0.4, 0, 0))
+        con.execute("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,?,?,?)", (1, "quality", "2026-10-15T00:00:00.000", None))
+        con.execute("INSERT OR REPLACE INTO pix_ai_descriptions VALUES (?,?)", (1, "a dog on a beach"))
     return aid
 
 
@@ -40,7 +40,7 @@ def test_a_fresh_empty_database_gets_every_table(other_db):
     """setup.sh and the set-up page point a new install at an empty database: the first start creates the tables."""
     con = vdb.connect(cfg=other_db)
     try:
-        assert vdb.columns(con, "ai_quality") == []
+        assert vdb.columns(con, "pix_ai_quality") == []
         vdb.ensure_schema(con)
         assert set(vdb.TABLES) <= vdb.table_names(con)
         assert vdb.add_missing_columns(con) == [], "a second open adds nothing"
@@ -55,15 +55,15 @@ def test_copy_to_another_database_keeps_every_row(client, fresh, other_db):
     src, dst = vdb.connect(), vdb.connect(cfg=other_db)
     try:
         counts = vdb.copy_all(src, dst, drop=True)
-        assert counts["favorite_photos"] >= 2 and counts["viewer_albums"] >= 1  # (accounts live in the Shared ioSuite database)
-        r = dst.execute("SELECT id, name FROM viewer_albums WHERE id = ?", (aid,)).fetchone()
+        assert counts["pix_favorite_photos"] >= 2 and counts["pix_albums"] >= 1  # (accounts live in the Shared ioSuite database)
+        r = dst.execute("SELECT id, name FROM pix_albums WHERE id = ?", (aid,)).fetchone()
         assert r["name"] == "Trip" and r[1] == "Trip", "rows answer to names and indexes"
-        assert dst.execute("SELECT value FROM app_settings WHERE key = 'zz_probe'").fetchone()[0] == "value with ? and %s and `key`"
-        assert dst.execute("SELECT stamp FROM ai_scans WHERE photo_id = 1 AND job = 'quality'").fetchone()[0] == "2026-10-15T00:00:00.000", "text stamps stay text"
+        assert dst.execute("SELECT value FROM pix_settings WHERE name = 'zz_probe'").fetchone()[0] == "value with ? and %s and `key`"
+        assert dst.execute("SELECT stamp FROM pix_ai_scans WHERE photo_id = 1 AND job = 'quality'").fetchone()[0] == "2026-10-15T00:00:00.000", "text stamps stay text"
     finally:
         src.close(); dst.close()
     t = vdb.test_connection(other_db)
-    assert t["tables"]["favorite_photos"] >= 2 and "favorite_photos" in t["existing"]
+    assert t["tables"]["pix_favorite_photos"] >= 2 and "pix_favorite_photos" in t["existing"]
     res = analysis.results()
     assert res[1]["sharp"] == 0.5 and res[1]["caption_ai"] == "a dog on a beach"
 
@@ -71,7 +71,7 @@ def test_copy_to_another_database_keeps_every_row(client, fresh, other_db):
 def test_private_albums_and_accounts_on_the_server(client, fresh):
     """The modules' queries on MariaDB (GROUP BY under ONLY_FULL_GROUP_BY, COLLATE NOCASE dropped, the `key` column)."""
     with vdb.writer() as con:  # leftovers from the tests before
-        for t in ("favorite_photos", "viewer_album_photos", "viewer_albums"):
+        for t in ("pix_favorite_photos", "pix_album_photos", "pix_albums"):
             con.execute(f"DELETE FROM {t}")
     users.create("alex", "correct horse", "admin"); users.create("vi", "", "viewer")
     state._settings = (-1, {})
@@ -86,7 +86,7 @@ def test_private_albums_and_accounts_on_the_server(client, fresh):
     priv = state.create_album("Secret", me["id"], shared=False); state.set_album_items(priv, [(1, "h1")], True)
     assert "Secret" not in {a["name"] for a in state.summary(None)["albums"]}
     assert {a["name"] for a in state.summary(me)["albums"]} >= {"Trip", "Secret"}
-    assert state.album_item_ids([priv]) == [] and state.album(priv)["is_shared"] is False
+    assert state.album_item_ids([priv]) == [] and state.album(priv)["shared"] is False
     tok = state.viewer.set(me)
     try:
         assert state.album_item_ids([priv]) == [1] and sorted(state.albums_of(1)) == sorted([aid, priv])
@@ -97,12 +97,12 @@ def test_private_albums_and_accounts_on_the_server(client, fresh):
 def test_an_older_table_without_the_album_columns_is_migrated_in_place(client):
     c = vdb.connect()
     try:
-        c.execute("CREATE TABLE zz_old_albums AS SELECT id, name, created FROM viewer_albums")
-        c.execute("DROP TABLE viewer_albums"); c.execute("RENAME TABLE zz_old_albums TO viewer_albums")
+        c.execute("CREATE TABLE viewer_albums AS SELECT id, name, created_at AS created FROM pix_albums")  # the name and columns before v1.27
+        c.execute("DROP TABLE pix_albums")
         c.commit()
         vdb.ensure_schema(c)
-        assert {"owner_id", "is_shared"} <= set(vdb.columns(c, "viewer_albums"))
-        assert {r[0] for r in c.execute("SELECT is_shared FROM viewer_albums")} <= {1}
+        assert {"created_at", "owner_id", "shared"} <= set(vdb.columns(c, "pix_albums")) and "viewer_albums" not in vdb.table_names(c)
+        assert {r[0] for r in c.execute("SELECT shared FROM pix_albums")} <= {1}
     finally:
         c.close()
 
@@ -136,14 +136,14 @@ def test_a_viewer_db_from_before_is_imported_once(tmp_path, other_db, monkeypatc
     with pytest.raises(ValueError):
         vdb.switch({"host": other_db["host"]}, copy=True)  # a database and a user are needed too
     r = vdb.switch(other_db, copy=True, drop=True)
-    assert r["imported"] == str(legacy) and r["copied"]["favorite_photos"] == 2 and r["copied"]["tags"] == 1 and "user_accounts" not in r["copied"]
+    assert r["imported"] == str(legacy) and r["copied"]["pix_favorite_photos"] == 2 and r["copied"]["pix_tags"] == 1 and "user_accounts" not in r["copied"]
     assert not legacy.exists() and (tmp_path / "viewer.db.imported").exists()
     assert json.loads((tmp_path / "viewer-db.json").read_text())["database"] == other_db["database"]
     con = vdb.connect(cfg=other_db)
     try:
-        assert con.execute("SELECT undo_values FROM photo_history WHERE photo_id = 1").fetchone()[0] == '{"rating": 3}'
-        assert con.execute("SELECT id FROM tags").fetchone()[0] == 0, "digiKam's root tag keeps id 0 (NO_AUTO_VALUE_ON_ZERO)"
-        assert con.execute("SELECT value FROM app_settings WHERE key = 'theme'").fetchone()[0] == "dark"
+        assert con.execute("SELECT undo_values FROM pix_photo_history WHERE photo_id = 1").fetchone()[0] == '{"rating": 3}'
+        assert con.execute("SELECT id FROM pix_tags").fetchone()[0] == 0, "digiKam's root tag keeps id 0 (NO_AUTO_VALUE_ON_ZERO)"
+        assert con.execute("SELECT value FROM pix_settings WHERE name = 'theme'").fetchone()[0] == "dark"
         assert set(vdb.TABLES) <= vdb.table_names(con), "the tables the file never had are created too"
     finally:
         con.close()
@@ -165,7 +165,7 @@ def test_dump_is_the_backup_form_and_leaves_the_token_out(client, fresh, tmp_pat
         out = tmp_path / "viewer.sql"
         vdb.dump(out)
         text = out.read_text(errors="replace")
-        assert "CREATE TABLE `favorite_photos`" in text and "'zz_probe'" in text and "very-secret" not in text and "mcp_admin_token" not in text
+        assert "CREATE TABLE `pix_favorite_photos`" in text and "'zz_probe'" in text and "very-secret" not in text and "mcp_admin_token" not in text
         vdb.dump(tmp_path / "all.sql", skip_token=False)
         assert "very-secret" in (tmp_path / "all.sql").read_text(errors="replace")
     finally:
@@ -194,4 +194,4 @@ def test_an_unreachable_server_is_recorded_not_fatal(monkeypatch):
 def test_every_declared_column_is_in_the_create_statement():
     for name, (cols, ddl) in vdb.TABLES.items():
         assert list(vdb.declared_columns(ddl)) == cols, name
-    assert "undo" not in vdb.TABLES["photo_history"][0] and " undo " not in vdb.TABLES["photo_history"][1]
+    assert "undo" not in vdb.TABLES["pix_photo_history"][0] and " undo " not in vdb.TABLES["pix_photo_history"][1]

@@ -5,7 +5,7 @@ hashes the file's image data only (ImageDataHash, SHA-256: the compressed pixels
 streams of PNG, TIFF, WebP, HEIC..., metadata excluded) and a copy of the file is put aside. After the
 write the hash is taken again. If it differs, the write is undone: the copy goes back in place, the
 write counts as failed, and the event is logged and recorded in the photo's change log. Each verified
-hash is kept in image_data_checksums, with the time it was last confirmed.
+hash is kept in pix_image_data_checksums, with the time it was last confirmed.
 """
 import json
 import logging
@@ -128,7 +128,7 @@ def _store(rows: list):
     try:
         ids = _photo_ids([p for p, _h, _t in rows])
         with vdb.writer() as con:
-            con.executemany("INSERT OR REPLACE INTO image_data_checksums (photo_id, hash, algorithm, verified) VALUES (?,?,?,?)",
+            con.executemany("INSERT OR REPLACE INTO pix_image_data_checksums (photo_id, hash, algorithm, verified_at) VALUES (?,?,?,?)",
                             [(ids[p], h, "SHA-256", t) for p, h, t in rows if p in ids])
     except Exception as e:  # bookkeeping only
         log.warning("image data checksums were not stored: %s", e)

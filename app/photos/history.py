@@ -1,4 +1,4 @@
-"""The change log: every change the viewer makes to a photo, kept for good in photo_history.
+"""The change log: every change the viewer makes to a photo, kept for good in pix_photo_history.
 
 One row per photo and change: when, who, what (a sentence), the details (the values before and after),
 and what can bring it back:
@@ -68,7 +68,7 @@ def record(rows: list):
     now, who = int(time.time()), actor()
     try:
         with vdb.writer() as con:
-            con.executemany("INSERT INTO photo_history (photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            con.executemany("INSERT INTO pix_photo_history (photo_id, created_at, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy) VALUES (?,?,?,?,?,?,?,?,?,?)",
                             [(int(r["photo_id"]), now, r.get("user") or who, r["action"], r["summary"][:500],
                               json.dumps(r.get("details")) if r.get("details") is not None else None,
                               json.dumps(r.get("undo")) if r.get("undo") is not None else None,
@@ -120,7 +120,7 @@ def _photos_of_person(tag_id: int) -> list:
 
 def users() -> list:
     with vdb.reader() as con:
-        return [r[0] for r in con.execute("SELECT DISTINCT user_name FROM photo_history WHERE user_name IS NOT NULL ORDER BY user_name")]
+        return [r[0] for r in con.execute("SELECT DISTINCT user_name FROM pix_photo_history WHERE user_name IS NOT NULL ORDER BY user_name")]
 
 
 def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str = None, q: str = None, person: int = None,
@@ -144,12 +144,12 @@ def entries(photo_id: int = None, limit: int = 100, offset: int = 0, action: str
         if user:
             where.append("user_name = ?"); params.append(user)
         if since:
-            where.append("ts >= ?"); params.append(int(since))
+            where.append("created_at >= ?"); params.append(int(since))
         if until:
-            where.append("ts < ?"); params.append(int(until))
+            where.append("created_at < ?"); params.append(int(until))
         w = (" WHERE " + " AND ".join(where)) if where else ""
-        total = con.execute(f"SELECT count(*) FROM photo_history{w}", params).fetchone()[0]
-        rows = con.execute(f"SELECT id, photo_id, ts, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM photo_history{w} "
+        total = con.execute(f"SELECT count(*) FROM pix_photo_history{w}", params).fetchone()[0]
+        rows = con.execute(f"SELECT id, photo_id, created_at, user_name, action, summary, details, undo_values, sidecar_copy, path, file_copy FROM pix_photo_history{w} "
                            f"ORDER BY id DESC LIMIT ? OFFSET ?", params + [int(limit), int(offset)]).fetchall()
     from app.faces import facemgr  # lazy: faces.facemgr -> photos.history would be an import cycle
     known_paths = _paths([r[1] for r in rows if not r[9]])
@@ -198,7 +198,7 @@ def _deleted_backup(details_json):
 
 def get(entry_id: int) -> dict:
     with vdb.reader() as con:
-        r = con.execute("SELECT id, photo_id, action, details, undo_values, sidecar_copy, path, file_copy FROM photo_history WHERE id = ?", (int(entry_id),)).fetchone()
+        r = con.execute("SELECT id, photo_id, action, details, undo_values, sidecar_copy, path, file_copy FROM pix_photo_history WHERE id = ?", (int(entry_id),)).fetchone()
     if not r:
         return None
     return {"id": r[0], "photo": r[1], "action": r[2], "details": json.loads(r[3]) if r[3] else {}, "undo": json.loads(r[4]) if r[4] else None,
@@ -271,7 +271,7 @@ def restore(entry_id: int, kind: str) -> dict:
         if not b.exists():
             raise FileNotFoundError("The original of this file is no longer in file-backups")
         with vdb.reader() as vcon:  # a rotate or crop made since changed the size, orientation and face regions in digiKam too:
-            later = vcon.execute("SELECT count(*) FROM photo_history WHERE photo_id = ? AND action = 'lossless' AND id > ?", (pid, entry_id)).fetchone()[0]
+            later = vcon.execute("SELECT count(*) FROM pix_photo_history WHERE photo_id = ? AND action = 'lossless' AND id > ?", (pid, entry_id)).fetchone()[0]
         if later:  # putting the old pixels back under those rows would leave them wrong: those edits are undone first, each restoring its rows
             raise ValueError(f"Undo the {later} later rotate/crop {'edit' if later == 1 else 'edits'} of this photo first (each puts its size and face regions back), then restore the original")
         from app.photos import lossless  # lazy: photos.lossless -> photos.history would be an import cycle
@@ -359,10 +359,10 @@ def _restore_deleted(e: dict) -> dict:
     new_id = added[0]["id"]
     con = vdb.connect()
     try:  # the photo's history continues under its new id
-        con.execute("UPDATE photo_history SET photo_id = ? WHERE photo_id = ?", (new_id, e["photo"]))
+        con.execute("UPDATE pix_photo_history SET photo_id = ? WHERE photo_id = ?", (new_id, e["photo"]))
         # and its identity, so the next index build does not take the restored file (same fingerprint) for a
         # renumbered photo and move (or drop) its rows a second time
-        con.execute("UPDATE photo_identity SET dk_id = ? WHERE dk_id = ?", (new_id, e["photo"]))
+        con.execute("UPDATE pix_photo_identity SET dk_id = ? WHERE dk_id = ?", (new_id, e["photo"]))
         con.commit()
     finally:
         con.close()

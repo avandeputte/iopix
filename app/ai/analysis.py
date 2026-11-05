@@ -59,7 +59,7 @@ def _counts() -> dict:
         return None
     try:
         with vdb.reader(READ_TIMEOUT) as con:
-            have = dict(con.execute("SELECT job, count(*) FROM ai_scans GROUP BY job").fetchall())
+            have = dict(con.execute("SELECT job, count(*) FROM pix_ai_scans GROUP BY job").fetchall())
         return {key: int(have.get(key, 0)) for key in JOBS}
     except Exception:
         return None
@@ -114,11 +114,11 @@ def stamp(p: dict) -> str:
 
 
 def _todo(job: str, photos: list, con=None) -> list:
-    """The still photos this job has not looked at, or looked at in an older version of the file (ai_scans)."""
+    """The still photos this job has not looked at, or looked at in an older version of the file (pix_ai_scans)."""
     if con is None:
         with vdb.reader(READ_TIMEOUT) as con:
             return _todo(job, photos, con)
-    have = dict(con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = ?", (job,)).fetchall())
+    have = dict(con.execute("SELECT photo_id, stamp FROM pix_ai_scans WHERE job = ?", (job,)).fetchall())
     return [p for p in photos if not p["video"] and have.get(p["id"]) != stamp(p)]
 
 
@@ -226,14 +226,14 @@ def _pixel_job(photos: list, gens: dict):
                     return
                 if qrows:
                     with vdb.writer() as con:
-                        con.executemany("INSERT OR REPLACE INTO ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
-                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'quality',?,NULL)", [(r[0], r[1]) for r in qrows])
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_quality VALUES (?,?,?,?,?)", [(r[0], *r[2:]) for r in qrows])
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'quality',?,NULL)", [(r[0], r[1]) for r in qrows])
                     progress["quality"]["done"] += len(qrows)
                 if done:
                     with vdb.writer() as con:
-                        con.executemany("DELETE FROM ai_objects WHERE photo_id = ?", [(d[0],) for d in done])
-                        con.executemany("INSERT INTO ai_objects VALUES (?,?,?,?,?,?,?)", orows)
-                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'objects',?,NULL)", done)
+                        con.executemany("DELETE FROM pix_ai_objects WHERE photo_id = ?", [(d[0],) for d in done])
+                        con.executemany("INSERT INTO pix_ai_objects VALUES (?,?,?,?,?,?,?)", orows)
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'objects',?,NULL)", done)
                     progress["objects"]["done"] += len(done)
                 last = _notify(last, 60)
     finally:
@@ -389,9 +389,9 @@ def _vision_job(photos: list, gen: int):
                     if progress["vision"].cancelled(gen):
                         return
                     with vdb.writer() as con:
-                        con.executemany("INSERT OR REPLACE INTO ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
-                        con.executemany("INSERT OR REPLACE INTO ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
-                        con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'vision',?,NULL)", [(r[0], r[1]) for r in rows])
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_text VALUES (?,?)", [(r[0], r[2]) for r in rows])
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_face_count VALUES (?,?,?)", [(r[0], r[3], r[4]) for r in rows])
+                        con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'vision',?,NULL)", [(r[0], r[1]) for r in rows])
                     progress["vision"]["done"] += len(rows)
                 last = _notify(last, 60)
     finally:
@@ -421,8 +421,8 @@ def _caption_job(photos: list, gen: int):
             if progress["captions"].cancelled(gen):
                 return
             with vdb.writer() as con:
-                con.executemany("INSERT OR REPLACE INTO ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
-                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_descriptions VALUES (?,?)", [(r[0], r[2]) for r in rows])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'captions',?,NULL)", [(r[0], r[1]) for r in rows])
             progress["captions"]["done"] += len(batch)
             last = _notify(last, 120)
     finally:
@@ -446,7 +446,7 @@ def _looks_todo(photos: list, parts: dict, con=None) -> list:
     if con is None:
         with vdb.reader(READ_TIMEOUT) as con:
             return _looks_todo(photos, parts, con)
-    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks'")}
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM pix_ai_scans WHERE job = 'looks'")}
     out = []
     for p in photos:
         if p["video"]:
@@ -534,8 +534,8 @@ def _looks_job(photos: list, gen: int):
                     return
                 with vdb.writer() as con:
                     done = [int(r[0]["id"]) for r in ready]
-                    old = {r[0]: r for r in in_chunks(con, "SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks WHERE photo_id IN ({ids})", done)}
-                    have = {r[0]: (r[1], r[2]) for r in in_chunks(con, "SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'looks' AND photo_id IN ({ids})", done)}
+                    old = {r[0]: r for r in in_chunks(con, "SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM pix_ai_looks WHERE photo_id IN ({ids})", done)}
+                    have = {r[0]: (r[1], r[2]) for r in in_chunks(con, "SELECT photo_id, stamp, detail FROM pix_ai_scans WHERE job = 'looks' AND photo_id IN ({ids})", done)}
                     rows, scans = [], []
                     for p, need, out, _clip in ready:
                         st = stamp(p)
@@ -555,8 +555,8 @@ def _looks_job(photos: list, gen: int):
                             if k in need and (field in out or not out):  # undecodable (no out): marked done until the file changes
                                 done[k] = parts[k]
                         scans.append((p["id"], st, json.dumps(done, sort_keys=True)))
-                    con.executemany("INSERT OR REPLACE INTO ai_looks VALUES (?,?,?,?,?)", rows)
-                    con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'looks',?,?)", scans)
+                    con.executemany("INSERT OR REPLACE INTO pix_ai_looks VALUES (?,?,?,?,?)", rows)
+                    con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'looks',?,?)", scans)
                 progress["looks"]["done"] += len(batch)
                 last = _notify(last, 120)
     finally:
@@ -596,21 +596,21 @@ def results() -> dict:
     out = {}
     try:
         with vdb.reader(READ_TIMEOUT) as con:
-            for r in con.execute("SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM ai_quality"):
+            for r in con.execute("SELECT photo_id, sharp, bright, clip_lo, clip_hi FROM pix_ai_quality"):
                 out.setdefault(r[0], {}).update(sharp=r[1], bright=r[2], clip_lo=r[3], clip_hi=r[4])
-            for r in con.execute("SELECT photo_id, text FROM ai_text"):
+            for r in con.execute("SELECT photo_id, text FROM pix_ai_text"):
                 out.setdefault(r[0], {}).update(ocr=r[1] or None)
-            for r in con.execute("SELECT photo_id, nfaces, faceq FROM ai_face_count"):
+            for r in con.execute("SELECT photo_id, nfaces, faceq FROM pix_ai_face_count"):
                 out.setdefault(r[0], {}).update(vfaces=r[1], faceq=r[2])
-            for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'"):
+            for r in con.execute("SELECT photo_id FROM pix_ai_scans WHERE job = 'objects'"):
                 out.setdefault(r[0], {}).update(objects={}, npeople=0)
-            for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks"):
+            for r in con.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM pix_ai_looks"):
                 out.setdefault(r[0], {}).update(aesth=r[1], focus=r[2], eyes_checked=r[3], eyes_closed=r[4])
-            for r in con.execute("SELECT photo_id, text FROM ai_descriptions WHERE text != ''"):  # descriptions stored before the filler was trimmed get it trimmed here
+            for r in con.execute("SELECT photo_id, text FROM pix_ai_descriptions WHERE text != ''"):  # descriptions stored before the filler was trimmed get it trimmed here
                 out.setdefault(r[0], {}).update(caption_ai=caption.tidy(r[1]))
-            for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
+            for pid, x, y, w, h in con.execute("SELECT photo_id, x, y, w, h FROM pix_ai_objects WHERE cls = 'person' AND w * h >= 0.01"):
                 out.setdefault(pid, {}).setdefault("persons", []).append((x, y, w, h))  # for the focus point of a cropped thumbnail (smartcrop.py)
-            for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM ai_objects GROUP BY 1, 2"):
+            for pid, cls, n in con.execute("SELECT photo_id, cls, count(*) FROM pix_ai_objects GROUP BY 1, 2"):
                 d = out.setdefault(pid, {})
                 d.setdefault("objects", {})[cls] = n
                 if cls == "person":
@@ -627,18 +627,18 @@ def boxes(photo_id: int) -> list:
     try:
         with vdb.reader(READ_TIMEOUT) as con:
             return [dict(r) for r in con.execute(
-                "SELECT cls, round(score, 2) AS score, x, y, w, h FROM ai_objects WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
+                "SELECT cls, round(score, 2) AS score, x, y, w, h FROM pix_ai_objects WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
     except Exception:
         return []
 
 
 def reset(job: str):
     """Throw away one analysis so it is computed again from scratch."""
-    tables = {"quality": ["ai_quality"], "vision": ["ai_text", "ai_face_count"], "objects": ["ai_objects"], "captions": ["ai_descriptions"], "looks": ["ai_looks"]}.get(job, [])
+    tables = {"quality": ["pix_ai_quality"], "vision": ["pix_ai_text", "pix_ai_face_count"], "objects": ["pix_ai_objects"], "captions": ["pix_ai_descriptions"], "looks": ["pix_ai_looks"]}.get(job, [])
     for k in JOBS:  # stop the running jobs (all of them: they run as one set, and the caller restarts the set)
         progress[k].cancel()
     with vdb.writer() as con:
         for t in tables:
             con.execute(f"DELETE FROM {t}")
         if job in JOBS:
-            con.execute("DELETE FROM ai_scans WHERE job = ?", (job,))
+            con.execute("DELETE FROM pix_ai_scans WHERE job = ?", (job,))

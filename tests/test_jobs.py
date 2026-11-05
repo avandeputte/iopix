@@ -118,11 +118,11 @@ def test_scan_job_start_rule_and_reset(monkeypatch):
     gate.clear()
     job.start(photos + [{"id": 4}])
     assert _wait(lambda: len(runs) == 3)
-    job.reset()  # cancels the run (its results are not recorded) and leaves nothing in ai_scans for the job
+    job.reset()  # cancels the run (its results are not recorded) and leaves nothing in pix_ai_scans for the job
     assert job.progress.cancelled(runs[2]) and not job.progress["running"]
     gate.set()
     assert _wait(lambda: jobs.status()["running"] is None)
     assert done == [[1, 2, 3]]
     with vdb.reader() as con:
-        assert con.execute("SELECT count(*) FROM ai_scans WHERE job = 'captions'").fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'captions'").fetchone()[0] == 0
     jobs._progress.pop("captions", None)  # the test's own Progress leaves the status registry as it found it

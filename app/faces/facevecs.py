@@ -9,8 +9,8 @@ The embeddings come from one of two models (ONNX, run locally with onnxruntime; 
 Maintenance, the setting face_vectors): OpenCV's SFace (the default, 128-d, on the square crops
 the face queue already shows) or InsightFace's ArcFace ResNet-50 (512-d, much better at telling
 people apart; each crop is first aligned on its eyes, nose and mouth, found by the chosen face
-detector, the way ArcFace was trained). Vectors live in the viewer database (ai_face_embeddings
-for undecided faces, ai_person_references for the named prototypes), are pruned as faces are
+detector, the way ArcFace was trained). Vectors live in the viewer database (pix_ai_face_embeddings
+for undecided faces, pix_ai_person_references for the named prototypes), are pruned as faces are
 decided, and are all recomputed when the model (or the downloaded revision of it) changes, since vectors of
 different models do not compare.
 """
@@ -196,12 +196,12 @@ def _proto_faces():
 
 def _have_protos() -> dict:
     with vdb.reader() as con:
-        return {(r[1], r[2], r[3], r[4], r[5]): r[0] for r in con.execute("SELECT tag_id, photo_id, x, y, w, h FROM ai_person_references")}
+        return {(r[1], r[2], r[3], r[4], r[5]): r[0] for r in con.execute("SELECT tag_id, photo_id, x, y, w, h FROM pix_ai_person_references")}
 
 
 def _have() -> set:
     with vdb.reader() as con:
-        return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM ai_face_embeddings")}
+        return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM pix_ai_face_embeddings")}
 
 
 def coverage() -> tuple:
@@ -222,7 +222,7 @@ def start():
 
 def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
     """todo: [(key..., path, pw, ph)] where key is (photo, x, y, w, h) or (tag, photo, x, y, w, h); rows go to `table`."""
-    tagged = table == "ai_person_references"
+    tagged = table == "pix_ai_person_references"
     done = 0
     for todo_batch in chunked(todo, 32):
         if progress.cancelled(gen):
@@ -247,10 +247,10 @@ def _embed_into(gen: int, todo: list, table: str, offset: int, kind: str, sess):
                 return False
             with vdb.writer() as con:
                 if tagged:
-                    con.executemany("INSERT OR REPLACE INTO ai_person_references (tag_id, photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?,?)",
+                    con.executemany("INSERT OR REPLACE INTO pix_ai_person_references (tag_id, photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?,?)",
                                     [(*key, vecs[k].astype(np.float32).tobytes()) for k, key in enumerate(batch)])
                 else:
-                    con.executemany("INSERT OR REPLACE INTO ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?)",
+                    con.executemany("INSERT OR REPLACE INTO pix_ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (?,?,?,?,?,?)",
                                     [(*key, vecs[k].astype(np.float32).tobytes()) for k, key in enumerate(batch)])
         done += len(todo_batch)
         progress["done"] = offset + done
@@ -273,8 +273,8 @@ def _same_model():
         return
     if have != kind:  # the bare name is what versions before revisions wrote: those vectors came from the file installed then, adopted as is
         with vdb.writer() as con:
-            con.execute("DELETE FROM ai_face_embeddings")
-            con.execute("DELETE FROM ai_person_references")
+            con.execute("DELETE FROM pix_ai_face_embeddings")
+            con.execute("DELETE FROM pix_ai_person_references")
         log.info("faces: embeddings recomputed with %s", want)
     state.set_setting("face_vectors_built", want)
 
@@ -288,9 +288,9 @@ def _job(gen: int):
     todo_p = [f for f in protos if (f[1], f[2], f[3], f[4], f[5]) not in have_p or have_p[(f[1], f[2], f[3], f[4], f[5])] != f[0]]
     progress.update(running=True, done=0, total=len(todo) + len(todo_p))  # the generation was taken at submit time
     try:
-        if not _embed_into(gen, todo_p, "ai_person_references", 0, kind, sess):  # the prototypes first: they make the suggestions possible
+        if not _embed_into(gen, todo_p, "pix_ai_person_references", 0, kind, sess):  # the prototypes first: they make the suggestions possible
             return
-        if not _embed_into(gen, todo, "ai_face_embeddings", len(todo_p), kind, sess):
+        if not _embed_into(gen, todo, "pix_ai_face_embeddings", len(todo_p), kind, sess):
             return
         # faces decided since (named, ignored, removed) no longer need a vector; prototypes follow the newest faces
         current = {(f[0], f[1], f[2], f[3], f[4]) for f in faces}
@@ -300,9 +300,9 @@ def _job(gen: int):
         if stale or stale_p:
             with vdb.writer() as con:
                 if stale:
-                    con.executemany("DELETE FROM ai_face_embeddings WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale)
+                    con.executemany("DELETE FROM pix_ai_face_embeddings WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale)
                 if stale_p:
-                    con.executemany("DELETE FROM ai_person_references WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale_p)
+                    con.executemany("DELETE FROM pix_ai_person_references WHERE photo_id = ? AND x = ? AND y = ? AND w = ? AND h = ?", stale_p)
     finally:
         progress.finish()
 
@@ -310,14 +310,14 @@ def _job(gen: int):
 def reset():
     progress.cancel()
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_face_embeddings")
-        con.execute("DELETE FROM ai_person_references")
+        con.execute("DELETE FROM pix_ai_face_embeddings")
+        con.execute("DELETE FROM pix_ai_person_references")
 
 
 def _prototypes() -> tuple:
     """(matrix of prototype vectors, their tag ids, {tag: name}) for the suggestions; empty when none."""
     with vdb.reader() as con:
-        rows = [(r[0], np.frombuffer(r[1], dtype=np.float32)) for r in con.execute("SELECT tag_id, vec FROM ai_person_references")]
+        rows = [(r[0], np.frombuffer(r[1], dtype=np.float32)) for r in con.execute("SELECT tag_id, vec FROM pix_ai_person_references")]
     rows = [r for r in rows if len(r[1]) == DIMS.get(chosen(), 128)]  # never a stray vector of another model
     if not rows:
         return None, None, {}
@@ -392,7 +392,7 @@ def groups(kind: str = "unknown", threshold: float = None, tag: int = None) -> d
     faces = [dict(r) for r in rows]
     vcon = vdb.connect()
     try:
-        vecs = {(r[0], r[1], r[2], r[3], r[4]): np.frombuffer(r[5], dtype=np.float32) for r in vcon.execute("SELECT photo_id, x, y, w, h, vec FROM ai_face_embeddings")}
+        vecs = {(r[0], r[1], r[2], r[3], r[4]): np.frombuffer(r[5], dtype=np.float32) for r in vcon.execute("SELECT photo_id, x, y, w, h, vec FROM pix_ai_face_embeddings")}
     finally:
         vcon.close()
     dim = DIMS.get(chosen(), 128)

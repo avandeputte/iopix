@@ -11,7 +11,7 @@ under Manage › Wrongly rotated and in the info panel, each with the turn that 
 Nothing is changed until the user clicks Rotate, which is the ordinary lossless rotate (lossless.py: jpegtran
 for JPEGs, the orientation flag for the rest, file and digiKam row updated, undo in the edit log). The
 classifier is kept in data/models/rotation-<search model>.npz and learnt again when the search model changes;
-the findings are in the viewer database (ai_rotation) and a dismissed one stays dismissed (quality_accepted,
+the findings are in the viewer database (pix_ai_rotation) and a dismissed one stays dismissed (pix_quality_accepted,
 check "rotation") until the file changes.
 """
 import logging
@@ -187,7 +187,7 @@ def _job(gen: int):
         stamps = {r[0]: r[1] for r in con.execute("SELECT id, hash || ':' || coalesce(size, 0) || ':' || coalesce(modified, '') FROM photos WHERE video = 0")}
         key = f"{engine.name}"
         with vdb.reader() as v:
-            done = {r[0]: r[1] for r in v.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'rotation'")}
+            done = {r[0]: r[1] for r in v.execute("SELECT photo_id, stamp FROM pix_ai_scans WHERE job = 'rotation'")}
         todo_pos = [i for i, pid in enumerate(ids.tolist()) if pid in stamps and done.get(pid) != f"{stamps[pid]}:{key}"]
         progress.update(running=bool(todo_pos), phase="screening", done=0, total=len(todo_pos))
         if not todo_pos:
@@ -196,8 +196,8 @@ def _job(gen: int):
         cand = [(int(ids[i]), int(probs[j].argmax()), float(probs[j].max())) for j, i in enumerate(todo_pos) if probs[j].argmax() != 0 and probs[j].max() >= SCREEN_MIN]
         clean = [int(ids[i]) for j, i in enumerate(todo_pos) if not (probs[j].argmax() != 0 and probs[j].max() >= SCREEN_MIN)]
         with vdb.writer() as v:
-            v.executemany("DELETE FROM ai_rotation WHERE photo_id = ?", [(p,) for p in clean])
-            v.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'rotation',?,NULL)", [(p, f"{stamps[p]}:{key}") for p in clean])
+            v.executemany("DELETE FROM pix_ai_rotation WHERE photo_id = ?", [(p,) for p in clean])
+            v.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'rotation',?,NULL)", [(p, f"{stamps[p]}:{key}") for p in clean])
         progress.update(running=True, phase="checking", done=0, total=len(cand))
         for pid, _cls, _p in cand:
             if progress.cancelled(gen):
@@ -213,10 +213,10 @@ def _job(gen: int):
                 except Exception as e:
                     log.warning("rotation: could not check %s (%s)", pid, e)
             with vdb.writer() as v:
-                v.execute("DELETE FROM ai_rotation WHERE photo_id = ?", (pid,))
+                v.execute("DELETE FROM pix_ai_rotation WHERE photo_id = ?", (pid,))
                 if found:
-                    v.execute("INSERT INTO ai_rotation (photo_id, turn, score, stamp) VALUES (?,?,?,?)", (pid, found[0], round(found[1], 4), stamps[pid]))
-                v.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'rotation',?,NULL)", (pid, f"{stamps[pid]}:{key}"))
+                    v.execute("INSERT INTO pix_ai_rotation (photo_id, turn, score, stamp) VALUES (?,?,?,?)", (pid, found[0], round(found[1], 4), stamps[pid]))
+                v.execute("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'rotation',?,NULL)", (pid, f"{stamps[pid]}:{key}"))
             progress.step()
     finally:
         con.close()
@@ -239,14 +239,14 @@ def reset():
     except Exception:
         pass
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_rotation")
-        con.execute("DELETE FROM ai_scans WHERE job = 'rotation'")
+        con.execute("DELETE FROM pix_ai_rotation")
+        con.execute("DELETE FROM pix_ai_scans WHERE job = 'rotation'")
 
 
 def coverage() -> tuple:
     try:
         with vdb.reader() as con:
-            done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'rotation'").fetchone()[0]
+            done = con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'rotation'").fetchone()[0]
         total = len(semantic.ids) if available() and semantic.ids is not None else 0
         return int(done), int(total)
     except Exception:
@@ -262,11 +262,11 @@ def dismiss(photos: list, on: bool = True) -> int:
     want = [int(p) for p in photos]
     with vdb.writer() as con:
         if on:
-            stamps = dict(in_chunks(con, "SELECT photo_id, stamp FROM ai_rotation WHERE photo_id IN ({ids})", want))
-            con.executemany("INSERT OR REPLACE INTO quality_accepted (photo_id, check_name, signature, user_name, ts) VALUES (?,'rotation',?,?,?)",
+            stamps = dict(in_chunks(con, "SELECT photo_id, stamp FROM pix_ai_rotation WHERE photo_id IN ({ids})", want))
+            con.executemany("INSERT OR REPLACE INTO pix_quality_accepted (photo_id, check_name, signature, user_name, created_at) VALUES (?,'rotation',?,?,?)",
                             [(p, stamps[p], history.actor(), int(time.time())) for p in want if p in stamps])
             return sum(1 for p in want if p in stamps)
-        con.executemany("DELETE FROM quality_accepted WHERE photo_id = ? AND check_name = 'rotation'", [(p,) for p in want])
+        con.executemany("DELETE FROM pix_quality_accepted WHERE photo_id = ? AND check_name = 'rotation'", [(p,) for p in want])
         return len(want)
 
 
@@ -275,8 +275,8 @@ def findings(ids: list = None) -> dict:
     ones left out (unless their file changed since)."""
     where = f" WHERE photo_id IN ({','.join(str(int(i)) for i in ids) or 'NULL'})" if ids is not None else ""
     with vdb.reader() as con:
-        rows = [tuple(r) for r in con.execute("SELECT photo_id, turn, score, stamp FROM ai_rotation" + where)]
-        acc = dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = 'rotation'" + where.replace(" WHERE", " AND")).fetchall())
+        rows = [tuple(r) for r in con.execute("SELECT photo_id, turn, score, stamp FROM pix_ai_rotation" + where)]
+        acc = dict(con.execute("SELECT photo_id, signature FROM pix_quality_accepted WHERE check_name = 'rotation'" + where.replace(" WHERE", " AND")).fetchall())
     items, dismissed = [], 0
     for pid, turn, score, stamp in rows:
         if acc.get(pid) == stamp:

@@ -271,7 +271,7 @@ def _write_rows(con, pid, w, h, orientation, size, kept, dropped, restore_region
 def forget_checksum(pid: int):
     try:
         with vdb.writer() as con:
-            con.execute("DELETE FROM image_data_checksums WHERE photo_id = ?", (int(pid),))
+            con.execute("DELETE FROM pix_image_data_checksums WHERE photo_id = ?", (int(pid),))
     except Exception:
         pass
 

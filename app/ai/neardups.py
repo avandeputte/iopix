@@ -62,7 +62,7 @@ def _job(gen: int, level: str):
         state.set_setting("near_dups_gen", "")  # not current until every block is in
         con = vdb.connect()
         try:
-            con.execute("DELETE FROM ai_similar_photos")
+            con.execute("DELETE FROM pix_ai_similar_photos")
             con.commit()
             block = 256
             for s in range(0, n, block):
@@ -81,7 +81,7 @@ def _job(gen: int, level: str):
                     for j in js.tolist():
                         pairs.append((int(ids[i]), int(ids[j]), float(row[j])))
                 if pairs:  # this block's pairs in one transaction; the whole list never exists at once
-                    con.executemany("INSERT INTO ai_similar_photos (a, b, score) VALUES (?,?,?)", pairs)
+                    con.executemany("INSERT INTO pix_ai_similar_photos (photo_id, similar_photo_id, score) VALUES (?,?,?)", pairs)
                     con.commit()
                 total += len(pairs)
                 progress["done"] = min(n, s + block)
@@ -100,7 +100,7 @@ def _job(gen: int, level: str):
 def groups(limit: int = 300) -> list:
     """Connected components of the stored pairs, each with its photos (index facts) and the strongest score."""
     with vdb.reader() as con:
-        pairs = [tuple(r) for r in con.execute("SELECT a, b, score FROM ai_similar_photos")]
+        pairs = [tuple(r) for r in con.execute("SELECT photo_id, similar_photo_id, score FROM pix_ai_similar_photos")]
     if not pairs:
         return []
     parent = {}

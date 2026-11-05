@@ -8,11 +8,11 @@ it is that person; the group's other boxes, from behind, too far or too small fo
 the person is in those photos too: "probably Sam, dressed as in 6 photos where the face is named".
 
 A suggestion adds the person's tag to the photo when the user clicks it, as a person present without a face
-region, and is written nowhere before that. The embeddings are kept in the viewer database (ai_person_looks,
+region, and is written nowhere before that. The embeddings are kept in the viewer database (pix_ai_person_looks,
 keyed by the person box like the jersey numbers) and are computed again when the search model changes.
 
 The job's bookkeeping (progress, the start rule, reset, coverage) is the shared ScanJob (scanjob.py); this module
-keeps the to-do query, the embedding loop and the stamp rule (the file's stamp and the model's name, in ai_scans).
+keeps the to-do query, the embedding loop and the stamp rule (the file's stamp and the model's name, in pix_ai_scans).
 """
 import logging
 from collections import defaultdict
@@ -58,16 +58,16 @@ def _model_key() -> str:
 def _todo(con, photos: list) -> list:
     """Still photos with people detected whose boxes are not embedded with the current model, or whose file changed."""
     model = _model_key()
-    have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'clothing'")}
-    objects = {r[0] for r in con.execute("SELECT photo_id FROM ai_scans WHERE job = 'objects'")}
+    have = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM pix_ai_scans WHERE job = 'clothing'")}
+    objects = {r[0] for r in con.execute("SELECT photo_id FROM pix_ai_scans WHERE job = 'objects'")}
     return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != f"{stamp(p)}:{model}"]
 
 
 def _counts(con) -> tuple:
     """(photos embedded with the current model, photos with object detection)."""
     model = _model_key()
-    return (con.execute("SELECT count(*) FROM ai_scans WHERE job = 'clothing' AND stamp LIKE ?", (f"%:{model}",)).fetchone()[0],
-            con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0])
+    return (con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'clothing' AND stamp LIKE ?", (f"%:{model}",)).fetchone()[0],
+            con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'objects'").fetchone()[0])
 
 
 def crops(im, boxes: list) -> list:
@@ -115,14 +115,14 @@ def _work(gen: int, todo: list):
             if progress.cancelled(gen):
                 return
             with vdb.writer() as con:
-                con.executemany("DELETE FROM ai_person_looks WHERE photo_id = ?", [(p["id"],) for p, _bs, _cs in ready])
-                con.executemany("INSERT OR REPLACE INTO ai_person_looks (photo_id, px, py, pw, ph, vec) VALUES (?,?,?,?,?,?)",
+                con.executemany("DELETE FROM pix_ai_person_looks WHERE photo_id = ?", [(p["id"],) for p, _bs, _cs in ready])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_person_looks (photo_id, px, py, pw, ph, vec) VALUES (?,?,?,?,?,?)",
                                 [(p["id"], detector.thousandths(b[0]), detector.thousandths(b[1]), detector.thousandths(b[2]), detector.thousandths(b[3]), np.asarray(v, np.float32).tobytes()) for (p, b, _c), v in zip(flat, vecs)])
-                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'clothing',?,NULL)", [(p["id"], f"{stamp(p)}:{model}") for p, _bs, _cs in ready])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'clothing',?,NULL)", [(p["id"], f"{stamp(p)}:{model}") for p, _bs, _cs in ready])
             progress.step(len(chunk))
 
 
-job = ScanJob("clothing", _todo, _work, _counts, available, tables=("ai_person_looks",))
+job = ScanJob("clothing", _todo, _work, _counts, available, tables=("pix_ai_person_looks",))
 progress, start, reset, coverage = job.progress, job.start, job.reset, job.coverage
 
 
@@ -140,11 +140,11 @@ def _events(con, ids: list = None) -> dict:
             if not mates:
                 continue
             with vdb.reader() as vcon:
-                have = {r[0] for r in in_chunks(vcon, "SELECT DISTINCT photo_id FROM ai_person_looks WHERE photo_id IN ({ids})", mates)}
+                have = {r[0] for r in in_chunks(vcon, "SELECT DISTINCT photo_id FROM pix_ai_person_looks WHERE photo_id IN ({ids})", mates)}
             events[(album, day)] = [i for i in mates if i in have]
         return events
     with vdb.reader() as vcon:
-        have = sorted({r[0] for r in vcon.execute("SELECT DISTINCT photo_id FROM ai_person_looks")})
+        have = sorted({r[0] for r in vcon.execute("SELECT DISTINCT photo_id FROM pix_ai_person_looks")})
     meta = {}
     for pid, album, day in in_chunks(con, "SELECT id, album_id, day FROM photos WHERE dprec IS NULL AND id IN ({ids})", have):  # an approximate date has no day to make an event of
         meta[pid] = (album, day)
@@ -158,7 +158,7 @@ def _boxes_of(ids: list) -> list:
     """[(photo, (x, y, w, h), vec)] for the photos given."""
     out = []
     with vdb.reader() as con:
-        for pid, px, py, pw, ph, vec in in_chunks(con, "SELECT photo_id, px, py, pw, ph, vec FROM ai_person_looks WHERE photo_id IN ({ids})", ids):
+        for pid, px, py, pw, ph, vec in in_chunks(con, "SELECT photo_id, px, py, pw, ph, vec FROM pix_ai_person_looks WHERE photo_id IN ({ids})", ids):
             out.append((pid, (px / 1000, py / 1000, pw / 1000, ph / 1000), np.frombuffer(vec, np.float32)))
     return out
 
@@ -258,6 +258,6 @@ def for_photo(photo_id: int) -> int:
     """How many people in a photo have a clothing embedding (the info panel)."""
     try:
         with vdb.reader() as con:
-            return int(con.execute("SELECT count(*) FROM ai_person_looks WHERE photo_id = ?", (photo_id,)).fetchone()[0])
+            return int(con.execute("SELECT count(*) FROM pix_ai_person_looks WHERE photo_id = ?", (photo_id,)).fetchone()[0])
     except Exception:
         return 0

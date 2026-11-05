@@ -45,8 +45,8 @@ def test_cover_picks_the_sharp_lit_frame(monkeypatch):
 
 def test_info_and_transcripts(lib):
     with vdb.writer() as con:
-        con.execute("DELETE FROM video_info")
-        con.execute("INSERT INTO video_info VALUES (?,?,?,?,?,?,?,?,?)", (5, "s", 12.5, json.dumps([3.0, 20.0]), "happy birthday", json.dumps([{"t": 1.0, "end": 3.0, "text": "happy birthday"}]), "en", "parakeet", 0))
+        con.execute("DELETE FROM pix_video_info")
+        con.execute("INSERT INTO pix_video_info VALUES (?,?,?,?,?,?,?,?,?)", (5, "s", 12.5, json.dumps([3.0, 20.0]), "happy birthday", json.dumps([{"t": 1.0, "end": 3.0, "text": "happy birthday"}]), "en", "parakeet", 0))
     try:
         i = videos.info(5)
         assert i["cover_t"] == 12.5 and i["chapters"] == [3.0, 20.0] and i["segments"][0]["t"] == 1.0
@@ -55,7 +55,7 @@ def test_info_and_transcripts(lib):
         assert videos.info(6) == {}
     finally:
         with vdb.writer() as con:
-            con.execute("DELETE FROM video_info")
+            con.execute("DELETE FROM pix_video_info")
 
 
 def test_video_frame_endpoint(client, lib):

@@ -1,8 +1,8 @@
 """The library itself, in the viewer's own database: photos, folders, tags, faces, captions...
 
 These tables have exactly the columns of the digiKam tables they correspond to (Images -> photos,
-Albums -> folders, ImageTagProperties -> face_regions, ...), only with names that say what they hold.
-That is what lets the viewer work without digiKam:
+Albums -> folders, ImageTagProperties -> face_regions, ...), only with names that say what they hold
+(in the database pix_photos, pix_folders...: TABLE; SPEC's short names are what the code calls them). That is what lets the viewer work without digiKam:
 
 - While Sync with digiKam is on, these tables follow digiKam's database (copy_from_digikam, in the
   background after the index is built): the rows on both sides are compared and only the rows that differ
@@ -10,7 +10,7 @@ That is what lets the viewer work without digiKam:
 - When Sync with digiKam is off, dkdb.connect() hands out a LibraryConn instead of a connection to
   digiKam's database. It speaks digiKam's table names and rewrites them to these, so every module that
   writes the library (tags, faces, folders, uploads, place tags, tag pictures, applying edits) works
-  unchanged, on the viewer's own copy. Each change made that way is counted (library_info
+  unchanged, on the viewer's own copy. Each change made that way is counted (pix_library_info
   local_changes), so turning sync back on never silently replaces it with digiKam's data.
 """
 import re
@@ -26,11 +26,11 @@ SPEC = {
     "folders": ("Albums", [("id", "INTEGER PRIMARY KEY", "INT AUTO_INCREMENT PRIMARY KEY"), ("albumRoot", "INTEGER", "INT"), ("relativePath", "TEXT", "VARCHAR(700)"),
                            ("date", "TEXT", "VARCHAR(32)"), ("caption", "TEXT", "TEXT"), ("collection", "TEXT", "TEXT"), ("icon", "INTEGER", "BIGINT"),
                            ("modificationDate", "TEXT", "VARCHAR(32)")],
-                ", UNIQUE (albumRoot, relativePath)", ", UNIQUE KEY folders_path (albumRoot, relativePath)"),
+                ", UNIQUE (albumRoot, relativePath)", ", UNIQUE KEY uq_pix_folders_path (albumRoot, relativePath)"),
     "photos": ("Images", [("id", "INTEGER PRIMARY KEY", "BIGINT AUTO_INCREMENT PRIMARY KEY"), ("album", "INTEGER", "INT"), ("name", "TEXT", "VARCHAR(500)"),
                           ("status", "INTEGER", "INT"), ("category", "INTEGER", "INT"), ("modificationDate", "TEXT", "VARCHAR(32)"), ("fileSize", "INTEGER", "BIGINT"),
                           ("uniqueHash", "TEXT", "VARCHAR(128)"), ("manualOrder", "INTEGER", "BIGINT")],
-               ", UNIQUE (album, name)", ", UNIQUE KEY photos_name (album, name), INDEX photos_hash (uniqueHash)"),
+               ", UNIQUE (album, name)", ", UNIQUE KEY uq_pix_photos_name (album, name), INDEX idx_pix_photos_hash (uniqueHash)"),
     "photo_information": ("ImageInformation", [("imageid", "INTEGER PRIMARY KEY", "BIGINT PRIMARY KEY"), ("rating", "INTEGER", "INT"), ("creationDate", "TEXT", "VARCHAR(32)"),
                                                ("digitizationDate", "TEXT", "VARCHAR(32)"), ("orientation", "INTEGER", "INT"), ("width", "INTEGER", "INT"), ("height", "INTEGER", "INT"),
                                                ("format", "TEXT", "VARCHAR(64)"), ("colorDepth", "INTEGER", "INT"), ("colorModel", "INTEGER", "INT"), ("timeZone", "INTEGER", "INT")], "", ""),
@@ -47,31 +47,40 @@ SPEC = {
                                          ("exposureProgram", "INTEGER", "INT"), ("videoCodec", "TEXT", "TEXT")], "", ""),
     "comments": ("ImageComments", [("id", "INTEGER PRIMARY KEY", "BIGINT AUTO_INCREMENT PRIMARY KEY"), ("imageid", "INTEGER", "BIGINT"), ("type", "INTEGER", "INT"),
                                    ("language", "TEXT", "VARCHAR(128)"), ("author", "TEXT", "TEXT"), ("date", "TEXT", "VARCHAR(32)"), ("comment", "TEXT", "MEDIUMTEXT")],
-                 "", ", INDEX comments_image (imageid)"),
+                 "", ", INDEX idx_pix_comments_image (imageid)"),
     "copyright": ("ImageCopyright", [("id", "INTEGER PRIMARY KEY", "BIGINT AUTO_INCREMENT PRIMARY KEY"), ("imageid", "INTEGER", "BIGINT"), ("property", "TEXT", "TEXT"),
-                                     ("value", "TEXT", "TEXT"), ("extraValue", "TEXT", "TEXT")], "", ", INDEX copyright_image (imageid)"),
+                                     ("value", "TEXT", "TEXT"), ("extraValue", "TEXT", "TEXT")], "", ", INDEX idx_pix_copyright_image (imageid)"),
     "photo_properties": ("ImageProperties", [("imageid", "INTEGER", "BIGINT"), ("property", "TEXT", "VARCHAR(255)"), ("value", "TEXT", "TEXT")],
-                         ", UNIQUE (imageid, property)", ", UNIQUE KEY photo_properties_key (imageid, property)"),
-    "photo_tags": ("ImageTags", [("imageid", "INTEGER", "BIGINT"), ("tagid", "INTEGER", "INT")], ", UNIQUE (imageid, tagid)", ", PRIMARY KEY (imageid, tagid), INDEX photo_tags_tag (tagid)"),
+                         ", UNIQUE (imageid, property)", ", UNIQUE KEY uq_pix_photo_properties_image_property (imageid, property)"),
+    "photo_tags": ("ImageTags", [("imageid", "INTEGER", "BIGINT"), ("tagid", "INTEGER", "INT")], ", UNIQUE (imageid, tagid)", ", PRIMARY KEY (imageid, tagid), INDEX idx_pix_photo_tags_tag (tagid)"),
     "face_regions": ("ImageTagProperties", [("imageid", "INTEGER", "BIGINT"), ("tagid", "INTEGER", "INT"), ("property", "TEXT", "VARCHAR(255)"), ("value", "TEXT", "TEXT")],
-                     "", ", INDEX face_regions_image (imageid), INDEX face_regions_tag (tagid)"),
+                     "", ", INDEX idx_pix_face_regions_image (imageid), INDEX idx_pix_face_regions_tag (tagid)"),
     "tags": ("Tags", [("id", "INTEGER PRIMARY KEY", "INT AUTO_INCREMENT PRIMARY KEY"), ("pid", "INTEGER", "INT"), ("name", "TEXT", "VARCHAR(500)"), ("icon", "INTEGER", "BIGINT"),
-                      ("iconkde", "TEXT", "TEXT")], ", UNIQUE (name, pid)", ", UNIQUE KEY tags_name (name, pid)"),
-    "tag_properties": ("TagProperties", [("tagid", "INTEGER", "INT"), ("property", "TEXT", "VARCHAR(255)"), ("value", "TEXT", "TEXT")], "", ", INDEX tag_properties_tag (tagid)"),
-    "library_settings": ("Settings", [("keyword", "TEXT", "VARCHAR(191)"), ("value", "TEXT", "TEXT")], ", UNIQUE (keyword)", ", UNIQUE KEY library_settings_key (keyword)"),
+                      ("iconkde", "TEXT", "TEXT")], ", UNIQUE (name, pid)", ", UNIQUE KEY uq_pix_tags_name (name, pid)"),
+    "tag_properties": ("TagProperties", [("tagid", "INTEGER", "INT"), ("property", "TEXT", "VARCHAR(255)"), ("value", "TEXT", "TEXT")], "", ", INDEX idx_pix_tag_properties_tag (tagid)"),
+    "library_settings": ("Settings", [("keyword", "TEXT", "VARCHAR(191)"), ("value", "TEXT", "TEXT")], ", UNIQUE (keyword)", ", UNIQUE KEY uq_pix_library_settings_keyword (keyword)"),
 }
-DIGIKAM = {dk: ours for ours, (dk, *_rest) in SPEC.items()}
+TABLE = {name: "pix_" + name for name in SPEC}  # the table in the viewer database; SPEC's names are what the code and the merge base call them
+DIGIKAM = {dk: TABLE[ours] for ours, (dk, *_rest) in SPEC.items()}
+# the index names from before the suite naming convention (vdb renames them once, at start)
+RENAME_INDEXES = {"pix_folders": {"folders_path": "uq_pix_folders_path"}, "pix_photos": {"photos_name": "uq_pix_photos_name", "photos_hash": "idx_pix_photos_hash"},
+                  "pix_comments": {"comments_image": "idx_pix_comments_image"}, "pix_copyright": {"copyright_image": "idx_pix_copyright_image"},
+                  "pix_photo_properties": {"photo_properties_key": "uq_pix_photo_properties_image_property"},
+                  "pix_photo_tags": {"photo_tags_tag": "idx_pix_photo_tags_tag"},
+                  "pix_face_regions": {"face_regions_image": "idx_pix_face_regions_image", "face_regions_tag": "idx_pix_face_regions_tag"},
+                  "pix_tags": {"tags_name": "uq_pix_tags_name"}, "pix_tag_properties": {"tag_properties_tag": "idx_pix_tag_properties_tag"},
+                  "pix_library_settings": {"library_settings_key": "uq_pix_library_settings_keyword"}}
 _NAMES = re.compile(r"\b(" + "|".join(sorted(DIGIKAM, key=len, reverse=True)) + r")\b")
 _WRITE = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b", re.I)
 
 
 def tables() -> dict:
-    """vdb.TABLES entries for the library tables: name -> (columns, MySQL DDL). The SQLite types in SPEC
+    """vdb.TABLES entries for the library tables: table -> (columns, MySQL DDL). The SQLite types in SPEC
     serve the merge-base file (save_base) only."""
     out = {}
     for name, (_dk, cols, _sq_extra, my_extra) in SPEC.items():
-        out[name] = ([c for c, _s, _m in cols],
-                     f"CREATE TABLE IF NOT EXISTS {name} (" + ", ".join(f"`{c}` {m}" for c, _s, m in cols) + my_extra + ")")
+        out[TABLE[name]] = ([c for c, _s, _m in cols],
+                            f"CREATE TABLE IF NOT EXISTS {TABLE[name]} (" + ", ".join(f"`{c}` {m}" for c, _s, m in cols) + my_extra + ")")
     return out
 
 
@@ -137,14 +146,14 @@ def connect(write: bool = False):
 
 
 def _info(con, key: str, default=None):
-    row = con.execute("SELECT value FROM library_info WHERE key = ?", (key,)).fetchone()
+    row = con.execute("SELECT value FROM pix_library_info WHERE name = ?", (key,)).fetchone()
     return row[0] if row else default
 
 
 def _set_info(con, pairs: dict):
     for k, v in pairs.items():
-        con.execute("DELETE FROM library_info WHERE key = ?", (k,))
-        con.execute("INSERT INTO library_info (key, value) VALUES (?,?)", (k, str(v)))
+        con.execute("DELETE FROM pix_library_info WHERE name = ?", (k,))
+        con.execute("INSERT INTO pix_library_info (name, value) VALUES (?,?)", (k, str(v)))
 
 
 def _bump(con):
@@ -159,7 +168,7 @@ def info() -> dict:
     from app.data import vdb  # lazy: data.vdb -> digikam.library would be an import cycle
     try:
         with vdb.reader() as con:
-            d = {r[0]: r[1] for r in con.execute("SELECT key, value FROM library_info").fetchall()}
+            d = {r[0]: r[1] for r in con.execute("SELECT name, value FROM pix_library_info").fetchall()}
     except Exception:
         return {}
     return d
@@ -220,7 +229,7 @@ def copy_from_digikam(src) -> dict:
             names = [c for c, _s, _m in cols]
             q = (lambda c: f"`{c}`") if con.mysql else (lambda c: c)
             ql = ", ".join(q(c) for c in names)
-            insert = f"INSERT INTO {name} ({ql}) VALUES ({', '.join('?' * len(names))})"
+            insert = f"INSERT INTO {TABLE[name]} ({ql}) VALUES ({', '.join('?' * len(names))})"
             keys = _key_cols(cols)
             gone, add = [], []
             if keys:  # one row per id: compare by id
@@ -234,7 +243,7 @@ def copy_from_digikam(src) -> dict:
                         add.append(r)
                 gone += [(k,) for k in mine]
                 for chunk in chunked(gone, 2000):
-                    con.executemany(f"DELETE FROM {name} WHERE {q(keys[0])} = ?", chunk)
+                    con.executemany(f"DELETE FROM {TABLE[name]} WHERE {q(keys[0])} = ?", chunk)
             else:  # no key: rows are compared whole, duplicates counted
                 from collections import Counter
                 mine, want, raw_of = Counter(), Counter(), {}
@@ -253,7 +262,7 @@ def copy_from_digikam(src) -> dict:
                         if want[c]:
                             add += [raw_of[c]] * want[c]
                 for chunk in chunked(gone, 2000):
-                    con.executemany(f"DELETE FROM {name} WHERE {where}", chunk)
+                    con.executemany(f"DELETE FROM {TABLE[name]} WHERE {where}", chunk)
             for chunk in chunked(add, 2000):
                 con.executemany(insert, chunk)
             if gone or add:
@@ -339,7 +348,7 @@ def current() -> dict:
         out = {}
         for name, (dk, cols, *_rest) in SPEC.items():
             names = [c for c, _s, _m in cols]
-            out[name] = [tuple(r) for r in con.execute(f"SELECT {', '.join(names)} FROM {name}").fetchall()]
+            out[name] = [tuple(r) for r in con.execute(f"SELECT {', '.join(names)} FROM {TABLE[name]}").fetchall()]
         return out
 
 

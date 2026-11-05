@@ -8,7 +8,7 @@ What is checked (only reading the files):
          the bottom of the picture is lost, which nothing can bring back.
   PNG    every chunk's checksum (Pillow's verify).
   other  the picture is decoded (Pillow); a file that cannot be is reported with the decoder's message.
-Videos are not checked. Each result is kept in ai_scans (job filecheck) under the file's stamp, so a later run
+Videos are not checked. Each result is kept in pix_ai_scans (job filecheck) under the file's stamp, so a later run
 looks only at new and changed files; the detail of a damaged one is a small JSON note.
 
 The repair adds the missing end marker to the file. The file is copied first (lossless.copy_before: the true
@@ -267,7 +267,7 @@ def _photos() -> list:
 
 def _done() -> dict:
     with vdb.reader() as con:
-        return {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = ?", (JOB,))}
+        return {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM pix_ai_scans WHERE job = ?", (JOB,))}
 
 
 def _job(gen: int, photos: list):
@@ -287,7 +287,7 @@ def _job(gen: int, photos: list):
                     progress["found"] += 1
                 rows.append((p["id"], _stamp(p), json.dumps(r) if r else None))
             with vdb.writer() as con:
-                con.executemany(f"INSERT OR REPLACE INTO ai_scans VALUES (?,'{JOB}',?,?)", rows)
+                con.executemany(f"INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'{JOB}',?,?)", rows)
             progress.step(len(todo_batch))
     finally:
         progress.finish(gen)
@@ -297,7 +297,7 @@ def start(redo: bool = False) -> int:
     """Check the files not checked yet (or changed since); with redo every file again. Returns how many are queued."""
     if redo:
         with vdb.writer() as con:
-            con.execute("DELETE FROM ai_scans WHERE job = ?", (JOB,))
+            con.execute("DELETE FROM pix_ai_scans WHERE job = ?", (JOB,))
     photos = _photos()
     have = _done()
     n = sum(1 for p in photos if have.get(p["id"], (None,))[0] != _stamp(p))

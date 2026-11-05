@@ -16,7 +16,7 @@ found but could not name (an "Unknown" region), so they show up under People ›
 "looks like" suggestion from face grouping, and can be named there or in digiKam.
 
 Nothing runs on its own: the library job starts only from Maintenance, a folder or a photo. Each photo
-checked is remembered (ai_scans, job facedetect) so a library run picks up only new and changed photos; a run
+checked is remembered (pix_ai_scans, job facedetect) so a library run picks up only new and changed photos; a run
 on one photo or one folder always looks again. A face removed after a run is not brought back by the
 next library run, since that photo is not looked at again unless it changes.
 """
@@ -273,7 +273,7 @@ def _existing(ids: list) -> dict:
 
 def _scanned() -> dict:
     with vdb.reader() as con:
-        return dict(con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'facedetect'").fetchall())
+        return dict(con.execute("SELECT photo_id, stamp FROM pix_ai_scans WHERE job = 'facedetect'").fetchall())
 
 
 def coverage() -> int:
@@ -281,7 +281,7 @@ def coverage() -> int:
         return 0
     con = v.connect()
     try:
-        return con.execute("SELECT count(*) FROM ai_scans WHERE job = 'facedetect'").fetchone()[0]
+        return con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'facedetect'").fetchone()[0]
     except Exception:
         return 0
     finally:
@@ -292,7 +292,7 @@ def reset():
     """Forget which photos were looked at, so the next library run looks at all of them again."""
     progress.cancel()
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_scans WHERE job = 'facedetect'")
+        con.execute("DELETE FROM pix_ai_scans WHERE job = 'facedetect'")
 
 
 # ---- running
@@ -315,7 +315,7 @@ def _record(rows: list):
     if not rows:
         return
     with vdb.writer() as con:
-        con.executemany("INSERT OR REPLACE INTO ai_scans (photo_id, job, stamp, detail) VALUES (?,'facedetect',?,?)",
+        con.executemany("INSERT OR REPLACE INTO pix_ai_scans (photo_id, job, stamp, detail) VALUES (?,'facedetect',?,?)",
                         [(r[0], r[1], json.dumps({"found": r[2], "added": r[3], "checked": r[4]})) for r in rows])
 
 

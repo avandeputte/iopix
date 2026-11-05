@@ -11,10 +11,10 @@
             downloaded from Maintenance (models.py, choice "speech_model"); without one this part is skipped.
 
 One background job ("videos", jobs.py) does the three for every video not yet done, or done with an older file or
-model; the results live in the viewer database (video_info). Nothing is written to any video or to digiKam.
+model; the results live in the viewer database (pix_video_info). Nothing is written to any video or to digiKam.
 The job's bookkeeping (progress, the start rule, reset) is the shared ScanJob (scanjob.py); this module keeps the
 to-do query, the loop over the videos and the stamp rule (the file's stamp, and VERSION with the speech model's
-name as the detail, in ai_scans).
+name as the detail, in pix_ai_scans).
 """
 import json
 import logging
@@ -259,7 +259,7 @@ def _key(speech_model: str) -> str:
 
 
 def _current_key() -> tuple:
-    """(speech wanted, the ai_scans detail a video done now gets): the detail names the speech model, so a video
+    """(speech wanted, the pix_ai_scans detail a video done now gets): the detail names the speech model, so a video
     done without one (or with another) is done again when a model arrives."""
     speech = speech_available()
     return speech, _key(models.chosen("speech_model") if speech else "")
@@ -267,7 +267,7 @@ def _current_key() -> tuple:
 
 def _todo(con, photos: list) -> list:
     _speech, key = _current_key()
-    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'videos'")}
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM pix_ai_scans WHERE job = 'videos'")}
     return [p for p in photos if p["video"] and have.get(p["id"]) != (analysis.stamp(p), key)]
 
 
@@ -276,7 +276,7 @@ def coverage() -> tuple:
     whose fallback is a (0, 0) pair)."""
     try:
         with vdb.reader() as con:
-            done = con.execute("SELECT count(*) FROM ai_scans WHERE job = 'videos'").fetchone()[0]
+            done = con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'videos'").fetchone()[0]
         return int(done), None
     except Exception:
         return 0, None
@@ -300,7 +300,7 @@ def _work(gen: int, todo: list):
             continue
         dur = p.get("duration") or 0
         with vdb.reader() as con:
-            old = con.execute("SELECT stamp, cover_t, chapters, transcript, segments, lang, speech_model FROM video_info WHERE photo_id = ?", (p["id"],)).fetchone()
+            old = con.execute("SELECT stamp, cover_t, chapters, transcript, segments, lang, speech_model FROM pix_video_info WHERE photo_id = ?", (p["id"],)).fetchone()
         same_file = old is not None and old[0] == analysis.stamp(p)
         try:
             if same_file and old[1] is not None:
@@ -321,18 +321,18 @@ def _work(gen: int, todo: list):
         if progress.cancelled(gen):
             return
         with vdb.writer() as con:
-            con.execute("DELETE FROM video_info WHERE photo_id = ?", (p["id"],))
-            con.execute("INSERT INTO video_info (photo_id, stamp, cover_t, chapters, transcript, segments, lang, speech_model, ts) VALUES (?,?,?,?,?,?,?,?,?)",
+            con.execute("DELETE FROM pix_video_info WHERE photo_id = ?", (p["id"],))
+            con.execute("INSERT INTO pix_video_info (photo_id, stamp, cover_t, chapters, transcript, segments, lang, speech_model, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
                         (p["id"], analysis.stamp(p), cover_t, json.dumps(chapters), (tr or {}).get("text") or None, json.dumps((tr or {}).get("segments") or []),
                          (tr or {}).get("lang"), models.chosen("speech_model") if (speech and tr is not None) else None, int(time.time())))
             # speech wanted but failed (a model that would not load, a broken file): recorded as "no speech", so it is tried again
-            con.execute("INSERT OR REPLACE INTO ai_scans VALUES (?,'videos',?,?)", (p["id"], analysis.stamp(p), key if not (speech and tr is None) else _key("")))
+            con.execute("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'videos',?,?)", (p["id"], analysis.stamp(p), key if not (speech and tr is None) else _key("")))
         if not (same_file and old[1] == cover_t):
             thumbs.forget(p["id"])  # the thumbnail, preview and embedding are made again from the chosen frame
         progress.step()
 
 
-job = ScanJob("videos", _todo, _work, available=available, tables=("video_info",), phase="")
+job = ScanJob("videos", _todo, _work, available=available, tables=("pix_video_info",), phase="")
 progress, start, reset = job.progress, job.start, job.reset
 
 
@@ -344,7 +344,7 @@ def cover_time(photo_id: int):
     """The chosen cover frame's time, or None (then thumbs.video_frame uses its own rule)."""
     try:
         with vdb.reader() as con:
-            r = con.execute("SELECT cover_t FROM video_info WHERE photo_id = ?", (photo_id,)).fetchone()
+            r = con.execute("SELECT cover_t FROM pix_video_info WHERE photo_id = ?", (photo_id,)).fetchone()
         return float(r[0]) if r and r[0] is not None else None
     except Exception:
         return None
@@ -354,7 +354,7 @@ def info(photo_id: int) -> dict:
     """{cover_t, chapters: [seconds], transcript, segments, lang} for the info panel and the player."""
     try:
         with vdb.reader() as con:
-            r = con.execute("SELECT cover_t, chapters, transcript, segments, lang FROM video_info WHERE photo_id = ?", (photo_id,)).fetchone()
+            r = con.execute("SELECT cover_t, chapters, transcript, segments, lang FROM pix_video_info WHERE photo_id = ?", (photo_id,)).fetchone()
     except Exception:
         r = None
     if not r:
@@ -367,7 +367,7 @@ def transcripts() -> dict:
     out = {}
     try:
         with vdb.reader() as con:
-            for pid, text in con.execute("SELECT photo_id, transcript FROM video_info WHERE transcript IS NOT NULL AND transcript != ''"):
+            for pid, text in con.execute("SELECT photo_id, transcript FROM pix_video_info WHERE transcript IS NOT NULL AND transcript != ''"):
                 out[pid] = text
     except Exception as e:
         log.warning("videos: transcripts unreadable (%s)", e)
@@ -378,7 +378,7 @@ def signature() -> str:
     """Part of the index version: changes as transcripts arrive."""
     try:
         with vdb.reader() as con:
-            n = con.execute("SELECT count(*) FROM video_info WHERE transcript IS NOT NULL").fetchone()[0]
+            n = con.execute("SELECT count(*) FROM pix_video_info WHERE transcript IS NOT NULL").fetchone()[0]
         return "v%d" % (n // 200 * 200)  # in steps; the run's end folds the rest in (jobs.finished_hook)
     except Exception:
         return "v0"
@@ -387,4 +387,4 @@ def signature() -> str:
 def forget(ids: list):
     with vdb.writer() as con:
         for part in chunked(ids, 500):
-            con.execute(f"DELETE FROM video_info WHERE photo_id IN ({','.join(str(int(i)) for i in part)})")
+            con.execute(f"DELETE FROM pix_video_info WHERE photo_id IN ({','.join(str(int(i)) for i in part)})")

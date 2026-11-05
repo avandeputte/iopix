@@ -18,7 +18,7 @@ def _vid(pid):
     from app.data import vdb
     con = vdb.connect()
     try:
-        r = con.execute("SELECT vid FROM photo_identity WHERE dk_id = ?", (pid,)).fetchone()
+        r = con.execute("SELECT id FROM pix_photo_identity WHERE dk_id = ?", (pid,)).fetchone()
         return r[0] if r else None
     finally:
         con.close()

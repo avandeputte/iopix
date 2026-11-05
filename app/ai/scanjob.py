@@ -1,6 +1,6 @@
 """The scaffolding every "scan the library, remember what was done" job shares.
 
-Jersey numbers, clothing and videos each look at the photos a job has not covered yet (ai_scans, keyed by a
+Jersey numbers, clothing and videos each look at the photos a job has not covered yet (pix_ai_scans, keyed by a
 stamp of the file and a detail of the model or rules used), work through them in batches on the shared queue
 (jobs.py), and record each one as done. Around that core they used to repeat the same bookkeeping: the Progress,
 the "start while running" rule, the reset that cancels and empties the tables, the coverage count, and the
@@ -22,11 +22,11 @@ class ScanJob:
 
     todo(con, photos) -> list   the photos (index rows) the job still has to do, read on `con` (a vdb reader)
     work(gen, todo)             the run itself, batch by batch, checking progress.cancelled(gen) between batches
-                                and recording each batch in the job's tables and ai_scans
+                                and recording each batch in the job's tables and pix_ai_scans
     counts(con) -> (done, total) what coverage() reports (total None when every item is wanted)
     available()                 the job can run here (its model or package is installed); checked at start and
                                 again at run time, when the model may have been removed since
-    tables                      the job's own tables, emptied by reset() together with its ai_scans rows
+    tables                      the job's own tables, emptied by reset() together with its pix_ai_scans rows
     **fields                    the job's own progress fields (phase...), cleared again at each run"""
 
     def __init__(self, name: str, todo, work, counts=None, available=None, tables: tuple = (), **fields):
@@ -70,7 +70,7 @@ class ScanJob:
         with vdb.writer() as con:
             for t in self.tables:
                 con.execute(f"DELETE FROM {t}")
-            con.execute("DELETE FROM ai_scans WHERE job = ?", (self.name,))
+            con.execute("DELETE FROM pix_ai_scans WHERE job = ?", (self.name,))
 
     def coverage(self) -> tuple:
         """(done, total) for the Maintenance row; (0, 0) when the database cannot be read (not there yet, locked)."""

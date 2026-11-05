@@ -48,9 +48,9 @@ def test_copy_follows_digikam_and_every_photo_has_a_viewer_id(client):
     index.ensure_fresh()
     m = index.mirror_info()
     assert m and m["source"] == dkdb.source_version()
-    assert m["photos"] == _count("photos") > 0
-    assert _count("photo_identity") >= m["photos"]  # one row per photo; rows of photos deleted by earlier tests stay (a copy never takes another photo's row)
-    assert _count("tags") > 0 and _count("photo_tags") > 0 and _count("folders") > 0
+    assert m["photos"] == _count("pix_photos") > 0
+    assert _count("pix_photo_identity") >= m["photos"]  # one row per photo; rows of photos deleted by earlier tests stay (a copy never takes another photo's row)
+    assert _count("pix_tags") > 0 and _count("pix_photo_tags") > 0 and _count("pix_folders") > 0
     s = client.get("/api/status").json()["digikam"]
     assert s["sync"] and s["reachable"] and s["source"] == "digikam" and s["mirror"]["photos"] == m["photos"]
 
@@ -109,7 +109,7 @@ def test_sync_off_everything_works_on_the_viewers_own_library(client, lib, photo
         assert client.get("/api/status").json()["digikam"]["sync"] is False
         con = dkdb.connect()
         assert getattr(con, "standalone", False), "digiKam's names reach the library tables"
-        assert con.execute("SELECT count(*) FROM Images").fetchone()[0] == _count("photos")
+        assert con.execute("SELECT count(*) FROM Images").fetchone()[0] == _count("pix_photos")
         con.close()
         # a tag, a folder and a face, all without digiKam
         r = client.post("/api/tags/op", json={"op": "add", "parent": 0, "name": "zz-standalone-tag"})
@@ -143,8 +143,8 @@ def test_viewer_data_follows_a_photo_digikam_renumbered(client, lib):
     pid = lib["ids"][1]
     con = state.connect()
     try:
-        vid, uhash = con.execute("SELECT vid, hash FROM photo_identity WHERE dk_id = ?", (pid,)).fetchone()
-        new = con.execute("SELECT max(dk_id) FROM photo_identity").fetchone()[0] + 1000
+        vid, uhash = con.execute("SELECT id, hash FROM pix_photo_identity WHERE dk_id = ?", (pid,)).fetchone()
+        new = con.execute("SELECT max(dk_id) FROM pix_photo_identity").fetchone()[0] + 1000
     finally:
         con.close()
     state.set_favorites([(pid, uhash)], True)
@@ -155,8 +155,8 @@ def test_viewer_data_follows_a_photo_digikam_renumbered(client, lib):
         assert new in state.favorite_ids() and pid not in state.favorite_ids(), "the favorite followed the file"
         con = state.connect()
         try:
-            assert con.execute("SELECT dk_id FROM photo_identity WHERE vid = ?", (vid,)).fetchone()[0] == new, "same viewer id, new digiKam id"
-            assert con.execute("SELECT count(*) FROM photo_identity WHERE dk_id = ?", (pid,)).fetchone()[0] == 0
+            assert con.execute("SELECT dk_id FROM pix_photo_identity WHERE id = ?", (vid,)).fetchone()[0] == new, "same viewer id, new digiKam id"
+            assert con.execute("SELECT count(*) FROM pix_photo_identity WHERE dk_id = ?", (pid,)).fetchone()[0] == 0
         finally:
             con.close()
     finally:
@@ -275,12 +275,12 @@ def test_library_follows_digikam_row_by_row(client, lib):
         src.rollback(); src.close()
     con = vdb.connect()
     try:
-        pid = con.execute("SELECT imageid FROM photo_information LIMIT 1").fetchone()[0]
-        con.execute("UPDATE photo_information SET rating = 5 WHERE imageid = ?", (pid,))
-        tag_row = con.execute("SELECT imageid, tagid FROM photo_tags LIMIT 1").fetchone()
-        con.execute("DELETE FROM photo_tags WHERE imageid = ? AND tagid = ?", tuple(tag_row))
-        face = con.execute("SELECT imageid, tagid, property, value FROM face_regions LIMIT 1").fetchone()
-        con.execute("INSERT INTO face_regions VALUES (?,?,?,?)", tuple(face))  # a stray duplicate
+        pid = con.execute("SELECT imageid FROM pix_photo_information LIMIT 1").fetchone()[0]
+        con.execute("UPDATE pix_photo_information SET rating = 5 WHERE imageid = ?", (pid,))
+        tag_row = con.execute("SELECT imageid, tagid FROM pix_photo_tags LIMIT 1").fetchone()
+        con.execute("DELETE FROM pix_photo_tags WHERE imageid = ? AND tagid = ?", tuple(tag_row))
+        face = con.execute("SELECT imageid, tagid, property, value FROM pix_face_regions LIMIT 1").fetchone()
+        con.execute("INSERT INTO pix_face_regions VALUES (?,?,?,?)", tuple(face))  # a stray duplicate
         con.commit()
     finally:
         con.close()

@@ -17,7 +17,7 @@ camera's years outside the window are not counted, and an age estimate is clippe
 
 Everything is computed on request from the index, the stored ages and the embeddings; nothing is written.
 Using a suggestion is the user's click (the date editor's year-only date through /api/edit). Hints live in the
-viewer database (date_hints).
+viewer database (pix_date_hints).
 """
 import json
 import logging
@@ -54,7 +54,7 @@ def hints() -> dict:
     """{album id: {not_before, not_after}} as entered."""
     try:
         with vdb.reader() as con:
-            return {int(r[0]): {"not_before": r[1], "not_after": r[2]} for r in con.execute("SELECT album_id, not_before, not_after FROM date_hints")}
+            return {int(r[0]): {"not_before": r[1], "not_after": r[2]} for r in con.execute("SELECT album_id, not_before, not_after FROM pix_date_hints")}
     except Exception:
         return {}
 
@@ -70,9 +70,9 @@ def set_hint(album_id: int, not_before=None, not_after=None):
         raise ValueError("The earliest year is after the latest")
     with vdb.writer() as con:
         if nb is None and na is None:
-            con.execute("DELETE FROM date_hints WHERE album_id = ?", (int(album_id),))
+            con.execute("DELETE FROM pix_date_hints WHERE album_id = ?", (int(album_id),))
         else:
-            con.execute("INSERT OR REPLACE INTO date_hints (album_id, not_before, not_after, user_name, ts) VALUES (?,?,?,?,?)",
+            con.execute("INSERT OR REPLACE INTO pix_date_hints (album_id, not_before, not_after, user_name, updated_at) VALUES (?,?,?,?,?)",
                         (int(album_id), nb, na, history.actor(), int(time.time())))
 
 

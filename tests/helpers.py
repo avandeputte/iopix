@@ -39,10 +39,10 @@ def clear_accounts(db_path=None):
     from iosuite_shared import db as authdb
     from app import users
     users.init()
-    authdb.ex("DELETE FROM users")
-    authdb.ex("ALTER TABLE users AUTO_INCREMENT = 1")
-    authdb.ex("DELETE FROM settings")
-    authdb.ex("DELETE FROM suite_apps")
+    authdb.ex("DELETE FROM ios_users")
+    authdb.ex("ALTER TABLE ios_users AUTO_INCREMENT = 1")
+    authdb.ex("DELETE FROM ios_settings")
+    authdb.ex("DELETE FROM ios_apps")
     from app.auth import auth
     auth._registered = False  # the next request registers iopix in the list of apps again
     users.invalidate()  # the accounts cache must not outlive the rows
@@ -117,7 +117,7 @@ def forget_identity(ids):
     con = vdb.connect()
     try:
         for i in ids:
-            con.execute("DELETE FROM photo_identity WHERE dk_id = ?", (int(i),))
+            con.execute("DELETE FROM pix_photo_identity WHERE dk_id = ?", (int(i),))
         con.commit()
     finally:
         con.close()

@@ -40,19 +40,19 @@ def test_the_index_shows_the_cleaned_text(client, lib):
     con.close()
     db = vdb.connect()
     try:
-        before = db.execute("SELECT text FROM ai_text WHERE photo_id = ?", (pid,)).fetchone()
-        db.execute("INSERT OR REPLACE INTO ai_text VALUES (?, ?)", (pid, "NIVHITY IOWA.\nscabeyes\nCITY"))
+        before = db.execute("SELECT text FROM pix_ai_text WHERE photo_id = ?", (pid,)).fetchone()
+        db.execute("INSERT OR REPLACE INTO pix_ai_text VALUES (?, ?)", (pid, "NIVHITY IOWA.\nscabeyes\nCITY"))
         db.commit()
         index.build()
         assert client.get(f"/api/photo/{pid}").json()["ocr"] == "IOWA.\nCITY"
         assert pid in client.get("/api/photos?q=iowa").json()["id"]
         assert pid not in client.get("/api/photos?q=nivhity").json()["id"]
-        assert db.execute("SELECT text FROM ai_text WHERE photo_id = ?", (pid,)).fetchone()[0].startswith("NIVHITY")  # stored as read
+        assert db.execute("SELECT text FROM pix_ai_text WHERE photo_id = ?", (pid,)).fetchone()[0].startswith("NIVHITY")  # stored as read
     finally:
         if before:
-            db.execute("INSERT OR REPLACE INTO ai_text VALUES (?, ?)", (pid, before[0]))
+            db.execute("INSERT OR REPLACE INTO pix_ai_text VALUES (?, ?)", (pid, before[0]))
         else:
-            db.execute("DELETE FROM ai_text WHERE photo_id = ?", (pid,))
+            db.execute("DELETE FROM pix_ai_text WHERE photo_id = ?", (pid,))
         db.commit()
         db.close()
         index.build()

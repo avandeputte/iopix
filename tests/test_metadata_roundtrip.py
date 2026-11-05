@@ -139,7 +139,7 @@ def test_a_sync_or_an_old_sidecar_never_takes_a_person_off(client, lib, pid_tag)
         rec = consistency.compare([{**p, "name": "x"}])[0]
         from app.data import vdb
         c = vdb.connect()
-        c.execute("INSERT OR REPLACE INTO metadata_check (photo_id, stamp, data, mismatch, has_sidecar, file_xmp, checked) VALUES (?,?,?,?,?,?,?)",
+        c.execute("INSERT OR REPLACE INTO pix_metadata_check (photo_id, stamp, data, mismatch, has_sidecar, file_xmp, checked_at) VALUES (?,?,?,?,?,?,?)",
                   (p["id"], "x", json.dumps(rec), len(rec["mismatch"]), 1, 0, int(time.time())))
         c.commit(); c.close()
         consistency.sync([p["id"]], "sidecar", ["db"], ["tags"])

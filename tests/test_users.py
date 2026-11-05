@@ -255,12 +255,12 @@ def test_a_session_in_use_is_renewed(client, fresh):
     _login(client, "alex", "correct horse")
     assert "set-cookie" not in client.get("/api/auth/me").headers, "a session from today is not renewed"
     now = int(_time.time())
-    authdb.ex("UPDATE sessions SET renewed = %s, expires = %s", (now - 20 * 86400, now + 10 * 86400))  # renewed 20 days ago: 10 days left
+    authdb.ex("UPDATE ios_sessions SET renewed_at = %s, expires_at = %s", (now - 20 * 86400, now + 10 * 86400))  # renewed 20 days ago: 10 days left
     sessions.invalidate()
     r = client.get("/api/auth/me")
     assert r.json()["user"]["name"] == "alex"
     assert r.cookies.get(users.COOKIE) == client.cookies.get(users.COOKIE), r.headers.get("set-cookie")  # the cookie is set again, for another 30 days
-    assert authdb.one("SELECT expires FROM sessions")["expires"] > now + 29 * 86400
+    assert authdb.one("SELECT expires_at FROM ios_sessions")["expires_at"] > now + 29 * 86400
 
 def test_registers_in_the_suite(client, fresh):
     """The first request lists iopix in the suite's apps (suite_apps), with its name and version, for the start page."""

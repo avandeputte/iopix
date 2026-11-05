@@ -104,7 +104,7 @@ def test_a_model_installed_later_fills_in_only_its_part(client, lib, monkeypatch
         monkeypatch.setattr(looks, "eyes_available", lambda: False)
         analysis._looks_job(photos, analysis.progress["looks"].gen)
         db = vdb.connect()
-        first = {r[0]: r[1:] for r in db.execute("SELECT photo_id, aesthetic, focus FROM ai_looks")}
+        first = {r[0]: r[1:] for r in db.execute("SELECT photo_id, aesthetic, focus FROM pix_ai_looks")}
         db.close()
         assert set(first) == {p["id"] for p in photos} and all(a is None and f is not None for a, f in first.values())
         assert not analysis._looks_todo(photos, analysis._looks_parts())  # nothing left to do
@@ -119,7 +119,7 @@ def test_a_model_installed_later_fills_in_only_its_part(client, lib, monkeypatch
         monkeypatch.setattr(looks, "focus", lambda im: pytest.fail("focus measured again"))
         analysis._looks_job(photos, analysis.progress["looks"].gen)
         db = vdb.connect()
-        second = {r[0]: r[1:] for r in db.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM ai_looks")}
+        second = {r[0]: r[1:] for r in db.execute("SELECT photo_id, aesthetic, focus, eyes_checked, eyes_closed FROM pix_ai_looks")}
         db.close()
         for pid, (a, f, judged, closed) in second.items():
             assert 1 < a < 10 and f == first[pid][1]
@@ -135,7 +135,7 @@ def test_the_api_shows_quality_and_filters_likely_rejects(client, lib):
     con.close()
     db = vdb.connect()
     try:
-        db.executemany("INSERT OR REPLACE INTO ai_looks VALUES (?,?,?,?,?)", [(a, 6.2, 900.0, 2, 2), (b, 4.1, 300.0, 2, 0)])
+        db.executemany("INSERT OR REPLACE INTO pix_ai_looks VALUES (?,?,?,?,?)", [(a, 6.2, 900.0, 2, 2), (b, 4.1, 300.0, 2, 0)])
         db.commit()
         index.build()
         qa = client.get(f"/api/photo/{a}").json()["quality"]
@@ -148,7 +148,7 @@ def test_the_api_shows_quality_and_filters_likely_rejects(client, lib):
         assert client.get("/api/photos?sort=looks").json()["id"][0] == a
         assert client.get("/api/facets?eyes=closed").json()["extras"]["reject_eyes"] >= 1
     finally:
-        db.execute(f"DELETE FROM ai_looks WHERE photo_id IN ({a}, {b})")
+        db.execute(f"DELETE FROM pix_ai_looks WHERE photo_id IN ({a}, {b})")
         db.commit()
         db.close()
         index.build()

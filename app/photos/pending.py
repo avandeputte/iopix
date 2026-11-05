@@ -1,5 +1,5 @@
 """The remembered edits: what the viewer wrote to sidecars (and files) that digiKam's database does
-not have yet, kept in the viewer's own database (vdb's pending_edits table) so the viewer shows the
+not have yet, kept in the viewer's own database (vdb's pix_pending_edits table) so the viewer shows the
 new values right away and the index can lay them over digiKam's rows.
 
 One row per photo, the whole edit as JSON, replaced on every change, so an edit is read as one
@@ -29,7 +29,7 @@ def signature() -> str:
         return "e0"
     con = appstate.connect()
     try:
-        n, ts = con.execute("SELECT count(*), coalesce(max(ts), 0) FROM pending_edits").fetchone()
+        n, ts = con.execute("SELECT count(*), coalesce(max(updated_at), 0) FROM pix_pending_edits").fetchone()
         return f"e{n}.{ts}"
     except Exception:
         return "e0"
@@ -40,7 +40,7 @@ def signature() -> str:
 def _next_ts(c) -> int:
     """The stamp for a pending edit written now: never equal to the newest one, so two edits within the same second
     still change signature() (and the index shows the second)."""
-    newest = c.execute("SELECT coalesce(max(ts), 0) FROM pending_edits").fetchone()[0] or 0
+    newest = c.execute("SELECT coalesce(max(updated_at), 0) FROM pix_pending_edits").fetchone()[0] or 0
     return max(int(time.time()), int(newest) + 1)
 
 
@@ -49,7 +49,7 @@ def save_pending(rows: list):
     if rows:
         def go(c):
             ts = _next_ts(c)
-            c.executemany("INSERT OR REPLACE INTO pending_edits VALUES (?,?,?)", [(int(pid), json.dumps(e), ts) for pid, e in rows])
+            c.executemany("INSERT OR REPLACE INTO pix_pending_edits VALUES (?,?,?)", [(int(pid), json.dumps(e), ts) for pid, e in rows])
         appstate.write(go)
 
 
@@ -59,7 +59,7 @@ def pending() -> dict:
         return {}
     con = appstate.connect()
     try:
-        return {r[0]: json.loads(r[1]) for r in con.execute("SELECT photo_id, data FROM pending_edits")}
+        return {r[0]: json.loads(r[1]) for r in con.execute("SELECT photo_id, data FROM pix_pending_edits")}
     except Exception:
         return {}
     finally:
@@ -72,7 +72,7 @@ def pending_one(photo_id: int):
         return None
     con = appstate.connect()
     try:
-        r = con.execute("SELECT data FROM pending_edits WHERE photo_id = ?", (photo_id,)).fetchone()
+        r = con.execute("SELECT data FROM pix_pending_edits WHERE photo_id = ?", (photo_id,)).fetchone()
         return json.loads(r[0]) if r else None
     except Exception:
         return None
@@ -102,7 +102,7 @@ def pending_count() -> int:
         return 0
     con = appstate.connect()
     try:
-        return con.execute("SELECT count(*) FROM pending_edits").fetchone()[0]
+        return con.execute("SELECT count(*) FROM pix_pending_edits").fetchone()[0]
     except Exception:
         return 0
     finally:
@@ -113,7 +113,7 @@ def newest_pending() -> int:
     """When the most recent remembered edit was made (unix time), 0 when there is none."""
     con = appstate.connect()
     try:
-        row = con.execute("SELECT max(ts) FROM pending_edits").fetchone()
+        row = con.execute("SELECT max(updated_at) FROM pix_pending_edits").fetchone()
         return int(row[0] or 0) if row else 0
     finally:
         con.close()
@@ -123,7 +123,7 @@ def forget(photo_ids):
     """Drop remembered edits (digiKam has caught up, or they were undone)."""
     ids = [(int(i),) for i in photo_ids]
     if ids:
-        appstate.write(lambda c: c.executemany("DELETE FROM pending_edits WHERE photo_id = ?", ids))
+        appstate.write(lambda c: c.executemany("DELETE FROM pix_pending_edits WHERE photo_id = ?", ids))
 
 
 def remap_pending_tags(mapping: dict) -> list:

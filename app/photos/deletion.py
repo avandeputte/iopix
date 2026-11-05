@@ -33,10 +33,10 @@ log = logging.getLogger("app.photos.deletion")
 BACKUP_DIR = config.DATA_DIR / "deleted-photos"
 PHOTO_TABLES = ("ImageInformation", "ImageMetadata", "ImagePositions", "VideoMetadata", "ImageComments", "ImageCopyright",
                 "ImageProperties", "ImageTags", "ImageTagProperties")
-VIEWER_TABLES = (("favorite_photos", "photo_id"), ("viewer_album_photos", "photo_id"), ("pending_edits", "photo_id"), ("ai_scans", "photo_id"), ("ai_quality", "photo_id"),
-                 ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_looks", "photo_id"), ("ai_face_ages", "photo_id"),
-                 ("ai_face_embeddings", "photo_id"), ("ai_person_references", "photo_id"), ("metadata_check", "photo_id"), ("image_data_checksums", "photo_id"), ("quality_accepted", "photo_id"),
-                 ("ai_similar_photos", "a"), ("ai_similar_photos", "b"))
+VIEWER_TABLES = (("pix_favorite_photos", "photo_id"), ("pix_album_photos", "photo_id"), ("pix_pending_edits", "photo_id"), ("pix_ai_scans", "photo_id"), ("pix_ai_quality", "photo_id"),
+                 ("pix_ai_text", "photo_id"), ("pix_ai_face_count", "photo_id"), ("pix_ai_objects", "photo_id"), ("pix_ai_descriptions", "photo_id"), ("pix_ai_looks", "photo_id"), ("pix_ai_face_ages", "photo_id"),
+                 ("pix_ai_face_embeddings", "photo_id"), ("pix_ai_person_references", "photo_id"), ("pix_metadata_check", "photo_id"), ("pix_image_data_checksums", "photo_id"), ("pix_quality_accepted", "photo_id"),
+                 ("pix_ai_similar_photos", "photo_id"), ("pix_ai_similar_photos", "similar_photo_id"))
 
 
 def sidecars(path: str) -> list:
