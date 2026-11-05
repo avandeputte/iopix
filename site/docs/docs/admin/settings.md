@@ -6,7 +6,7 @@
 
 | Setting | Does |
 | --- | --- |
-| Name | what iopix calls itself: the top of the page, the browser tab, the installed app |
+| Name | what iopix calls itself: the top of the page, the browser tab, the installed app. Left empty (or set to iopix in any capitalisation) it shows the wordmark **ioPix**, with a capital P like the other ioThing apps |
 | Appearance | light (default), dark, or follow the device |
 | Units | metric or imperial for distances and altitude |
 | Thumbnail badges | faces, place and favorite badges on thumbnails |

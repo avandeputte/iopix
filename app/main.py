@@ -62,7 +62,7 @@ async def lifespan(_app):
         yield
 
 
-app = FastAPI(title="iopix", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="ioPix", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # every endpoint that changes the library (sidecars, files, digiKam's database); refused in read-only mode
 MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it is read (uploads are multipart and not bound here)

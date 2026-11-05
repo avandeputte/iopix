@@ -237,11 +237,11 @@ async function start() {
  *  down): nothing else works, so the page is the database panel from Settings, and reloads once the viewer restarts. */
 function setupDatabasePage(st) {
   document.body.classList.add('locked');
-  document.title = st.appName || 'iopix';
-  main.replaceChildren(h('div', { class: 'page' }, h('h1', { class: 'ptitle' }, `${st.appName || 'iopix'} needs its database`),
+  document.title = st.appName || 'ioPix';
+  main.replaceChildren(h('div', { class: 'page' }, h('h1', { class: 'ptitle' }, `${st.appName || 'ioPix'} needs its database`),
     h('div', { class: 'muted intro' }, st.databaseConfigured
-      ? `The configured MariaDB/MySQL database is not answering (${st.databaseError}). Start the server, or point ${st.appName || 'iopix'} at another database below.`
-      : `${st.appName || 'iopix'} keeps its own data (accounts, settings, albums, the edit log, AI results) in a MariaDB or MySQL database. Create an empty database with a user that owns it, then enter its details.`),
+      ? `The configured MariaDB/MySQL database is not answering (${st.databaseError}). Start the server, or point ${st.appName || 'ioPix'} at another database below.`
+      : `${st.appName || 'ioPix'} keeps its own data (accounts, settings, albums, the edit log, AI results) in a MariaDB or MySQL database. Create an empty database with a user that owns it, then enter its details.`),
     h('div', { class: 'srow' }, viewerDbPanel({ setup: true }))));
 }
 /** The sidebar docks beside the page on a wide screen, unless its button put it away (remembered). Put away, or on a

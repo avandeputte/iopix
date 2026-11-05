@@ -45,7 +45,7 @@ export const S = {
   DIGIKAM_CHECK: 'pgrep',
   APP_VERSION: '',
   APP_COMMIT: '',
-  APP_NAME: 'iopix',
+  APP_NAME: 'ioPix',
   LOSSLESS: null,
   EDITING: false,
   WRITE_FILES: false,
@@ -131,10 +131,10 @@ export function applyTheme() {
 }
 
 
-/** The app's name as a .brand-name span: when it is iopix, "io" and "pix" in their two colours (Settings › Name can change it). */
+/** The app's name as a .brand-name span: when it is ioPix (in any capitalisation), the wordmark "io" + "Pix" in its two colours (Settings › Name can change it). */
 export function brandName(el = h('span', { class: 'brand-name' })) {
-  const n = S.APP_NAME || 'iopix';
-  if (n.toLowerCase() === 'iopix') fill(el, h('span', { class: 'io' }, n.slice(0, 2)), h('span', { class: 'pix' }, n.slice(2)));
+  const n = S.APP_NAME || 'ioPix';
+  if (n.toLowerCase() === 'iopix') fill(el, h('span', { class: 'io' }, 'io'), h('span', { class: 'pix' }, 'Pix'));
   else el.textContent = n;
   return el;
 }
