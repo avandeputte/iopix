@@ -7,6 +7,7 @@ own stays per app: the role an account holds here, its display settings, and the
 """
 from iothing_auth.fastapi import Auth
 from iothing_auth import users as shared
+from iothing_auth.updates import Updater
 
 from app import __version__, config
 
@@ -23,6 +24,22 @@ def _read_only() -> bool:
 auth = Auth(APP, read_only=_read_only, read_only_message="The viewer is in read-only mode; nothing in the library can be changed.", app_label="ioPix",
             version=__version__, public_url=config.PUBLIC_URL or None, description="Photos", color="#3b4a8c", icon="/icons/mark.svg")
 auth.deny_exempt = ("/mcp",)  # MCP clients sign in with the admin token, whatever Cloudflare service token got them through
+
+
+def _get_setting(key: str, default: str = "") -> str:
+    from app.data import state
+    return state.get_setting(key, default)
+
+
+def _set_setting(key: str, value: str) -> None:
+    from app.data import state
+    state.set_setting(key, value)
+
+
+# updates (the daily check, update.sh, restart), the MCP admin token and the server log, as in every app of the suite
+# (iothing_auth.updates); the daily-check switch and the token are kept with iopix's own settings
+updater = Updater(APP, __version__, config.APP_DIR, repo=config.IOPIX_REPO, branch=config.IOPIX_BRANCH, result_file=config.DATA_DIR / ".update-result",
+                  settings=(_get_setting, _set_setting), user_agent="iopix")
 
 
 def decorate(u):

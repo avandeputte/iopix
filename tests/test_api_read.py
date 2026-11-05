@@ -113,7 +113,7 @@ def test_version_is_single_sourced_and_shown(client):
     assert __version__ == toml, "bump app/__init__.py and pyproject.toml together"
     s = client.get("/api/status").json()
     assert s["appVersion"] == __version__ and "commit" in s
-    assert client.get("/api/update").json()["version"] == __version__
+    assert client.get("/api/server").json()["version"] == __version__
 
 
 def test_smart_albums_are_saved_searches(client):

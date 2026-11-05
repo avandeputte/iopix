@@ -130,9 +130,9 @@ def test_bad_precision_is_refused(client, lib):
 
 
 def test_the_mcp_tool_counts_then_marks_by_year(client, lib):
-    from app import updates
+    from app.auth import updater
     from app.mcp import admin
-    tok = updates.admin_token()
+    tok = updater.admin_token()
     con = index.open_index()
     pid, taken = con.execute("SELECT id, taken FROM photos WHERE video = 0 AND taken IS NOT NULL ORDER BY id LIMIT 1").fetchone()
     n_year = con.execute("SELECT count(*) FROM photos WHERE substr(taken, 1, 4) = ?", (taken[:4],)).fetchone()[0]

@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 
 from app.ai import analysis, concepts, moments
-from app import __version__ as APP_VERSION, access, config, iocontacts, jobs as bgjobs, updates, users
+from app import __version__ as APP_VERSION, access, config, iocontacts, jobs as bgjobs, users
+from app.auth import updater
 from app.photos import edits, lossless, tagmanager
 from app.faces import facedetect
 from app.data import index, state as appstate
@@ -234,10 +235,10 @@ def api_status(request: Request):
             "dbWrite": config.DB_WRITE and not appstate.read_only() and writer, "writeFiles": edits.writes_files(),
             "user": ({"id": user["id"], "name": user["name"], "role": user["role"], "person": user.get("person")} if user else None), "usersExist": users.any_users(),
             "isAdmin": admin, "signedIn": signed, "requireLogin": users.require_login(),
-            "updateAvailable": updates.available() if admin and updates.auto_check_enabled() else None,
+            "updateAvailable": updater.available() if admin and updater.auto_check_enabled() else None,
             "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK,
             "digikam": dk if admin else {k: v for k, v in dk.items() if k != "error"}, "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
-            "appVersion": APP_VERSION, "commit": updates.local_commit()[:7], "appName": app_name(),
+            "appVersion": APP_VERSION, "commit": updater.local_commit()[:7], "appName": app_name(),
             "tagJobs": {**tagmanager.progress, "pending": tagmanager.pending_jobs()},
             "analysis": analysis.progress, "jobs": bgjobs.status()}
 
