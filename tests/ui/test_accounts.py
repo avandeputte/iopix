@@ -9,10 +9,10 @@ from ui.conftest import _eventually, _get, _open_photo, _post  # noqa: E402
 
 def test_pwa_service_worker_caches_the_shell(page, server):
     page.goto(server + "/#/photos")
-    out = page.evaluate("""async () => { const r = await navigator.serviceWorker.ready; const c = await caches.open('iopix-shell-v4');
+    out = page.evaluate("""async () => { const r = await navigator.serviceWorker.ready; const c = await caches.open('iopix-shell-v5');
         return { state: r.active && r.active.state, cached: (await c.keys()).map((k) => new URL(k.url).pathname) }; }""")
     assert out["state"] in ("activating", "activated")  # ready resolves while the worker may still be activating for a tick
-    assert {"/", "/app.js", "/js/core.js", "/js/lightbox.js", "/app.css", "/manifest.webmanifest", "/icons/icon-192.png"} <= set(out["cached"]), "the shell and every module are cached"
+    assert {"/", "/static/app.js", "/static/js/core.js", "/static/js/lightbox.js", "/static/app.css", "/manifest.webmanifest", "/static/icons/icon-192.png"} <= set(out["cached"]), "the shell and every module are cached"
     assert not any(p.startswith("/api") or p.startswith("/thumb") for p in out["cached"]), "photos and the API are never cached"
 
 def test_users_flow_in_the_browser(page, server, browser):
@@ -49,7 +49,7 @@ def test_users_flow_in_the_browser(page, server, browser):
     assert visitor.locator(".modal").count() == 1, "a wrong password keeps the dialog open"
     visitor.locator(".modal input[type=password]").fill("correct horse"); visitor.locator(".modal button", has_text="Sign in").click()
     visitor.wait_for_selector("#usermenu .avatar", timeout=5000)
-    visitor.wait_for_function("import('/js/state.js').then((m) => m.S.EDITING)", timeout=10000)  # the sign-in's status poll: an admin edits
+    visitor.wait_for_function("import('/static/js/state.js').then((m) => m.S.EDITING)", timeout=10000)  # the sign-in's status poll: an admin edits
     _open_photo(visitor, server, pid)
     if visitor.locator(".lb-info").is_hidden():
         visitor.locator('[title^="Info"]').click()
@@ -155,7 +155,7 @@ def test_csp_lets_the_app_and_the_vendored_map_run(browser, server):
         page.goto(server + "/#/map")
         page.wait_for_selector(".leaflet-container", timeout=15000)
         assert page.evaluate("window.L.version") == "1.9.4" and page.evaluate("typeof L.markerClusterGroup") == "function"
-        assert page.evaluate("new L.Icon.Default()._getIconUrl('icon')").endswith("/vendor/leaflet/images/marker-icon.png")
+        assert page.evaluate("new L.Icon.Default()._getIconUrl('icon')").endswith("/static/vendor/leaflet/images/marker-icon.png")
         page.goto(server + "/#/settings")
         page.wait_for_selector("#main h1", timeout=15000)
         page.wait_for_timeout(500)  # a fixed wait on purpose: a policy report would come after the page is up, and nothing marks a report that does not come

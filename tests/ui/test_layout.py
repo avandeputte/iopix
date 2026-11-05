@@ -189,7 +189,7 @@ def test_page_title_takes_focus_and_the_status_box_is_live(page, server):
     page.wait_for_selector("#main h1:has-text('Folders')", timeout=15000)
     page.wait_for_timeout(300)  # a fixed wait on purpose: the focus must NOT move to the title, and nothing marks a move that does not happen
     assert page.evaluate("document.activeElement.id") == "q", "typing is not interrupted"
-    assert page.evaluate("history.replaceState(null, '', '#/photos?q=why?'); import('/js/state.js').then((m) => m.parseHash().params.get('q'))") == "why?"
+    assert page.evaluate("history.replaceState(null, '', '#/photos?q=why?'); import('/static/js/state.js').then((m) => m.parseHash().params.get('q'))") == "why?"
 
 def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, server):
     """A note centred with left: 50% used to be sized to the right half of the screen, so its words wrapped into a
@@ -204,14 +204,14 @@ def test_floating_notes_take_the_width_their_words_need_on_a_phone(browser, serv
     page.route("**/api/status*", with_update)
     try:
         page.goto(server + "/#/explore"); page.wait_for_selector("#nav > a", timeout=10000)
-        page.evaluate("() => { import('/js/state.js').then((st) => st.toast('3 photos moved to the trash. 1 could not be: the file is not on disk.', 'Undo', () => {}, 60000)); }")
+        page.evaluate("() => { import('/static/js/state.js').then((st) => st.toast('3 photos moved to the trash. 1 could not be: the file is not on disk.', 'Undo', () => {}, 60000)); }")
         page.evaluate("() => { const n = document.createElement('div'); n.id = 'reloadnote'; n.innerHTML = '<span>A new version of iopix is ready.</span><button class=\"pillbtn on\">Load it now</button><button class=\"iconbtn\">x</button>'; document.body.append(n); }")
         page.wait_for_selector("#toast:not([hidden])", timeout=5000); page.wait_for_selector("#reloadnote", timeout=5000)
         for sel in ("#toast", "#reloadnote"):
             box = page.locator(sel).bounding_box()
             assert box["width"] > 300 and box["height"] < 90, (sel, box)
             assert box["x"] >= 0 and box["x"] + box["width"] <= 390, (sel, box)
-        page.evaluate("() => { import('/js/main.js').then((m) => { m.updateBanner({ version: '9.9.9', remote: 'r', message: 'v9.9.9: words' }); m.dkBanner({ sync: true, reachable: false, since: 1760000000 }); }); }")
+        page.evaluate("() => { import('/static/js/main.js').then((m) => { m.updateBanner({ version: '9.9.9', remote: 'r', message: 'v9.9.9: words' }); m.dkBanner({ sync: true, reachable: false, since: 1760000000 }); }); }")
         page.wait_for_selector("#updbanner", timeout=5000)  # both cards are drawn in the same call
         if page.locator("#dkbanner").count():  # admins only
             u, d = page.locator("#updbanner").bounding_box(), page.locator("#dkbanner").bounding_box()
@@ -228,7 +228,7 @@ def _units_page(browser, server, locale):
     pg.wait_for_selector("#unitseg", timeout=10000)
     return ctx, pg
 
-_FMT = """async (u) => { const c = await import('/js/core.js'); localStorage.setItem('iopix.units', u);
+_FMT = """async (u) => { const c = await import('/static/js/core.js'); localStorage.setItem('iopix.units', u);
     return [c.fmtDist(100), c.fmtDist(1609.344), c.fmtDist(25000), c.fmtHeight(300), c.heightUnit(), c.accuracyChoices()[0],
             c.fromHeight(c.toHeight(123.4)) ]; }"""
 
@@ -270,7 +270,7 @@ def test_location_dialog_speaks_the_chosen_units(browser, server, lib):
             pg.goto(server + "/#/settings")
             pg.evaluate(f"localStorage.setItem('iopix.units', '{units}')")
             _open_photo(pg, server, pid)
-            pg.evaluate("import('/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, alt: 250.37}))" % pid)
+            pg.evaluate("import('/static/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, alt: 250.37}))" % pid)
             pg.wait_for_selector(f".modal input[placeholder='{alt_ph}']", timeout=5000)
             opts = pg.locator(".modal select.sharepick option").all_inner_texts()
             assert opts[0] == first and len(opts) == 5, opts
@@ -278,7 +278,7 @@ def test_location_dialog_speaks_the_chosen_units(browser, server, lib):
             assert shown == ("821.4" if units == "mi" else "250.37"), shown
             pg.locator(".modal button", has_text="Cancel").click()
             # a stored approximate position that is not one of the round sizes stays a choice, selected
-            pg.evaluate("import('/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, accuracy: 3000}))" % pid)
+            pg.evaluate("import('/static/js/editing.js').then((m) => m.locationDialog([%d], {lat: 40.44, lon: -79.96, accuracy: 3000}))" % pid)
             pg.wait_for_selector(".modal select.sharepick", timeout=5000)
             assert pg.locator(".modal select.sharepick").input_value() == "3000"
             assert len(pg.locator(".modal select.sharepick option").all_inner_texts()) == 6
@@ -312,11 +312,11 @@ def test_the_name_opens_the_other_suite_apps(page, server, browser):
     assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok  # signs this context in
     page.goto(server + "/#/explore")
     page.wait_for_selector("#usermenu .avatar", timeout=10000)
-    page.wait_for_function("import('/js/suite.js').then(() => true)", timeout=5000)
+    page.wait_for_function("import('/static/js/suite.js').then(() => true)", timeout=5000)
     assert page.locator("#nav .navhead a.brand[href='#/explore']").count() == 1  # iopix alone: nothing changes
     assert page.locator("#suitebtn").count() == 0
     others = {"app": "iopix", "items": [
-        {"app": "iopix", "name": "iopix", "url": server, "icon": server + "/icons/mark.svg", "color": "#3b4a8c"},
+        {"app": "iopix", "name": "iopix", "url": server, "icon": server + "/static/icons/mark.svg", "color": "#3b4a8c"},
         {"app": "iocontacts", "name": "ioContacts", "description": "Contacts", "url": "https://contacts.example.com", "icon": None, "color": "#7a4fd0"},
         {"app": "ionotes", "name": "ioNotes", "url": "https://notes.example.com", "icon": "https://notes.example.com/icon.svg", "color": "#2f8f5b"},
         {"app": "nowhere", "name": "ioNowhere", "url": None}]}  # never seen anywhere: no address to link to

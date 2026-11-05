@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.122.0"
+version = "1.123.0"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,7 @@ dependencies = [
   "python-multipart<1",
   "mcp<3",
   "pyjwt[crypto]<3",   # Cloudflare Access tokens (proxy sign-in)
-  "iosuite-shared @ git+https://github.com/avandeputte/iosuite-shared.git@cf4755f9efcaead7f0653b57048f437b606863c4",   # 0.8.0, the Shared ioSuite database (IOSUITE_DB_*): the suite's shared accounts and sessions (pinned: bump to pick up a new one)
+  "iosuite-shared @ git+https://github.com/avandeputte/iosuite-shared.git@f2253b350dfecaf633c81773807b159c06c4b0b7",   # iosuite-shared 0.9.0, the suite's shared library: accounts, sessions, the Shared ioSuite database (pinned: bump to pick up a new one)
 ]
 
 [project.optional-dependencies]

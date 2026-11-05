@@ -165,7 +165,7 @@ def _wait_flags(page, timeout=10000):
     show or hide the editing controls are the server's, not the defaults the page started with. boot() awaits the first
     poll before drawing a page, so after a load this is already so; after a sign-in, a settings change or a reload it is
     what a test has to wait for. APP_VERSION is '' until the first answer and never after."""
-    page.wait_for_function("import('/js/state.js').then((m) => !!m.S.APP_VERSION)", timeout=timeout)
+    page.wait_for_function("import('/static/js/state.js').then((m) => !!m.S.APP_VERSION)", timeout=timeout)
 
 
 def _viewer_ready(page):

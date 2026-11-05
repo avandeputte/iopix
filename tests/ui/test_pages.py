@@ -274,7 +274,7 @@ def test_consistency_bulk_sync_bar(page, server, lib):
     boxes.first.check()
     page.wait_for_selector("#cbulk:not([hidden]) button[data-src=sidecar]", timeout=3000)
     assert "1 selected" in page.locator("#cbulk .n").inner_text()
-    page.evaluate("import('/js/main.js').then((m) => m.pollStatus())")  # one status poll with its re-render, now rather than in 20 s
+    page.evaluate("import('/static/js/main.js').then((m) => m.pollStatus())")  # one status poll with its re-render, now rather than in 20 s
     assert page.locator("#cbulk:not([hidden])").count() == 1, "the bar stays while photos are ticked"
     vp = page.viewport_size
     for b in page.locator("#cbulk button[data-src]").all():
@@ -851,12 +851,12 @@ def test_quality_page_keeps_its_place_after_an_edit_in_the_viewer(page, server, 
     page.wait_for_selector(".modal h3:has-text('Set location')", timeout=5000)
     page.locator(".modal input[placeholder='latitude']").fill("40.3834")
     page.locator(".modal input[placeholder='longitude']").fill("-80.0459")
-    meta = page.evaluate("import('/js/state.js').then((m) => m.S.META.version)")
+    meta = page.evaluate("import('/static/js/state.js').then((m) => m.S.META.version)")
     try:
         with page.expect_response(lambda r: "/api/edit" in r.url and r.request.method == "POST", timeout=15000):
             page.locator(".modal button", has_text="Save location").click()
         assert _eventually(lambda: pid not in unlocated(), timeout=20), "the library changed under the report"
-        page.wait_for_function("(v) => import('/js/state.js').then((m) => m.S.META.version !== v)", arg=meta, timeout=15000)  # the page polled after the edit (the viewer still open) and saw the change
+        page.wait_for_function("(v) => import('/static/js/state.js').then((m) => m.S.META.version !== v)", arg=meta, timeout=15000)  # the page polled after the edit (the viewer still open) and saw the change
         page.keyboard.press("Escape")
         page.wait_for_selector("#lightbox", state="hidden", timeout=5000)
         page.wait_for_timeout(800)  # a fixed wait on purpose: the report must NOT be drawn again, and nothing marks a redraw that does not happen
@@ -921,7 +921,7 @@ def test_a_library_change_does_not_redraw_the_page_being_looked_at(browser, serv
     pid = _get(server, "/api/photos")["id"][2]
     call = lambda path, body: _post(server, path, body)  # noqa: E731
 
-    poll = "import('/js/main.js').then((m) => m.pollStatus()).then(() => import('/js/state.js')).then((m) => m.S.META.version)"
+    poll = "import('/static/js/main.js').then((m) => m.pollStatus()).then(() => import('/static/js/state.js')).then((m) => m.S.META.version)"
     try:
         page.goto(f"{server}/#/{view}")
         page.wait_for_selector("#main .tile img, #main .tree, #main .cards, #main .page", timeout=15000)
@@ -936,7 +936,7 @@ def test_a_library_change_does_not_redraw_the_page_being_looked_at(browser, serv
         page.wait_for_function(_WHAT_IS_THERE, timeout=5000)  # the grid draws the rows at the new position a moment after the scroll
         seen = page.evaluate(_WHAT_IS_THERE)
         page.evaluate("document.querySelector('#main').firstElementChild.dataset.old = '1'")  # a redraw replaces this element
-        meta = page.evaluate("import('/js/state.js').then((m) => m.S.META.version)")
+        meta = page.evaluate("import('/static/js/state.js').then((m) => m.S.META.version)")
         call("/api/edit", {"ids": [pid], "changes": {"rating": 1}})
         assert _eventually(lambda: page.evaluate(poll) != meta, 15), "the page saw the change"
         page.wait_for_selector("#libnote", timeout=5000)
@@ -963,7 +963,7 @@ def test_badges_change_at_once_on_every_thumbnail(page, server):
     geo, faces, vids = set(d["geo"]), set(d["faces"]), {int(k) for k in d["video"]}
     plain = next((d["id"][i] for i in range(d["count"]) if i not in faces and i not in vids), None)
     nogeo = next((d["id"][i] for i in range(d["count"]) if i not in geo and d["id"][i] != plain), None)
-    person = page.evaluate("import('/js/state.js').then((m) => m.S.META.tags.find((t) => t.person && t.nAll)?.id)")
+    person = page.evaluate("import('/static/js/state.js').then((m) => m.S.META.tags.find((t) => t.person && t.nAll)?.id)")
     if not (plain and person):
         pytest.skip("the test library needs a photo without people and a named person")
     ids = [x for x in (plain, nogeo) if x]
@@ -976,20 +976,20 @@ def test_badges_change_at_once_on_every_thumbnail(page, server):
     tile = lambda x: page.locator(f"h2:has-text('Rediscover') + .jrows .tile[data-id='{x}']")  # noqa: E731
     fast = {"timeout": 1500}
     assert tile(plain).locator(".fbadge").count() == 0 and tile(plain).locator(".cbadge[title='Has face tags']").count() == 0
-    page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], true))")
+    page.evaluate(f"import('/static/js/actions.js').then((m) => m.setFavorite([{plain}], true))")
     tile(plain).locator(".fbadge").wait_for(**fast)
     try:
-        page.evaluate(f"import('/js/faces.js').then((m) => m.faceOp({{ op: 'tagonly', image: {plain}, tag: {person} }}))")
+        page.evaluate(f"import('/static/js/faces.js').then((m) => m.faceOp({{ op: 'tagonly', image: {plain}, tag: {person} }}))")
         tile(plain).locator(".cbadge[title='Has face tags']").wait_for(**fast)
-        page.evaluate(f"import('/js/faces.js').then((m) => m.faceOp({{ op: 'untag', image: {plain}, tag: {person} }}))")  # evaluate awaits faceOp: the server has answered
+        page.evaluate(f"import('/static/js/faces.js').then((m) => m.faceOp({{ op: 'untag', image: {plain}, tag: {person} }}))")  # evaluate awaits faceOp: the server has answered
         tile(plain).locator(".cbadge[title='Has face tags']").wait_for(state="detached", **fast)
         if nogeo:
-            page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: {{ lat: 48.8584, lon: 2.2945, alt: null }} }}))")
+            page.evaluate(f"import('/static/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: {{ lat: 48.8584, lon: 2.2945, alt: null }} }}))")
             tile(nogeo).locator(".cbadge[title='Has GPS coordinates']").wait_for(timeout=5000)
-            page.evaluate(f"import('/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: null }}))")
+            page.evaluate(f"import('/static/js/editing.js').then((m) => m.editPhotos([{nogeo}], {{ gps: null }}))")
             tile(nogeo).locator(".cbadge[title='Has GPS coordinates']").wait_for(state="detached", timeout=5000)
     finally:
-        page.evaluate(f"import('/js/actions.js').then((m) => m.setFavorite([{plain}], false))")
+        page.evaluate(f"import('/static/js/actions.js').then((m) => m.setFavorite([{plain}], false))")
     tile(plain).locator(".fbadge").wait_for(state="detached", **fast)
 
 def test_date_suggestions_and_quality_pages_render(page, server, lib):
@@ -1046,7 +1046,7 @@ def test_suggestion_cards_tag_all_and_not_them(page, server, lib):
     page.goto(server + "/#/rotation")
     page.wait_for_selector(".sugg-item .tile img[title^='Shown the way']", timeout=10000)
     assert "2 marked as fine are left out" in page.inner_text(".intro")
-    assert page.locator(".sugg-item button", has_text="It’s fine").count() == page.evaluate("import('/js/state.js').then((m) => m.S.CAN_MANAGE ? 1 : 0)")
+    assert page.locator(".sugg-item button", has_text="It’s fine").count() == page.evaluate("import('/static/js/state.js').then((m) => m.S.CAN_MANAGE ? 1 : 0)")
 
 
 # --- the suggestion pages, with the models' answers mocked --------------------------------------------------------

@@ -27,7 +27,7 @@ export async function loadSuite() {
 /** The logo top left opens the menu when there are other apps, and the name beside it stays the link to Explore;
  *  alone, logo and name are one link to Explore. On a phone the sidebar is the bottom bar, so the top bar shows the
  *  logo button instead. */
-const mark = () => h('img', { src: 'icons/mark.svg', alt: '', class: 'brand-mark' });
+const mark = () => h('img', { src: 'static/icons/mark.svg', alt: '', class: 'brand-mark' });
 function suiteButton(id) {
   return h('button', { type: 'button', id, class: 'suitebtn', title: 'Other ioThing apps', 'aria-haspopup': 'menu', 'aria-label': 'Open another ioThing app',
     onclick: (e) => toggleSuite(e.currentTarget) }, mark());

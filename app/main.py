@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi import HTTPException
 
 from app.ai import analysis, models as dlmodels
@@ -69,8 +69,8 @@ MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it 
 
 
 # what a visitor may still fetch when sign-in is required: the app shell and the sign-in endpoints
-OPEN_PATHS = ("/", "/index.html", "/app.js", "/app.css", "/sw.js", "/manifest.webmanifest", "/api/status", "/share")
-OPEN_PREFIXES = ("/icons/", "/js/", "/vendor/", "/api/auth/")  # /vendor/: the map library, part of the app shell
+OPEN_PATHS = ("/", "/sw.js", "/manifest.webmanifest", "/api/status", "/share")
+OPEN_PREFIXES = ("/static/", "/api/auth/")  # /static/: the app shell's files (the map library among them)
 
 
 def _open_to_visitors(path: str) -> bool:
@@ -226,6 +226,24 @@ from mcp.server.transport_security import TransportSecuritySettings  # noqa: E40
 
 _mcp_asgi = mcp.server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True,
                                                    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-# its route handles the exact path /mcp; placed first so the static root mount never sees it
+# its route handles the exact path /mcp; placed first
 app.router.routes[:0] = list(_mcp_asgi.routes)
-app.mount("/", StaticFiles(directory=config.STATIC_DIR, html=True), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    """The page, with the version stamped on the script and stylesheet: after an update the browser (and Cloudflare,
+    which caches .js and .css at the edge) fetches the new ones instead of serving what it kept."""
+    html = (config.STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for f in ("static/app.js", "static/app.css"):
+        html = html.replace(f'"{f}"', f'"{f}?v={APP_VERSION}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker():
+    """At the root, so the service worker's scope is the whole app."""
+    return FileResponse(config.STATIC_DIR / "sw.js", media_type="text/javascript")
+
+
+app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")

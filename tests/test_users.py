@@ -174,7 +174,7 @@ def test_require_login_locks_everything_but_the_sign_in(client, fresh, lib):
     assert client.get("/api/status").json()["requireLogin"] is True
     client.cookies.clear()
     # a visitor: the shell and the sign-in endpoints work, nothing else does
-    for path in ("/", "/app.js", "/app.css", "/manifest.webmanifest", "/api/status", "/api/auth/me", "/api/auth/accounts"):
+    for path in ("/", "/static/app.js", "/static/app.css", "/manifest.webmanifest", "/api/status", "/api/auth/me", "/api/auth/accounts"):
         assert client.get(path).status_code == 200, path
     assert client.get("/api/auth/me").json()["requireLogin"] is True
     pid = lib["ids"][0] if isinstance(lib, dict) and "ids" in lib else client.get("/api/photos", cookies={}).json().get("id", [None])[0]
