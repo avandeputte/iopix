@@ -23,8 +23,8 @@ The installers can do this for you:
 
 | Install | How |
 | --- | --- |
-| [Docker](../install/docker.md) | the compose file ships a `mariadb` service (`iopix-db`) with the `VIEWER_DB_*` lines already pointing at it |
-| [Linux installer](../install/linux.md) | `--iopix-db local` installs MariaDB on the machine and creates the database, or give `--iopix-db HOST:PORT/DB:USER:PASSWORD` |
+| [Docker](../install/docker.md) | the compose file ships a `mariadb` service (`iopix-db`) with the `DB_*` lines already pointing at it |
+| [Linux installer](../install/linux.md) | `--db local` installs MariaDB on the machine and creates the database, or give `--db HOST:PORT/DB:USER:PASSWORD` |
 | [Proxmox container](../install/proxmox.md) | MariaDB inside the container, or a server you name |
 | [setup.sh](../install/setup-script.md) | asks for the details |
 
@@ -34,19 +34,19 @@ iopix reads the connection from `viewer-db.json` in the data folder, or from the
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VIEWER_DB_TYPE` | | `mysql` for MariaDB or MySQL |
-| `VIEWER_DB_HOST` | | server address |
-| `VIEWER_DB_PORT` | `3306` | server port |
-| `VIEWER_DB_DATABASE` | | database name |
-| `VIEWER_DB_USER` | | account |
-| `VIEWER_DB_PASSWORD` | | password |
+| `DB_TYPE` | | `mysql` for MariaDB or MySQL |
+| `DB_HOST` | | server address |
+| `DB_PORT` | `3306` | server port |
+| `DB_NAME` | | database name |
+| `DB_USER` | | account |
+| `DB_PASSWORD` | | password |
 
 Without either, iopix starts in a **database needed** state: the web app shows only a set-up page, the same panel as **Settings › digiKam and server › iopix database**, asking for the server details. **Test connection** checks them; **Use this database** saves them to `viewer-db.json` and restarts iopix on the new database. Until then nothing else answers: API calls return 503 with `needsDatabase: true`.
 
-If the configured server cannot be reached at start, the same page shows the error and a **Retry** button only. Nobody can sign in without the database, so the page does not let anyone test or switch to another server then; to change the connection, edit `data/viewer-db.json` (or the `VIEWER_DB_*` variables) and restart. iopix waits for the database; it does not fall back to anything else.
+If the configured server cannot be reached at start, the same page shows the error and a **Retry** button only. Nobody can sign in without the database, so the page does not let anyone test or switch to another server then; to change the connection, edit `data/viewer-db.json` (or the `DB_*` variables) and restart. iopix waits for the database; it does not fall back to anything else.
 
 !!! tip "Server on the Docker host"
-    From a container, `VIEWER_DB_HOST: host.docker.internal` reaches a server on the same machine.
+    From a container, `DB_HOST: host.docker.internal` reaches a server on the same machine.
 
 ## Moving to another database
 

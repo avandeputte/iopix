@@ -1,7 +1,7 @@
 """The shared ioThing accounts (iosuite-shared), as iopix uses them.
 
-Accounts, passwords, sessions and roles live in the Shared ioSuite database (IOSUITE_DB_* in iopix.env), shared
-with ioNotes and ioContacts: one sign-in serves every app on the domain (IOTHING_COOKIE_DOMAIN). What is iopix's
+Accounts, passwords, sessions and roles live in the Shared ioSuite database (IOSUITE_DB_* in config.env), shared
+with ioNotes and ioContacts: one sign-in serves every app on the domain (COOKIE_DOMAIN). What is iopix's
 own stays per app: the role an account holds here, its display settings, and the digiKam person it is linked to
 (the face badge on the sign-in screen), kept as the "person" value of the account's iopix data.
 """

@@ -1,7 +1,7 @@
 # iopix with Docker: `docker compose up -d` pulls the published image; `docker compose up -d --build`
 # builds it from this checkout instead (build arguments AI / CAPTIONS, see the Dockerfile). Works as a stack in Dockge / Portainer.
 # Edit the "CHANGE ME" spots (photos path, digiKam database or none, the iopix database password, admin password).
-# Everything the viewer writes (index, thumbnails, models, backups) lives in the named volume `dkv-data` (its name from before the rename, kept so existing stacks keep their data); the
+# Everything the viewer writes (index, thumbnails, models, backups) lives in the named volume `iopix-data`; the
 # library mounts are read-only. iopix's own database (settings, accounts, favorites, albums, edit log, AI results)
 # is on MariaDB: the `iopix-db` service below, with its data in the named volume `iopix-db`. On the first start the
 # container downloads the AI models named in AUTO_MODELS (about 1.6 GB) into the volume while the library is already browsable.
@@ -22,13 +22,13 @@ services:
       - "8600:8600"
     volumes:
       - /path/to/photos:/library/photos:ro          # CHANGE ME: the folder digiKam manages
-      - dkv-data:/data                            # the container runs as uid 1000: a volume from before that needs chown -R 1000:1000 once (README)
+      - iopix-data:/data                          # the container runs as uid 1000
       # SQLite instead of MariaDB: also mount the folder with digikam4.db and drop the DIGIKAM_DB_* lines below
       # - /path/to/digikamDB:/library/digikamDB:ro
     environment:
       TZ: America/New_York
       # No digiKam? Set DIGIKAM_DB_TYPE to none and delete the five DIGIKAM_DB_* lines under it: iopix then keeps
-      # the library itself (in the dkv-data volume) and finds the photos in the folder by itself. Drop :ro from the
+      # the library itself (in its database) and finds the photos in the folder by itself. Drop :ro from the
       # photos mount above so tags, faces and captions can be saved in sidecar files beside the photos.
       # digiKam's database on MariaDB (the viewer only reads it unless an editor changes metadata,
       # and then it takes a mysqldump into the volume first)
@@ -39,16 +39,15 @@ services:
       DIGIKAM_DB_USER: digikam
       DIGIKAM_DB_PASSWORD: change-me                  # CHANGE ME
       # iopix's own database: the iopix-db service below. To use a MariaDB/MySQL you already run instead (the one
-      # digiKam uses, for instance), point VIEWER_DB_HOST/PORT/DATABASE/USER/PASSWORD at it (a database and a user
+      # digiKam uses, for instance), point DB_HOST/PORT/NAME/USER/PASSWORD at it (a database and a user
       # that owns it; the tables are created on the first start), delete the iopix-db service, the depends_on
-      # above and the iopix-db volume at the bottom. An install from before v1.113 imports its data/viewer.db
-      # once from the Settings page. Without these the viewer starts with a set-up page that asks for them.
-      VIEWER_DB_TYPE: mysql
-      VIEWER_DB_HOST: iopix-db
-      VIEWER_DB_PORT: "3306"
-      VIEWER_DB_DATABASE: iopix
-      VIEWER_DB_USER: iopix
-      VIEWER_DB_PASSWORD: change-me-too               # CHANGE ME: the same as MARIADB_PASSWORD below
+      # above and the iopix-db volume at the bottom. Without these the viewer starts with a set-up page that asks for them.
+      DB_TYPE: mysql
+      DB_HOST: iopix-db
+      DB_PORT: "3306"
+      DB_NAME: iopix
+      DB_USER: iopix
+      DB_PASSWORD: change-me-too                      # CHANGE ME: the same as MARIADB_PASSWORD below
       # where the photos are inside this container; the album root digiKam recorded
       # (e.g. /Users/alex/Pictures/photos) is mapped to it (Settings > Album roots can also do this per root)
       PHOTOS_ROOT: /library/photos
@@ -56,6 +55,15 @@ services:
       # needs an editor or admin sign-in (remove both lines to start open, and create the admin from Settings)
       ADMIN_USER: admin
       ADMIN_PASSWORD: change-me-please                # CHANGE ME (8 characters or more)
+      # the Shared ioSuite database (MariaDB): accounts, sessions and suite-wide settings, shared with the other
+      # ioThing apps (one sign-in for all)
+      IOSUITE_DB_HOST: db.example.lan                 # CHANGE ME
+      IOSUITE_DB_NAME: iosuite
+      IOSUITE_DB_USER: iosuite
+      IOSUITE_DB_PASSWORD: change-me                  # CHANGE ME
+      # the address people and the other apps reach iopix at, and the domain the sign-in is shared on
+      # PUBLIC_URL: https://photo.example.com
+      # COOKIE_DOMAIN: example.com
       # models fetched on first start: content search (SigLIP 2), objects (YOLOX), places (GeoNames)
       AUTO_MODELS: siglip2,yolox,geonames
       # cores one background job may use (default: half); the container cannot see digiKam, so
@@ -79,7 +87,7 @@ services:
     environment:
       MARIADB_DATABASE: iopix
       MARIADB_USER: iopix
-      MARIADB_PASSWORD: change-me-too                 # CHANGE ME: the same as VIEWER_DB_PASSWORD above
+      MARIADB_PASSWORD: change-me-too                 # CHANGE ME: the same as DB_PASSWORD above
       MARIADB_RANDOM_ROOT_PASSWORD: "1"               # the root password is printed once in the container's log; iopix never needs it
     volumes:
       - iopix-db:/var/lib/mysql
@@ -91,5 +99,5 @@ services:
       retries: 6
 
 volumes:
-  dkv-data:
+  iopix-data:
   iopix-db:

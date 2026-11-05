@@ -1,7 +1,7 @@
 # Builds the container image and pushes it to GitHub's registry (ghcr.io) on every push to
 # main and on version tags; pull requests only build. The image holds no models: the
 # container downloads them on first start (AUTO_MODELS), see the README.
-name: Docker image
+name: Tests and image
 
 on:
   push:
@@ -18,7 +18,6 @@ permissions:
 
 env:
   IMAGE: ghcr.io/avandeputte/iopix
-  # the image name from before the rename keeps receiving the same builds, so existing stacks keep updating
 
 jobs:
   tests:
@@ -52,7 +51,7 @@ jobs:
         # the full suite cuts a scratch copy from a digiKam library, so it runs on a developer machine
         # (.venv/bin/python -m pytest tests); without one, conftest skips those and the rest run here
         env:
-          IOPIX_TEST_DB: 127.0.0.1:3306:root:test  # the MariaDB service above (host:port:user:password)
+          IOSUITE_TEST_DB: 127.0.0.1:3306:root:test  # the MariaDB service above (host:port:user:password)
         run: |
           python -m pip install -q numpy  # the search-model switch test builds vectors
           sudo apt-get install -y -qq --no-install-recommends libimage-exiftool-perl libjpeg-turbo-progs >/dev/null  # the no-digiKam test scans real files; the damaged-file tests repair them
@@ -97,6 +96,7 @@ jobs:
           build-args: |
             AI=1
             CAPTIONS=0
+            COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

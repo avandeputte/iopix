@@ -19,7 +19,7 @@ iopix's own records (accounts, settings, favorites, albums, the edit log, AI res
 | `history/` | sidecar copies for the edit log's Restore | your call |
 | `deleted-photos/` | photos deleted for good, with a record of what they were | your call |
 | `db-backups/` | copies of digiKam's database before destructive changes (the last 10 of each kind are kept), and `.sql` dumps of iopix's own database taken before a version changes its shape | your call |
-| `viewer.log` | iopix's own log | yes |
+| `iopix.log` | iopix's own log | yes |
 
 Sidecar and file backups are never deleted automatically. Allow disk space for them; Maintenance › Storage and backups shows how much each part takes.
 
@@ -27,7 +27,7 @@ Sidecar and file backups are never deleted automatically. Allow disk space for t
 
 Back up the database server and the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives `viewer.sql`, a `mysqldump` of iopix's database, plus the content-search embeddings files and the restore steps. The MCP admin token is not included, so set a new one after a restore if you use the MCP server.
 
-To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure `viewer-db.json` or the `VIEWER_DB_*` variables point at that database, and start iopix again.
+To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure `viewer-db.json` or the `DB_*` variables point at that database, and start iopix again.
 
 ## Rolling back digiKam's database
 

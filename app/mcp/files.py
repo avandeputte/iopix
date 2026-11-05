@@ -57,7 +57,7 @@ def diagnostics(token: str) -> dict:
         "proxySignIn": proxyauth.status(),
         "read_only": appstate.read_only(),
         "settings": _public_settings(),
-        "log_file": str(config.LOG_FILE), "log_file_exists": config.LOG_FILE.exists(),
+        "log_file": str(config.LOG_FILE or ""), "log_file_exists": bool(config.LOG_FILE and config.LOG_FILE.exists()),
     }
     try:
         con = db()
@@ -83,9 +83,11 @@ def _public_settings() -> dict:
 
 @server.tool(annotations=READ_ONLY)
 def server_log(token: str, lines: int = 200, contains: str = "", level: Literal["any", "warning", "error", "auth"] = "any") -> dict:
-    """The last lines of the viewer's own log (data/viewer.log, rotating). `contains` keeps only lines
+    """The last lines of the viewer's own log (LOG_FILE, data/iopix.log by default, rotating). `contains` keeps only lines
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
     need_token(token)
+    if config.LOG_FILE is None:
+        raise ToolError("no log file (LOG_FILE is empty in config.env)")
     try:
         return tail(config.LOG_FILE, min(int(lines), LOG_LINES_MAX), contains, level)
     except OSError as e:
@@ -131,7 +133,7 @@ def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optiona
                  trusted: Optional[str] = None, create_role: Optional[str] = None) -> dict:
     """Sign-in at a reverse proxy (Cloudflare Access, Authelia behind HAProxy/nginx/Caddy/Traefik): with no settings
     given, how it is set up and the Cloudflare Access team and application last seen in requests; with settings, saves
-    them (mode: off|cloudflare|haproxy|nginx|caddy|traefik|header; an empty string clears one; iopix.env still wins).
+    them (mode: off|cloudflare|haproxy|nginx|caddy|traefik|header; an empty string clears one; config.env still wins).
     Needs the admin token."""
     need_token(token)
     changes = {k: v for k, v in (("AUTH_PROXY", mode), ("CF_ACCESS_TEAM", cf_access_team), ("CF_ACCESS_AUD", cf_access_aud),

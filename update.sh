@@ -10,7 +10,7 @@
 #   IOPIX_RESULT=<file>  write the outcome ("ok: ..." or "error: ...") there before the
 #     restart, so the viewer can show it afterwards (its own child process dies in the restart)
 #
-# Keeps iopix.env (or digikam-viewer.env from before the rename), the data folder and the Python environment. A git checkout is
+# Keeps config.env, the data folder and the Python environment. A git checkout is
 # pulled; an installed copy (no .git) is replaced from the GitHub tarball of the main branch.
 # The order protects the install: the Python packages the new version asks for (its pyproject.toml) are
 # installed first, and the code moves only once that succeeded, so a failed package install leaves the
@@ -19,12 +19,10 @@
 set -e
 cd "$(dirname "$0")"
 APP="$(pwd)"
-# IOPIX_*; the DIGIKAM_VIEWER_* names from before the rename still work
-REPO="${IOPIX_REPO:-${DIGIKAM_VIEWER_REPO:-avandeputte/iopix}}"
-[ "$REPO" = avandeputte/digikam-viewer ] && REPO=avandeputte/iopix  # the repository was renamed
-BRANCH="${IOPIX_BRANCH:-${DIGIKAM_VIEWER_BRANCH:-main}}"
-REF="${IOPIX_REF:-${DIGIKAM_VIEWER_REF:-$BRANCH}}"
-RESULT="${IOPIX_RESULT:-${DIGIKAM_VIEWER_RESULT:-}}"
+REPO="${IOPIX_REPO:-avandeputte/iopix}"
+BRANCH="${IOPIX_BRANCH:-main}"
+REF="${IOPIX_REF:-$BRANCH}"
+RESULT="${IOPIX_RESULT:-}"
 case "$REF" in -*|*..*|*/*/*) printf 'error: bad ref: %s\n' "$REF" >&2; exit 1;; esac  # a commit id or a branch, never an option or a path
 FORCE=0; CHECK=0
 for a in "$@"; do case "$a" in --force) FORCE=1;; --check) CHECK=1;; *) printf 'error: unknown option %s (--check, --force)\n' "$a" >&2; exit 2;; esac; done
@@ -83,7 +81,7 @@ else
   # stage everything first; the swap comes after the packages are in. Settings, data and the
   # environment live outside these items and are never touched
   STAGE="$APP/.update-stage"; rm -rf "${STAGE:?}"; mkdir -p "$STAGE"
-  for item in app static pyproject.toml README.md setup.sh run.sh update.sh installer/iopix.service; do
+  for item in app static proxmox installer pyproject.toml README.md LICENSE setup.sh run.sh update.sh Dockerfile docker-compose.yml config.env.example; do
     [ -e "$SRC/$item" ] && { mkdir -p "$STAGE/$(dirname "$item")"; cp -R "$SRC/$item" "$STAGE/$item"; }
   done
   [ -d "$STAGE/app" ] && [ -d "$STAGE/static" ] && [ -f "$STAGE/pyproject.toml" ] || { rm -rf "${STAGE:?}"; die "the downloaded tarball looks incomplete"; }
@@ -133,7 +131,7 @@ if [ -d .git ]; then
 else
   MOVED=""
   swap_back() { for item in $MOVED; do rm -rf "${APP:?}/${item:?}"; [ -e "$APP/$item.old" ] && mv "$APP/$item.old" "$APP/$item"; done; rm -rf "${STAGE:?}"; }
-  for item in app static pyproject.toml README.md setup.sh run.sh update.sh; do
+  for item in app static proxmox installer pyproject.toml README.md LICENSE setup.sh run.sh update.sh Dockerfile docker-compose.yml config.env.example; do
     [ -e "$STAGE/$item" ] || continue
     rm -rf "${APP:?}/${item:?}.old"
     if [ -e "$APP/$item" ]; then mv "$APP/$item" "$APP/$item.old" || { swap_back; die "could not set $item aside; the previous files are back in place"; }; fi
@@ -141,7 +139,7 @@ else
     mv "$STAGE/$item" "$APP/$item" || { swap_back; die "could not install $item; the previous files are back in place"; }
   done
   for item in $MOVED; do rm -rf "${APP:?}/${item:?}.old"; done
-  [ -f "$STAGE/installer/iopix.service" ] && cp "$STAGE/installer/iopix.service" "$APP/iopix.service"
+  [ -f "$APP/installer/iopix.service" ] && cp "$APP/installer/iopix.service" "$APP/iopix.service"
   rm -rf "${STAGE:?}"
   echo "$R" > COMMIT
 fi
@@ -163,14 +161,14 @@ fi
 say "Restarting the service"
 # as the service user (the Linux installer's layout) the restart goes through sudo: the installer allows exactly this command
 restart_unit() { if [ "$(id -u)" != 0 ] && command -v sudo >/dev/null 2>&1; then sudo -n systemctl restart "$1"; else systemctl restart "$1"; fi; }
-SVC=""; for s in iopix digikam-viewer; do command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$s" 2>/dev/null && { SVC="$s"; break; }; done
+SVC=""; for s in iopix; do command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$s" 2>/dev/null && { SVC="$s"; break; }; done
 if [ -n "$SVC" ]; then
   if restart_unit "$SVC"; then echo "  systemd: restarted $SVC"; else
     echo "  could not restart $SVC from here; run: sudo systemctl restart $SVC"
     note "ok: updated to v$NEWV; the service could not be restarted from here: sudo systemctl restart $SVC"
   fi
 elif [ "$(uname -s)" = Darwin ]; then
-  L="$(launchctl list 2>/dev/null | grep -o 'com\.[a-z.]*\(iopix\|digikam-viewer\)' | head -1)"
+  L="$(launchctl list 2>/dev/null | grep -o 'com\.[a-z.]*iopix' | head -1)"
   if [ -n "$L" ]; then launchctl kickstart -k "gui/$(id -u)/$L" && echo "  launchd: restarted $L"; else echo "  no service found; restart the viewer yourself"; fi
 else
   echo "  no service found; restart the viewer yourself"

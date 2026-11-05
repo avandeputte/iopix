@@ -35,12 +35,12 @@ services:
       PHOTOS_ROOT: /library/photos
       ADMIN_USER: admin                          # 3. the first admin account
       ADMIN_PASSWORD: change-me-please
-      VIEWER_DB_TYPE: mysql                      # iopix's own database: the iopix-db service below
-      VIEWER_DB_HOST: iopix-db
-      VIEWER_DB_PORT: "3306"
-      VIEWER_DB_DATABASE: iopix
-      VIEWER_DB_USER: iopix
-      VIEWER_DB_PASSWORD: change-me-too          # 4. same as MARIADB_PASSWORD below
+      DB_TYPE: mysql                      # iopix's own database: the iopix-db service below
+      DB_HOST: iopix-db
+      DB_PORT: "3306"
+      DB_NAME: iopix
+      DB_USER: iopix
+      DB_PASSWORD: change-me-too          # 4. same as MARIADB_PASSWORD below
       AUTO_MODELS: siglip2,yolox,geonames
       DIGIKAM_CHECK: none
     depends_on:
@@ -61,7 +61,7 @@ volumes:
   iopix-db:
 ```
 
-The `iopix-db` service is MariaDB for iopix's own data (accounts, settings, favorites, albums, the edit log, AI results); it has nothing to do with digiKam's database. To use a server you already run instead, drop the service and point the `VIEWER_DB_*` lines at it (`host.docker.internal` for a server on the Docker host). See [iopix's own database](../connect/iopix-database.md).
+The `iopix-db` service is MariaDB for iopix's own data (accounts, settings, favorites, albums, the edit log, AI results); it has nothing to do with digiKam's database. To use a server you already run instead, drop the service and point the `DB_*` lines at it (`host.docker.internal` for a server on the Docker host). See [iopix's own database](../connect/iopix-database.md).
 
 !!! note "No digiKam"
     Set `DIGIKAM_DB_TYPE: none` and remove the other `DIGIKAM_DB_*` lines. iopix then keeps the library itself, in the data volume. Remove `:ro` from the photos line so edits can be saved next to the photos. See [Using iopix without digiKam](../connect/no-digikam.md).
@@ -82,7 +82,7 @@ docker compose up -d
 Open `http://<server>:8600`. On the first start the container downloads the models named in `AUTO_MODELS` (about 1.6 GB by default: content search, object detection and places) into the data volume, one after another. The library is browsable meanwhile, and each feature switches on as its model arrives. Set `AUTO_MODELS: ""` to skip this.
 
 !!! note "Upgrading from a version before 1.113"
-    If the data volume still holds `viewer.db`, add the `iopix-db` service and the `VIEWER_DB_*` lines, then open iopix: its set-up page offers to import the old file into the new database.
+    If the data volume still holds `viewer.db`, add the `iopix-db` service and the `DB_*` lines, then open iopix: its set-up page offers to import the old file into the new database.
 
 ## Allowing edits
 

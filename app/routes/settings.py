@@ -63,19 +63,19 @@ def api_settings_get(request: Request):
 
 @router.get("/api/settings/proxy", dependencies=[access.admin])
 def api_proxy_get():
-    """Sign-in at a reverse proxy (Cloudflare Access...): its settings, which of them iopix.env fixes, and the
+    """Sign-in at a reverse proxy (Cloudflare Access...): its settings, which of them config.env fixes, and the
     Cloudflare Access team and application last seen in requests. Admins only."""
     return proxyauth.status()
 
 
 @router.post("/api/settings/proxy", dependencies=[access.admin])
 async def api_proxy_set(request: Request):
-    """Body: any of proxyauth.KEYS (an empty string clears one). Settings in iopix.env cannot be changed here."""
+    """Body: any of proxyauth.KEYS (an empty string clears one). Settings in config.env cannot be changed here."""
     body = await json_body(request)
     changes = {k: str(v or "").strip() for k, v in body.items() if k in proxyauth.KEYS}
     fixed = [k for k in changes if config.proxy_env(k) is not None]
     if fixed:
-        raise HTTPException(400, f"Set in iopix.env, change it there: {', '.join(fixed)}")
+        raise HTTPException(400, f"Set in config.env, change it there: {', '.join(fixed)}")
     m = changes.get("AUTH_PROXY")
     if m is not None and m.lower() not in ("", "off", *proxyauth.PRESETS):
         raise HTTPException(400, "Unknown proxy")
@@ -343,7 +343,7 @@ def api_maps(request: Request):
 @router.get("/api/iocontacts/settings", dependencies=[access.admin])
 def api_iocontacts_get():
     """Settings › ioContacts: the address and account (secrets only as whether they are set), which of them
-    iopix.env fixes, and how the last fetch went."""
+    config.env fixes, and how the last fetch went."""
     return iocontacts.public_settings()
 
 

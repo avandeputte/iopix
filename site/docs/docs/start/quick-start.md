@@ -42,9 +42,9 @@ Pick the way that matches your machine. If you are not sure, Docker is the easie
     Download `iopix-install.sh` from the [latest release](https://github.com/avandeputte/iopix/releases/latest), then as root:
 
     ```sh
-    sh iopix-install.sh --photos /srv/photos --digikam-db /srv/digikamDB --iopix-db local
+    sh iopix-install.sh --photos /srv/photos --digikam-sqlite /srv/digikamDB --db local
     # or, without digiKam:
-    sh iopix-install.sh --photos /srv/photos --no-digikam --iopix-db local
+    sh iopix-install.sh --photos /srv/photos --no-digikam --db local
     ```
 
     Full guide: [Linux installer](../install/linux.md).

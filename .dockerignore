@@ -15,3 +15,4 @@ tests
 *.egg-info
 *.log
 .DS_Store
+config.env

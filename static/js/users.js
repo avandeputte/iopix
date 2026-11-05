@@ -148,7 +148,7 @@ function proxySection() {
   const draw = async () => {
     let d; try { d = await api('/api/settings/proxy'); } catch (e) { fill(box, errorBox(e)); return; }
     const v = d.values, env = new Set(d.fromEnv || []);
-    const lock = (k, el) => { if (env.has(k)) { el.disabled = true; el.title = 'Set in iopix.env'; } el.onkeydown = (e) => e.stopPropagation(); return el; };
+    const lock = (k, el) => { if (env.has(k)) { el.disabled = true; el.title = 'Set in config.env'; } el.onkeydown = (e) => e.stopPropagation(); return el; };
     const inp = (k, ph, w = 320) => lock(k, h('input', { class: 'einput', value: v[k] || '', placeholder: ph, style: `margin:0;width:${w}px;max-width:100%` }));
     const modeSel = lock('AUTH_PROXY', h('select', null, [['off', 'Off'], ['cloudflare', 'Cloudflare Access'], ['haproxy', 'HAProxy'], ['nginx', 'nginx'], ['caddy', 'Caddy'], ['traefik', 'Traefik'], ['header', 'Another proxy']]
       .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY || 'off').toLowerCase() === k }, l))));
@@ -173,7 +173,7 @@ function proxySection() {
     fill(box, h('h2', null, 'Sign-in at a proxy'),
       h('div', { class: 'muted', style: 'max-width:820px' }, 'Someone signed in at your reverse proxy (Cloudflare Access on a tunnel, or Authelia, Authentik or oauth2-proxy behind HAProxy, nginx, Caddy or Traefik) is signed in here too, matched to an account by email, then name. Everyone else still uses the sign-in here; requests from outside through Cloudflare can only use accounts with a password.'),
       h('div', { style: 'margin:8px 0' }, h('b', null, state)),
-      env.size ? h('div', { class: 'muted', style: 'font-size:13px' }, `Set in iopix.env (change them there): ${[...env].join(', ')}`) : null,
+      env.size ? h('div', { class: 'muted', style: 'font-size:13px' }, `Set in config.env (change them there): ${[...env].join(', ')}`) : null,
       row('Proxy', 'Which reverse proxy signs people in.', modeSel), cf, seen, other, rest,
       h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn on', onclick: async () => {
         const body = {};

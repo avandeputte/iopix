@@ -24,6 +24,6 @@ In **Settings › ioContacts**, an admin enters:
 | User and app password | an ioContacts account that can read the address books, and an app password made for it in ioContacts under **Settings › Apps and devices** |
 | Cloudflare client ID and secret | only when ioContacts sits behind Cloudflare Access: a service token (Zero Trust › Access › Service auth) allowed in the ioContacts application's policy |
 
-**Save and test** reads the contacts at once and says how many people it found birthdays for. Clear the address (or **Turn off**) to stop. The same settings can come from `IOCONTACTS_URL`, `IOCONTACTS_USER`, `IOCONTACTS_PASSWORD`, `IOCONTACTS_CF_CLIENT_ID` and `IOCONTACTS_CF_CLIENT_SECRET` in `iopix.env`, which win over the page.
+**Save and test** reads the contacts at once and says how many people it found birthdays for. Clear the address (or **Turn off**) to stop. The same settings can come from `IOCONTACTS_URL`, `IOCONTACTS_USER`, `IOCONTACTS_PASSWORD`, `IOCONTACTS_CF_CLIENT_ID` and `IOCONTACTS_CF_CLIENT_SECRET` in `config.env`, which win over the page.
 
 iopix's server reads ioContacts, never your browser, and does so again every ten minutes. When ioContacts can't be reached, pages carry on with the birthdays from the last good read (none just after iopix restarts), and the settings tab shows what went wrong.

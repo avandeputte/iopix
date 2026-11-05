@@ -312,7 +312,7 @@ def scan(photos: list, rescan_all: bool = True):
 
 def summary() -> dict:
     empty = {"scanned": 0, "mismatched": 0, "by_field": {}, "no_sidecar": 0, "scanned_at": None}
-    if not vdb.exists():
+    if not vdb.ready():
         return empty
     con = vdb.connect(timeout=READ_TIMEOUT)
     try:

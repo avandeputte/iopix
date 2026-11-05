@@ -48,7 +48,6 @@ def special_tags(con) -> dict:
     return out
 
 
-_special = special_tags  # old private name, still used by older tests; remove after v1.120
 
 
 def _is_person(con, tid: int) -> bool:
