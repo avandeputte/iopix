@@ -11,7 +11,7 @@ def _albums(client):
 
 def _clear_albums():
     con = state.connect()
-    con.execute("DELETE FROM viewer_album_photos"); con.execute("DELETE FROM viewer_albums")
+    con.execute("DELETE FROM pix_album_photos"); con.execute("DELETE FROM pix_albums")
     con.commit(); con.close()
 
 

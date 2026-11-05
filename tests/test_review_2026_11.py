@@ -90,23 +90,23 @@ def test_a_nested_reader_does_not_roll_back_the_writer_above_it():
     from app.data import state
     state.init()
     with vdb.writer() as con:
-        con.execute("INSERT OR REPLACE INTO app_settings VALUES (?, ?)", ("zz_nested_probe", "kept"))
+        con.execute("INSERT OR REPLACE INTO pix_settings (name, value) VALUES (?, ?)", ("zz_nested_probe", "kept"))
         with vdb.reader() as inner:
             assert inner.raw is not con.raw, "the nested reader has its own connection"
             inner.execute("SELECT 1").fetchone()
         own = vdb.connect()  # what a writer opened inside a library transaction (Sync off) gets: a connection of its own
         try:
             assert isinstance(own.raw, vdb._Own) and own.raw is not con.raw
-            own.execute("INSERT OR REPLACE INTO app_settings VALUES (?, ?)", ("zz_nested_probe2", "own"))
+            own.execute("INSERT OR REPLACE INTO pix_settings (name, value) VALUES (?, ?)", ("zz_nested_probe2", "own"))
             own.commit()
         finally:
             own.close()
-        assert con.execute("SELECT value FROM app_settings WHERE `key` = ?", ("zz_nested_probe",)).fetchone()[0] == "kept", "the outer write survived the nested blocks"
+        assert con.execute("SELECT value FROM pix_settings WHERE name = ?", ("zz_nested_probe",)).fetchone()[0] == "kept", "the outer write survived the nested blocks"
     with vdb.reader() as con:
         assert isinstance(con.raw, vdb._Kept), "after the blocks, the pooled connection is leased again"
-        assert con.execute("SELECT value FROM app_settings WHERE `key` = ?", ("zz_nested_probe",)).fetchone()[0] == "kept"
+        assert con.execute("SELECT value FROM pix_settings WHERE name = ?", ("zz_nested_probe",)).fetchone()[0] == "kept"
     with vdb.writer() as con:
-        con.execute("DELETE FROM app_settings WHERE `key` LIKE 'zz_nested_probe%'")
+        con.execute("DELETE FROM pix_settings WHERE name LIKE 'zz_nested_probe%'")
 
 
 def test_new_tags_merge_parents_first_whatever_their_ids():

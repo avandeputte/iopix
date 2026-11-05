@@ -13,7 +13,7 @@ Three measures, each on its own so a missing model only leaves its own column em
 
 Everything runs on the CPU with onnxruntime. The models are downloaded from Maintenance (models.py,
 keys "aesthetic" and "eyes"); analysis.py runs this as the "looks" job and stores the numbers in the
-viewer database (ai_looks). Nothing is written to photos, sidecars or digiKam: the index turns the
+viewer database (pix_ai_looks). Nothing is written to photos, sidecars or digiKam: the index turns the
 numbers into filters, a sort and the best frame of each burst.
 """
 import collections

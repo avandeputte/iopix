@@ -67,8 +67,8 @@ def accounts() -> list:
 
 def linked_persons() -> set:
     """The person tags listed accounts are linked to: their face badges are the account picker's avatars."""
-    rows = authdb.q("SELECT d.v FROM user_data d JOIN users u ON u.id = d.user_id WHERE d.app = %s AND d.k = 'person' AND u.listed = 1", (APP,))
-    return {int(v) for v in (authdb.json_load(r["v"]) for r in rows) if v}
+    rows = authdb.q("SELECT d.value FROM ios_user_data d JOIN ios_users u ON u.id = d.user_id WHERE d.app = %s AND d.name = 'person' AND u.listed = 1", (APP,))
+    return {int(v) for v in (authdb.json_load(r["value"]) for r in rows) if v}
 
 
 def require_login() -> bool:

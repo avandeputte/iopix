@@ -79,7 +79,7 @@ def test_database_row_tests_a_connection(page, server, lib):
 def test_container_mode_writes_without_a_confirmation(page, server):
     """DIGIKAM_CHECK=ask/none (the browser tests' server runs that way): the viewer cannot see digiKam,
     so a database write goes through without asking whether digiKam is closed."""
-    con = ui_db(); con.cursor().execute("REPLACE INTO app_settings (`key`, value) VALUES ('digikam_closed_until', '0')"); con.close()
+    con = ui_db(); con.cursor().execute("REPLACE INTO pix_settings (name, value) VALUES ('digikam_closed_until', '0')"); con.close()
     assert _get(server, "/api/status")["digikamCheck"] == "none"
     dialogs = []
     def on_dialog(d):
@@ -1060,7 +1060,7 @@ def _dismissed(kind):
     con = ui_db()
     try:
         with con.cursor() as cur:
-            cur.execute("SELECT photo_id, tag_id FROM suggestion_dismissed WHERE kind = %s", (kind,))
+            cur.execute("SELECT photo_id, tag_id FROM pix_dismissed_suggestions WHERE kind = %s", (kind,))
             return {(r[0], r[1]) for r in cur.fetchall()}
     finally:
         con.close()

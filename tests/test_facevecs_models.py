@@ -67,7 +67,7 @@ def test_vectors_separate_people(client, lib, monkeypatch, model):
 def test_switching_the_model_forgets_the_old_vectors(client, lib, monkeypatch):
     con = vdb.connect()
     try:
-        con.execute("INSERT OR REPLACE INTO ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (1, 0, 0, 10, 10, ?)", (np.zeros(128, np.float32).tobytes(),))
+        con.execute("INSERT OR REPLACE INTO pix_ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (1, 0, 0, 10, 10, ?)", (np.zeros(128, np.float32).tobytes(),))
         con.commit()
     finally:
         con.close()
@@ -76,7 +76,7 @@ def test_switching_the_model_forgets_the_old_vectors(client, lib, monkeypatch):
     facevecs._same_model()
     con = vdb.connect()
     try:
-        assert con.execute("SELECT count(*) FROM ai_face_embeddings").fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM pix_ai_face_embeddings").fetchone()[0] == 0
     finally:
         con.close()
     assert state.get_setting("face_vectors_built") == "arcface"

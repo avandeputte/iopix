@@ -217,7 +217,7 @@ def test_near_duplicate_pairs_in_blocks_match_the_full_comparison(monkeypatch):
         assert neardups.progress["error"] is None
         con = vdb.connect()
         try:
-            pairs = {(a, b): s for a, b, s in con.execute("SELECT a, b, score FROM ai_similar_photos")}
+            pairs = {(a, b): s for a, b, s in con.execute("SELECT photo_id, similar_photo_id, score FROM pix_ai_similar_photos")}
         finally:
             con.close()
         threshold = neardups.LEVELS["loose"]
@@ -238,7 +238,7 @@ def test_near_duplicate_pairs_in_blocks_match_the_full_comparison(monkeypatch):
     finally:
         con = vdb.connect()
         try:
-            con.execute("DELETE FROM ai_similar_photos")
+            con.execute("DELETE FROM pix_ai_similar_photos")
             con.commit()
         finally:
             con.close()
@@ -284,14 +284,14 @@ def test_face_vectors_are_dropped_when_the_model_revision_changes(monkeypatch):
     def count():
         con = vdb.connect()
         try:
-            return con.execute("SELECT count(*) FROM ai_face_embeddings").fetchone()[0]
+            return con.execute("SELECT count(*) FROM pix_ai_face_embeddings").fetchone()[0]
         finally:
             con.close()
 
     def seed():
         con = vdb.connect()
         try:
-            con.execute("INSERT OR REPLACE INTO ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (1, 0, 0, 10, 10, ?)", (np.zeros(128, np.float32).tobytes(),))
+            con.execute("INSERT OR REPLACE INTO pix_ai_face_embeddings (photo_id, x, y, w, h, vec) VALUES (1, 0, 0, 10, 10, ?)", (np.zeros(128, np.float32).tobytes(),))
             con.commit()
         finally:
             con.close()
@@ -309,7 +309,7 @@ def test_face_vectors_are_dropped_when_the_model_revision_changes(monkeypatch):
     finally:
         con = vdb.connect()
         try:
-            con.execute("DELETE FROM ai_face_embeddings")
+            con.execute("DELETE FROM pix_ai_face_embeddings")
             con.commit()
         finally:
             con.close()

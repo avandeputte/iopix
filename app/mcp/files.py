@@ -74,7 +74,7 @@ def _public_settings() -> dict:
     """Every stored setting except secrets (passwords, keys, session vouches)."""
     con = appstate.connect()
     try:
-        rows = con.execute("SELECT key, value FROM app_settings").fetchall()
+        rows = con.execute("SELECT name, value FROM pix_settings").fetchall()
     finally:
         con.close()
     hide = ("password", "key", "secret", "token")

@@ -266,7 +266,7 @@ def _baddate() -> list:
 def accepted_ids(check: str) -> dict:
     """{photo: signature} the owner accepted for this check."""
     with vdb.reader() as con:
-        return dict(con.execute("SELECT photo_id, signature FROM quality_accepted WHERE check_name = ?", (check,)).fetchall())
+        return dict(con.execute("SELECT photo_id, signature FROM pix_quality_accepted WHERE check_name = ?", (check,)).fetchall())
 
 
 def ignore_unnamed(photos: list) -> dict:
@@ -298,10 +298,10 @@ def accept(photos: list, check: str = "unnamed", on: bool = True) -> int:
             missing = want - set(sig)
             if missing:  # already accepted, or not a finding (any more): keep what is there
                 want -= missing
-            con.executemany("INSERT OR REPLACE INTO quality_accepted (photo_id, check_name, signature, user_name, ts) VALUES (?,?,?,?,?)",
+            con.executemany("INSERT OR REPLACE INTO pix_quality_accepted (photo_id, check_name, signature, user_name, created_at) VALUES (?,?,?,?,?)",
                             [(p, check, sig[p], history.actor(), int(time.time())) for p in want])
         else:
-            con.executemany("DELETE FROM quality_accepted WHERE photo_id = ? AND check_name = ?", [(p, check) for p in want])
+            con.executemany("DELETE FROM pix_quality_accepted WHERE photo_id = ? AND check_name = ?", [(p, check) for p in want])
     return len(want)
 
 
@@ -387,8 +387,8 @@ def fix_files(after=None) -> int:
     if progress["running"]:
         raise dbsync.SyncError("The clean-up is still running; the image files follow when it has finished.")
     with vdb.reader() as con:
-        cleaned = [r[0] for r in con.execute("SELECT DISTINCT photo_id FROM photo_history WHERE action = 'face' AND summary LIKE 'Duplicate face regions removed:%'")]
-        done = {r[0] for r in con.execute("SELECT DISTINCT photo_id FROM photo_history WHERE summary = ?", (FILE_DONE,))}
+        cleaned = [r[0] for r in con.execute("SELECT DISTINCT photo_id FROM pix_photo_history WHERE action = 'face' AND summary LIKE 'Duplicate face regions removed:%'")]
+        done = {r[0] for r in con.execute("SELECT DISTINCT photo_id FROM pix_photo_history WHERE summary = ?", (FILE_DONE,))}
     todo = [(pid, p) for pid, p in dbsync.photo_paths([p for p in cleaned if p not in done]) if edits.can_write_file(p)]
     if not todo:
         return 0

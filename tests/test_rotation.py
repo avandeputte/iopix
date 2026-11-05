@@ -46,9 +46,9 @@ def test_turns_and_ops():
 
 def test_findings_and_dismiss(lib):
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_rotation")
-        con.execute("DELETE FROM quality_accepted WHERE check_name = 'rotation'")
-        con.executemany("INSERT INTO ai_rotation (photo_id, turn, score, stamp) VALUES (?,?,?,?)", [(1, 1, 0.99, "s1"), (2, 2, 0.95, "s2")])
+        con.execute("DELETE FROM pix_ai_rotation")
+        con.execute("DELETE FROM pix_quality_accepted WHERE check_name = 'rotation'")
+        con.executemany("INSERT INTO pix_ai_rotation (photo_id, turn, score, stamp) VALUES (?,?,?,?)", [(1, 1, 0.99, "s1"), (2, 2, 0.95, "s2")])
     try:
         out = rotation.findings()
         assert [(i["id"], i["op"]) for i in out["items"]] == [(1, "left"), (2, "180")] and out["dismissed"] == 0
@@ -57,14 +57,14 @@ def test_findings_and_dismiss(lib):
         out = rotation.findings()
         assert [i["id"] for i in out["items"]] == [1] and out["dismissed"] == 1
         with vdb.writer() as con:  # the file changed: the finding is back
-            con.execute("UPDATE ai_rotation SET stamp = 's2b' WHERE photo_id = 2")
+            con.execute("UPDATE pix_ai_rotation SET stamp = 's2b' WHERE photo_id = 2")
         assert [i["id"] for i in rotation.findings()["items"]] == [1, 2]
         assert rotation.dismiss([2], on=False) == 1
         assert [i["id"] for i in rotation.findings([2])["items"]] == [2]
     finally:
         with vdb.writer() as con:
-            con.execute("DELETE FROM ai_rotation")
-            con.execute("DELETE FROM quality_accepted WHERE check_name = 'rotation'")
+            con.execute("DELETE FROM pix_ai_rotation")
+            con.execute("DELETE FROM pix_quality_accepted WHERE check_name = 'rotation'")
 
 
 def test_endpoint(client, lib):

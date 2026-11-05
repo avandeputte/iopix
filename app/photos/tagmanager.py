@@ -42,7 +42,7 @@ def init():
 def pending_jobs() -> int:
     con = appstate.connect()
     try:
-        return con.execute("SELECT count(*) FROM tag_rewrite_queue").fetchone()[0]
+        return con.execute("SELECT count(*) FROM pix_tag_rewrite_queue").fetchone()[0]
     except Exception:
         return 0
     finally:
@@ -339,7 +339,7 @@ def apply(op: dict, db_path: Path = None, require_digikam_closed: bool = True, q
         _after_merge(summary["id"], summary["into"], c.merged_images, db_path)
     if queue and jobs:
         appstate.write(lambda c: c.executemany(
-            "INSERT INTO tag_rewrite_queue (op, path, image_id) VALUES (?,?,?)", jobs))
+            "INSERT INTO pix_tag_rewrite_queue (op, path, photo_id) VALUES (?,?,?)", jobs))
         start_worker()
     elif not queue:
         summary["jobs"] = jobs
@@ -377,12 +377,12 @@ def _after_merge(src: int, dst: int, images: list, db_path):
     """What the viewer keeps about the merged tag follows it: People groups and face references; the sidecars'
     face regions are rewritten from the database (the tag lists through the queue, like any tag change)."""
     def go(c):
-        for (gid,) in c.execute("SELECT group_id FROM people_group_members WHERE tag_id = ?", (src,)).fetchall():
-            if c.execute("SELECT 1 FROM people_group_members WHERE group_id = ? AND tag_id = ?", (gid, dst)).fetchone():
-                c.execute("DELETE FROM people_group_members WHERE group_id = ? AND tag_id = ?", (gid, src))
+        for (gid,) in c.execute("SELECT group_id FROM pix_people_group_members WHERE tag_id = ?", (src,)).fetchall():
+            if c.execute("SELECT 1 FROM pix_people_group_members WHERE group_id = ? AND tag_id = ?", (gid, dst)).fetchone():
+                c.execute("DELETE FROM pix_people_group_members WHERE group_id = ? AND tag_id = ?", (gid, src))
             else:
-                c.execute("UPDATE people_group_members SET tag_id = ? WHERE group_id = ? AND tag_id = ?", (dst, gid, src))
-        c.execute("UPDATE ai_person_references SET tag_id = ? WHERE tag_id = ?", (dst, src))
+                c.execute("UPDATE pix_people_group_members SET tag_id = ? WHERE group_id = ? AND tag_id = ?", (dst, gid, src))
+        c.execute("UPDATE pix_ai_person_references SET tag_id = ? WHERE tag_id = ?", (dst, src))
     appstate.write(go)
     if images:
         from app.faces import facemgr  # lazy: faces.facemgr -> photos.tagmanager would be an import cycle
@@ -420,10 +420,10 @@ def start_worker():
             while True:
                 con = appstate.connect()
                 try:
-                    first = con.execute("SELECT op FROM tag_rewrite_queue ORDER BY id LIMIT 1").fetchone()
+                    first = con.execute("SELECT op FROM pix_tag_rewrite_queue ORDER BY id LIMIT 1").fetchone()
                     if not first:
                         break
-                    rows = con.execute("SELECT id, path, image_id FROM tag_rewrite_queue WHERE op = ? ORDER BY id LIMIT 200",
+                    rows = con.execute("SELECT id, path, photo_id FROM pix_tag_rewrite_queue WHERE op = ? ORDER BY id LIMIT 200",
                                        tuple(first)).fetchall()
                 finally:
                     con.close()
@@ -432,7 +432,7 @@ def start_worker():
                 except Exception as e:  # leave the rows queued; they are retried on the next start
                     progress.fail(e)
                     break
-                appstate.write(lambda c: c.executemany("DELETE FROM tag_rewrite_queue WHERE id = ?", [(r[0],) for r in rows]))
+                appstate.write(lambda c: c.executemany("DELETE FROM pix_tag_rewrite_queue WHERE id = ?", [(r[0],) for r in rows]))
                 progress.step(len(rows))
             if OPS_BACKUP_DIR.exists():
                 for old in sorted(p for p in OPS_BACKUP_DIR.iterdir() if p.is_dir())[:-KEEP_OPS]:

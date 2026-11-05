@@ -36,7 +36,7 @@ def _album_rights(user) -> dict:
 
 
 def _can_change_album(a: dict, user) -> bool:
-    if a["is_shared"]:
+    if a["shared"]:
         return bool(users.can_write(user))
     return bool(user) and a["owner_id"] == user.get("id")
 
@@ -46,9 +46,9 @@ def api_state(request: Request):
     user = request.state.user
     s = appstate.summary(user)
     for a in s["albums"]:
-        a["shared"] = bool(a.pop("is_shared"))
+        a["shared"] = bool(a["shared"])
         a["mine"] = bool(user) and a["owner_id"] == user.get("id")
-        a["canEdit"] = _can_change_album({"is_shared": a["shared"], "owner_id": a.pop("owner_id")}, user)
+        a["canEdit"] = _can_change_album({"shared": a["shared"], "owner_id": a.pop("owner_id")}, user)
     return jresp(request, {"rev": appstate.rev, **s, **_album_rights(user)})
 
 
@@ -88,11 +88,11 @@ async def api_ualbum_update(album_id: int, request: Request):
     body = await json_body(request)
     user = request.state.user
     a = appstate.album(album_id)
-    if not a or not (a["is_shared"] or (user and a["owner_id"] == user.get("id"))):
+    if not a or not (a["shared"] or (user and a["owner_id"] == user.get("id"))):
         raise HTTPException(404, "No such album")
     if not _can_change_album(a, user):
         raise HTTPException(403, "Only editors and admins can change a shared album")
-    if "shared" in body and bool(body["shared"]) != a["is_shared"]:
+    if "shared" in body and bool(body["shared"]) != a["shared"]:
         if bool(body["shared"]) and not users.can_write(user):
             raise HTTPException(403, "Only editors and admins can share an album")
         if not bool(body["shared"]) and not (user and user.get("id") is not None):

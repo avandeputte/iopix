@@ -120,7 +120,7 @@ def test_folder_hints_bound_the_clues(tmp_path, monkeypatch, lib):
     monkeypatch.setattr(dateclues, "_look_years", lambda con, ids, win=None: {})
     from app.data import vdb
     with vdb.writer() as con:
-        con.execute("DELETE FROM date_hints")
+        con.execute("DELETE FROM pix_date_hints")
     try:
         before = {i["id"]: i for i in dateclues.suggestions()["items"]}
         assert 2001 <= before[1]["year"] <= 2003
@@ -136,7 +136,7 @@ def test_folder_hints_bound_the_clues(tmp_path, monkeypatch, lib):
         assert dateclues.hints() == {}
     finally:
         with vdb.writer() as con:
-            con.execute("DELETE FROM date_hints")
+            con.execute("DELETE FROM pix_date_hints")
 
 
 def test_datehints_endpoints(client, lib):
@@ -158,7 +158,7 @@ def test_an_age_estimate_far_outside_the_hint_is_dropped_not_capped(tmp_path, mo
         "people": []})
     from app.data import vdb
     with vdb.writer() as con:
-        con.execute("DELETE FROM date_hints")
+        con.execute("DELETE FROM pix_date_hints")
     try:
         dateclues.set_hint(1, None, 1990)
         out = {i["id"]: i for i in dateclues.suggestions()["items"]}
@@ -167,4 +167,4 @@ def test_an_age_estimate_far_outside_the_hint_is_dropped_not_capped(tmp_path, mo
         assert two["year"] == 1990 and two["clues"][0]["kind"] == "ages" and two["clues"][0]["sd"] > 3
     finally:
         with vdb.writer() as con:
-            con.execute("DELETE FROM date_hints")
+            con.execute("DELETE FROM pix_date_hints")

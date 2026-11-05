@@ -11,7 +11,7 @@ a year with an uncertainty; the photo's suggestion is their weighted mean, with 
 The model only sees faces, so a suggestion is never more than "about 1987 (1985-1989)": it is shown,
 with the people and ages it came from, and written nowhere. Using it is the date editor's year-only
 date (the user's click, through /api/edit). Estimated ages are kept in the viewer database
-(ai_face_ages, keyed by face rectangle like the face vectors); birth years in person_births.
+(pix_ai_face_ages, keyed by face rectangle like the face vectors); birth years in pix_person_births.
 """
 import logging
 import math
@@ -127,7 +127,7 @@ def _wanted(con) -> list:
 
 def _have() -> set:
     with vdb.reader() as con:
-        return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM ai_face_ages")}
+        return {tuple(r) for r in con.execute("SELECT photo_id, x, y, w, h FROM pix_ai_face_ages")}
 
 
 def coverage() -> tuple:
@@ -184,7 +184,7 @@ def _job(gen: int):
                 return
             db = vdb.connect()
             try:
-                db.executemany("INSERT OR REPLACE INTO ai_face_ages (photo_id, x, y, w, h, age) VALUES (?,?,?,?,?,?)",
+                db.executemany("INSERT OR REPLACE INTO pix_ai_face_ages (photo_id, x, y, w, h, age) VALUES (?,?,?,?,?,?)",
                                [(pid, f[4], f[5], f[6], f[7], a) for f, a in zip(faces, ages)])
                 db.commit()
             finally:
@@ -205,7 +205,7 @@ def start():
 def reset():
     progress.cancel()
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_face_ages")
+        con.execute("DELETE FROM pix_ai_face_ages")
 
 
 # --------------------------------------------------------------------------
@@ -214,7 +214,7 @@ def reset():
 
 def births() -> dict:
     with vdb.reader() as con:
-        return {int(r[0]): int(r[1]) for r in con.execute("SELECT tag_id, birth_year FROM person_births")}
+        return {int(r[0]): int(r[1]) for r in con.execute("SELECT tag_id, birth_year FROM pix_person_births")}
 
 
 def known_births() -> dict:
@@ -225,9 +225,9 @@ def known_births() -> dict:
 def set_birth(tag: int, year):
     with vdb.writer() as con:
         if year is None:
-            con.execute("DELETE FROM person_births WHERE tag_id = ?", (tag,))
+            con.execute("DELETE FROM pix_person_births WHERE tag_id = ?", (tag,))
         else:
-            con.execute("INSERT OR REPLACE INTO person_births (tag_id, birth_year, ts) VALUES (?,?,?)", (tag, int(year), int(time.time())))
+            con.execute("INSERT OR REPLACE INTO pix_person_births (tag_id, birth_year, updated_at) VALUES (?,?,?)", (tag, int(year), int(time.time())))
 
 
 # --------------------------------------------------------------------------
@@ -240,10 +240,10 @@ _ages_cache = {"at": 0.0, "n": -1, "value": None}
 def _ages() -> dict:
     """Every stored age; kept for two minutes (the info panel asks per photo, and the table only grows while the job runs)."""
     with vdb.reader() as con:
-        n = con.execute("SELECT count(*) FROM ai_face_ages").fetchone()[0]
+        n = con.execute("SELECT count(*) FROM pix_ai_face_ages").fetchone()[0]
         if _ages_cache["value"] is not None and _ages_cache["n"] == n and time.time() - _ages_cache["at"] < 120:
             return _ages_cache["value"]
-        value = {(r[0], r[1], r[2], r[3], r[4]): r[5] for r in con.execute("SELECT photo_id, x, y, w, h, age FROM ai_face_ages WHERE age IS NOT NULL")}
+        value = {(r[0], r[1], r[2], r[3], r[4]): r[5] for r in con.execute("SELECT photo_id, x, y, w, h, age FROM pix_ai_face_ages WHERE age IS NOT NULL")}
     _ages_cache.update(at=time.time(), n=n, value=value)
     return value
 

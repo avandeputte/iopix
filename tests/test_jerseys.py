@@ -62,10 +62,10 @@ def test_roster_and_suggestions(tmp_path, monkeypatch, lib):
     p = _index(tmp_path)
     monkeypatch.setattr(index, "open_index", lambda path=None: sqlite3.connect(f"file:{p}?mode=ro", uri=True))
     with vdb.writer() as con:
-        con.execute("DELETE FROM ai_jerseys")
-        con.executemany("INSERT INTO ai_jerseys VALUES (?,?,?,?,?,?,?,?,?,?)", [(pid, 100, 50, 200, 600, "10", 0.95, 200, 180, 150) for pid in (1, 2, 3, 4, 5, 6, 7, 8)])
-        con.execute("INSERT INTO ai_jerseys VALUES (9, 100, 50, 200, 600, '10', 0.95, 20, 180, 150)")  # the other team's red 10, in Sam's folder
-        con.execute("DELETE FROM suggestion_dismissed")
+        con.execute("DELETE FROM pix_ai_jerseys")
+        con.executemany("INSERT INTO pix_ai_jerseys VALUES (?,?,?,?,?,?,?,?,?,?)", [(pid, 100, 50, 200, 600, "10", 0.95, 200, 180, 150) for pid in (1, 2, 3, 4, 5, 6, 7, 8)])
+        con.execute("INSERT INTO pix_ai_jerseys VALUES (9, 100, 50, 200, 600, '10', 0.95, 20, 180, 150)")  # the other team's red 10, in Sam's folder
+        con.execute("DELETE FROM pix_dismissed_suggestions")
     try:
         out = jerseys.suggestions()
         items = {i["id"]: i for i in out["items"]}
@@ -84,7 +84,7 @@ def test_roster_and_suggestions(tmp_path, monkeypatch, lib):
         assert jerseys.results()[4] == "10"
     finally:
         with vdb.writer() as con:
-            con.execute("DELETE FROM ai_jerseys")
+            con.execute("DELETE FROM pix_ai_jerseys")
 
 
 def test_endpoint(client, lib):

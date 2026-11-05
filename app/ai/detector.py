@@ -115,19 +115,19 @@ class Detector:
 
 
 def person_boxes(ids: list, min_box: float, min_height: float) -> dict:
-    """{photo id: [(x, y, w, h)]}: the people detected in these photos (ai_objects), largest first, as fractions of the
+    """{photo id: [(x, y, w, h)]}: the people detected in these photos (pix_ai_objects), largest first, as fractions of the
     upright frame; boxes smaller than `min_box` of the frame or lower than `min_height` of its height are left out
     (each job that works on a person box, a shirt number or the clothes, has its own idea of too small)."""
     out = {}
     with vdb.reader() as con:
-        for r in in_chunks(con, "SELECT photo_id, x, y, w, h FROM ai_objects WHERE cls = 'person' AND photo_id IN ({ids}) ORDER BY w * h DESC", map(int, ids)):
+        for r in in_chunks(con, "SELECT photo_id, x, y, w, h FROM pix_ai_objects WHERE cls = 'person' AND photo_id IN ({ids}) ORDER BY w * h DESC", map(int, ids)):
                 if r[3] * r[4] >= min_box and r[4] >= min_height:
                     out.setdefault(r[0], []).append((r[1], r[2], r[3], r[4]))
     return out
 
 
 def thousandths(v: float) -> int:
-    """A box coordinate (a fraction of the frame) as the integer the per-person tables key on (ai_jerseys, ai_person_looks)."""
+    """A box coordinate (a fraction of the frame) as the integer the per-person tables key on (pix_ai_jerseys, pix_ai_person_looks)."""
     return int(round(v * 1000))
 
 

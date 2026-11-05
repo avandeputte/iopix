@@ -2,7 +2,7 @@
 
 Every module that keeps viewer data (state, users, edits, tagmanager, analysis, consistency, the library
 copy) gets its connection here. The code is written in the SQLite dialect it grew up in (? placeholders,
-INSERT OR REPLACE / OR IGNORE, COLLATE NOCASE, the `key` column); the wrapper translates it for MySQL and
+INSERT OR REPLACE / OR IGNORE, COLLATE NOCASE); the wrapper translates it for MySQL and
 hands back rows that answer to both an index and a column name. Keeping the translation rather than
 rewriting a thousand statements is deliberate: the digiKam side (dkdb.py) still speaks both dialects, and
 the statements stay readable.
@@ -28,6 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 
+from iosuite_shared import schema
+
 from app import config
 from app.digikam import library as _library
 from app.digikam.dkdb import Conn, Cursor, norm_plain
@@ -39,7 +41,6 @@ KEYS = ("type", "host", "port", "database", "user", "password")
 _cfg = None
 _lock = threading.Lock()
 error = None  # why the configured database cannot be used right now (None when it answers)
-_KEY_COL = re.compile(r"(?<![\w`.])key(?![\w`(])")  # the settings column, a reserved word on MySQL
 
 try:
     import pymysql
@@ -50,88 +51,89 @@ except ImportError:  # pragma: no cover
 
 # ---- schema: one definition per table, the MySQL spelling; columns in copy order
 TABLES = {
-    "app_settings": (["key", "value"],
-                 "CREATE TABLE IF NOT EXISTS app_settings (`key` VARCHAR(191) PRIMARY KEY, value MEDIUMTEXT)"),
-    "favorite_photos": (["photo_id", "hash", "added"],
-                  "CREATE TABLE IF NOT EXISTS favorite_photos (photo_id BIGINT PRIMARY KEY, hash VARCHAR(64), added BIGINT)"),
-    # is_shared 1: everyone sees it, editors and admins change it; 0: only owner_id (a user_accounts id) sees and changes it
-    "viewer_albums": (["id", "name", "created", "owner_id", "is_shared"],
-                "CREATE TABLE IF NOT EXISTS viewer_albums (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, created BIGINT, owner_id BIGINT NULL, is_shared INT NOT NULL DEFAULT 1)"),
-    "viewer_album_photos": (["album_id", "photo_id", "hash", "added"],
-                     "CREATE TABLE IF NOT EXISTS viewer_album_photos (album_id INT, photo_id BIGINT, hash VARCHAR(64), added BIGINT, PRIMARY KEY (album_id, photo_id))"),
-    "saved_searches": (["id", "name", "query", "created"],
-                 "CREATE TABLE IF NOT EXISTS saved_searches (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, query TEXT NOT NULL, created BIGINT)"),
-    "pending_edits": (["photo_id", "data", "ts"],
-              "CREATE TABLE IF NOT EXISTS pending_edits (photo_id BIGINT PRIMARY KEY, data MEDIUMTEXT, ts BIGINT)"),
-    "tag_rewrite_queue": (["id", "op", "path", "image_id"],
-                "CREATE TABLE IF NOT EXISTS tag_rewrite_queue (id INT AUTO_INCREMENT PRIMARY KEY, op VARCHAR(64), path TEXT, image_id BIGINT)"),
-    # ---- AI results: one row per photo and job in ai_scans says which version of the file (stamp) each job
+    "pix_settings": (["name", "value", "updated_at"],
+                     "CREATE TABLE IF NOT EXISTS pix_settings (name VARCHAR(191) PRIMARY KEY, value MEDIUMTEXT, "
+                     "updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3))"),
+    "pix_favorite_photos": (["photo_id", "hash", "added_at"],
+                  "CREATE TABLE IF NOT EXISTS pix_favorite_photos (photo_id BIGINT PRIMARY KEY, hash VARCHAR(64), added_at BIGINT)"),
+    # shared 1: everyone sees it, editors and admins change it; 0: only owner_id (an account id in the Shared ioSuite database) sees and changes it
+    "pix_albums": (["id", "name", "created_at", "owner_id", "shared"],
+                "CREATE TABLE IF NOT EXISTS pix_albums (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, created_at BIGINT, owner_id BIGINT NULL, shared INT NOT NULL DEFAULT 1)"),
+    "pix_album_photos": (["album_id", "photo_id", "hash", "added_at"],
+                     "CREATE TABLE IF NOT EXISTS pix_album_photos (album_id INT, photo_id BIGINT, hash VARCHAR(64), added_at BIGINT, PRIMARY KEY (album_id, photo_id))"),
+    "pix_saved_searches": (["id", "name", "query", "created_at"],
+                 "CREATE TABLE IF NOT EXISTS pix_saved_searches (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, query TEXT NOT NULL, created_at BIGINT)"),
+    "pix_pending_edits": (["photo_id", "data", "updated_at"],
+              "CREATE TABLE IF NOT EXISTS pix_pending_edits (photo_id BIGINT PRIMARY KEY, data MEDIUMTEXT, updated_at BIGINT)"),
+    "pix_tag_rewrite_queue": (["id", "op", "path", "photo_id"],
+                "CREATE TABLE IF NOT EXISTS pix_tag_rewrite_queue (id INT AUTO_INCREMENT PRIMARY KEY, op VARCHAR(64), path TEXT, photo_id BIGINT)"),
+    # ---- AI results: one row per photo and job in pix_ai_scans says which version of the file (stamp) each job
     # last looked at (detail: a small JSON note, e.g. face detection's counts); the result tables hold data only
-    "ai_scans": (["photo_id", "job", "stamp", "detail"],
-                 "CREATE TABLE IF NOT EXISTS ai_scans (photo_id BIGINT, job VARCHAR(32), stamp VARCHAR(191), detail TEXT, PRIMARY KEY (photo_id, job), INDEX ai_scans_job (job))"),
-    "ai_quality": (["photo_id", "sharp", "bright", "clip_lo", "clip_hi"],
-                   "CREATE TABLE IF NOT EXISTS ai_quality (photo_id BIGINT PRIMARY KEY, sharp DOUBLE, bright DOUBLE, clip_lo DOUBLE, clip_hi DOUBLE)"),
-    "ai_text": (["photo_id", "text"],
-                "CREATE TABLE IF NOT EXISTS ai_text (photo_id BIGINT PRIMARY KEY, text MEDIUMTEXT)"),
-    "ai_face_count": (["photo_id", "nfaces", "faceq"],
-                      "CREATE TABLE IF NOT EXISTS ai_face_count (photo_id BIGINT PRIMARY KEY, nfaces INT, faceq DOUBLE)"),
-    "ai_objects": (["photo_id", "cls", "score", "x", "y", "w", "h"],
-                "CREATE TABLE IF NOT EXISTS ai_objects (photo_id BIGINT, cls VARCHAR(64), score DOUBLE, x DOUBLE, y DOUBLE, w DOUBLE, h DOUBLE, INDEX ai_objects_photo (photo_id))"),
-    "ai_descriptions": (["photo_id", "text"],
-                        "CREATE TABLE IF NOT EXISTS ai_descriptions (photo_id BIGINT PRIMARY KEY, text TEXT)"),
-    "ai_looks": (["photo_id", "aesthetic", "focus", "eyes_checked", "eyes_closed"],
-                 "CREATE TABLE IF NOT EXISTS ai_looks (photo_id BIGINT PRIMARY KEY, aesthetic DOUBLE, focus DOUBLE, eyes_checked INT, eyes_closed INT)"),
-    "ai_face_ages": (["photo_id", "x", "y", "w", "h", "age"],
-                     "CREATE TABLE IF NOT EXISTS ai_face_ages (photo_id BIGINT, x INT, y INT, w INT, h INT, age DOUBLE, PRIMARY KEY (photo_id, x, y, w, h))"),
-    "person_births": (["tag_id", "birth_year", "ts"],
-                      "CREATE TABLE IF NOT EXISTS person_births (tag_id BIGINT PRIMARY KEY, birth_year INT, ts BIGINT)"),
-    "ai_face_embeddings": (["photo_id", "x", "y", "w", "h", "vec"],
-                  "CREATE TABLE IF NOT EXISTS ai_face_embeddings (photo_id BIGINT, x INT, y INT, w INT, h INT, vec BLOB, PRIMARY KEY (photo_id, x, y, w, h))"),
-    "ai_person_references": (["tag_id", "photo_id", "x", "y", "w", "h", "vec"],
-                    "CREATE TABLE IF NOT EXISTS ai_person_references (tag_id BIGINT, photo_id BIGINT, x INT, y INT, w INT, h INT, vec BLOB, PRIMARY KEY (photo_id, x, y, w, h))"),
+    "pix_ai_scans": (["photo_id", "job", "stamp", "detail"],
+                 "CREATE TABLE IF NOT EXISTS pix_ai_scans (photo_id BIGINT, job VARCHAR(32), stamp VARCHAR(191), detail TEXT, PRIMARY KEY (photo_id, job), INDEX idx_pix_ai_scans_job (job))"),
+    "pix_ai_quality": (["photo_id", "sharp", "bright", "clip_lo", "clip_hi"],
+                   "CREATE TABLE IF NOT EXISTS pix_ai_quality (photo_id BIGINT PRIMARY KEY, sharp DOUBLE, bright DOUBLE, clip_lo DOUBLE, clip_hi DOUBLE)"),
+    "pix_ai_text": (["photo_id", "text"],
+                "CREATE TABLE IF NOT EXISTS pix_ai_text (photo_id BIGINT PRIMARY KEY, text MEDIUMTEXT)"),
+    "pix_ai_face_count": (["photo_id", "nfaces", "faceq"],
+                      "CREATE TABLE IF NOT EXISTS pix_ai_face_count (photo_id BIGINT PRIMARY KEY, nfaces INT, faceq DOUBLE)"),
+    "pix_ai_objects": (["photo_id", "cls", "score", "x", "y", "w", "h"],
+                "CREATE TABLE IF NOT EXISTS pix_ai_objects (photo_id BIGINT, cls VARCHAR(64), score DOUBLE, x DOUBLE, y DOUBLE, w DOUBLE, h DOUBLE, INDEX idx_pix_ai_objects_photo (photo_id))"),
+    "pix_ai_descriptions": (["photo_id", "text"],
+                        "CREATE TABLE IF NOT EXISTS pix_ai_descriptions (photo_id BIGINT PRIMARY KEY, text TEXT)"),
+    "pix_ai_looks": (["photo_id", "aesthetic", "focus", "eyes_checked", "eyes_closed"],
+                 "CREATE TABLE IF NOT EXISTS pix_ai_looks (photo_id BIGINT PRIMARY KEY, aesthetic DOUBLE, focus DOUBLE, eyes_checked INT, eyes_closed INT)"),
+    "pix_ai_face_ages": (["photo_id", "x", "y", "w", "h", "age"],
+                     "CREATE TABLE IF NOT EXISTS pix_ai_face_ages (photo_id BIGINT, x INT, y INT, w INT, h INT, age DOUBLE, PRIMARY KEY (photo_id, x, y, w, h))"),
+    "pix_person_births": (["tag_id", "birth_year", "updated_at"],
+                      "CREATE TABLE IF NOT EXISTS pix_person_births (tag_id BIGINT PRIMARY KEY, birth_year INT, updated_at BIGINT)"),
+    "pix_ai_face_embeddings": (["photo_id", "x", "y", "w", "h", "vec"],
+                  "CREATE TABLE IF NOT EXISTS pix_ai_face_embeddings (photo_id BIGINT, x INT, y INT, w INT, h INT, vec BLOB, PRIMARY KEY (photo_id, x, y, w, h))"),
+    "pix_ai_person_references": (["tag_id", "photo_id", "x", "y", "w", "h", "vec"],
+                    "CREATE TABLE IF NOT EXISTS pix_ai_person_references (tag_id BIGINT, photo_id BIGINT, x INT, y INT, w INT, h INT, vec BLOB, PRIMARY KEY (photo_id, x, y, w, h))"),
     # undo_values, not "undo": UNDO is a reserved word on MariaDB and MySQL
     # file_copy: the backed-up image file (data/file-backups, the original from before the viewer first wrote into it)
-    "photo_history": (["id", "photo_id", "ts", "user_name", "action", "summary", "details", "undo_values", "sidecar_copy", "path", "file_copy"],
-                      "CREATE TABLE IF NOT EXISTS photo_history (id BIGINT AUTO_INCREMENT PRIMARY KEY, photo_id BIGINT, ts BIGINT, user_name VARCHAR(191), action VARCHAR(32), summary TEXT, details MEDIUMTEXT, undo_values MEDIUMTEXT, sidecar_copy TEXT, path TEXT, file_copy TEXT, INDEX photo_history_photo (photo_id))"),
-    "image_data_checksums": (["photo_id", "hash", "algorithm", "verified"],
-                             "CREATE TABLE IF NOT EXISTS image_data_checksums (photo_id BIGINT PRIMARY KEY, hash VARCHAR(128), algorithm VARCHAR(16), verified BIGINT)"),
-    "ai_jerseys": (["photo_id", "px", "py", "pw", "ph", "number", "score", "hue", "sat", "val"],
-                   "CREATE TABLE IF NOT EXISTS ai_jerseys (photo_id BIGINT, px INT, py INT, pw INT, ph INT, number VARCHAR(8), score DOUBLE, hue INT, sat INT, val INT, PRIMARY KEY (photo_id, px, py, pw, ph))"),
-    "ai_person_looks": (["photo_id", "px", "py", "pw", "ph", "vec"],
-                        "CREATE TABLE IF NOT EXISTS ai_person_looks (photo_id BIGINT, px INT, py INT, pw INT, ph INT, vec BLOB, PRIMARY KEY (photo_id, px, py, pw, ph))"),
-    "ai_rotation": (["photo_id", "turn", "score", "stamp"],
-                    "CREATE TABLE IF NOT EXISTS ai_rotation (photo_id BIGINT PRIMARY KEY, turn INT, score DOUBLE, stamp VARCHAR(191))"),
-    "video_info": (["photo_id", "stamp", "cover_t", "chapters", "transcript", "segments", "lang", "speech_model", "ts"],
-                   "CREATE TABLE IF NOT EXISTS video_info (photo_id BIGINT PRIMARY KEY, stamp VARCHAR(191), cover_t DOUBLE, chapters TEXT, transcript MEDIUMTEXT, segments MEDIUMTEXT, lang VARCHAR(16), speech_model VARCHAR(64), ts BIGINT)"),
-    "suggestion_dismissed": (["kind", "photo_id", "tag_id", "user_name", "ts"],
-                             "CREATE TABLE IF NOT EXISTS suggestion_dismissed (kind VARCHAR(16), photo_id BIGINT, tag_id BIGINT, user_name VARCHAR(191), ts BIGINT, PRIMARY KEY (kind, photo_id, tag_id))"),
-    "date_hints": (["album_id", "not_before", "not_after", "user_name", "ts"],
-                   "CREATE TABLE IF NOT EXISTS date_hints (album_id BIGINT PRIMARY KEY, not_before INT, not_after INT, user_name VARCHAR(191), ts BIGINT)"),
-    "face_sidecar_queue": (["image_id", "ts"],
-                           "CREATE TABLE IF NOT EXISTS face_sidecar_queue (image_id BIGINT PRIMARY KEY, ts BIGINT)"),
-    "ai_similar_photos": (["a", "b", "score"],
-                  "CREATE TABLE IF NOT EXISTS ai_similar_photos (a BIGINT, b BIGINT, score DOUBLE, INDEX ai_similar_photos_a (a))"),
+    "pix_photo_history": (["id", "photo_id", "created_at", "user_name", "action", "summary", "details", "undo_values", "sidecar_copy", "path", "file_copy"],
+                      "CREATE TABLE IF NOT EXISTS pix_photo_history (id BIGINT AUTO_INCREMENT PRIMARY KEY, photo_id BIGINT, created_at BIGINT, user_name VARCHAR(191), action VARCHAR(32), summary TEXT, details MEDIUMTEXT, undo_values MEDIUMTEXT, sidecar_copy TEXT, path TEXT, file_copy TEXT, INDEX idx_pix_photo_history_photo (photo_id))"),
+    "pix_image_data_checksums": (["photo_id", "hash", "algorithm", "verified_at"],
+                             "CREATE TABLE IF NOT EXISTS pix_image_data_checksums (photo_id BIGINT PRIMARY KEY, hash VARCHAR(128), algorithm VARCHAR(16), verified_at BIGINT)"),
+    "pix_ai_jerseys": (["photo_id", "px", "py", "pw", "ph", "number", "score", "hue", "sat", "val"],
+                   "CREATE TABLE IF NOT EXISTS pix_ai_jerseys (photo_id BIGINT, px INT, py INT, pw INT, ph INT, number VARCHAR(8), score DOUBLE, hue INT, sat INT, val INT, PRIMARY KEY (photo_id, px, py, pw, ph))"),
+    "pix_ai_person_looks": (["photo_id", "px", "py", "pw", "ph", "vec"],
+                        "CREATE TABLE IF NOT EXISTS pix_ai_person_looks (photo_id BIGINT, px INT, py INT, pw INT, ph INT, vec BLOB, PRIMARY KEY (photo_id, px, py, pw, ph))"),
+    "pix_ai_rotation": (["photo_id", "turn", "score", "stamp"],
+                    "CREATE TABLE IF NOT EXISTS pix_ai_rotation (photo_id BIGINT PRIMARY KEY, turn INT, score DOUBLE, stamp VARCHAR(191))"),
+    "pix_video_info": (["photo_id", "stamp", "cover_t", "chapters", "transcript", "segments", "lang", "speech_model", "updated_at"],
+                   "CREATE TABLE IF NOT EXISTS pix_video_info (photo_id BIGINT PRIMARY KEY, stamp VARCHAR(191), cover_t DOUBLE, chapters TEXT, transcript MEDIUMTEXT, segments MEDIUMTEXT, lang VARCHAR(16), speech_model VARCHAR(64), updated_at BIGINT)"),
+    "pix_dismissed_suggestions": (["kind", "photo_id", "tag_id", "user_name", "created_at"],
+                             "CREATE TABLE IF NOT EXISTS pix_dismissed_suggestions (kind VARCHAR(16), photo_id BIGINT, tag_id BIGINT, user_name VARCHAR(191), created_at BIGINT, PRIMARY KEY (kind, photo_id, tag_id))"),
+    "pix_date_hints": (["album_id", "not_before", "not_after", "user_name", "updated_at"],
+                   "CREATE TABLE IF NOT EXISTS pix_date_hints (album_id BIGINT PRIMARY KEY, not_before INT, not_after INT, user_name VARCHAR(191), updated_at BIGINT)"),
+    "pix_face_sidecar_queue": (["photo_id", "created_at"],
+                           "CREATE TABLE IF NOT EXISTS pix_face_sidecar_queue (photo_id BIGINT PRIMARY KEY, created_at BIGINT)"),
+    "pix_ai_similar_photos": (["photo_id", "similar_photo_id", "score"],
+                  "CREATE TABLE IF NOT EXISTS pix_ai_similar_photos (photo_id BIGINT, similar_photo_id BIGINT, score DOUBLE, INDEX idx_pix_ai_similar_photos_photo (photo_id))"),
     # ---- the library itself (library.py): digiKam's columns under names that say what they hold
-    "library_info": (["key", "value"],
-                     "CREATE TABLE IF NOT EXISTS library_info (`key` VARCHAR(191) PRIMARY KEY, value MEDIUMTEXT)"),
+    "pix_library_info": (["name", "value"],
+                     "CREATE TABLE IF NOT EXISTS pix_library_info (name VARCHAR(191) PRIMARY KEY, value MEDIUMTEXT)"),
     **_library.tables(),
     # the viewer's own identity for a photo: digiKam's id is the working key everywhere, this row remembers
     # which file it stood for (digiKam's uniqueHash + size), so viewer data can follow a photo if digiKam renumbers
-    "photo_identity": (["vid", "dk_id", "hash", "size", "path", "name", "first_seen", "last_seen"],
-                  "CREATE TABLE IF NOT EXISTS photo_identity (vid INT AUTO_INCREMENT PRIMARY KEY, dk_id BIGINT, hash VARCHAR(64), size BIGINT, path TEXT, name VARCHAR(255), first_seen BIGINT, last_seen BIGINT, "
-                  "INDEX photo_identity_dk (dk_id), INDEX photo_identity_hash (hash, size))"),
+    "pix_photo_identity": (["id", "dk_id", "hash", "size", "path", "name", "first_seen_at", "last_seen_at"],
+                  "CREATE TABLE IF NOT EXISTS pix_photo_identity (id INT AUTO_INCREMENT PRIMARY KEY, dk_id BIGINT, hash VARCHAR(64), size BIGINT, path TEXT, name VARCHAR(255), first_seen_at BIGINT, last_seen_at BIGINT, "
+                  "INDEX idx_pix_photo_identity_dk (dk_id), INDEX idx_pix_photo_identity_hash (hash, size))"),
     # a Face quality finding the owner accepted as it is (check_name, not "check": a reserved word on MariaDB);
     # signature: what the photo's faces were then, so a photo whose faces change is looked at again
-    "quality_accepted": (["photo_id", "check_name", "signature", "user_name", "ts"],
-                         "CREATE TABLE IF NOT EXISTS quality_accepted (photo_id BIGINT, check_name VARCHAR(32), signature VARCHAR(191), user_name VARCHAR(191), ts BIGINT, PRIMARY KEY (photo_id, check_name))"),
+    "pix_quality_accepted": (["photo_id", "check_name", "signature", "user_name", "created_at"],
+                         "CREATE TABLE IF NOT EXISTS pix_quality_accepted (photo_id BIGINT, check_name VARCHAR(32), signature VARCHAR(191), user_name VARCHAR(191), created_at BIGINT, PRIMARY KEY (photo_id, check_name))"),
     # the People page's own groups (Family, Friends, Classmates...): digiKam's person tags (tag ids), in the order
     # chosen; a person may be in several groups. Nothing here is written to digiKam.
-    "people_groups": (["id", "name", "position", "created"],
-                      "CREATE TABLE IF NOT EXISTS people_groups (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(191) NOT NULL, position INT NOT NULL DEFAULT 0, created BIGINT)"),
-    "people_group_members": (["group_id", "tag_id", "position"],
-                             "CREATE TABLE IF NOT EXISTS people_group_members (group_id INT, tag_id BIGINT, position INT NOT NULL DEFAULT 0, PRIMARY KEY (group_id, tag_id))"),
-    "metadata_check": (["photo_id", "stamp", "data", "mismatch", "has_sidecar", "file_xmp", "checked"],
-                    "CREATE TABLE IF NOT EXISTS metadata_check (photo_id BIGINT PRIMARY KEY, stamp VARCHAR(191), data MEDIUMTEXT, mismatch INT, has_sidecar INT, file_xmp INT, checked BIGINT)"),
+    "pix_people_groups": (["id", "name", "position", "created_at"],
+                      "CREATE TABLE IF NOT EXISTS pix_people_groups (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(191) NOT NULL, position INT NOT NULL DEFAULT 0, created_at BIGINT)"),
+    "pix_people_group_members": (["group_id", "tag_id", "position"],
+                             "CREATE TABLE IF NOT EXISTS pix_people_group_members (group_id INT, tag_id BIGINT, position INT NOT NULL DEFAULT 0, PRIMARY KEY (group_id, tag_id))"),
+    "pix_metadata_check": (["photo_id", "stamp", "data", "mismatch", "has_sidecar", "file_xmp", "checked_at"],
+                    "CREATE TABLE IF NOT EXISTS pix_metadata_check (photo_id BIGINT PRIMARY KEY, stamp VARCHAR(191), data MEDIUMTEXT, mismatch INT, has_sidecar INT, file_xmp INT, checked_at BIGINT)"),
 }
 
 
@@ -238,8 +240,7 @@ class VConn(Conn):
     def _sql(self, sql: str) -> str:
         if not self.mysql:
             return sql
-        sql = super()._sql(sql).replace(" COLLATE NOCASE", "")
-        return _KEY_COL.sub("`key`", sql)
+        return super()._sql(sql).replace(" COLLATE NOCASE", "")
 
     def _params(self, params):  # text stamps stay text: no datetime coercion here
         return tuple(params)
@@ -439,31 +440,51 @@ def add_missing_columns(con: VConn) -> list:
     return added
 
 
-# the table names before v1.18, renamed in place (rows kept) the first time a newer viewer opens the database
-OLD_NAMES = {
-    "settings": "app_settings", "favorites": "favorite_photos",
-    "ualbums": "viewer_albums", "ualbum_items": "viewer_album_photos", "searches": "saved_searches",
-    "edits": "pending_edits", "tagjobs": "tag_rewrite_queue",
-    "quality": "ai_quality", "vision": "ai_text_and_faces", "objects": "ai_objects", "objects_done": "ai_objects_scanned",
-    "captions": "ai_descriptions", "face_vecs": "ai_face_embeddings", "face_protos": "ai_person_references",
-    "near_dups": "ai_similar_photos", "consistency": "metadata_check",
-    "lib_meta": "library_info", "lib_roots": "album_roots", "lib_albums": "folders",
-    "lib_tags": "tags", "lib_tagprops": "tag_properties", "lib_imagetags": "photo_tags",
-    "lib_regions": "face_regions", "lib_comments": "comments", "lib_copyright": "copyright",
-    "lib_props": "photo_properties", "lib_images": "photos", "photo_ids": "photo_identity",
-    # v1.18 called the library tables digikam_copy_*; they hold the library itself, digiKam or not
-    "digikam_copy_info": "library_info",
-    "digikam_copy_album_roots": "album_roots",
-    "digikam_copy_folders": "folders",
-    "digikam_copy_photos": "photos",
-    "digikam_copy_tags": "tags",
-    "digikam_copy_tag_properties": "tag_properties",
-    "digikam_copy_photo_tags": "photo_tags",
-    "digikam_copy_face_regions": "face_regions",
-    "digikam_copy_comments": "comments",
-    "digikam_copy_copyright": "copyright",
-    "digikam_copy_photo_properties": "photo_properties",
+# ---- the suite's naming convention (iosuite-shared 0.8.0): every table pix_<name>, *_at timestamps, name/value settings,
+# idx_/uq_ index names. A database from before is renamed once at start, every row kept (instant metadata changes).
+PREFIX = "pix"
+SCHEMA_VERSION = 1  # 1: the suite naming convention
+_SPECIAL = {"app_settings": "pix_settings", "viewer_albums": "pix_albums", "viewer_album_photos": "pix_album_photos",
+            "suggestion_dismissed": "pix_dismissed_suggestions"}
+RENAME_TABLES = {
+    **{old: _SPECIAL.get(old, "pix_" + old) for old in (
+        "app_settings", "favorite_photos", "viewer_albums", "viewer_album_photos", "saved_searches", "pending_edits", "tag_rewrite_queue",
+        "ai_scans", "ai_quality", "ai_text", "ai_face_count", "ai_objects", "ai_descriptions", "ai_looks", "ai_face_ages", "person_births",
+        "ai_face_embeddings", "ai_person_references", "photo_history", "image_data_checksums", "ai_jerseys", "ai_person_looks", "ai_rotation",
+        "video_info", "suggestion_dismissed", "date_hints", "face_sidecar_queue", "ai_similar_photos", "library_info", "photo_identity",
+        "quality_accepted", "people_groups", "people_group_members", "metadata_check")},
+    **{name: _library.TABLE[name] for name in _library.SPEC},  # the library tables: photos -> pix_photos, ...
 }
+RENAME_COLUMNS = {  # keyed by the new table name
+    "pix_settings": {"key": "name"}, "pix_library_info": {"key": "name"},
+    "pix_favorite_photos": {"added": "added_at"}, "pix_album_photos": {"added": "added_at"},
+    "pix_albums": {"created": "created_at", "is_shared": "shared"},
+    "pix_saved_searches": {"created": "created_at"}, "pix_people_groups": {"created": "created_at"},
+    "pix_pending_edits": {"ts": "updated_at"}, "pix_person_births": {"ts": "updated_at"}, "pix_video_info": {"ts": "updated_at"},
+    "pix_date_hints": {"ts": "updated_at"},
+    "pix_photo_history": {"ts": "created_at"}, "pix_dismissed_suggestions": {"ts": "created_at"}, "pix_quality_accepted": {"ts": "created_at"},
+    "pix_face_sidecar_queue": {"image_id": "photo_id", "ts": "created_at"}, "pix_tag_rewrite_queue": {"image_id": "photo_id"},
+    "pix_ai_similar_photos": {"a": "photo_id", "b": "similar_photo_id"},
+    "pix_photo_identity": {"vid": "id", "first_seen": "first_seen_at", "last_seen": "last_seen_at"},
+    "pix_image_data_checksums": {"verified": "verified_at"}, "pix_metadata_check": {"checked": "checked_at"},
+}
+RENAME_INDEXES = {
+    "pix_ai_scans": {"ai_scans_job": "idx_pix_ai_scans_job"}, "pix_ai_objects": {"ai_objects_photo": "idx_pix_ai_objects_photo"},
+    "pix_photo_history": {"photo_history_photo": "idx_pix_photo_history_photo"},
+    "pix_ai_similar_photos": {"ai_similar_photos_a": "idx_pix_ai_similar_photos_photo"},
+    "pix_photo_identity": {"photo_identity_dk": "idx_pix_photo_identity_dk", "photo_identity_hash": "idx_pix_photo_identity_hash"},
+    **_library.RENAME_INDEXES,
+}
+
+
+def _rename_to_convention(con: VConn) -> list:
+    """The tables, columns and indexes of a database from before the convention, renamed in place (rows kept)."""
+    cur = con.raw.cursor()
+    done = schema.rename(cur, RENAME_TABLES, RENAME_COLUMNS)
+    done += schema.rename(cur, None, None, RENAME_INDEXES)
+    if done:
+        log.info("viewer database: renamed to the suite naming convention: %s", ", ".join(done))
+    return done
 
 
 def table_names(con: VConn) -> set:
@@ -471,28 +492,6 @@ def table_names(con: VConn) -> set:
     if con.mysql:
         return {r[0] for r in con.execute("SHOW TABLES")}
     return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-
-
-def _drop_old_library_shape(con: VConn):
-    """v1.15-v1.20 kept a reduced copy of the library (photos with columns of its own). The library tables
-    now have digiKam's columns: drop the old ones; the next read of digiKam fills the new ones."""
-    have = table_names(con)
-    if "photos" in have and "file_size" in columns(con, "photos"):
-        for t in ("album_roots", "folders", "photos", "tags", "tag_properties", "photo_tags", "face_regions", "comments", "copyright", "photo_properties"):
-            con.execute(f"DROP TABLE IF EXISTS {t}")
-        if "library_info" in have:
-            con.execute("DELETE FROM library_info")
-        log.info("viewer database: the library tables take digiKam's full columns now; they are filled again at the next read of digiKam")
-
-
-def rename_old_tables(con: VConn):
-    """Give tables from before v1.18 their self-explanatory names, keeping every row."""
-    have = table_names(con)
-    todo = [(a, b) for a, b in OLD_NAMES.items() if a in have and b not in have]
-    for a, b in todo:
-        con.execute(f"RENAME TABLE `{a}` TO `{b}`")
-    if todo:
-        log.info("viewer database: renamed %d tables to their new names", len(todo))
 
 
 def dump_tool() -> str:
@@ -521,7 +520,12 @@ def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
     if not tool:
         raise RuntimeError("no mysqldump/mariadb-dump on this machine (install mariadb-client)")
     c = cfg or settings()
-    cmd = [tool, *_dump_options(tool), "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", "--skip-extended-insert", c["database"]]
+    con = connect(cfg=c)
+    try:  # the viewer's own tables only: the database may hold the other ioSuite apps' tables too
+        tables = sorted(t for t in table_names(con) if t.startswith(PREFIX + "_"))
+    finally:
+        con.close()
+    cmd = [tool, *_dump_options(tool), "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", "--skip-extended-insert", c["database"], *tables]
     with open(dst, "wb") as f:
         res = subprocess.run(cmd, stdout=subprocess.PIPE if skip_token else f, stderr=subprocess.PIPE, timeout=1800,
                              env={**os.environ, "MYSQL_PWD": c["password"] or ""})  # the password never on the command line
@@ -537,21 +541,17 @@ def ensure_schema(con: VConn = None):
     own = con is None
     con = con or connect()
     try:
-        rename_old_tables(con)
-        _drop_old_library_shape(con)
+        _rename_to_convention(con)
         for name, (cols, ddl) in TABLES.items():
             con.execute(ddl)
-        if "file_copy" not in columns(con, "photo_history"):  # v1.32: the backed-up image file of each change
-            con.execute("ALTER TABLE photo_history ADD COLUMN file_copy TEXT")
-        have = columns(con, "viewer_albums")  # v1.27: shared and private albums; albums from before are shared
-        if "owner_id" not in have:
-            con.execute("ALTER TABLE viewer_albums ADD COLUMN owner_id BIGINT NULL")
-        if "is_shared" not in have:
-            con.execute("ALTER TABLE viewer_albums ADD COLUMN is_shared INT NOT NULL DEFAULT 1")
-        add_missing_columns(con)  # v1.63.1: every other column added since a database was created (session_gen, and whatever comes next)
+        # every column added since a database was created: v1.27's album owner_id and shared (albums from before are
+        # shared), v1.32's file_copy, the settings' updated_at, and whatever comes next
+        add_missing_columns(con)
+        schema.ensure_version_table(con.raw.cursor(), PREFIX)
+        schema.record_version(con.raw.cursor(), PREFIX, SCHEMA_VERSION)
         # v1.43: the full comparison is kept only for photos whose copies disagree or that lack a sidecar; rows from
         # before carried it for every photo (tens of MB), and nothing reads it for the others
-        con.execute("UPDATE metadata_check SET data = NULL WHERE data IS NOT NULL AND mismatch = 0 AND has_sidecar = 1")
+        con.execute("UPDATE pix_metadata_check SET data = NULL WHERE data IS NOT NULL AND mismatch = 0 AND has_sidecar = 1")
         con.commit()
     finally:
         if own:
@@ -607,7 +607,7 @@ def test_connection(c: dict) -> dict:
         for t in TABLES:
             if t in have:
                 counts[t] = con.execute(f"SELECT count(*) FROM `{t}`").fetchone()[0]
-        return {"ok": True, "version": ver, "tables": counts, "existing": sorted({OLD_NAMES.get(t, t) for t in have} & set(TABLES))}
+        return {"ok": True, "version": ver, "tables": counts, "existing": sorted({RENAME_TABLES.get(t, t) for t in have} & set(TABLES))}
     finally:
         con.close()
 
@@ -618,7 +618,7 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
     rows behind); else existing rows are replaced by id."""
     counts = {}
     qs = (lambda t: f"`{t}`") if src.mysql else (lambda t: t)
-    rename_old_tables(dst)  # a target last written by an older viewer
+    _rename_to_convention(dst)  # a target last written by an older viewer
     dst.execute("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_AUTO_VALUE_ON_ZERO')")  # digiKam's root tag has id 0, which MySQL would otherwise replace
     for name, (cols, ddl) in TABLES.items():  # the whole schema first, then the rows
         if drop:
@@ -626,16 +626,20 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
         dst.execute(ddl)
     dst.commit()
     present = table_names(src)
+    old_name = {new: old for old, new in RENAME_TABLES.items()}
     for name, (cols, ddl) in TABLES.items():
-        have = columns(src, name) if name in present else []  # a table the source never had (hand-made schema) copies nothing
+        # a viewer.db from before v1.113 has the names from before the suite convention (app_settings, its `key` column...)
+        table = name if name in present or name not in old_name else old_name[name]
+        have = columns(src, table) if table in present else []  # a table the source never had (hand-made schema) copies nothing
         if not have:
             counts[name] = 0
             dst.commit()
             continue
-        use = [c for c in cols if c in have]
-        collist = ", ".join(("`key`" if c == "key" else c) for c in use)
-        sel = ", ".join(("`key`" if c == "key" and src.mysql else c) for c in use)
-        cur, n = src.execute(f"SELECT {sel} FROM {qs(name)}"), 0
+        was = {new: old for old, new in RENAME_COLUMNS.get(name, {}).items()} if table != name else {}
+        use = [c for c in cols if c in have or was.get(c) in have]
+        collist = ", ".join(use)
+        sel = ", ".join(c if c in have else was[c] for c in use)
+        cur, n = src.execute(f"SELECT {sel} FROM {qs(table)}"), 0
         while True:  # in slices: the face embeddings and tag rows of a large library do not all sit in memory at once
             rows = cur.fetchmany(2000)
             if not rows:

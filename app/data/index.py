@@ -3,7 +3,7 @@
 The library tables in the viewer's database carry digiKam's columns. While Sync with digiKam is on
 they are copied from digiKam's database whenever it changed (refresh_library); with sync off, or
 when digiKam's database is unreachable, they are what the viewer has, and the index is built from
-them either way, with one code path. The build also keeps photo_identity, the viewer's stable
+them either way, with one code path. The build also keeps pix_photo_identity, the viewer's stable
 identity for a photo (digiKam's uniqueHash and size), through which favorites, albums, edits and
 analysis results follow a photo if digiKam ever renumbers it.
 
@@ -260,10 +260,10 @@ def mirror_tag_paths(photo_ids: list) -> dict:
 
 
 # ---- photo_ids: the viewer's identity for a photo, and viewer data following a renumbered photo
-REKEY = [("favorite_photos", "photo_id"), ("viewer_album_photos", "photo_id"), ("pending_edits", "photo_id"), ("ai_scans", "photo_id"), ("ai_quality", "photo_id"),
-         ("ai_text", "photo_id"), ("ai_face_count", "photo_id"), ("ai_objects", "photo_id"), ("ai_descriptions", "photo_id"), ("ai_looks", "photo_id"), ("ai_face_ages", "photo_id"), ("ai_face_embeddings", "photo_id"),
-         ("ai_person_references", "photo_id"), ("metadata_check", "photo_id"), ("image_data_checksums", "photo_id"), ("photo_history", "photo_id"), ("quality_accepted", "photo_id"),
-         ("ai_similar_photos", "a"), ("ai_similar_photos", "b")]
+REKEY = [("pix_favorite_photos", "photo_id"), ("pix_album_photos", "photo_id"), ("pix_pending_edits", "photo_id"), ("pix_ai_scans", "photo_id"), ("pix_ai_quality", "photo_id"),
+         ("pix_ai_text", "photo_id"), ("pix_ai_face_count", "photo_id"), ("pix_ai_objects", "photo_id"), ("pix_ai_descriptions", "photo_id"), ("pix_ai_looks", "photo_id"), ("pix_ai_face_ages", "photo_id"), ("pix_ai_face_embeddings", "photo_id"),
+         ("pix_ai_person_references", "photo_id"), ("pix_metadata_check", "photo_id"), ("pix_image_data_checksums", "photo_id"), ("pix_photo_history", "photo_id"), ("pix_quality_accepted", "photo_id"),
+         ("pix_ai_similar_photos", "photo_id"), ("pix_ai_similar_photos", "similar_photo_id")]
 
 
 REJECT_REASONS = {"blur": "Blurry all over", "eyes": "Eyes closed", "burst": "A better frame of the same burst exists", "exposure": "Nearly black or blown out"}
@@ -306,7 +306,7 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
     with appstate.lock:
         con = appstate.connect()
         try:
-            rows = con.execute("SELECT vid, dk_id, hash, size, path, name, last_seen FROM photo_identity").fetchall()
+            rows = con.execute("SELECT id, dk_id, hash, size, path, name, last_seen_at FROM pix_photo_identity").fetchall()
             by_key, by_dk, stored = {}, {}, {}
             for vid, dk, h, sz, pth, nm, seen in rows:
                 by_key.setdefault((h, sz), []).append((vid, dk))
@@ -344,15 +344,15 @@ def sync_photo_ids(images: list, paths: dict) -> dict:
             kept = {vid for _h, _s, _n, _t, vid in rewritten}
             taken = [(vid,) for dk, (vid, h, sz) in by_dk.items() if dk in current and (h, sz) != current[dk][:2] and vid not in kept]
             if rewritten:
-                con.executemany("UPDATE photo_identity SET hash = ?, size = ?, name = ?, last_seen = ? WHERE vid = ?", rewritten)
+                con.executemany("UPDATE pix_photo_identity SET hash = ?, size = ?, name = ?, last_seen_at = ? WHERE id = ?", rewritten)
             if taken:
-                con.executemany("UPDATE photo_identity SET dk_id = NULL WHERE vid = ?", taken)
+                con.executemany("UPDATE pix_photo_identity SET dk_id = NULL WHERE id = ?", taken)
             if updates:
-                con.executemany("UPDATE photo_identity SET dk_id = ?, path = ?, name = ?, last_seen = ? WHERE vid = ?", updates)
+                con.executemany("UPDATE pix_photo_identity SET dk_id = ?, path = ?, name = ?, last_seen_at = ? WHERE id = ?", updates)
             for part in chunked(touched, 500):
-                con.execute(f"UPDATE photo_identity SET last_seen = ? WHERE vid IN ({','.join('?' * len(part))})", (now, *part))
+                con.execute(f"UPDATE pix_photo_identity SET last_seen_at = ? WHERE id IN ({','.join('?' * len(part))})", (now, *part))
             if inserts:
-                con.executemany("INSERT INTO photo_identity (dk_id, hash, size, path, name, first_seen, last_seen) VALUES (?,?,?,?,?,?,?)", inserts)
+                con.executemany("INSERT INTO pix_photo_identity (dk_id, hash, size, path, name, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?)", inserts)
             con.commit()
         except BaseException:
             con.rollback()

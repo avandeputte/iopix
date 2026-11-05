@@ -110,7 +110,7 @@ def test_image_files_with_the_duplicates_are_rewritten_too(client, lib):
     assert edits.file_backup_path(path).exists(), "the original file is kept in file-backups"
     con = vdb.connect()
     try:
-        assert con.execute("SELECT count(*) FROM photo_history WHERE photo_id = ? AND summary = ?", (pid, facequality.FILE_DONE)).fetchone()[0] == 1
+        assert con.execute("SELECT count(*) FROM pix_photo_history WHERE photo_id = ? AND summary = ?", (pid, facequality.FILE_DONE)).fetchone()[0] == 1
     finally:
         con.close()
     assert facequality.fix_files() == 0 or facequality.progress["photos"] == 0, "a second run finds nothing left to do"
@@ -176,7 +176,7 @@ def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, l
     dk.execute("DELETE FROM ImageTagProperties WHERE imageid = ?", (pid,)); dk.commit(); dk.close()
     with vdb.write_lock:
         con = vdb.connect()
-        con.executemany("INSERT INTO ai_objects (photo_id, cls, score, x, y, w, h) VALUES (?,?,?,?,?,?,?)", [(pid, "person", 0.9, 0.1, 0.1, 0.2, 0.4), (pid, "person", 0.8, 0.5, 0.1, 0.2, 0.4)])
+        con.executemany("INSERT INTO pix_ai_objects (photo_id, cls, score, x, y, w, h) VALUES (?,?,?,?,?,?,?)", [(pid, "person", 0.9, 0.1, 0.1, 0.2, 0.4), (pid, "person", 0.8, 0.5, 0.1, 0.2, 0.4)])
         con.commit(); con.close()
     index.build()
     q = client.get("/api/quality").json()["untagged"]
@@ -187,7 +187,7 @@ def test_people_without_any_face_or_tag_are_listed_and_can_be_accepted(client, l
     client.post("/api/quality/accept", json={"photos": [pid], "check": "untagged", "on": False})
     assert any(x["photo"] == pid for x in client.get("/api/quality").json()["untagged"]["items"])
     with vdb.write_lock:
-        con = vdb.connect(); con.execute("DELETE FROM ai_objects WHERE photo_id = ?", (pid,)); con.commit(); con.close()
+        con = vdb.connect(); con.execute("DELETE FROM pix_ai_objects WHERE photo_id = ?", (pid,)); con.commit(); con.close()
     dk = sqlite3.connect(lib["db"]); dk.executemany("INSERT INTO ImageTagProperties VALUES (?,?,?,?)", saved); dk.commit(); dk.close()
     index.build()
 

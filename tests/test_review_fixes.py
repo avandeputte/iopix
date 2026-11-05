@@ -68,7 +68,7 @@ def test_identical_copies_keep_their_own_identity(client):
     from app.data import index, state
     con = state.connect()
     try:
-        con.execute("DELETE FROM photo_identity WHERE dk_id IN (900101, 900102, 900103)"); con.commit()
+        con.execute("DELETE FROM pix_photo_identity WHERE dk_id IN (900101, 900102, 900103)"); con.commit()
     finally:
         con.close()
     images = [(900101, 0, "a.jpg", 1234, "samehash"), (900102, 0, "copy of a.jpg", 1234, "samehash")]
@@ -76,7 +76,7 @@ def test_identical_copies_keep_their_own_identity(client):
     assert index.sync_photo_ids(images, paths) == {}
     con = state.connect()
     try:
-        first = dict(con.execute("SELECT dk_id, vid FROM photo_identity WHERE dk_id IN (900101, 900102)").fetchall())
+        first = dict(con.execute("SELECT dk_id, id FROM pix_photo_identity WHERE dk_id IN (900101, 900102)").fetchall())
     finally:
         con.close()
     assert set(first) == {900101, 900102} and first[900101] != first[900102]
@@ -84,7 +84,7 @@ def test_identical_copies_keep_their_own_identity(client):
         assert index.sync_photo_ids(images, paths) == {}
     con = state.connect()
     try:
-        again = dict(con.execute("SELECT dk_id, vid FROM photo_identity WHERE dk_id IN (900101, 900102)").fetchall())
+        again = dict(con.execute("SELECT dk_id, id FROM pix_photo_identity WHERE dk_id IN (900101, 900102)").fetchall())
     finally:
         con.close()
     assert again == first
@@ -94,8 +94,8 @@ def test_identical_copies_keep_their_own_identity(client):
     assert index.sync_photo_ids(images2, paths2) == {900101: 900103}
     con = state.connect()
     try:
-        after = dict(con.execute("SELECT dk_id, vid FROM photo_identity WHERE dk_id IN (900102, 900103)").fetchall())
-        con.execute("DELETE FROM photo_identity WHERE dk_id IN (900101, 900102, 900103)"); con.commit()
+        after = dict(con.execute("SELECT dk_id, id FROM pix_photo_identity WHERE dk_id IN (900102, 900103)").fetchall())
+        con.execute("DELETE FROM pix_photo_identity WHERE dk_id IN (900101, 900102, 900103)"); con.commit()
     finally:
         con.close()
     assert after[900103] == first[900101] and after[900102] == first[900102]
@@ -116,11 +116,11 @@ def test_old_password_hashes_are_upgraded_at_sign_in(client, fresh):
     u = users.create("legacy-probe", "longpassword1", "viewer")
     salt = secrets.token_bytes(16)
     old = "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(hashlib.scrypt(b"longpassword1", salt=salt, n=2 ** 14, r=8, p=1, dklen=32)).decode()
-    authdb.ex("UPDATE users SET hash = %s WHERE id = %s", (old, u["id"]))
+    authdb.ex("UPDATE ios_users SET hash = %s WHERE id = %s", (old, u["id"]))
     users.invalidate()
     assert needs_rehash(old)
     login(client, "legacy-probe", "longpassword1")
-    h = authdb.one("SELECT hash FROM users WHERE id = %s", (u["id"],))["hash"]
+    h = authdb.one("SELECT hash FROM ios_users WHERE id = %s", (u["id"],))["hash"]
     assert h.startswith("scrypt2$65536$8$1$") and not needs_rehash(h)
     login(client, "legacy-probe", "longpassword1")
     client.post("/api/auth/logout", json={})

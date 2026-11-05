@@ -8,10 +8,10 @@ or too small for a face, then suggests the player: "probably Sam (number 10, as 
 
 The suggestion adds the person's tag to the photo when the user clicks it (no face region: digiKam's own
 "person in this photo without a face" tag), and is written nowhere before that. Numbers are kept in the
-viewer database (ai_jerseys, keyed by the person box) and searchable as "jersey:10".
+viewer database (pix_ai_jerseys, keyed by the person box) and searchable as "jersey:10".
 
 The job's bookkeeping (progress, the start rule, reset, coverage) is the shared ScanJob (scanjob.py); this module
-keeps the to-do query, the reading loop and the stamp rule (the file's stamp and VERSION, in ai_scans).
+keeps the to-do query, the reading loop and the stamp rule (the file's stamp and VERSION, in pix_ai_scans).
 """
 import logging
 import re
@@ -37,7 +37,7 @@ SINGLE_CONF = 0.9       # a lone digit is what a fold or a seam reads as most: i
 SINGLE_HEIGHT = 0.15    # and to be taller
 MAX_BOXES = 12
 NUMBER = re.compile(r"\d{1,2}")
-VERSION = "2"         # ai_scans.detail: 2 reads the shirt colour too; older rows are read again
+VERSION = "2"         # pix_ai_scans.detail: 2 reads the shirt colour too; older rows are read again
 HUE_APART = 40        # degrees (0-360): shirts whose hue differs by more, both colourful, are different kits
 VAL_APART = 90        # 0-255: for dull shirts (white, black, grey), the brightness difference that tells them apart
 LEARN_MIN_FOLDER = 2  # named sightings of a number in one folder before it names a player there
@@ -116,15 +116,15 @@ def read_numbers(im, boxes: list, ocr) -> list:
 
 def _todo(con, photos: list) -> list:
     """Still photos with people detected that this job has not read yet (or whose file or detection changed since)."""
-    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM ai_scans WHERE job = 'jerseys'")}
-    objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM ai_scans WHERE job = 'objects'")}
+    have = {r[0]: (r[1], r[2]) for r in con.execute("SELECT photo_id, stamp, detail FROM pix_ai_scans WHERE job = 'jerseys'")}
+    objects = {r[0]: r[1] for r in con.execute("SELECT photo_id, stamp FROM pix_ai_scans WHERE job = 'objects'")}
     return [p for p in photos if not p["video"] and p["id"] in objects and have.get(p["id"]) != (analysis.stamp(p), VERSION)]
 
 
 def _counts(con) -> tuple:
     """(photos read, photos with object detection): the numbers can only be read where the people were found."""
-    return (con.execute("SELECT count(*) FROM ai_scans WHERE job = 'jerseys'").fetchone()[0],
-            con.execute("SELECT count(*) FROM ai_scans WHERE job = 'objects'").fetchone()[0])
+    return (con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'jerseys'").fetchone()[0],
+            con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'objects'").fetchone()[0])
 
 
 def _work(gen: int, todo: list):
@@ -159,14 +159,14 @@ def _work(gen: int, todo: list):
             if progress.cancelled(gen):
                 return
             with vdb.writer() as con:
-                con.executemany("DELETE FROM ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
-                con.executemany("INSERT OR REPLACE INTO ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                con.executemany("DELETE FROM pix_ai_jerseys WHERE photo_id = ?", [(p["id"],) for p, _ in ready])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_jerseys (photo_id, px, py, pw, ph, number, score, hue, sat, val) VALUES (?,?,?,?,?,?,?,?,?,?)",
                                 [(p["id"], detector.thousandths(b[0]), detector.thousandths(b[1]), detector.thousandths(b[2]), detector.thousandths(b[3]), num, sc, *col) for p, found in ready for b, num, sc, col in found])
-                con.executemany("INSERT OR REPLACE INTO ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], analysis.stamp(p), VERSION) for p, _ in ready])
+                con.executemany("INSERT OR REPLACE INTO pix_ai_scans VALUES (?,'jerseys',?,?)", [(p["id"], analysis.stamp(p), VERSION) for p, _ in ready])
             progress.step(len(chunk))
 
 
-job = ScanJob("jerseys", _todo, _work, _counts, available, tables=("ai_jerseys",))
+job = ScanJob("jerseys", _todo, _work, _counts, available, tables=("pix_ai_jerseys",))
 progress, start, reset, coverage = job.progress, job.start, job.reset, job.coverage
 
 
@@ -175,7 +175,7 @@ def results() -> dict:
     out = defaultdict(list)
     try:
         with vdb.reader() as con:
-            for pid, num in con.execute("SELECT photo_id, number FROM ai_jerseys ORDER BY photo_id, score DESC"):
+            for pid, num in con.execute("SELECT photo_id, number FROM pix_ai_jerseys ORDER BY photo_id, score DESC"):
                 if num not in out[pid]:
                     out[pid].append(num)
     except Exception as e:
@@ -245,7 +245,7 @@ def suggestions(ids: list = None) -> dict:
     photos where a number is read on someone whose face is not named, and that number names a player in the same folder
     (else the same year) who is not yet tagged on the photo. Computed on request; nothing is written."""
     with vdb.reader() as vcon:
-        rows = [tuple(r) for r in vcon.execute("SELECT photo_id, px, py, pw, ph, number, score, hue, sat, val FROM ai_jerseys")]
+        rows = [tuple(r) for r in vcon.execute("SELECT photo_id, px, py, pw, ph, number, score, hue, sat, val FROM pix_ai_jerseys")]
     con = index.open_index()
     try:
         sightings = _all_sightings(con, rows)
@@ -300,7 +300,7 @@ def for_photo(photo_id: int) -> list:
     try:
         with vdb.reader() as con:
             return [{"number": r[4], "score": r[5], "box": {"x": r[0] / 1000, "y": r[1] / 1000, "w": r[2] / 1000, "h": r[3] / 1000}}
-                    for r in con.execute("SELECT px, py, pw, ph, number, score FROM ai_jerseys WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
+                    for r in con.execute("SELECT px, py, pw, ph, number, score FROM pix_ai_jerseys WHERE photo_id = ? ORDER BY score DESC", (photo_id,))]
     except Exception:
         return []
 
