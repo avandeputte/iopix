@@ -24,7 +24,7 @@ Every setting is an environment variable. `setup.sh` and the installers write th
 
 ## iopix's own database
 
-iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](../connect/iopix-database.md)). These variables name it; without them iopix reads `viewer-db.json` in the data folder, and without that it shows a set-up page asking for the details.
+iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](../connect/iopix-database.md)). These settings name it (the set-up page and Settings › iopix database write them into `config.env`); without them iopix shows a set-up page asking for the details.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |

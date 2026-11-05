@@ -6,7 +6,6 @@ iopix's own records (accounts, settings, favorites, albums, the edit log, AI res
 
 | Path | Contents | Safe to delete? |
 | --- | --- | --- |
-| `viewer-db.json` | how to reach iopix's database (server, database, account) | no |
 | `viewer.db.imported` | the SQLite database of a version before 1.113, kept after its one-time import; nothing reads it | yes, once you are sure the import went well |
 | `index.db` | the search index, rebuilt in seconds | yes |
 | `library-base.sqlite` | the snapshot Sync with digiKam compares against, rebuilt when needed | yes |
@@ -27,7 +26,7 @@ Sidecar and file backups are never deleted automatically. Allow disk space for t
 
 Back up the database server and the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives `viewer.sql`, a `mysqldump` of iopix's database, plus the content-search embeddings files and the restore steps.
 
-To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure `viewer-db.json` or the `DB_*` variables point at that database, and start iopix again.
+To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure the `DB_*` settings in `config.env` point at that database, and start iopix again.
 
 ## Rolling back digiKam's database
 

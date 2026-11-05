@@ -30,20 +30,19 @@ The installers can do this for you:
 
 ## Setting it up
 
-iopix reads the connection from `viewer-db.json` in the data folder, or from the environment:
+iopix reads the connection from these settings in `config.env` (or the environment, which wins):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DB_TYPE` | | `mysql` for MariaDB or MySQL |
 | `DB_HOST` | | server address |
 | `DB_PORT` | `3306` | server port |
 | `DB_NAME` | | database name |
 | `DB_USER` | | account |
 | `DB_PASSWORD` | | password |
 
-Without either, iopix starts in a **database needed** state: the web app shows only a set-up page, the same panel as **Settings › digiKam and server › iopix database**, asking for the server details. **Test connection** checks them; **Use this database** saves them to `viewer-db.json` and restarts iopix on the new database. Until then nothing else answers: API calls return 503 with `needsDatabase: true`.
+Without them, iopix starts in a **database needed** state: the web app shows only a set-up page, the same panel as **Settings › digiKam and server › iopix database**, asking for the server details. **Test connection** checks them; **Use this database** writes them into `config.env` and restarts iopix on the new database. Until then nothing else answers: API calls return 503 with `needsDatabase: true`. When the service's or container's environment sets them (a docker-compose `environment:` block), that wins over `config.env`: the panel says so, and the database is changed there.
 
-If the configured server cannot be reached at start, the same page shows the error and a **Retry** button only. Nobody can sign in without the database, so the page does not let anyone test or switch to another server then; to change the connection, edit `data/viewer-db.json` (or the `DB_*` variables) and restart. iopix waits for the database; it does not fall back to anything else.
+If the configured server cannot be reached at start, the same page shows the error and a **Retry** button only. Nobody can sign in without the database, so the page does not let anyone test or switch to another server then; to change the connection, edit the `DB_*` lines of `config.env` and restart. iopix waits for the database; it does not fall back to anything else.
 
 !!! tip "Server on the Docker host"
     From a container, `DB_HOST: host.docker.internal` reaches a server on the same machine.

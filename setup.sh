@@ -154,12 +154,11 @@ fi
 [ -z "$SQLITE" ] || [ -f "$SQLITE/digikam4.db" ] || die "digikam4.db not found in $SQLITE"
 ask DATA "Folder for the viewer's own data (index, thumbnails, models, backups)" "${DATA:-$APP/data}"
 # iopix's own database (settings, accounts, favorites, albums, AI results, and the library without digiKam) lives on
-# MySQL/MariaDB. Asked once: a later run keeps the DB_* lines of config.env (or data/viewer-db.json, written by
-# the Settings page).
+# MySQL/MariaDB. Asked once: a later run keeps the DB_* lines of config.env (the Settings page writes them too).
 ENVF="$APP/config.env"
 OLDVDB="$(grep '^DB_' "$ENVF" 2>/dev/null || true)"
 CANLOCAL=0; [ "$OS" != Darwin ] && [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1 && CANLOCAL=1  # Debian, Ubuntu, Proxmox as root
-if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ] && [ ! -f "$DATA/viewer-db.json" ]; then
+if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ]; then
   if [ "$CANLOCAL" = 1 ]; then
     ask VH "iopix's own database: 'local' installs MariaDB on this machine, or the host of an existing MySQL/MariaDB server" "local"
     [ "$VH" != local ] || VIEWERDB=local
@@ -176,7 +175,7 @@ if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ] && [ ! -f "$DATA/viewer-db.json" ]; th
     VIEWERDB="$VH:$VP/$VD:$VU:$VW"
   fi
 elif [ -z "$VIEWERDB" ]; then
-  echo "iopix's own database: kept as configured ($([ -n "$OLDVDB" ] && echo "$ENVF" || echo "$DATA/viewer-db.json"); Settings › Database switches)"
+  echo "iopix's own database: kept as configured ($ENVF; Settings › Database switches)"
 fi
 if [ "$VIEWERDB" = local ]; then
   [ "$CANLOCAL" = 1 ] || die "--db local needs apt (Debian, Ubuntu, Proxmox) and root; give --db HOST:PORT/DB:USER:PASS of a MySQL/MariaDB server instead"
@@ -304,12 +303,12 @@ fi
   echo "PORT=$PORT"
   echo "PUBLIC_URL=$PUBURL"
   echo "COOKIE_DOMAIN=$COOKIE"
-  # iopix's own database (MySQL/MariaDB); these win over $DATA/viewer-db.json, which the Settings page writes
+  # iopix's own database (MySQL/MariaDB); Settings › iopix database rewrites these lines when it switches
   if [ -n "$VIEWERDB" ]; then
     vhp=${VIEWERDB%%/*}; vrest=${VIEWERDB#*/}; vdb=${vrest%%:*}; vrest=${vrest#*:}; vus=${vrest%%:*}; vpw=${vrest#*:}
     echo "DB_TYPE=mysql"; echo "DB_HOST=${vhp%%:*}"; echo "DB_PORT=${vhp##*:}"; echo "DB_NAME=$vdb"; echo "DB_USER=$vus"; echo "DB_PASSWORD=$vpw"
   elif [ -z "$OLDVDB" ]; then
-    echo "# DB_TYPE=mysql DB_HOST= DB_PORT=3306 DB_NAME= DB_USER= DB_PASSWORD=: iopix's own database, or $DATA/viewer-db.json (Settings)"
+    echo "# iopix's own database (MySQL/MariaDB): the set-up page fills these in"; echo "# DB_HOST="; echo "# DB_PORT=3306"; echo "# DB_NAME="; echo "# DB_USER="; echo "# DB_PASSWORD="
   fi
   case "$SUITE" in ''|keep) ;; *)
     shp=${SUITE%%/*}; srest=${SUITE#*/}; sdb=${srest%%:*}; srest=${srest#*:}; sus=${srest%%:*}; spw=${srest#*:}
@@ -337,12 +336,12 @@ if [ -n "$DBADMIN" ]; then
   DB_ADMIN_PASSWORD="${DBADMIN#*:}" "$VENV/bin"/iosuite-shared --config "$APP" provision --admin "${DBADMIN%%:*}" || die "could not create the databases and users (see above): check the administrator's name and password"
 fi
 VDB_OK=0  # whether iopix's own database answers: the search-model setting and the admin account below need it
-if [ -n "${DB_HOST:-}" ] || [ -f "$DATA/viewer-db.json" ]; then
+if [ -n "${DB_HOST:-}" ]; then
   echo "iopix's own database on MySQL/MariaDB: testing, creating it if needed"
   "$VPY" - <<'PYEOF' && VDB_OK=1 || echo "  could not use that MySQL/MariaDB database for iopix (see above); run setup.sh again, or fix it later on the viewer's set-up page"
 import sys
 from app.data import vdb
-c = vdb.settings()  # DB_* from config.env (exported above; the password is not in the process list), else viewer-db.json
+c = vdb.settings()  # DB_* from config.env (exported above; the password is not in the process list)
 try:
     vdb.test_connection(c)
 except Exception as e:
@@ -426,7 +425,7 @@ else
   echo "    cd \"$APP\" && ./run.sh"
 fi
 if [ -n "${DB_HOST:-}" ]; then VDBWHERE="MySQL/MariaDB ${DB_USER}@${DB_HOST}:${DB_PORT:-3306}/${DB_NAME} (in $ENVF)"
-elif [ -f "$DATA/viewer-db.json" ]; then VDBWHERE="as in $DATA/viewer-db.json"; else VDBWHERE="not set up yet: the viewer asks on its first page"; fi
+else VDBWHERE="not set up yet: the viewer asks on its first page"; fi
 say "Done: http://localhost:$PORT   settings: $ENVF   data: $DATA   iopix database: $VDBWHERE"
 
 # ---- the other apps of the suite, beside this one (iosuite-shared install: the shared answers from config.env)

@@ -7,15 +7,14 @@ hands back rows that answer to both an index and a column name. Keeping the tran
 rewriting a thousand statements is deliberate: the digiKam side (dkdb.py) still speaks both dialects, and
 the statements stay readable.
 
-Where the connection goes is kept outside the database itself, in data/viewer-db.json (or DB_* in
-config.env), since the settings table lives inside. Without a configuration, or with one the server
+Where the connection goes is kept outside the database itself, in the DB_* lines of config.env, since the
+settings table lives inside. Without a configuration, or with one the server
 refuses, the viewer starts in its "database needed" state (main.py): the Settings page asks for the
 details, tests them, and the viewer restarts on them. An install from before v1.113 still has its SQLite
 file (data/viewer.db): the first switch copies every row out of it, once, and the file is renamed. That
 read-only import is the only SQLite code left here; the search index (index.db) is a rebuilt cache and
 stays a file.
 """
-import json
 import logging
 import os
 import re
@@ -35,7 +34,6 @@ from app.digikam import library as _library
 from app.digikam.dkdb import Conn, Cursor, norm_plain
 
 log = logging.getLogger("app.data.vdb")
-CONF = config.DATA_DIR / "viewer-db.json"
 LEGACY_SQLITE = config.DATA_DIR / "viewer.db"  # the file of an install from before v1.112: imported at the first switch
 KEYS = ("type", "host", "port", "database", "user", "password")
 _cfg = None
@@ -139,15 +137,11 @@ TABLES = {
 
 # ---- configuration
 def settings() -> dict:
-    """{type, host, port, database, user, password}: the file, then the environment on top. `type` is
-    always mysql (MariaDB and MySQL are the same to PyMySQL); it stays in the file for older readers."""
+    """{type, host, port, database, user, password}: the DB_* settings (config.env, or the environment). `type` is
+    always mysql (MariaDB and MySQL are the same to PyMySQL)."""
     global _cfg
     if _cfg is None:
         c = {"type": "mysql", "host": "", "port": 3306, "database": "", "user": "", "password": ""}
-        try:
-            c.update({k: v for k, v in json.loads(CONF.read_text()).items() if k in KEYS})
-        except (OSError, ValueError):
-            pass
         for k in KEYS:
             v = config.db_env(k)
             if v:
@@ -159,7 +153,7 @@ def settings() -> dict:
 
 
 def configured() -> bool:
-    """Whether a server, database and user are named at all (the file or the environment)."""
+    """Whether a server, database and user are named at all."""
     c = settings()
     return bool(c["host"] and c["database"] and c["user"])
 
@@ -169,25 +163,38 @@ def ready() -> bool:
     return configured() and error is None
 
 
+def from_environment() -> list:
+    """The DB_* settings the service's or container's environment fixes (they win over config.env, so the
+    Settings page cannot change them)."""
+    return [config.DB_ENV[k] for k in KEYS if k != "type" and config.from_environment(config.DB_ENV[k])]
+
+
 def public_settings() -> dict:
     """The database settings for the settings page: the password replaced by whether one is set, plus the
-    current error and whether a viewer.db from before v1.113 waits to be imported."""
+    current error, the settings the environment fixes, and whether a viewer.db from before v1.113 waits to be imported."""
     c = settings()
     return {**{k: v for k, v in c.items() if k != "password"}, "password_set": bool(c["password"]), "configured": configured(),
-            "error": error, "legacy_sqlite": str(LEGACY_SQLITE) if LEGACY_SQLITE.exists() else None}
+            "error": error, "fromEnv": from_environment(),
+            "legacy_sqlite": str(LEGACY_SQLITE) if LEGACY_SQLITE.exists() else None}
+
+
+def _env_values(c: dict) -> dict:
+    """The DB_* lines for the settings `c`; ValueError when the environment fixes one of them to something else."""
+    keep = {k: c.get(k, "") for k in KEYS if k != "type"}
+    keep["port"] = int(keep.get("port") or 3306)
+    values = {config.DB_ENV[k]: str(v) for k, v in keep.items()}
+    fixed = [n for n in from_environment() if os.environ.get(n) != values[n]]
+    if fixed:
+        raise ValueError(f"{', '.join(fixed)} {'is' if len(fixed) == 1 else 'are'} set in the environment of the service or container, "
+                         "which wins over config.env: change the database there")
+    return values
 
 
 def save_settings(c: dict):
-    """Write the file and use it from now on (callers switch the data first)."""
+    """Write the DB_* lines of config.env and use them from now on (callers switch the data first). A setting the
+    environment fixes to another value refuses the change: the restart would bring the old database back."""
     global _cfg
-    keep = {k: c.get(k, "") for k in KEYS}
-    keep["type"], keep["port"] = "mysql", int(keep.get("port") or 3306)
-    CONF.parent.mkdir(parents=True, exist_ok=True)
-    CONF.write_text(json.dumps(keep, indent=1))
-    try:
-        os.chmod(CONF, 0o600)
-    except OSError:
-        pass
+    config.save_values(_env_values(c))
     _cfg = None
     settings()
 
@@ -662,6 +669,7 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
     c["type"] = "mysql"
     if not (c["host"] and c["database"] and c["user"]):
         raise ValueError("A host, a database and a user are needed")
+    _env_values(c)  # refused before anything is copied when the environment fixes the database
     same = configured() and all(str(c[k]) == str(cur[k]) for k in ("host", "port", "database"))
     if same and ready():
         raise ValueError("The viewer already uses that database")
