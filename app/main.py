@@ -16,8 +16,8 @@ from fastapi import HTTPException
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facemgr
-from app import config, events, mcp, proxyauth, thumbs, updates, users
-from app.auth import auth as auth_shared
+from app import config, events, mcp, proxyauth, thumbs, users
+from app.auth import auth as auth_shared, updater
 from app.photos import consistency, edits, history, scanner, tagmanager
 from app.data import state as appstate, vdb
 from app.digikam import dkdb
@@ -55,7 +55,7 @@ async def lifespan(_app):
     scanner.start(events.after_write)  # the file scanner (Maintenance › File scanner): passes only while it is on
     if dkdb.no_digikam() and scanner.enabled():
         scanner.run_soon()  # no digiKam to have found what was added while iopix was stopped: a pass right after start-up
-    updates.start_daily()  # the daily "is there a newer version" check, when the setting allows it
+    updater.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them
         dlmodels.auto_download(config.AUTO_MODELS, on_done=models_arrived)
     async with mcp.server.session_manager.run():  # the MCP endpoint (/mcp) lives in this process
@@ -98,7 +98,7 @@ def mcp_enabled() -> bool:
 def _mcp_token_ok(request: Request) -> bool:
     """The MCP endpoint needs the admin token as a bearer header on every request (since v1.111)."""
     auth = request.headers.get("authorization", "")
-    return auth.lower().startswith("bearer ") and updates.token_ok(auth[7:].strip())
+    return auth.lower().startswith("bearer ") and updater.token_ok(auth[7:].strip())
 
 
 def _gate(request: Request):
@@ -195,6 +195,7 @@ app.include_router(albums.router)
 app.include_router(editing.router)
 app.include_router(settings.router)
 app.include_router(maintenance.router)
+app.include_router(auth_shared.server_router(updater, log_file=config.LOG_FILE, info=lambda: {"mcpEnabled": mcp_enabled(), "mcpLocked": config.MCP_FORCED}))  # /api/server, /api/log: admins
 app.include_router(auth.router)
 app.include_router(users_routes.router)
 app.include_router(geo.router)

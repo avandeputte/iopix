@@ -9,8 +9,8 @@ HEADERS = {"content-type": "application/json", "accept": "application/json, text
 
 
 def _auth():
-    from app import updates
-    return dict(HEADERS, authorization=f"Bearer {updates.admin_token()}")
+    from app.auth import updater
+    return dict(HEADERS, authorization=f"Bearer {updater.admin_token()}")
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +74,7 @@ def test_a_read_only_tool_call_works_with_the_token(client, lib):
 
 
 def test_diagnostic_tools(client, lib):
-    tok = client.post("/api/update", json={"action": "token"}).json()["token"]
+    tok = client.post("/api/server", json={"action": "token"}).json()["token"]
     denied = _rpc(client, "tools/call", {"name": "diagnostics", "arguments": {"token": "nope"}}, id=9)["result"]
     assert denied.get("isError") and "token" in denied["content"][0]["text"].lower()
     d = _rpc(client, "tools/call", {"name": "diagnostics", "arguments": {"token": tok}}, id=10)["result"]
@@ -98,9 +98,9 @@ def test_update_viewer_needs_the_admin_token(client, monkeypatch, tmp_path):
     monkeypatch.setattr(updates, "run", lambda ref="": started.append(ref or 1))
     bad = _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": "nope"}}, id=20)["result"]
     assert bad.get("isError") and "token" in bad["content"][0]["text"].lower() and not started
-    tok = client.post("/api/update", json={"action": "token"}).json()["token"]
+    tok = client.post("/api/server", json={"action": "token"}).json()["token"]
     assert len(tok) >= 24
-    assert tok not in client.get("/api/update").text, "the token is never in the plain status"
+    assert tok not in client.get("/api/server").text, "the token is never in the plain status"
     ok = _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": tok}}, id=21)["result"]
     assert not ok.get("isError") and started == [1]
     _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": tok, "ref": "abc1234"}}, id=24)
@@ -167,7 +167,7 @@ def test_tag_op_marks_a_person_and_merges_with_the_token(client, lib):
     person (an Edit log entry per photo); merge folds a second entry of that person into it."""
     import sqlite3
     from app.photos import tagmanager
-    tok = client.post("/api/update", json={"action": "token"}).json()["token"]
+    tok = client.post("/api/server", json={"action": "token"}).json()["token"]
     fam = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-Boyd"}, require_digikam_closed=False)["id"]
     a = tagmanager.apply({"op": "add", "parent": fam, "name": "zz-Steve Boyd"}, require_digikam_closed=False)["id"]
     b = tagmanager.apply({"op": "add", "parent": 0, "name": "zz-steve Boyd"}, require_digikam_closed=False)["id"]

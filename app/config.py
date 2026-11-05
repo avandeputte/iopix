@@ -130,14 +130,7 @@ SCANNER_LOOP = os.environ.get("SCANNER_LOOP", "1") != "0"  # SCANNER_LOOP=0 (the
 EXIFTOOL = os.environ.get("EXIFTOOL")  # a particular exiftool binary; else the one on PATH or digiKam's bundled copy
 
 
-def update_check_locked() -> bool:
-    """UPDATE_CHECK=0: the daily update check is off and Settings cannot turn it on."""
-    return os.environ.get("UPDATE_CHECK", "").strip() == "0"
-
-
-def mcp_admin_token_env() -> str:
-    """MCP_ADMIN_TOKEN: the token MCP clients use for admin actions; set, it wins over the generated one."""
-    return os.environ.get("MCP_ADMIN_TOKEN", "").strip()
+# UPDATE_CHECK=0 (the daily version check locked off) and MCP_ADMIN_TOKEN (the MCP admin token) are read by iothing_auth.updates (app.auth.updater)
 
 
 def sidecar_compat_env() -> bool:

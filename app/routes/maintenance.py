@@ -1,4 +1,5 @@
-"""Maintenance: background analysis and models, updates, restart, the server log, the file scanner and the library merge."""
+"""Maintenance: background analysis and models, the file scanner and the library merge. The version, updates, restart and the
+server log (Maintenance › Updates and logs) are iothing_auth's server_router (/api/server, /api/log), mounted in app/main.py."""
 import json
 import os
 import shutil
@@ -8,11 +9,10 @@ import time
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi import Request
-from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.ai import analysis, clothing, jerseys, jobs_meta, models as dlmodels, rotation, videos
-from app import access, config, events, jobs as bgjobs, logs, updates, users
+from app import access, config, events, jobs as bgjobs, users
 from app.digikam import dbsync, dkdb, merge
 from app.faces import ages, facedetect, facevecs
 from app.photos import edits, paths, scanner
@@ -115,56 +115,6 @@ async def api_models_download(request: Request):
     return {"ok": True}
 
 
-@router.get("/api/update", dependencies=[access.admin])
-def api_update():
-    """Installed commit, the last GitHub check, and whether update.sh can run here (admins: the log names server paths)."""
-    return updates.status()
-
-
-@router.post("/api/update", dependencies=[access.admin])
-async def api_update_run(request: Request):
-    """Body: {action: check | run, ref?}. check asks GitHub (network); run starts update.sh
-    (admin), optionally for a given commit or branch."""
-    body = await json_body(request)
-    action = body.get("action")
-    if action == "check":
-        return await run_in_threadpool(updates.check)
-    if action == "run":
-        try:
-            updates.run(str(body.get("ref") or ""))
-        except RuntimeError as e:
-            raise HTTPException(409, str(e))
-        return {"ok": True}
-    if action == "token":  # admin: the MCP update token (shown once here, never in /api/update)
-        from app.main import mcp_enabled  # lazy: main -> routes.maintenance would be an import cycle
-        return {"token": updates.admin_token(), "fromEnv": bool(config.mcp_admin_token_env()), "mcpEnabled": mcp_enabled()}
-    if action == "regenerate_token":
-        if config.mcp_admin_token_env():
-            raise HTTPException(400, "The token comes from MCP_ADMIN_TOKEN in the environment; change it there")
-        return {"token": updates.regenerate_token()}
-    raise HTTPException(400, "action must be check, run, token or regenerate_token")
-
-
-@router.post("/api/restart", dependencies=[access.admin])
-def api_restart():
-    """Exit; launchd (KeepAlive) or Docker (restart: unless-stopped) starts the viewer again."""
-    threading.Timer(0.5, lambda: os._exit(0)).start()
-    return {"ok": True}
-
-
-@router.get("/api/log", dependencies=[access.admin])
-def api_log(lines: int = 300, level: str = "any", contains: str = "", requests: int = 0):
-    """Maintenance › Server log: the end of data/viewer.log, filtered (admins)."""
-    return logs.tail(lines, contains[:200], level if level in ("any", "warning", "error", "auth") else "any", bool(requests))
-
-
-@router.get("/api/log/download", dependencies=[access.admin])
-def api_log_download():
-    if not config.LOG_FILE.exists():
-        raise HTTPException(404, "No log file yet")
-    return FileResponse(config.LOG_FILE, media_type="text/plain", filename="iopix-viewer.log", content_disposition_type="attachment")
-
-
 @router.get("/api/maintenance", dependencies=[access.public])
 def api_maintenance(request: Request):
     """Library and storage facts for the Settings page (paths, databases and storage for admins only)."""
@@ -188,7 +138,7 @@ def api_maintenance(request: Request):
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
         "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": config.MCP_FORCED,
-        "updateCheck": updates.auto_check_enabled(), "updateCheckLocked": config.update_check_locked(), "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or config.GOOGLE_SERVER_KEY), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
+        "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or config.GOOGLE_SERVER_KEY), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),
         "scanner": _scanner_state(),

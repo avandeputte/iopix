@@ -8,7 +8,9 @@ from typing import Literal, Optional
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from app import __version__, config, jobs, logs, proxyauth, thumbs, updates, users
+from app import __version__, config, jobs, proxyauth, thumbs, users
+from app.auth import updater
+from iothing_auth.updates import tail
 from app.photos import consistency, edits, repair
 from app.data import state as appstate
 from app.ai.semantic import semantic, enabled as semantic_enabled
@@ -41,7 +43,7 @@ def diagnostics(token: str) -> dict:
     q = jobs.status()
     dbc = dkdb.settings()
     out = {
-        "version": __version__, "commit": updates.local_commit()[:7], "docker": updates.in_docker(),
+        "version": __version__, "commit": updater.local_commit()[:7], "docker": updater.in_docker(),
         "platform": platform.platform(), "python": sys.version.split()[0], "app_dir": str(config.APP_DIR), "data_dir": str(config.DATA_DIR),
         "database": {"type": dbc["type"], "location": dkdb.describe(), "backup_mode": dbc["backup"], "digikam_check": config.DIGIKAM_CHECK},
         "tools": {"exiftool": bool(edits.EXIFTOOL), "ffmpeg": bool(thumbs.FFMPEG), "mysqldump": bool(sh.which("mysqldump") or sh.which("mariadb-dump"))},
@@ -85,7 +87,7 @@ def server_log(token: str, lines: int = 200, contains: str = "", level: Literal[
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
     need_token(token)
     try:
-        return logs.tail(min(int(lines), LOG_LINES_MAX), contains, level)
+        return tail(config.LOG_FILE, min(int(lines), LOG_LINES_MAX), contains, level)
     except OSError as e:
         raise ToolError(f"cannot read the log: {e}")
 
@@ -245,23 +247,23 @@ def photo_file(token: str, photo_id: int) -> dict:
 def check_for_update() -> dict:
     """Installed version and commit versus GitHub's main branch (network), and the outcome of the
     last update run (lastUpdate: ok, text, at)."""
-    return {"version": __version__, **updates.check(), "lastUpdate": updates.last_result()}
+    return {"version": __version__, **updater.check(), "lastUpdate": updater.last_result()}
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True))  # openWorld: it reaches GitHub
 def update_viewer(token: str, ref: str = "") -> dict:
     """Update the viewer to the latest commit on GitHub and restart it (update.sh: code, packages,
-    service; settings and data are kept). Needs the admin token from Maintenance > iopix version,
+    service; settings and data are kept). Needs the admin token from Maintenance > Updates and logs,
     because this endpoint has no sign-in. ref: the commit sha (or branch) to install; pass the sha
     you just pushed, since GitHub can report the previous commit for a short while after a push.
     Nothing happens when that commit is already installed. The connection drops when the viewer
     restarts; call check_for_update afterwards: lastUpdate carries the outcome and installed the
     commit. Not available in Docker (pull the image)."""
-    if not updates.token_ok(token):
-        raise ToolError("Wrong or missing admin token (Maintenance > iopix version shows it to an admin)")
+    if not updater.token_ok(token):
+        raise ToolError("Wrong or missing admin token (Maintenance > Updates and logs shows it to an admin)")
     try:
-        updates.run(ref)
+        updater.run(ref)
     except RuntimeError as e:
         raise ToolError(str(e))
-    return {"started": True, "installed": updates.local_commit()[:7], "ref": ref or "main",
+    return {"started": True, "installed": updater.local_commit()[:7], "ref": ref or "main",
             "note": "update.sh is running; the viewer restarts when it finishes (about a minute). Then call check_for_update: lastUpdate says what happened."}

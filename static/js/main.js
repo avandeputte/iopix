@@ -92,24 +92,24 @@ export function updateBanner(u) {  // exported for test_ui.py, which calls it th
     if (!await confirmDialog(`Fetch ${u.version ? 'version ' + u.version : 'the latest version'}, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;
     runUpdate((msg, failed) => {
       run.hidden = more.hidden = true;
-      fill(text, h('b', null, failed ? 'The update did not finish' : 'Updating…'), h('div', { class: 'muted' }, msg, failed ? [' ', h('a', { class: 'lnk', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, `Maintenance › ${S.APP_NAME} version`)] : null));
+      fill(text, h('b', null, failed ? 'The update did not finish' : 'Updating…'), h('div', { class: 'muted' }, msg, failed ? [' ', h('a', { class: 'lnk', href: '#/maintenance?tab=updates', onclick: () => b.remove() }, 'Maintenance › Updates and logs')] : null));
     });
   } }, 'Update now');
-  const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=viewer', onclick: () => b.remove() }, 'Details');
+  const more = h('a', { class: 'pillbtn', href: '#/maintenance?tab=updates', onclick: () => b.remove() }, 'Details');
   b = h('div', { id: 'updbanner', 'data-remote': u.remote }, h('span', { class: 'ic-wrap' }, icon('spark')), text, run, more,
     h('button', { class: 'iconbtn', title: 'Not now (hidden until the next version)', onclick: () => { store.local.set(PREF.updateDismissed, u.remote); b.remove(); } }, icon('close')));
   banners().prepend(b);
 }
-/** Run update.sh on the server (POST /api/update run), then watch for the new version: /api/status every 5 s until its
+/** Run update.sh on the server (POST /api/server {action: update}), then watch for the new version: /api/status every 5 s until its
  *  appVersion or commit differs from what runs here, and the page reloads. After 3 minutes without a change the update
  *  is reported as not finished. onState(text, failed) gets the words for the screen. Returns whether the update started. */
 export async function runUpdate(onState) {
-  try { await post('/api/update', { action: 'run' }); } catch (e) { toastError(e, 10000); return false; }
+  try { await post('/api/server', { action: 'update' }); } catch (e) { toastError(e, 10000); return false; }
   onState('Updating… the page reloads when the new version is up.', false);
   const was = `${S.APP_VERSION}|${S.APP_COMMIT}`, until = Date.now() + 180000;
   const check = async () => {
     try { const s = await api('/api/status'); if (s.appVersion && `${s.appVersion}|${s.commit || ''}` !== was) { location.reload(); return; } } catch { /* restarting */ }
-    if (Date.now() < until) setTimeout(check, 5000); else onState(`The update did not finish; see Maintenance › ${S.APP_NAME} version.`, true);
+    if (Date.now() < until) setTimeout(check, 5000); else onState('The update did not finish; see Maintenance › Updates and logs.', true);
   };
   setTimeout(check, 5000);
   return true;

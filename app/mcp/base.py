@@ -15,7 +15,8 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from app import config, updates, users
+from app import config, users
+from app.auth import updater
 from app.photos import edits
 from app.data import index, state as appstate
 from app.data.query import DATE_RE, build_where
@@ -90,12 +91,12 @@ def anon_paths_ok() -> bool:
 
 
 def need_token(token: str, writes: bool = False):
-    """The operator and maintenance tools take the admin token (Maintenance > iopix version) as their `token`
+    """The operator and maintenance tools take the admin token (Maintenance > Updates and logs) as their `token`
     argument. Over HTTP every /mcp request also carries it as a bearer header (main.py refuses the rest), so the
     argument is checked twice there; over stdio (`python -m app.mcp`) it is the only check. writes: the tool changes
     the library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
-    if not updates.token_ok(token):
-        raise ToolError("This tool needs the admin token (Maintenance > iopix version > MCP update token)")
+    if not updater.token_ok(token):
+        raise ToolError("This tool needs the admin token (Maintenance > Updates and logs > MCP update token)")
     if writes and appstate.read_only():
         raise ToolError("The viewer is in read-only mode; nothing in the library can be changed")
 

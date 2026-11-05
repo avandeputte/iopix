@@ -10,7 +10,7 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app.ai import models as dlmodels
-from app import access, config, events, iocontacts, jobs as bgjobs, proxyauth, updates, users
+from app import access, config, events, iocontacts, jobs as bgjobs, proxyauth, users
 from app.digikam import dkdb, library
 from app.faces import facevecs
 from app.photos import edits, scanner
@@ -39,8 +39,6 @@ def _settings_public() -> dict:
         "read_only": appstate.read_only(),
         "require_login": users.require_login(),
         "mcp_enabled": appstate.get_setting("mcp_enabled") == "1",
-        "update_check": updates.auto_check_enabled(),
-        "update_check_locked": config.update_check_locked(),
         "digikam_sync": index.sync_enabled(),
         "app_name": appstate.get_setting("app_name"),
         "database": db_settings_public(),
@@ -103,17 +101,6 @@ def _text(name, limit=None):
     def f(value, _body):
         appstate.set_setting(name, str(value or "").strip()[:limit])
     return f
-
-
-def _update_check(value, _body):
-    """The daily look at GitHub for a newer version (off: the viewer never contacts GitHub on its own)."""
-    if value and config.update_check_locked():
-        raise HTTPException(400, "Switched off by UPDATE_CHECK=0 in the environment")
-    appstate.set_setting("update_check", "1" if value else "0")
-    if value:
-        threading.Thread(target=updates.check, daemon=True).start()
-    else:
-        updates.forget_check()
 
 
 def _file_scanner(value, _body):
@@ -244,7 +231,6 @@ def _model(group):
 # every key the Settings page can post, applied in this order: {key: handler(value, body)}
 SETTINGS = {
     "write_files": _switch("write_files"),  # also write metadata into image files (JPEG, PNG, TIFF, WebP), not just sidecars
-    "update_check": _update_check,
     "file_scanner": _file_scanner,
     "scan_interval": _scan_interval,
     "app_name": _text("app_name", 40),  # how the viewer brands itself; empty puts the default back

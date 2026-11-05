@@ -346,7 +346,7 @@ def test_digikam_offline_banner_and_sync_setting(page, server):
     assert page.locator(".srow", has_text="Sync with digiKam").locator("button", has_text="Turn off").count() == 1
 
 def test_server_log_dialog_opens_from_maintenance(page, server):
-    page.goto(server + "/#/maintenance?tab=viewer")
+    page.goto(server + "/#/maintenance?tab=updates")
     page.wait_for_selector(".srow:has-text('Server log') button", timeout=10000)
     page.locator(".srow", has_text="Server log").locator("button").click()
     page.wait_for_selector(".modal pre.logview", timeout=5000)
@@ -775,13 +775,13 @@ def test_update_banner_runs_the_update_and_reloads_on_the_new_version(page, serv
         runs.append(route.request.post_data_json)
         route.fulfill(status=200, body='{"ok": true}', headers={"content-type": "application/json"})
     page.route("**/api/status", fake_status)
-    page.route("**/api/update", fake_update)
+    page.route("**/api/server", fake_update)
     page.goto(server + "/#/photos")
     page.wait_for_selector("#updbanner button:has-text('Update now')", timeout=10000)
     page.locator("#updbanner button:has-text('Update now')").click()
     page.locator(".modal-btns .pillbtn.on").click()  # the confirmation
     page.wait_for_function("document.querySelector('#updbanner') && document.querySelector('#updbanner').innerText.includes('Updating')", timeout=5000)
-    assert runs == [{"action": "run"}]
+    assert runs == [{"action": "update"}]
     assert page.locator("#updbanner button:has-text('Update now')").is_hidden()
     with page.expect_event("load", timeout=15000):  # the version poll (every 5 s) sees the new one and reloads
         state["version"] = "9.9.9"

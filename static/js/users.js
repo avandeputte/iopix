@@ -6,6 +6,7 @@ import { confirmDialog, modal, promptDialog } from './actions.js';
 import { personPicker } from './faces.js';
 import { boot, pollStatus } from './main.js';
 import { loadSuite } from './suite.js';
+import { popMenu } from './lightbox.js';
 
 // ---- users: sign in / out, own password, first-admin setup, admin user management
 export async function loadUser() {
@@ -15,9 +16,20 @@ export async function loadUser() {
 export function renderUserMenu() {
   loadSuite();  // the other apps' menu is per account: drawn again when the account changes
   const el = $('#usermenu'); if (!el) return;
-  el.replaceChildren(S.USER
-    ? h('button', { class: 'iconbtn tool', title: `${S.USER.name} (${S.USER.role}) · account`, onclick: accountDialog }, avatarOf(S.USER))
-    : h('button', { class: 'iconbtn tool', title: S.USERS_EXIST ? 'Sign in' : 'Create the admin account', onclick: () => (S.USERS_EXIST ? loginDialog() : setupDialog()) }, icon('person')));
+  const btn = h('button', { class: 'iconbtn tool', title: S.USER ? `${S.USER.name} (${S.USER.role})` : S.USERS_EXIST ? 'Sign in' : 'Create the admin account',
+    onclick: () => (!S.USER ? (S.USERS_EXIST ? loginDialog() : setupDialog()) : popMenu(btn, [  // the avatar menu, the same in every ioThing app
+      ['Account', accountDialog],
+      ['Appearance', () => { location.hash = hashFor('settings', new URLSearchParams('tab=display')); }],
+      ['Settings', () => { location.hash = hashFor('settings', new URLSearchParams()); }],
+      S.IS_ADMIN ? ['Maintenance', () => { location.hash = hashFor('maintenance', new URLSearchParams()); }] : null,
+      'Session',
+      ['Sign out everywhere else', async () => {
+        if (!await confirmDialog('Sign this account out everywhere else? Every other browser and phone will have to sign in again; this one stays.', { ok: 'Sign out everywhere' })) return;
+        await act(() => post('/api/auth/logout_all', {}), { toast: 'Signed out everywhere else.' });
+      }],
+      ['Sign out', signOut],
+    ])) }, S.USER ? avatarOf(S.USER) : icon('person'));
+  el.replaceChildren(btn);
 }
 async function afterLogin(me) {
   S.USER = me.user; SETTINGS.user = me.settings || {}; renderUserMenu();

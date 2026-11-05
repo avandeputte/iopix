@@ -5,7 +5,7 @@ import re
 import pytest
 from fastapi.routing import APIRoute
 
-SKIP = ("/api/backup/", "/api/log/download", "/api/zip", "/orig/", "/mcp", "/api/update")  # downloads and network calls
+SKIP = ("/api/backup/", "/api/log/download", "/api/zip", "/orig/", "/mcp")  # downloads and network calls
 
 
 def _routes():

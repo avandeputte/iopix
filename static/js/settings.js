@@ -234,7 +234,7 @@ const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
   settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['contacts', 'ioContacts'], ['users', 'Users and sign-in']],
-  maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['viewer', () => S.APP_NAME]],
+  maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['updates', 'Updates and logs']],
 };
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
 function settingsTabs(page, view) {
@@ -404,9 +404,6 @@ function serverTab(c) {
       return row('Album roots', `Where each album root digiKam knows is mounted here. Leave a field empty to use the default (PHOTOS_ROOT for a single-root library, else the path digiKam recorded); enter a path when the folder is mounted elsewhere, e.g. /photos in a container. Changing it rebuilds the index.`, body);
     })() : null,
     S.IS_ADMIN ? row(`${S.APP_NAME} database`, `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits, the AI results and its copy of the library: a MariaDB or MySQL database of its own (not digiKam’s). Moving to another one copies every row across and restarts ${S.APP_NAME}; the connection is kept in data/viewer-db.json, outside the database.`, viewerDbPanel()) : null,
-    S.IS_ADMIN ? row('Check for updates daily', m.updateCheckLocked ? `Switched off by UPDATE_CHECK=0 in the environment: ${S.APP_NAME} never contacts GitHub on its own.`
-      : `Once a day ${S.APP_NAME} asks GitHub whether a newer version of ${S.APP_NAME} exists and, if so, shows admins a banner. Only the public list of changes is fetched; nothing about this install or its photos is sent. Off: it never contacts GitHub on its own (Maintenance › ${S.APP_NAME} can still check on request).`,
-      switchField('update_check', !!m.updateCheck, { label: 'Check daily', disabled: !!m.updateCheckLocked, on: `${S.APP_NAME} will check for updates once a day.`, off: `${S.APP_NAME} will not contact GitHub on its own.`, after: () => pollSoon(2000) })) : null,
     S.IS_ADMIN ? row('MCP server', m.mcpLocked ? 'Switched on by MCP=1 in the environment.'
       : `The endpoint at /mcp that lets an AI assistant (Claude, for example) search and read this library. Off: /mcp does not answer at all. On: every request needs the MCP update token (Maintenance › iopix version) as a bearer header, the read-only tools included.`,
       m.mcpLocked ? null : switchField('mcp_enabled', !!m.mcpEnabled, { on: 'The MCP server at /mcp is on.', off: 'The MCP server is off: /mcp does not answer.' })) : null,
@@ -567,32 +564,38 @@ function storageTab(c) {
 }
 
 /** Maintenance › the app itself: the edit log, the server log, the version and updates, and restart. */
+/** Maintenance › Updates and logs: the version card, the daily check, the MCP admin token, the server log and Restart, from
+ *  iothing-auth's /api/server and /api/log, so the page is the same in every ioThing app. */
 function viewerTab(c) {
   const { view, row, btn } = c;
   return [
-    // 4. The viewer itself
-    stab('viewer'),
-    h('h2', null, S.APP_NAME),
+    // 4. Updates and logs
+    stab('updates'),
+    h('h2', null, 'Updates and logs'),
     row('Edit log', `Every change made in ${S.APP_NAME}, for every photo, kept for good: who, when, what it was before and after, with Undo and restore of the sidecar or the original file from the backups.`, h('a', { class: 'pillbtn', href: '#/history' }, 'Open the edit log')),
     row('Server log', `What the server has been doing: edits, database writes, updates, background jobs and any errors, from ${S.APP_NAME}’s own log file in the data folder.`, btn('Show the log', logDialog)),
     (() => {
       const body = h('div', { class: 'muted note' }, 'Loading…');
       let timer = 0;
       const draw = async () => {
-        let u; try { u = await api('/api/update'); } catch (e) { fill(body, e.message); return; }
+        let u; try { u = await api('/api/server'); } catch (e) { fill(body, e.message); return; }
         if (!body.isConnected) return;
         const c = u.check, p = u.progress, last = u.lastUpdate;
         const outcome = !p.running && !p.error && last ? h('div', { class: last.ok ? 'muted' : 'warn', style: 'font-size:12px;margin-top:2px' }, `last update: ${last.text}`) : null;
         const state = p.running ? `updating… ${S.APP_NAME} restarts when it is done` : p.error ? `last update failed: ${p.error}` : !c ? `v${u.version}` : c.status === 'current' ? `v${u.version} is the latest version` : c.status === 'update' ? `You have v${u.version}; ${c.remoteVersion ? `v${c.remoteVersion}` : 'a newer build'} is available${c.remoteDate ? ` (${c.remoteDate})` : ''}${c.remoteMessage ? `: ${c.remoteMessage.replace(/^v\d+\.\d+\.\d+:\s*/, '')}` : ''}` : `could not check: ${c.error}`;
         fill(body, state, outcome, h('div', { style: 'display:flex;gap:6px;margin-top:6px' },
-          btn('Check for updates', async () => { fill(body, 'Checking…'); await act(() => post('/api/update', { action: 'check' })); draw(); }),
-          btn('MCP update token…', async () => { try { const t = await post('/api/update', { action: 'token' }); const back = modal('MCP update token', t.mcpEnabled ? null : h('p', { class: 'warn' }, 'The MCP server is switched off (Settings › MCP server), so this token is not usable until it is turned on.'), h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
-            { buttons: [t.fromEnv ? null : ['Regenerate', async () => { if (!await confirmDialog('Generate a new token? The old one stops working.')) return; await act(() => post('/api/update', { action: 'regenerate_token' })); back.remove(); }], 'Close'] }); } catch (e) { toastError(e); } }),
+          btn('Check for updates', async () => { fill(body, 'Checking…'); await act(() => post('/api/server', { action: 'check' })); draw(); }),
+          btn('MCP update token…', async () => { try { const t = await post('/api/server', { action: 'token' }); const back = modal('MCP update token', u.mcpEnabled ? null : h('p', { class: 'warn' }, 'The MCP server is switched off (Settings › MCP server), so this token is not usable until it is turned on.'), h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
+            { buttons: [t.fromEnv ? null : ['Regenerate', async () => { if (!await confirmDialog('Generate a new token? The old one stops working.')) return; await act(() => post('/api/server', { action: 'regenerate_token' })); back.remove(); }], 'Close'] }); } catch (e) { toastError(e); } }),
           u.docker ? h('span', { class: 'muted' }, 'Docker: update by pulling the image (docker compose pull && docker compose up -d).')
             : u.canRun ? btn('Update now', async () => {
               if (!await confirmDialog(`Fetch the latest version, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;
               if (await runUpdate((text, failed) => { if (failed) toast(text, null, null, 15000); })) { toast(`Updating; ${S.APP_NAME} restarts when it is done, and the page reloads.`); setTimeout(draw, 3000); }
-            }, c && c.status === 'update') : null));
+            }, c && c.status === 'update') : null,
+          h('a', { class: 'pillbtn', href: `https://github.com/${u.repo}/commits/${u.branch}`, target: '_blank', rel: 'noopener' }, 'Change log')),
+          h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;margin-top:8px' }, h('input', { type: 'checkbox', checked: !!u.autoCheck, disabled: !!u.autoCheckLocked, onchange: async (e) => {
+            try { await post('/api/server', { autoCheck: e.target.checked }); toast(e.target.checked ? `${S.APP_NAME} will check for updates once a day.` : `${S.APP_NAME} will not contact GitHub on its own.`); pollSoon(2000); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }),
+            u.autoCheckLocked ? 'Check daily (switched off by UPDATE_CHECK=0 in the environment)' : 'Check daily (only GitHub’s public list of changes is asked; nothing about this install is sent)'));
         clearTimeout(timer);
         if (p.running) timer = setTimeout(() => { if (S.route.view === view && body.isConnected) draw(); }, 5000);
       };
@@ -600,7 +603,7 @@ function viewerTab(c) {
       return row(`${S.APP_NAME} version`, `Which version of ${S.APP_NAME} is running here, and whether a newer one is out. “Update now” installs the newest version, keeps your settings and data, and restarts ${S.APP_NAME}; the page reloads when it is back.`, body);
     })(),
     row(`Restart ${S.APP_NAME}`, 'Stops the server; launchd, Docker or systemd starts it again within seconds. Needed after an update of the RapidOCR package (offered in the models table above when “Check models for updates” finds a newer one), and handy when a background job looks stuck.',
-      btn('Restart', async () => { if (!await confirmDialog(`Restart ${S.APP_NAME} now?`)) return; await act(() => post('/api/restart', {}), { toast: 'Restarting…' }); })),
+      btn('Restart', async () => { if (!await confirmDialog(`Restart ${S.APP_NAME} now?`)) return; await act(() => post('/api/server', { action: 'restart' }), { toast: 'Restarting…' }); })),
   ];
 }
 async function settingsPage(view) {
