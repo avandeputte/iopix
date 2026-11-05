@@ -1,4 +1,4 @@
-/** The ioThing suite's other apps (iothing-auth's suite_apps, GET /api/auth/suite). When other apps are registered,
+/** The ioThing suite's other apps (iosuite-shared's suite_apps, GET /api/auth/suite). When other apps are registered,
  *  the iopix logo top left (in the sidebar; in the top bar on a phone) opens a menu of them, each a link to that app.
  *  Alone, the logo and the name are the link to Explore and nothing else changes. Signed-in accounts only (the list needs one). */
 import { $, api, h } from './core.js';

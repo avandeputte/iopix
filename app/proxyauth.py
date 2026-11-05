@@ -1,5 +1,5 @@
 """Sign-in done by a reverse proxy in front of the viewer (Cloudflare Access, HAProxy, nginx, Caddy or Traefik with
-an authentication step): iothing_auth.proxyauth does the work, with the settings stored once for the whole suite
+an authentication step): iosuite_shared.proxyauth does the work, with the settings stored once for the whole suite
 (or per app) in the Shared ioSuite database; the environment (iopix.env) still wins. This module keeps iopix's old names:
 
   AUTH_PROXY          off (default) | cloudflare | haproxy | nginx | caddy | traefik | header
@@ -9,8 +9,8 @@ an authentication step): iothing_auth.proxyauth does the work, with the settings
   CF_ACCESS_TEAM      the Cloudflare Access team domain, e.g. myteam.cloudflareaccess.com
   CF_ACCESS_AUD       the Access application's audience (AUD) tag
 """
-from iothing_auth import proxyauth as shared
-from iothing_auth.proxyauth import (CF_HEADER, CF_JWT_HEADER, EXTERNAL_HEADERS, GENERIC_HEADERS, KEYS, PRESETS, authlog,
+from iosuite_shared import proxyauth as shared
+from iosuite_shared.proxyauth import (CF_HEADER, CF_JWT_HEADER, EXTERNAL_HEADERS, GENERIC_HEADERS, KEYS, PRESETS, authlog,
                                     forget_identities, once, peer_of, remember_peer, seen, _cache, _logged)
 
 __all__ = ["CF_HEADER", "CF_JWT_HEADER", "EXTERNAL_HEADERS", "GENERIC_HEADERS", "KEYS", "PRESETS", "authlog", "forget_identities", "once",

@@ -130,7 +130,7 @@ SCANNER_LOOP = os.environ.get("SCANNER_LOOP", "1") != "0"  # SCANNER_LOOP=0 (the
 EXIFTOOL = os.environ.get("EXIFTOOL")  # a particular exiftool binary; else the one on PATH or digiKam's bundled copy
 
 
-# UPDATE_CHECK=0 (the daily version check locked off) and MCP_ADMIN_TOKEN (the MCP admin token) are read by iothing_auth.updates (app.auth.updater)
+# UPDATE_CHECK=0 (the daily version check locked off) and MCP_ADMIN_TOKEN (the MCP admin token) are read by iosuite_shared.updates (app.auth.updater)
 
 
 def sidecar_compat_env() -> bool:

@@ -1,4 +1,4 @@
-"""Sign-in: login, logout, the signed-in account's own settings and password, first-run setup (iothing-auth's
+"""Sign-in: login, logout, the signed-in account's own settings and password, first-run setup (iosuite-shared's
 routes, shared with the other ioThing apps), plus iopix's own: linking an account to a person."""
 
 from fastapi import HTTPException

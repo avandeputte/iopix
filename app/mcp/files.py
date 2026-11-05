@@ -10,7 +10,7 @@ from mcp.types import ToolAnnotations
 
 from app import __version__, config, jobs, proxyauth, thumbs, users
 from app.auth import updater
-from iothing_auth.updates import tail
+from iosuite_shared.updates import tail
 from app.photos import consistency, edits, repair
 from app.data import state as appstate
 from app.ai.semantic import semantic, enabled as semantic_enabled

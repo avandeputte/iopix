@@ -118,7 +118,7 @@ def _gate(request: Request):
 
 
 # who is asking (the shared session cookie, the proxy's identity), whether sign-in is required at all, and the
-# cross-site check on writes: iothing-auth's middleware. What each route needs beyond that (an editor, an admin,
+# cross-site check on writes: iosuite-shared's middleware. What each route needs beyond that (an editor, an admin,
 # an account) is declared on the route (app/access.py).
 app.middleware("http")(auth_shared.middleware(is_open=_open_to_visitors, open_prefixes=("/mcp",), before=_gate))
 
