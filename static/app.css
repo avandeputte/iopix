@@ -75,6 +75,19 @@ body.side-docked #menubtn { display: none; }
 .brand-name { font-size: var(--fs-l); font-weight: 500; white-space: nowrap; color: var(--brand-ink); letter-spacing: .01em; }
 .brand-name:has(.io) { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }  /* the name is iopix: bold and tight, as on the icon */
 .brand-name .io { color: var(--name-io); } .brand-name .pix { color: var(--name-pix); }
+/* the suite's other apps (static/js/suite.js): with other ioThing apps installed, the name top left opens a menu of them */
+.suitebtn { flex: none; display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 12px; border-radius: var(--r-m); }
+.suitebtn:hover, .suitebtn:focus-visible, .suitebtn[aria-expanded] { background: var(--bg3); }
+.suitebtn .ic { width: 20px; height: 20px; color: var(--fg2); transition: transform .15s; }
+.suitebtn[aria-expanded] .ic { transform: rotate(180deg); }
+#suitebtn { display: none; }
+.suitepop { position: fixed; z-index: var(--z-menu); display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(92px, max-content)); gap: 4px; padding: 8px;
+  background: var(--bg); color: var(--fg); border-radius: var(--r-l); box-shadow: var(--shadow); }
+.apptile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px 8px; border-radius: var(--r-m); color: var(--fg); text-align: center; }
+.apptile:hover, .apptile:focus-visible { background: var(--bg2); text-decoration: none; }
+.appic { width: 44px; height: 44px; border-radius: var(--r-m); object-fit: contain; }
+.appic.fb { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: var(--fs-xl); }
+.appnm { font-size: var(--fs-s); white-space: nowrap; }
 .signin-brand { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; }
 .signin-brand .logo { width: 36px; height: 36px; }
 .signin-brand .brand-name, .signin-brand .brand-name:has(.io) { font-size: var(--fs-xxl); }
@@ -830,6 +843,8 @@ button.lnk:hover { text-decoration: underline; }
   :root { --topbar: 48px; --nav: 0px; }
   #menubtn, #navscrim, .navhead, .navgap, .navsec, .navmanage, .navfoot, #nav a[data-v="settings"], #nav a[data-v="maintenance"] { display: none; }  /* Settings and Maintenance are under More */
   #topbar { gap: 8px; padding: 0 8px; left: 0; }
+  #suitebtn { display: inline-flex; height: 40px; padding: 0 2px 0 6px; }  /* the sidebar is the bottom bar here: the menu of other apps is in the top bar */
+  #suitebtn .brand-name:has(.io) { font-size: 20px; }
   #filterbtn span:last-child { display: none; }
   #filterbtn { padding: 0 8px; border: 0; }
   #nav { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: 56px; flex-direction: row; justify-content: flex-start; overflow-x: auto; padding: 0; gap: 0;
@@ -945,7 +960,7 @@ button.lnk:hover { text-decoration: underline; }
 }
 
 /* ==== inside the iopix app (html.inapp, ?app=1): the app's own tab bar replaces the sidebar and the bottom bar ==== */
-html.inapp #nav, html.inapp #sidebtn, html.inapp #menubtn, html.inapp #navscrim { display: none !important; }
+html.inapp #nav, html.inapp #sidebtn, html.inapp #menubtn, html.inapp #navscrim, html.inapp #suitebtn { display: none !important; }
 html.inapp body, html.inapp body.side-docked { --nav: 0px; }
 html.inapp #main, html.inapp #filters, html.inapp .cbulk { bottom: 0; }
 html.inapp #scrub { bottom: 8px; } html.inapp #toast, html.inapp #reloadnote { bottom: 16px; } html.inapp #banners { bottom: 16px; }

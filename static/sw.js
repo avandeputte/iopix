@@ -3,7 +3,7 @@
 // as the fallback. Photos, thumbnails and the API are never cached here: the library changes and
 // the page reloads itself when the server reports a new version.
 const SHELL = 'iopix-shell-v4';  // bump when the shell files change in a way the network-first fetch would not refresh (new icons)
-const JS = ['core', 'state', 'search', 'grid', 'actions', 'editing', 'download', 'pages', 'users', 'admin', 'settings', 'map', 'filters', 'lightbox', 'faces', 'info', 'main'].map((m) => `./js/${m}.js`);
+const JS = ['core', 'state', 'search', 'grid', 'actions', 'editing', 'download', 'pages', 'suite', 'users', 'admin', 'settings', 'map', 'filters', 'lightbox', 'faces', 'info', 'main'].map((m) => `./js/${m}.js`);
 // the map's library, served with the app (static/vendor)
 const VENDOR = ['leaflet/leaflet.js', 'leaflet/leaflet.css', 'leaflet/images/marker-icon.png', 'leaflet/images/marker-icon-2x.png', 'leaflet/images/marker-shadow.png', 'leaflet/images/layers.png', 'leaflet/images/layers-2x.png',
   'leaflet.markercluster/leaflet.markercluster.js', 'leaflet.markercluster/MarkerCluster.css', 'leaflet.markercluster/MarkerCluster.Default.css'].map((f) => `./vendor/${f}`);

@@ -303,3 +303,40 @@ def test_inside_the_app_the_web_navigation_steps_aside(browser, server):
             assert page.evaluate("document.documentElement.classList.contains('inapp')"), "remembered for the tab"
         finally:
             ctx.close()
+
+
+def test_the_name_opens_the_other_suite_apps(page, server, browser):
+    """With other ioThing apps in suite_apps, the name top left opens a menu of them (static/js/suite.js), each a link to
+    its app; alone, the name stays the link to Explore. On a phone the same menu is in the top bar."""
+    assert page.request.post(server + "/api/auth/setup", data={"name": "alex", "password": "correct horse"}).ok  # signs this context in
+    page.goto(server + "/#/explore")
+    page.wait_for_selector("#usermenu .avatar", timeout=10000)
+    page.wait_for_function("import('/js/suite.js').then(() => true)", timeout=5000)
+    assert page.locator("#nav .navhead a.brand[href='#/explore']").count() == 1  # iopix alone: nothing changes
+    assert page.locator("#suitebtn").count() == 0
+    others = {"app": "iopix", "items": [
+        {"app": "iopix", "name": "iopix", "url": server, "icon": server + "/icons/mark.svg", "color": "#3b4a8c"},
+        {"app": "iocontacts", "name": "ioContacts", "description": "Contacts", "url": "https://contacts.example.com", "icon": None, "color": "#7a4fd0"},
+        {"app": "ionotes", "name": "ioNotes", "url": "https://notes.example.com", "icon": "https://notes.example.com/icon.svg", "color": "#2f8f5b"},
+        {"app": "nowhere", "name": "ioNowhere", "url": None}]}  # never seen anywhere: no address to link to
+    page.route("**/api/auth/suite", lambda r: r.fulfill(json=others))
+    page.route("https://notes.example.com/**", lambda r: r.fulfill(status=404))  # its icon fails: a coloured letter instead
+    page.reload()
+    page.wait_for_selector("#nav .navhead button.suitebtn .brand-name .io", timeout=10000)
+    page.locator("#nav .navhead button.suitebtn").click()
+    page.wait_for_selector(".suitepop .apptile", timeout=5000)
+    tiles = page.locator(".suitepop .apptile")
+    assert page.locator(".suitepop .appnm").all_inner_texts() == ["ioContacts", "ioNotes"]  # the others, not iopix itself
+    assert [tiles.nth(i).get_attribute("href") for i in range(2)] == ["https://contacts.example.com", "https://notes.example.com"]
+    page.wait_for_selector(".suitepop .apptile:nth-child(2) .appic.fb", timeout=5000)
+    page.keyboard.press("Escape")
+    assert page.locator(".suitepop").count() == 0
+    # a phone: the sidebar is the bottom bar, so the menu is in the top bar
+    page.set_viewport_size({"width": 390, "height": 800})
+    assert page.locator("#suitebtn").is_visible()
+    page.locator("#suitebtn").click()
+    page.wait_for_selector(".suitepop .apptile", timeout=5000)
+    box = page.locator(".suitepop").bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= 390
+    page.mouse.click(200, 600)
+    assert page.locator(".suitepop").count() == 0

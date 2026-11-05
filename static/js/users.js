@@ -5,6 +5,7 @@ import { S, applyBadgePref, applyTheme, avatarOf, brandName, hashFor, onRoute, p
 import { confirmDialog, modal, promptDialog } from './actions.js';
 import { personPicker } from './faces.js';
 import { boot, pollStatus } from './main.js';
+import { loadSuite } from './suite.js';
 
 // ---- users: sign in / out, own password, first-admin setup, admin user management
 export async function loadUser() {
@@ -12,6 +13,7 @@ export async function loadUser() {
   renderUserMenu();
 }
 export function renderUserMenu() {
+  loadSuite();  // the other apps' menu is per account: drawn again when the account changes
   const el = $('#usermenu'); if (!el) return;
   el.replaceChildren(S.USER
     ? h('button', { class: 'iconbtn tool', title: `${S.USER.name} (${S.USER.role}) · account`, onclick: accountDialog }, avatarOf(S.USER))
