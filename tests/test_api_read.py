@@ -1,6 +1,7 @@
 """The read side of the API against the scratch library: status, metadata,
 photo lists and details, facets, map, zip planning, and the shapes the
 front end relies on."""
+import re
 
 
 def test_status_shape(client):
@@ -89,11 +90,22 @@ def test_pwa_files_are_served(client):
     m = client.get("/manifest.webmanifest")
     assert m.status_code == 200 and m.json()["display"] == "standalone" and len(m.json()["icons"]) == 3
     assert client.get("/sw.js").status_code == 200 and "javascript" in client.get("/sw.js").headers["content-type"]
-    for p in ("/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-512-maskable.png", "/icons/apple-touch-icon.png", "/icons/mark.svg"):
+    for p in ("/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon-512-maskable.png", "/static/icons/apple-touch-icon.png", "/static/icons/mark.svg"):
         assert client.get(p).status_code == 200, p
     html = client.get("/").text
     assert 'rel="manifest"' in html and "theme-color" in html
-    assert "serviceWorker" in client.get("/app.js").text  # the registration lives in app.js: the only inline script is the theme one (content security policy)
+    assert "serviceWorker" in client.get("/static/app.js").text  # the registration lives in app.js: the only inline script is the theme one (content security policy)
+
+
+def test_the_shell_its_files_and_the_icon_are_public(client):
+    """The suite's layout: the page at /, every file it names under /static/, the mark at suite.ICON."""
+    from iosuite_shared import suite
+    html = client.get("/").text
+    paths = re.findall(r'(?:src|href)="(static/[^"?]+)', html)
+    paths += [i["src"] for i in client.get("/manifest.webmanifest").json()["icons"]]
+    assert paths and all(p.startswith("static/") for p in paths)
+    for p in ["/" + p for p in paths] + [suite.ICON, "/static/icons/apple-touch-icon.png", "/sw.js"]:
+        assert client.get(p).status_code == 200, p
 
 
 def test_job_rows_expose_progress_visibility(client):

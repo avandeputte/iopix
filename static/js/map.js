@@ -13,12 +13,12 @@ export function loadLeaflet(cluster) {
   const js = (src) => new Promise((ok, fail) => document.head.append(h('script', { src, onload: ok, onerror: () => fail(new Error('offline')) })));
   // Leaflet and its cluster plugin ship with the app (static/vendor): no third party, and the page's Content Security
   // Policy stays 'self'. Leaflet finds its marker and layer-switch images next to its stylesheet.
-  S.leafletP ||= (css('/vendor/leaflet/leaflet.css'), js('/vendor/leaflet/leaflet.js')).catch((e) => { S.leafletP = null; throw e; });  // failed once is not failed for the session
+  S.leafletP ||= (css('/static/vendor/leaflet/leaflet.css'), js('/static/vendor/leaflet/leaflet.js')).catch((e) => { S.leafletP = null; throw e; });  // failed once is not failed for the session
   if (!cluster) return S.leafletP;
   S.clusterP ||= S.leafletP.then(() => {
-    css('/vendor/leaflet.markercluster/MarkerCluster.css');
-    css('/vendor/leaflet.markercluster/MarkerCluster.Default.css');
-    return js('/vendor/leaflet.markercluster/leaflet.markercluster.js');
+    css('/static/vendor/leaflet.markercluster/MarkerCluster.css');
+    css('/static/vendor/leaflet.markercluster/MarkerCluster.Default.css');
+    return js('/static/vendor/leaflet.markercluster/leaflet.markercluster.js');
   });
   return S.clusterP;
 }
