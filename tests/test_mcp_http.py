@@ -93,9 +93,9 @@ def test_diagnostic_tools(client, lib):
 
 
 def test_update_viewer_needs_the_admin_token(client, monkeypatch, tmp_path):
-    from app import updates
+    from app.auth import updater
     started = []
-    monkeypatch.setattr(updates, "run", lambda ref="": started.append(ref or 1))
+    monkeypatch.setattr(updater, "run", lambda ref="": started.append(ref or 1))
     bad = _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": "nope"}}, id=20)["result"]
     assert bad.get("isError") and "token" in bad["content"][0]["text"].lower() and not started
     tok = client.post("/api/server", json={"action": "token"}).json()["token"]
@@ -105,22 +105,22 @@ def test_update_viewer_needs_the_admin_token(client, monkeypatch, tmp_path):
     assert not ok.get("isError") and started == [1]
     _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": tok, "ref": "abc1234"}}, id=24)
     assert started == [1, "abc1234"], "the ref reaches the updater"
-    new = client.post("/api/update", json={"action": "regenerate_token"}).json()["token"]
+    new = client.post("/api/server", json={"action": "regenerate_token"}).json()["token"]
     assert new != tok
     again = _rpc(client, "tools/call", {"name": "update_viewer", "arguments": {"token": tok}}, id=22)["result"]
     assert again.get("isError"), "the old token stops working"
     monkeypatch.setenv("MCP_ADMIN_TOKEN", "from-env-token")
-    assert updates.admin_token() == "from-env-token"
-    assert client.post("/api/update", json={"action": "regenerate_token"}).status_code == 400
+    assert updater.admin_token() == "from-env-token"
+    assert client.post("/api/server", json={"action": "regenerate_token"}).status_code == 400
     chk = _rpc(client, "tools/call", {"name": "check_for_update", "arguments": {}}, id=23)["result"]
     assert "version" in json.loads(chk["content"][0]["text"])
 
 
 def test_consistency_tools_need_the_token(client):
-    from app import updates
+    from app.auth import updater
     bad = _rpc(client, "tools/call", {"name": "consistency_report", "arguments": {"token": "nope"}}, id=40)["result"]
     assert bad.get("isError")
-    tok = updates.admin_token()
+    tok = updater.admin_token()
     ok = _rpc(client, "tools/call", {"name": "consistency_report", "arguments": {"token": tok}}, id=41)["result"]
     assert not ok.get("isError") and "summary" in ok["content"][0]["text"]
     r = _rpc(client, "tools/call", {"name": "consistency_sync", "arguments": {"token": tok, "photo_ids": [], "source": "db", "targets": ["db"], "fields": ["title"]}}, id=42)["result"]
@@ -131,34 +131,34 @@ def test_rewrite_sidecars_tool(client, lib):
     """rewrite_sidecars needs the admin token and rewrites the given photos' sidecars from digiKam's database."""
     import pytest as _pytest
     from mcp.server.mcpserver.exceptions import ToolError
-    from app import updates
+    from app.auth import updater
     from app.mcp import admin
     with _pytest.raises(ToolError):
         admin.rewrite_sidecars("wrong", [lib["ids"][0]])
-    r = admin.rewrite_sidecars(updates.admin_token(), lib["ids"][:2])
+    r = admin.rewrite_sidecars(updater.admin_token(), lib["ids"][:2])
     assert r["photos"] == 2 and r["tags_failed"] == [] and set(r["regions"]) == {str(i) for i in lib["ids"][:2]}, r
 
 
 def test_edit_photos_tool_sets_the_date_in_sidecar_and_database(client, lib):
     import sqlite3
-    from app import updates
+    from app.auth import updater
     from app.mcp import admin, files
     from app.photos import edits
     pid = lib["ids"][-1]
     con = sqlite3.connect(lib["db"]); before = con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0]; con.close()
-    r = admin.edit_photos(updates.admin_token(), [pid], taken="2015-04-04T12:37:05")
+    r = admin.edit_photos(updater.admin_token(), [pid], taken="2015-04-04T12:37:05")
     assert r["edited"] == 1 and r["database"]["applied"] == 1, r
     con = sqlite3.connect(lib["db"])
     assert con.execute("SELECT creationDate FROM ImageInformation WHERE imageid = ?", (pid,)).fetchone()[0].startswith("2015-04-04T12:37:05")
     con.close()
-    admin.edit_photos(updates.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
+    admin.edit_photos(updater.admin_token(), [pid], taken=str(before)[:19].replace(" ", "T"))
     edits.forget([pid])
 
 
 def test_inspect_file_reads_a_video(client, lib):
-    from app import updates
+    from app.auth import updater
     from app.mcp import admin, files
-    r = files.inspect_file(updates.admin_token(), lib["videos"][0])
+    r = files.inspect_file(updater.admin_token(), lib["videos"][0])
     assert r["size"] > 0 and r["boxes"] and r["complete"] and "exiftool" in r, r
 
 
