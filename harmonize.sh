@@ -187,6 +187,8 @@ fi
 if [ "$HAS_UNIT" = 1 ]; then
   cp "$UNIT" "$W/unit"
   edit "$W/unit" -e "s|^EnvironmentFile=.*|EnvironmentFile=$APP/config.env|" -e "s|^ExecStart=.*|ExecStart=$APP/.venv/bin/python -m app|"
+  grep -q '^EnvironmentFile=' "$W/unit" || edit "$W/unit" -e "s|^(ExecStart=.*)|EnvironmentFile=$APP/config.env\\
+\\1|"
 fi
 PLIST="$(ls "$HOME"/Library/LaunchAgents/*"$NAME"*.plist 2>/dev/null | head -n 1 || true)"
 
@@ -217,7 +219,7 @@ if [ "$UPDATE" = 0 ]; then say "Done. Now run ./update.sh (the service needs the
 say "Installing the new version (update.sh)"
 # in a git checkout this downloaded copy would block the merge (the new version has a harmonize.sh of its own)
 ASIDE=0
-if [ -d .git ] && [ -f harmonize.sh ] && ! git ls-files --error-unmatch harmonize.sh >/dev/null 2>&1; then mv harmonize.sh .harmonize.sh; ASIDE=1; fi
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -f harmonize.sh ] && ! git ls-files --error-unmatch harmonize.sh >/dev/null 2>&1; then mv harmonize.sh .harmonize.sh; ASIDE=1; fi
 if ! sh ./update.sh; then
   [ "$ASIDE" = 1 ] && [ ! -f harmonize.sh ] && mv .harmonize.sh harmonize.sh
   die "update.sh failed (see above). The settings are already converted; sh harmonize.sh --undo puts them back."
@@ -227,10 +229,12 @@ if [ "$HAS_UNIT" = 1 ] && command -v systemctl >/dev/null 2>&1; then systemctl r
 P="$(value config.env PORT)"; P="${P:-$NEW_PORT}"
 PY="$APP/.venv/bin/python"; [ -x "$PY" ] || PY=python3
 if "$PY" - "$P" <<'PYEOF'
-import sys, time, urllib.request
+import sys, time, urllib.error, urllib.request
 for _ in range(30):
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/api/status", timeout=3); sys.exit(0)
+    except urllib.error.HTTPError:
+        sys.exit(0)  # it answers (a status page that wants a sign-in is still an answer)
     except Exception:
         time.sleep(1)
 sys.exit(1)
