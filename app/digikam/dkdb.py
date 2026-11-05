@@ -76,7 +76,10 @@ def _mysql_kwargs() -> dict:
 
 def test_connection(c: dict = None) -> dict:
     """Try the given (or current) settings without saving them: counts, DBVersion, album roots."""
-    c = {**settings(), **{k: v for k, v in (c or {}).items() if v not in (None, "")}}
+    cur = settings()
+    c = {**cur, **{k: v for k, v in (c or {}).items() if v not in (None, "")}}
+    if any(str(c[k]) != str(cur[k]) for k in ("host", "port", "database", "user")) and not (c.get("password") and c["password"] != cur["password"]):
+        c["password"] = ""  # the stored password goes to the stored server only, never to another host the caller names
     if str(c["type"]).lower() in NO_DIGIKAM:
         raise SyncError("Nothing to test: no digiKam database is used")
     if str(c["type"]).lower() in ("mysql", "mariadb"):

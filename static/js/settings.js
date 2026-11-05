@@ -645,6 +645,14 @@ export function viewerDbPanel({ setup = false } = {}) {
   const btn = (label, fn, primary) => h('button', { class: 'pillbtn' + (primary ? ' on' : ''), onclick: fn }, label);
   (async () => {
     let d; try { d = await api('/api/viewerdb'); } catch (e) { fill(body, e.message); return; }
+    if (d.locked) {  // configured but not answering, and nobody signed in: only Retry (the connection is changed in data/viewer-db.json or VIEWER_DB_*)
+      const result = h('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' });
+      fill(body, h('div', null, `${S.APP_NAME}’s database is configured but not answering: `, h('span', { class: 'warn' }, d.error || ''),
+        h('div', { class: 'muted note mt6' }, 'Start the database server (or wait for it) and retry. To use another server, change data/viewer-db.json or the VIEWER_DB_* variables and restart.')),
+        h('div', { class: 'btnrow', style: 'margin-top:8px' },
+          btn('Retry the configured database', async () => { fill(result, 'Trying…'); try { await post('/api/viewerdb/retry', {}); fill(result, 'It answers now. Restarting…'); setTimeout(() => location.reload(), 4000); } catch (e) { fill(result, e.message); } }, true)), result);
+      return;
+    }
     const inp = (k, ph, type = 'text', w = 160) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : (d[k] ?? ''), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
     const f = { host: inp('host', 'host'), port: inp('port', 'port', 'text', 70), database: inp('database', 'database'), user: inp('user', 'user'),
       password: inp('password', d.password_set ? 'password (stored; leave empty to keep)' : 'password', 'password') };

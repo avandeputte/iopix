@@ -161,7 +161,8 @@ def embed_paths(paths: list, kind: str = None, sess=None):
     name = s.get_inputs()[0].name
     out = []
     for p in paths:
-        blob = _prepare(Image.open(p), kind)[None]
+        with Image.open(p) as im:
+            blob = _prepare(im, kind)[None]
         v = s.run(None, {name: blob})[0][0]
         out.append(v / max(float(np.linalg.norm(v)), 1e-9))
     return np.asarray(out, dtype=np.float32)

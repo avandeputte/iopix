@@ -16,7 +16,7 @@ import os
 import subprocess
 
 from app.digikam import dbsync, dkdb
-from app.photos import edits, history, pixelguard, scanner
+from app.photos import edits, history, scanner
 from app.data import index
 from app.digikam.dbsync import SyncError
 from app.faces import facemgr
@@ -100,9 +100,8 @@ def write(pid: int, changes: list, require_digikam_closed: bool = True) -> dict:
     if in_file:
         edits.ensure_backup(p["path"])
         jobs.append((p["path"], _args(changes)))
-    with pixelguard.Guard([p["path"]] if in_file else []) as g:
-        bad = edits.run_exiftool(jobs)
-        undone = g.verify()
+    undone = []
+    bad = edits.run_exiftool(jobs, undone)  # pixelguard inside run_exiftool: a file whose picture would change is put back, and named in `undone`
     if undone or any(b.endswith(".xmp") for b in bad):
         raise SyncError("exiftool could not write " + ("the image data would have changed; the file is as it was" if undone else ", ".join(os.path.basename(b) for b in bad)))
     file_error = None

@@ -104,6 +104,7 @@ def delete(photos: list, require_digikam_closed: bool = True) -> dict:
     with dkdb.reader() as rcon:
         where = {r["id"]: r["path"] for r in organize._rows(rcon, [int(p["id"]) for p in photos])}
     manifest, ok, failed = [], [], []
+    copied = {}  # where each copy in the backup came from: two album roots can hold the same relative path
     moved = []
     for p in photos:
         now = where.get(int(p["id"]))
@@ -118,8 +119,11 @@ def delete(photos: list, require_digikam_closed: bool = True) -> dict:
             files = [p["path"]] + sidecars(p["path"]) if os.path.exists(p["path"]) else sidecars(p["path"])
             for f in files:
                 t = dest / _rel(f)
+                if copied.get(t, f) != f:
+                    raise OSError(f"another photo in this batch has the same path in another album root ({copied[t]}); delete them separately")
                 t.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(f, t)
+                copied[t] = f
             manifest.append({**{k: p.get(k) for k in ("id", "path", "name", "hash", "size", "taken", "rating", "title", "caption")},
                              "tags": p.get("tags", []), "files": [str(_rel(f)) for f in files]})
             ok.append(p)
