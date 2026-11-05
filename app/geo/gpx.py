@@ -18,13 +18,16 @@ from datetime import datetime, timezone
 
 def parse(data: bytes) -> list:
     """[(utc timestamp, lat, lon, ele or None)] sorted by time."""
-    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff") or data[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff") or b"\x00<" in data[:64]:
+        raise ValueError("GPX files must be UTF-8 (or ASCII) XML")  # UTF-16/32 would slip past the checks below
+    low = data.lower()
+    if b"<!doctype" in low or b"<!entity" in low:
         raise ValueError("GPX files with a DOCTYPE are not accepted")
     root = ET.fromstring(data)
     pts = []
     for el in root.iter():
         # GPX 1.0 and 1.1 differ only in namespace, so match on the local name; waypoints count too
-        if not el.tag.endswith("}trkpt") and not el.tag.endswith("}wpt") and el.tag != "trkpt":
+        if not el.tag.endswith(("}trkpt", "}wpt")) and el.tag not in ("trkpt", "wpt"):
             continue
         try:
             lat, lon = float(el.get("lat")), float(el.get("lon"))

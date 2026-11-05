@@ -124,7 +124,7 @@ class _Merge:
         """New (parents first), changed, deleted."""
         d, q = self.d, self.q
         tc = d["tags"]["cols"]
-        for r in sorted(d["tags"]["new"], key=lambda r: r[0]):
+        for r in _parents_first(d["tags"]["new"], tc):  # a tag moved under a newer one has the smaller id: order by parent, not id
             row = dict(zip(tc, r))
             cur = q("INSERT INTO Tags (pid, name, icon, iconkde) VALUES (?,?,?,?)", (self.tag(row["pid"]), row["name"], row["icon"], row["iconkde"]))
             self.tagmap[row["id"]] = cur.lastrowid
@@ -165,9 +165,12 @@ class _Merge:
                     (row["albumRoot"], row["relativePath"], row["date"], row["caption"], row["collection"], None, row["modificationDate"]))
             self.albummap[row["id"]] = cur.lastrowid
             self.cnt("folders_new")
-        for b, o in d["folders"]["changed"]:
+        # a folder renamed or moved with sync off is at its new path on disk: digiKam's row follows (the deepest
+        # paths last, so a renamed parent's row is written before its children's)
+        for b, o in sorted(d["folders"]["changed"], key=lambda bo: dict(zip(fc, bo[1]))["relativePath"].count("/")):
             orow = dict(zip(fc, o))
-            q("UPDATE Albums SET caption = ?, collection = ? WHERE id = ?", (orow["caption"], orow["collection"], orow["id"]))
+            q("UPDATE Albums SET relativePath = ?, date = ?, caption = ?, collection = ? WHERE id = ?",
+              (orow["relativePath"], orow["date"], orow["caption"], orow["collection"], orow["id"]))
             self.cnt("folders_changed")
 
     def photos(self):
@@ -313,6 +316,18 @@ def apply(require_digikam_closed: bool = True) -> dict:
     index.conflict["digikam"] = None
     log.info("merged the changes made with sync off into digiKam's database in %.1fs: %s (%d conflicts, %d photos renumbered)", time.time() - t0, m.applied, m.conflicts, len(remap))
     return {"applied": m.applied, "conflicts": m.conflicts, "remapped": len(remap), "backup": str(backup) if backup else None}
+
+
+def _parents_first(rows: list, cols: list) -> list:
+    """New tags in an order that inserts every parent before its children, whatever their ids (a tag moved under
+    a tag created after it has the smaller id); the rest by id, as before."""
+    ids = {r[cols.index("id")] for r in rows}
+    pid_of = {r[cols.index("id")]: r[cols.index("pid")] for r in rows}
+
+    def depth(tid, seen=()):
+        p = pid_of.get(tid)
+        return 0 if p not in ids or p in seen else 1 + depth(p, (*seen, tid))
+    return sorted(rows, key=lambda r: (depth(r[cols.index("id")]), r[cols.index("id")]))
 
 
 def _pm(photomap, v):

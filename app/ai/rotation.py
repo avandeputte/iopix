@@ -128,7 +128,8 @@ def _thumb(con, pid: int):
     if not r:
         return None
     try:
-        return Image.open(thumbs.make("t", dict(r))).convert("RGB")
+        with Image.open(thumbs.make("t", dict(r))) as im:
+            return im.convert("RGB")
     except Exception as e:
         log.debug("rotation: no thumbnail for %s (%s)", pid, e)
         return None

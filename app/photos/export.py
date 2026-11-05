@@ -64,7 +64,8 @@ def prepare(path: str, opts: dict):
                     im.save(out, icc_profile=icc) if icc else im.save(out)
             # the original's metadata on the copy; it is upright now, and its size is the new one
             _exiftool(["-tagsfromfile", path, "-all:all", "-xmp:all", "-unsafe", "-Orientation#=1", "-IFD1:all=", "-ThumbnailImage=", "-PreviewImage="], out)
-            w, h = Image.open(out).size
+            with Image.open(out) as done:
+                w, h = done.size
             _exiftool([f"-ExifImageWidth={w}", f"-ExifImageHeight={h}"], out)
         else:  # a video, or a still kept at its size and format: a copy, so only the location can change
             out = os.path.join(tmp, "out" + ext)

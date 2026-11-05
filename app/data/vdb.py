@@ -294,7 +294,8 @@ _tl = threading.local()  # one MySQL connection per thread, kept open: a fresh T
 
 class _Kept:
     """A pooled PyMySQL connection: close() rolls back whatever was not committed and keeps the socket for the
-    next use on this thread; a broken one is dropped so the next connect() opens a new one."""
+    next use on this thread; a broken one is dropped so the next connect() opens a new one. The connection is
+    leased to one holder at a time (_tl.busy): closing it ends the lease."""
 
     def __init__(self, raw):
         self.raw = raw
@@ -303,6 +304,8 @@ class _Kept:
         return getattr(self.raw, name)
 
     def close(self):
+        if getattr(_tl, "raw", None) is self.raw:
+            _tl.busy = False
         try:
             self.raw.rollback()
         except Exception:
@@ -314,19 +317,40 @@ class _Kept:
                 _tl.raw = None
 
 
+class _Own:
+    """A connection of its own for a nested use while the thread's pooled one is leased: a reader opened inside a
+    writer's block (a setting looked up, a photo's row read) must not roll back or commit the writer's work, so it
+    gets a connection that really closes."""
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
+
+    def close(self):
+        try:
+            self.raw.close()
+        except Exception:
+            pass
+
+
 def _mysql_kept(c: dict):
     key = (c["host"], c["port"], c["database"], c["user"])
     raw = getattr(_tl, "raw", None)
+    if raw is not None and getattr(_tl, "busy", False):
+        return _Own(_mysql_raw(c))  # the pooled connection is in use further up this thread's stack
     if raw is not None and getattr(_tl, "key", None) == key:
         try:
             raw.ping()  # a dead socket raises: dropped below, and a new connection is opened
+            _tl.busy = True
             return _Kept(raw)
         except Exception:
             try:
                 raw.close()
             except Exception:
                 pass
-    _tl.raw, _tl.key = _mysql_raw(c), key
+    _tl.raw, _tl.key, _tl.busy = _mysql_raw(c), key, True
     return _Kept(_tl.raw)
 
 
@@ -647,9 +671,19 @@ def retry():
 
 
 # ---- testing, copying, switching
+def _with_stored(c: dict) -> dict:
+    """The given settings over the stored ones; an empty password keeps the stored one, but only for the
+    stored server, database and user (it is never sent to another host the caller names)."""
+    cur = settings()
+    c = {**cur, **{k: v for k, v in c.items() if k in KEYS and v not in (None, "")}}
+    if any(str(c[k]) != str(cur[k]) for k in ("host", "port", "database", "user")) and not (c.get("password") and c["password"] != cur["password"]):
+        c["password"] = ""
+    return c
+
+
 def test_connection(c: dict) -> dict:
-    """Connect with the given settings (an empty password keeps the stored one) and count what is there."""
-    c = {**settings(), **{k: v for k, v in c.items() if k in KEYS and v not in (None, "")}}
+    """Connect with the given settings (an empty password keeps the stored one, for the stored server) and count what is there."""
+    c = _with_stored(c)
     con = connect(cfg=c)
     try:
         ver = con.execute("SELECT VERSION()").fetchone()[0]
@@ -705,7 +739,7 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
     current one (or, on an install from before v1.113 that has no database yet, from its viewer.db, which is
     then renamed), save the configuration. The caller restarts the viewer afterwards."""
     cur = settings()
-    c = {**cur, **{k: v for k, v in c.items() if k in KEYS and v not in (None, "")}}
+    c = _with_stored(c)
     c["type"] = "mysql"
     if not (c["host"] and c["database"] and c["user"]):
         raise ValueError("A host, a database and a user are needed")

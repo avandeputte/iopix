@@ -274,17 +274,19 @@ def _cstr(arg: str) -> str:
     return "#[CSTR]" + arg.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
 
 
-def run_exiftool(jobs: list) -> list:
+def run_exiftool(jobs: list, undone: list = None) -> list:
     """jobs: [(target file, [args])]. One exiftool process handles them all, each
     target backed up first. Returns the targets that failed (or were skipped because
-    they could not be backed up)."""
+    they could not be backed up). `undone`, when given, receives the image files put
+    back because the write would have changed their picture (pixelguard); they are in
+    the returned list too."""
     if not jobs:
         return []
     with lock:
-        return _run_exiftool(jobs)
+        return _run_exiftool(jobs, undone)
 
 
-def _run_exiftool(jobs: list) -> list:
+def _run_exiftool(jobs: list, undone: list = None) -> list:
     lines, skipped = [], []
     for target, args in jobs:
         try:
@@ -323,6 +325,8 @@ def _run_exiftool(jobs: list) -> list:
             pass
     if damaged:
         skipped += damaged
+        if undone is not None:
+            undone.extend(damaged)
         jobs = [j for j in jobs if j[0] not in damaged]
     for target, _ in jobs:
         if target.endswith(".xmp"):

@@ -127,7 +127,8 @@ async def _without_database(request: Request, call_next):
     """The viewer has no usable database of its own (vdb.ready() is false): the app shell and the status answer,
     the database set-up endpoints are served here directly, as an admin (there is nobody else yet, as on a fresh
     install; the sign-in middleware and the routes' own checks would need the database), and everything else
-    says what is missing. The viewer restarts once a database is chosen."""
+    says what is missing. The viewer restarts once a database is chosen. Once a database is configured, only
+    Retry stays open (see below)."""
     path, method = request.url.path, request.method
     if path == "/api/status":
         return JSONResponse({"needsDatabase": True, "databaseError": vdb.error, "databaseConfigured": vdb.configured(),
@@ -137,6 +138,21 @@ async def _without_database(request: Request, call_next):
             origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
             if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
                 return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
+        # a database is configured but did not answer at start (the server is down, or started after the viewer): nobody is
+        # signed in, so nothing here may test another server with the stored password or point the viewer at another
+        # database; only Retry, and the error. Changing the connection then is done in data/viewer-db.json or VIEWER_DB_*.
+        if vdb.configured():
+            if path == "/api/viewerdb" and method == "GET":
+                return JSONResponse({"configured": True, "locked": True, "error": vdb.error, "type": "mysql"})
+            if path == "/api/viewerdb/retry" and method == "POST":
+                try:
+                    return JSONResponse(await settings.api_viewerdb_retry())
+                except HTTPException as e:
+                    return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+            if path in ("/api/viewerdb/test", "/api/viewerdb/switch"):
+                return JSONResponse({"detail": f"{APP_NAME_DEFAULT}'s database is configured but not answering ({vdb.error}). "
+                                               "Retry once it is up, or change the connection in data/viewer-db.json or the VIEWER_DB_* variables."}, status_code=403)
+            return JSONResponse({"detail": "Not found"}, status_code=404)
         try:
             if path == "/api/viewerdb" and method == "GET":
                 return JSONResponse(settings.api_viewerdb())

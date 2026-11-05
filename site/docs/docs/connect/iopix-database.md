@@ -43,7 +43,7 @@ iopix reads the connection from `viewer-db.json` in the data folder, or from the
 
 Without either, iopix starts in a **database needed** state: the web app shows only a set-up page, the same panel as **Settings › digiKam and server › iopix database**, asking for the server details. **Test connection** checks them; **Use this database** saves them to `viewer-db.json` and restarts iopix on the new database. Until then nothing else answers: API calls return 503 with `needsDatabase: true`.
 
-If the configured server cannot be reached at start, the same page shows the error and a **Retry** button. iopix waits for the database; it does not fall back to anything else.
+If the configured server cannot be reached at start, the same page shows the error and a **Retry** button only. Nobody can sign in without the database, so the page does not let anyone test or switch to another server then; to change the connection, edit `data/viewer-db.json` (or the `VIEWER_DB_*` variables) and restart. iopix waits for the database; it does not fall back to anything else.
 
 !!! tip "Server on the Docker host"
     From a container, `VIEWER_DB_HOST: host.docker.internal` reaches a server on the same machine.
