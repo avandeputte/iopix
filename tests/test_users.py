@@ -269,4 +269,4 @@ def test_registers_in_the_suite(client, fresh):
     assert suite.get("iopix") is None
     client.get("/api/status")
     app = suite.get("iopix")
-    assert app["name"] == "iopix" and app["version"] == __version__ and app["color"] == "#3b4a8c"
+    assert app["name"] == "ioPix" and app["version"] == __version__ and app["color"] == "#3b4a8c"

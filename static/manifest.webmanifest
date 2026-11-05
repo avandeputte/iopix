@@ -1,5 +1,5 @@
 {
-  "name": "iopix",
+  "name": "ioPix",
   "short_name": "Photos",
   "description": "Browse and search a digiKam photo library",
   "start_url": "./#/explore",

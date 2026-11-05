@@ -38,9 +38,9 @@ def test_settings_and_maintenance_pages(page, server):
     page.goto(server + "/#/maintenance")
     page.wait_for_selector("h1:has-text('Maintenance')", timeout=10000)  # a hash-only navigation re-renders in place
     page.wait_for_selector(".stabs", timeout=10000)
-    assert page.locator(".stabs button").all_inner_texts() == ["Library", "AI analysis and models", "Storage and backups", "iopix"], "the app's name, not the retired Viewer"
+    assert page.locator(".stabs button").all_inner_texts() == ["Library", "AI analysis and models", "Storage and backups", "ioPix"], "the app's name, not the retired Viewer"
     heads = page.locator("h2").evaluate_all("els => els.map((e) => e.textContent)")
-    for h in ("Library", "AI analysis and models", "Storage and backups", "iopix"):
+    for h in ("Library", "AI analysis and models", "Storage and backups", "ioPix"):
         assert any(x.startswith(h) for x in heads), (h, heads)
     assert "Display" not in heads and "Editing" not in heads
     page.locator(".stabs button", has_text="AI analysis and models").click()

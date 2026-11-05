@@ -259,12 +259,13 @@ def setup_file_log():
             lg.setLevel(logging.INFO)
 
 
-APP_NAME_DEFAULT = "iopix"
+APP_NAME_DEFAULT = "ioPix"
 
 
 def app_name() -> str:
     """What the viewer calls itself (Settings › Name): the top bar, the tab title, the installed app."""
-    return (appstate.get_setting("app_name", "") or "").strip()[:40] or APP_NAME_DEFAULT
+    name = (appstate.get_setting("app_name", "") or "").strip()[:40]
+    return APP_NAME_DEFAULT if not name or name.lower() == APP_NAME_DEFAULT.lower() else name  # "iopix" typed in any case shows as the wordmark ioPix
 
 
 def app_stamp() -> str:

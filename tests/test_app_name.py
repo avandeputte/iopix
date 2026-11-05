@@ -2,7 +2,7 @@
 
 
 def test_app_name_setting_brands_status_and_manifest(client):
-    assert client.get("/api/status").json()["appName"] == "iopix"
+    assert client.get("/api/status").json()["appName"] == "ioPix"
     assert client.post("/api/settings", json={"app_name": "  iothing Photos "}).status_code == 200
     try:
         assert client.get("/api/status").json()["appName"] == "iothing Photos"
@@ -13,4 +13,13 @@ def test_app_name_setting_brands_status_and_manifest(client):
         assert client.get("/manifest.webmanifest").json()["short_name"] == "Pix"
     finally:
         client.post("/api/settings", json={"app_name": ""})
-    assert client.get("/api/status").json()["appName"] == "iopix"
+    assert client.get("/api/status").json()["appName"] == "ioPix"
+
+
+def test_lowercase_iopix_shows_the_wordmark_spelling(client):
+    """A name saved as "iopix" (before the capital P) still shows as ioPix, like the other ioThing apps."""
+    client.post("/api/settings", json={"app_name": "iopix"})
+    try:
+        assert client.get("/api/status").json()["appName"] == "ioPix"
+    finally:
+        client.post("/api/settings", json={"app_name": ""})

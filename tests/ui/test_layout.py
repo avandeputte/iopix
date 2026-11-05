@@ -104,7 +104,7 @@ def test_app_name_shows_in_the_top_bar_and_tab(page, server):
 def test_the_name_iopix_is_written_in_two_colours(page, server):
     page.goto(server + "/#/photos")
     page.wait_for_selector(".brand-name .io", timeout=10000)
-    assert page.locator(".brand-name").text_content() == "iopix"
+    assert page.locator(".brand-name").text_content() == "ioPix"
     io, pix = page.evaluate("[...document.querySelectorAll('.brand-name .io, .brand-name .pix')].map((e) => getComputedStyle(e).color)")
     assert io != pix  # gold and indigo, from the --name-io/--name-pix tokens
 

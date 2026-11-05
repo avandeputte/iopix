@@ -290,7 +290,7 @@ function displayTab(c) {
     stab('display'),
     h('h2', null, 'Display'),
     S.IS_ADMIN ? (() => {
-      const inp = h('input', { class: 'einput', placeholder: 'iopix', value: m.appNameSet || '', maxlength: 40, style: 'width:220px', onkeydown: (e) => { if (e.key === 'Enter') e.target.nextSibling.click(); } });
+      const inp = h('input', { class: 'einput', placeholder: 'ioPix', value: m.appNameSet || '', maxlength: 40, style: 'width:220px', onkeydown: (e) => { if (e.key === 'Enter') e.target.nextSibling.click(); } });
       return row('Name', `What ${S.APP_NAME} calls itself, for everyone: the top bar, the browser tab and the installed app. Leave it empty for iopix.`,
         h('span', { style: 'display:flex;gap:6px;align-items:center' }, inp, btn('Save', async () => { try { await post('/api/settings', { app_name: inp.value }); toast('Name saved.'); pollSoon(300); } catch (e) { toastError(e); } })));
     })() : null,
