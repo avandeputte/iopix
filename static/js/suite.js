@@ -1,7 +1,7 @@
 /** The ioThing suite's other apps (iothing-auth's suite_apps, GET /api/auth/suite). When other apps are registered,
- *  the iopix name top left (in the sidebar; in the top bar on a phone) opens a menu of them, each a link to that app.
- *  Alone, the name stays the link to Explore and nothing else changes. Signed-in accounts only (the list needs one). */
-import { $, api, h, icon } from './core.js';
+ *  the iopix logo top left (in the sidebar; in the top bar on a phone) opens a menu of them, each a link to that app.
+ *  Alone, the logo and the name are the link to Explore and nothing else changes. Signed-in accounts only (the list needs one). */
+import { $, api, h } from './core.js';
 import { S, brandName } from './state.js';
 
 let apps = [];
@@ -24,26 +24,27 @@ export async function loadSuite() {
   draw();
 }
 
-/** The sidebar's name becomes a button when there are other apps (a link to Explore otherwise); on a phone the top
- *  bar shows the same button, since the sidebar is the bottom bar there. */
+/** The logo top left opens the menu when there are other apps, and the name beside it stays the link to Explore;
+ *  alone, logo and name are one link to Explore. On a phone the sidebar is the bottom bar, so the top bar shows the
+ *  logo button instead. */
+const mark = () => h('img', { src: 'icons/mark.svg', alt: '', class: 'brand-mark' });
+function suiteButton(id) {
+  return h('button', { type: 'button', id, class: 'suitebtn', title: 'Other ioThing apps', 'aria-haspopup': 'menu', 'aria-label': 'Open another ioThing app',
+    onclick: (e) => toggleSuite(e.currentTarget) }, mark());
+}
 function draw() {
   closeSuite();
   const head = $('#nav .navhead'), old = head && head.querySelector('.brand');
   if (old) {
-    const title = old.title;
+    const title = old.title || 'Home';
     const brand = apps.length
-      ? h('button', { type: 'button', class: 'brand suitebtn', 'aria-haspopup': 'menu', 'aria-label': 'Open another ioThing app', onclick: (e) => toggleSuite(e.currentTarget) },
-        brandName(), icon('expand'))
-      : h('a', { class: 'brand', href: '#/explore' }, brandName());
-    brand.title = title || 'Home';
+      ? h('div', { class: 'brand', title }, suiteButton(null), h('a', { class: 'brand-home', href: '#/explore', title: 'Home' }, brandName()))
+      : h('a', { class: 'brand', href: '#/explore', title }, mark(), brandName());
     old.replaceWith(brand);
   }
   let top = $('#suitebtn');
-  if (apps.length && !top) {
-    top = h('button', { type: 'button', id: 'suitebtn', class: 'suitebtn', title: 'Other ioThing apps', 'aria-haspopup': 'menu', 'aria-label': 'Open another ioThing app',
-      onclick: (e) => toggleSuite(e.currentTarget) }, brandName(), icon('expand'));
-    $('#topbar').prepend(top);
-  } else if (!apps.length && top) top.remove();
+  if (apps.length && !top) $('#topbar').prepend(suiteButton('suitebtn'));
+  else if (!apps.length && top) top.remove();
 }
 
 export function closeSuite() {
