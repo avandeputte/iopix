@@ -118,6 +118,18 @@ ask_app_settings() {
     aw=$(whiptail --backtitle "$bt" --passwordbox "Admin password (8 characters or more; empty: no account yet)" 9 72 3>&1 1>&2 2>&3) || exit 1
     [[ -n "$aw" ]] && IOPIX_ADMIN="$an:$aw" || IOPIX_ADMIN=""
   fi
+  if [[ -z "${IOPIX_ALSO+x}" ]]; then  # the other apps of the suite in the same container
+    IOPIX_ALSO=$(whiptail --backtitle "$bt" --checklist "Also install in this container (same database server, each app its own database; same accounts and admin; each on its usual port):" 15 78 5 \
+      iosuite "ioSuite (the start page)  (8630)" OFF \
+      iocalendar "ioCalendar  (8620)" OFF \
+      iocontacts "ioContacts  (8640, LDAP 3890)" OFF \
+      ionotes "ionotes  (8610)" OFF \
+      iohealth "ioHealth  (47800)" OFF 3>&1 1>&2 2>&3) || exit 1
+    IOPIX_ALSO=$(echo "$IOPIX_ALSO" | tr -d '"' | tr ' ' ',')
+  fi
+  if [[ -n "$IOPIX_ALSO" ]]; then  # room for more than one app
+    (( var_ram < 2048 )) && var_ram=2048; (( var_disk < 8 )) && var_disk=8
+  fi
 }
 
 function update_script() {
@@ -169,7 +181,7 @@ VDBENV=""; if [[ "${IOPIX_DB:-local}" == local ]]; then VDBENV=". /opt/iopix/vie
 SECF="$(mktemp)"; chmod 600 "$SECF"; printf '%s' "$SECRETS" > "$SECF"
 pct push "$CTID" "$SECF" /opt/iopix/setup.env --perms 0600 --user 0 --group 0
 rm -f "$SECF"
-SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DBARG --data /opt/iopix/data --features '${IOPIX_FEATURES:-none}' --service --no-system-deps --port 8600 --public-url '${IOPIX_PUBLIC_URL:-}' --cookie-domain '${IOPIX_COOKIE_DOMAIN:-}'"
+SETUP_CMD="cd /opt/iopix/app && sh ./setup.sh --yes --photos /library/photos $DBARG --data /opt/iopix/data --features '${IOPIX_FEATURES:-none}' --service --no-system-deps --port 8600 --public-url '${IOPIX_PUBLIC_URL:-}' --cookie-domain '${IOPIX_COOKIE_DOMAIN:-}' --also '${IOPIX_ALSO:-none}'"
 WRAPPED="set -a; . /opt/iopix/setup.env; ${VDBENV}set +a; rm -f /opt/iopix/setup.env; $SETUP_CMD > /opt/iopix/setup.log 2>&1"
 # the setup's output is kept in the container; on failure the last lines are shown here
 if ! pct exec "$CTID" -- bash -c "$WRAPPED"; then
@@ -186,5 +198,9 @@ msg_ok "Completed successfully!\n"
 echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
 echo -e "${INFO}${YW}Access it using the following URL:${CL}"
 echo -e "${GATEWAY}${BGN}http://${IP}:8600${CL}"
+for a in ${IOPIX_ALSO//,/ }; do
+  case "$a" in iosuite) p=8630;; iocalendar) p=8620;; iocontacts) p=8640;; ionotes) p=8610;; iohealth) p=47800;; iopix) p=8600;; *) p="";; esac
+  [[ -n "$p" ]] && echo -e "${INFO}${YW}$a:${CL} ${BGN}http://${IP}:$p${CL}"
+done
 [[ "${IOPIX_DB:-local}" == local ]] && echo -e "${INFO}${YW}iopix's own database: MariaDB inside the container (database iopix; the credentials are in /opt/iopix/app/config.env).${CL}" || echo -e "${INFO}${YW}iopix's own database: the MySQL/MariaDB server you named (DB_* in /opt/iopix/app/config.env).${CL}"
 [[ "${IOPIX_WRITE:-0}" = 1 ]] && echo -e "${INFO}${YW}The library is mounted read/write (sidecar edits, database writes on request).${CL}" || echo -e "${INFO}${YW}The library is mounted read-only (browsing only). To allow edits later: recreate with write access, or make the container privileged and remount without ro=1.${CL}"
