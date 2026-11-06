@@ -15,6 +15,9 @@
 #     user: iosuite, on the --db server); kept as it is in config.env when not given
 #   --admin NAME:PASS | --no-admin   --port 8600   --public-url URL   --cookie-domain DOMAIN
 #   --service | --no-service   --python PATH   --system-deps | --no-system-deps   --yes
+#   --also APP,APP | all | none   also install other apps of the suite here (iosuite, iocalendar, iocontacts, ionotes, iohealth), beside this one,
+#                                 with the same database server (each app its own database), Shared ioSuite database,
+#                                 sign-in domain and admin: those questions are asked once (IOPIX_ALSO does the same)
 # iopix's own: --photos DIR   --data DIR   --features search,places,objects,ocr,captions   --search-model clip|siglip2
 #   --digikam-db HOST:PORT/DB:USER:PASS | --digikam-sqlite DIR | --no-digikam   digiKam's database (--no-digikam: iopix
 #   keeps the library itself and finds the photos in the folder)
@@ -28,19 +31,20 @@ APP="$(pwd)"
 OS="$(uname -s)"
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
-YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; NODK=0; VIEWERDB=""; SUITE=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; PUBURL=""; COOKIE=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""
+YES=0; PHOTOS=""; SQLITE=""; MYSQL=""; NODK=0; VIEWERDB=""; SUITE=""; FEATURES=""; SEARCH_MODEL=""; PORT=""; PUBURL=""; COOKIE=""; ADMIN=""; NO_ADMIN=0; SERVICE=""; DATA=""; PY=""; SYSDEPS=""; ALSO=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1; shift;; --photos) PHOTOS="$2"; shift 2;; --digikam-sqlite) SQLITE="$2"; shift 2;; --digikam-db) MYSQL="$2"; shift 2;; --no-digikam) NODK=1; shift;; --db) VIEWERDB="$2"; shift 2;; --suite-db) SUITE="$2"; shift 2;;
     --features) FEATURES="$2"; shift 2;; --search-model) SEARCH_MODEL="$2"; shift 2;; --port) PORT="$2"; shift 2;; --public-url) PUBURL="$2"; shift 2;; --cookie-domain) COOKIE="$2"; shift 2;;
     --admin) ADMIN="$2"; shift 2;; --no-admin) NO_ADMIN=1; shift;; --service) SERVICE=1; shift;; --no-service) SERVICE=0; shift;;
-    --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    --data) DATA="$2"; shift 2;; --python) PY="$2"; shift 2;; --also) ALSO="$2"; shift 2;; --system-deps) SYSDEPS=1; shift;; --no-system-deps) SYSDEPS=0; shift;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option $1 (try --help)";;
   esac
 done
 # the same answers from the environment, for installers that would rather not put passwords on a command line
 [ -n "$ADMIN" ] || ADMIN="${IOPIX_ADMIN:-}"
+[ -n "$ALSO" ] || ALSO="${IOPIX_ALSO:-}"
 [ -n "$MYSQL" ] || MYSQL="${IOPIX_DIGIKAM_DB:-}"
 [ -n "$VIEWERDB" ] || VIEWERDB="${IOPIX_DB:-}"
 [ -n "$SUITE" ] || SUITE="${IOPIX_SUITE_DB:-}"
@@ -243,6 +247,10 @@ if [ -z "$ADMIN" ] && [ "$NO_ADMIN" = 0 ]; then
     [ -n "$AW" ] && ADMIN="$AN:$AW" || echo "no password given; skipping the admin account (Settings can create it later)"
   fi
 fi
+if [ -z "$ALSO" ]; then
+  say "The other apps of the suite can be installed here too, beside iopix, with the same database server (each app gets its own database), the same Shared ioSuite database, sign-in domain and admin"
+  ask ALSO "Also install (iosuite, iocalendar, iocontacts, ionotes, iohealth; comma-separated, 'all', or 'none')" "none"
+fi
 if [ -z "$SERVICE" ]; then
   case "$OS" in Darwin) SVC="a launchd login item";; *) SVC="a systemd service";; esac
   yesno "Start the viewer at login as $SVC?" y && SERVICE=1 || SERVICE=0
@@ -409,3 +417,14 @@ fi
 if [ -n "${DB_HOST:-}" ]; then VDBWHERE="MySQL/MariaDB ${DB_USER}@${DB_HOST}:${DB_PORT:-3306}/${DB_NAME} (in $ENVF)"
 elif [ -f "$DATA/viewer-db.json" ]; then VDBWHERE="as in $DATA/viewer-db.json"; else VDBWHERE="not set up yet: the viewer asks on its first page"; fi
 say "Done: http://localhost:$PORT   settings: $ENVF   data: $DATA   iopix database: $VDBWHERE"
+
+# ---- the other apps of the suite, beside this one (iosuite-shared install: the shared answers from config.env)
+case "$ALSO" in ''|none|no) ;;
+  *) say "Installing the other apps: $ALSO"
+     if [ "$SERVICE" = 1 ]; then SVC="--service"; else SVC="--no-service"; fi
+     if [ -n "$ADMIN" ]; then
+       ADMIN_PASSWORD="${ADMIN#*:}" "$VENV/bin"/iosuite-shared --config "$APP" install "$ALSO" --admin "${ADMIN%%:*}" --from iopix $SVC
+     else
+       "$VENV/bin"/iosuite-shared --config "$APP" install "$ALSO" --from iopix $SVC
+     fi || die "not every app could be installed; see the lines above (each one can be set up again with its own setup.sh)";;
+esac
