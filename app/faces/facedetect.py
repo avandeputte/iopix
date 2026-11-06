@@ -27,7 +27,7 @@ import threading
 import time
 
 from app.ai import analysis, models
-from app.data import index, vdb, vdb as v
+from app.data import index, vdb
 from app import jobs, thumbs
 from app.digikam.dkdb import chunked, in_chunks
 
@@ -277,15 +277,14 @@ def _scanned() -> dict:
 
 
 def coverage() -> int:
-    if not v.exists():
+    """How many photos the detector has looked at (Maintenance › AI analysis); 0 without a viewer database."""
+    if not vdb.ready():
         return 0
-    con = v.connect()
     try:
-        return con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'facedetect'").fetchone()[0]
+        with vdb.reader() as con:
+            return con.execute("SELECT count(*) FROM pix_ai_scans WHERE job = 'facedetect'").fetchone()[0]
     except Exception:
         return 0
-    finally:
-        con.close()
 
 
 def reset():

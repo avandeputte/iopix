@@ -85,3 +85,15 @@ def test_detect_endpoint_adds_only_unmarked_faces(client, lib, monkeypatch):
     c.commit()
     c.close()
     index.build()
+
+
+def test_coverage_counts_scanned_photos():
+    """Maintenance › AI analysis asks how many photos the detector looked at; the count comes from the viewer database."""
+    from app.data import vdb
+    with vdb.writer() as con:
+        con.execute("DELETE FROM pix_ai_scans WHERE job = 'facedetect'")
+        con.execute("INSERT INTO pix_ai_scans (photo_id, job, stamp) VALUES (1, 'facedetect', 'x'), (2, 'facedetect', 'x')")
+    assert facedetect.coverage() == 2
+    with vdb.writer() as con:
+        con.execute("DELETE FROM pix_ai_scans WHERE job = 'facedetect'")
+    assert facedetect.coverage() == 0
