@@ -118,6 +118,16 @@ ask_app_settings() {
     aw=$(whiptail --backtitle "$bt" --passwordbox "Admin password (8 characters or more; empty: no account yet)" 9 72 3>&1 1>&2 2>&3) || exit 1
     [[ -n "$aw" ]] && IOPIX_ADMIN="$an:$aw" || IOPIX_ADMIN=""
   fi
+  if [[ -z "${IOPIX_DB_ADMIN+x}" ]]; then  # a MariaDB administrator: the databases and users above are created for you (empty: they exist)
+    local dau daw
+    dau=$(whiptail --backtitle "$bt" --inputbox "MariaDB administrator who may create the databases and users above, e.g. root (empty: they exist already)" 10 76 "" 3>&1 1>&2 2>&3) || exit 1
+    if [[ -n "$dau" ]]; then
+      daw=$(whiptail --backtitle "$bt" --passwordbox "Password of $dau" 9 60 3>&1 1>&2 2>&3) || exit 1
+      IOPIX_DB_ADMIN="$dau:$daw"
+    else
+      IOPIX_DB_ADMIN=""
+    fi
+  fi
   if [[ -z "${IOPIX_ALSO+x}" ]]; then  # the other apps of the suite in the same container
     IOPIX_ALSO=$(whiptail --backtitle "$bt" --checklist "Also install in this container (same database server, each app its own database; same accounts and admin; each on its usual port):" 15 78 5 \
       iosuite "ioSuite (the start page)  (8630)" OFF \
@@ -178,6 +188,7 @@ msg_info "Running the app's setup inside the container (packages, models, settin
 VDBENV=""; if [[ "${IOPIX_DB:-local}" == local ]]; then VDBENV=". /opt/iopix/viewer-db.env; "; else SECRETS+="IOPIX_DB=$(printf '%q' "$IOPIX_DB")"$'\n'; fi
 [[ -n "${IOPIX_ADMIN:-}" ]] && SECRETS+="IOPIX_ADMIN=$(printf '%q' "$IOPIX_ADMIN")"$'\n'
 # the answers with passwords go in as a root-only file (pushed, read into setup.sh's environment, removed), never as arguments
+[[ -n "${IOPIX_DB_ADMIN:-}" ]] && SECRETS+="IOPIX_DB_ADMIN=$(printf '%q' "$IOPIX_DB_ADMIN")"$'\n'
 SECF="$(mktemp)"; chmod 600 "$SECF"; printf '%s' "$SECRETS" > "$SECF"
 pct push "$CTID" "$SECF" /opt/iopix/setup.env --perms 0600 --user 0 --group 0
 rm -f "$SECF"
