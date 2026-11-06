@@ -237,30 +237,6 @@ def models_arrived(keys: list):
         kick.set()
 
 
-def setup_file_log():
-    """A rotating log in the data folder, with uvicorn's lines, readable from Maintenance and the MCP
-    diagnostics whatever the platform logs to (journald, launchd, docker)."""
-    import logging
-    from logging.handlers import RotatingFileHandler
-    if config.LOG_FILE is None:  # LOG_FILE= with nothing after it: no file
-        return
-    try:
-        config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        h = RotatingFileHandler(config.LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-    except OSError:
-        return
-    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    h.setLevel(logging.INFO)  # the file's own level: INFO and up, whatever the loggers let through
-    for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
-        lg = logging.getLogger(name)
-        if not any(isinstance(x, RotatingFileHandler) and getattr(x, "baseFilename", "") == str(config.LOG_FILE) for x in lg.handlers):
-            lg.addHandler(h)
-        # a logger nobody configured (NOTSET: the root logger, WARNING by default) opens up to INFO so the app's own
-        # lines reach the file; a level somebody set, such as uvicorn's from --log-level, is left alone
-        if lg.level == logging.NOTSET:
-            lg.setLevel(logging.INFO)
-
-
 APP_NAME_DEFAULT = "ioPix"
 
 

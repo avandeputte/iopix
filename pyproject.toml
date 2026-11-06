@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iopix"
-version = "1.126.0"
+version = "1.127.0"
 description = "Web front end for a digiKam library, with local AI search"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,7 @@ dependencies = [
   "python-multipart<1",
   "mcp<3",
   "pyjwt[crypto]<3",   # Cloudflare Access tokens (proxy sign-in)
-  "iosuite-shared @ git+https://github.com/avandeputte/iosuite-shared.git@98abba420051914d02376fdd8a67ff287cc70e59",   # iosuite-shared 0.10.1, the suite's shared library: accounts, sessions, the Shared ioSuite database (pinned: bump to pick up a new one)
+  "iosuite-shared @ git+https://github.com/avandeputte/iosuite-shared.git@c68e257be27c10b064aa22a1c4fcf86112e3de28",   # iosuite-shared 0.11.0, the suite's shared library: accounts, sessions, the Shared ioSuite database (pinned: bump to pick up a new one)
 ]
 
 [project.optional-dependencies]
@@ -35,7 +35,7 @@ objects = ["numpy<3", "onnxruntime<2"]                               # YOLOX obj
 captions = ["torch>=2,<3", "transformers>=5,<6"]                     # BLIP photo descriptions (large; CPU wheels from the PyTorch index)
 speech = ["onnx-asr<1", "numpy<3", "onnxruntime<2"]                  # speech in videos (Parakeet / Whisper with ONNX Runtime)
 ai = ["fastembed<1", "huggingface_hub<2", "numpy<3", "rapidocr<4", "pyspellchecker<1", "onnxruntime<2"]
-test = ["pytest<10", "httpx<1", "playwright<2", "pytest-playwright<1", "pyflakes<5"]
+test = ["pytest<10", "httpx<1", "playwright<2", "pytest-playwright<1", "pyflakes<4"]
 
 [project.urls]
 Homepage = "https://github.com/avandeputte/iopix"

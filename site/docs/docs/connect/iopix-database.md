@@ -54,7 +54,7 @@ Create the new database as above, then in **Settings › digiKam and server › 
 
 ## Backups
 
-**Maintenance › Storage and backups › Download a backup › iopix data** gives `viewer.sql`, a `mysqldump` of the iopix database (the MCP admin token left out), plus the content-search embeddings files and a README with the restore steps. To restore, create an empty database and load the dump into it:
+**Maintenance › Storage and backups › Download a backup › iopix data** gives `viewer.sql`, a `mysqldump` of the iopix database, plus the content-search embeddings files and a README with the restore steps. To restore, create an empty database and load the dump into it:
 
 ```sh
 mariadb iopix < viewer.sql

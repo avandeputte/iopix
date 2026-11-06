@@ -1,10 +1,11 @@
-"""iopix: a web front end for a digiKam library.
+"""ioPix: a web front end for a digiKam library.
 
-The library (digiKam's database and the photo files) is only read here; the
-few endpoints that change it (sidecars, image files, digiKam's database on
-request) declare access.editor_write or access.admin_write on their route and
-go through the modules that own those writes."""
-import json
+Who may call a route is declared on the route (app/access.py); iosuite-shared's middleware works out who is asking
+(the shared session cookie, the identity a reverse proxy such as Cloudflare Access vouches for, HTTP Basic or a bearer
+app password), whether sign-in is required at all, and refuses cross-site writes. The same scheme as every app of the
+suite. The library (digiKam's database and the photo files) is only read here; the few endpoints that change it
+(sidecars, image files, digiKam's database on request) declare access.editor_write or access.admin_write on their route
+and go through the modules that own those writes."""
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -13,34 +14,36 @@ from urllib.parse import urlsplit
 from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi import HTTPException
+from iosuite_shared import mcp as shared_mcp
+from iosuite_shared.fastapi import public_user
+from iosuite_shared.updates import setup_log
 
 from app.ai import analysis, models as dlmodels
-from app.faces import facemgr
-from app import config, events, mcp, thumbs, users
-from iosuite_shared import proxyauth
-from app.auth import auth as auth_shared, updater
-from app.photos import consistency, edits, history, scanner, tagmanager
-from app.data import state as appstate, vdb
+from app.faces import facedetect, facemgr
+from app import config, events, jobs as bgjobs, mcp, thumbs, users
+from app.auth import auth, updater
+from app.photos import consistency, edits, history, lossless, scanner, tagmanager
+from app.data import index as photo_index, state as appstate, vdb
 from app.digikam import dkdb
+from app.geo import places
+from app.ai.semantic import enabled as semantic_enabled, semantic
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-proxyauth.remember_peer()  # before uvicorn's forwarded-header rewrite runs: proxy sign-in trusts the real peer
-from app.routes import auth, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
-from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, setup_file_log, models_arrived, APP_NAME_DEFAULT
+from app.routes import auth as auth_routes, backup, browse, images, albums, editing, geo, maintenance, review, organize, faces, settings, users as users_routes
+from app.runtime import state, kick, refresh, auto, watch, resolve, prewarmer, models_arrived, APP_NAME_DEFAULT, app_name, app_stamp, public_version
 from app import __version__ as APP_VERSION
+
+setup_log(config.LOG_FILE)  # the server log that Maintenance › Updates and logs shows; the app runs without it
 __all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewarmer"]  # tests and app.mcp reach these through app.main
 
 @asynccontextmanager
 async def lifespan(_app):
-    setup_file_log()
-    upgraded = config.INDEX_DB.exists()  # an install that has run before (a fresh one has no index yet)
     appstate.init()
     if not vdb.ready():  # no viewer database (a fresh install, an upgrade from before v1.113, or its server is down): the set-up page only
         logging.getLogger("app.main").error("starting without a viewer database (%s): only the database set-up page answers until one is configured", vdb.error)
-        async with mcp.server.session_manager.run():
+        async with shared_mcp.running(mcp.server):
             yield
         return
-    _mcp_first_setting(upgraded)
     users.init()
     edits.init()
     tagmanager.init()
@@ -59,69 +62,49 @@ async def lifespan(_app):
     updater.start_daily()  # the daily "is there a newer version" check, when the setting allows it
     if config.AUTO_MODELS:  # containers and fresh installs: fetch missing models, then start the jobs that need them
         dlmodels.auto_download(config.AUTO_MODELS, on_done=models_arrived)
-    async with mcp.server.session_manager.run():  # the MCP endpoint (/mcp) lives in this process
+    async with shared_mcp.running(mcp.server):  # the MCP endpoint (/mcp) lives in this process
         yield
 
 
-app = FastAPI(title="ioPix", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title="ioPix", version=APP_VERSION, lifespan=lifespan, docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
+              description="A web front end for a digiKam photo library, for the family. Also an MCP endpoint (/mcp) for AI assistants.")
 
-# every endpoint that changes the library (sidecars, files, digiKam's database); refused in read-only mode
-MAX_JSON_BODY = 4 << 20  # a JSON request larger than this is refused before it is read (uploads are multipart and not bound here)
+MAX_JSON_BYTES = 4 << 20  # a JSON request larger than this is refused (uploads are multipart and not bound here)
 
-
-# what a visitor may still fetch when sign-in is required: the app shell and the sign-in endpoints
-OPEN_PATHS = ("/", "/sw.js", "/manifest.webmanifest", "/api/status", "/share")
-OPEN_PREFIXES = ("/static/", "/api/auth/")  # /static/: the app shell's files (the map library among them)
+# what a visitor may still fetch when sign-in is required: the app shell and its files (the map library among them),
+# the API docs, a share link, and the MCP endpoint (its gate below)
+OPEN_PATHS = ("/", "/sw.js", "/manifest.webmanifest", "/share", "/api/docs", "/api/openapi.json")
+OPEN_PREFIXES = ("/static/", "/mcp")
 
 
 def _open_to_visitors(path: str) -> bool:
     if path.startswith("/face/"):  # the avatars on the sign-in screen: only the faces accounts are linked to
         tail = path[6:].split("/")[0]
         return tail.isdigit() and int(tail) in users.linked_persons()
-    return path in OPEN_PATHS or path.startswith(OPEN_PREFIXES)
-
-
-def _mcp_first_setting(upgraded: bool):
-    """The MCP switch is stored once and then kept across updates: off on a fresh install, on for an install
-    from before the switch existed (v1.85), whose /mcp answered until then."""
-    if appstate.get_setting("mcp_enabled", "") == "":
-        appstate.set_setting("mcp_enabled", "1" if upgraded else "0")
-        logging.getLogger("app").info("MCP server %s (first start with the MCP switch)", "kept on: an existing install" if upgraded else "off: a fresh install")
+    return False
 
 
 def mcp_enabled() -> bool:
     """Settings › Viewer › MCP server: off unless an admin turns it on (or MCP=1 in the environment)."""
-    if config.MCP_FORCED:
-        return True
-    return appstate.get_setting("mcp_enabled", "0") == "1"
+    return shared_mcp.enabled(appstate.get_setting, config.MCP_FORCED)
 
 
-def _mcp_token_ok(request: Request) -> bool:
-    """The MCP endpoint needs the admin token as a bearer header on every request (since v1.111)."""
-    auth = request.headers.get("authorization", "")
-    return auth.lower().startswith("bearer ") and updater.token_ok(auth[7:].strip())
+_mcp_gate = auth.mcp_gate(mcp_enabled, on_user=mcp.current_user.set, settings_page="Settings › Viewer › MCP server")
 
 
-def _gate(request: Request):
-    """Once the user is known (app/auth.py's middleware): who the change history and private albums see, and the
-    MCP endpoint's own gates (the switch, and the admin token on every request)."""
+def _before(request: Request):
+    """Once the user is known: who the change history and private albums see, and the MCP endpoint's gate (the switch;
+    an app password or session; every tool acts as that account, as in every app of the suite)."""
     user = request.state.user
     history.user.set(user["name"] if user else ("MCP" if request.url.path.startswith("/mcp") else "visitor"))
     appstate.viewer.set(user)  # private albums: seen only by their owner
-    if request.url.path.startswith("/mcp"):
-        if not mcp_enabled():  # switched off (the default): as if there were no such endpoint
-            return JSONResponse({"detail": "The MCP server is switched off (Settings › Viewer › MCP server)."}, status_code=404)
-        if not _mcp_token_ok(request):  # every request, the read-only tools included: the library is nobody else's business
-            return JSONResponse({"detail": "The MCP server needs the admin token on every request: 'Authorization: Bearer <token>' "
-                                           "(Maintenance › iopix version › MCP update token)"}, status_code=401)
-        mcp.token_given.set(True)  # answers may carry file paths: the caller holds the admin token
-    return None
+    return _mcp_gate(request)
 
 
-# who is asking (the shared session cookie, the proxy's identity), whether sign-in is required at all, and the
-# cross-site check on writes: iosuite-shared's middleware. What each route needs beyond that (an editor, an admin,
-# an account) is declared on the route (app/access.py).
-app.middleware("http")(auth_shared.middleware(is_open=_open_to_visitors, open_prefixes=("/mcp",), before=_gate))
+# who is asking (the shared session cookie, the proxy's identity, Basic, a bearer app password), whether sign-in is
+# required at all, and the cross-site check on writes: iosuite-shared's middleware. What each route needs beyond
+# that (an editor, an admin, an account) is declared on the route (app/access.py).
+app.middleware("http")(auth.middleware(open_paths=OPEN_PATHS, open_prefixes=OPEN_PREFIXES, is_open=_open_to_visitors, before=_before))
 
 
 async def _without_database(request: Request, call_next):
@@ -132,8 +115,8 @@ async def _without_database(request: Request, call_next):
     Retry stays open (see below)."""
     path, method = request.url.path, request.method
     if path == "/api/status":
-        return JSONResponse({"needsDatabase": True, "databaseError": vdb.error, "databaseConfigured": vdb.configured(),
-                             "appVersion": APP_VERSION, "appName": APP_NAME_DEFAULT, "version": "", "app": ""})
+        return JSONResponse({"ok": False, "app": config.APP, "name": APP_NAME_DEFAULT, "version": APP_VERSION, "appName": APP_NAME_DEFAULT,
+                             "needsDatabase": True, "databaseError": vdb.error, "databaseConfigured": vdb.configured(), "index": "", "stamp": ""})
     if path.startswith("/api/viewerdb"):
         if method not in ("GET", "HEAD", "OPTIONS"):  # the same cross-site rule the sign-in middleware applies
             origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
@@ -179,31 +162,41 @@ async def _database_gate(request: Request, call_next):
     return await call_next(request)
 
 
-@app.middleware("http")
-async def static_revalidate(request: Request, call_next):
-    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
-    if request.method not in ("GET", "HEAD", "OPTIONS") and ctype in ("application/json", "application/x-www-form-urlencoded", "text/plain", ""):  # (uploads are multipart)
-        try:
-            if int(request.headers.get("content-length") or 0) > MAX_JSON_BODY:
-                return JSONResponse({"detail": "That request is too large"}, status_code=413)
-        except ValueError:
-            return JSONResponse({"detail": "Bad Content-Length"}, status_code=400)
-        if "content-length" not in request.headers and "chunked" in (request.headers.get("transfer-encoding") or "").lower():
-            return JSONResponse({"detail": "Send the request with a Content-Length"}, status_code=411)  # a chunked body has no length to check
-    response = await call_next(request)
-    if "cache-control" not in response.headers:
-        response.headers["Cache-Control"] = "no-cache"
-    return response
+def _limit_for(path: str, ctype: str) -> int:
+    if ctype in ("application/json", "application/x-www-form-urlencoded", "text/plain", ""):
+        return MAX_JSON_BYTES
+    return 1 << 40  # uploads (multipart) and files: not bound here
 
 
-@app.exception_handler(ValueError)
-@app.exception_handler(TypeError)
-@app.exception_handler(json.JSONDecodeError)
-async def _bad_input(request: Request, e: Exception):
-    """A body or parameter that is not what a route expects (a word where a number belongs, malformed JSON, a list
-    where an id belongs) is the client's mistake: a 400 that says so, not a 500 and a traceback."""
-    logging.getLogger("app").warning("bad input on %s %s: %s: %s", request.method, request.url.path, type(e).__name__, str(e)[:200])
-    return JSONResponse({"detail": f"Bad request: {str(e)[:200] or type(e).__name__}"}, status_code=400)
+# 400 for bad input, the headers, no-store on the API, the body cap: the same in every app of the suite
+auth.install(app, limit_for=_limit_for)
+
+
+def _status_extra(request: Request) -> dict:
+    """ioPix's own fields of GET /api/status, beside the suite's: the index version the page compares to reload, the
+    front end's stamp, the jobs, what the viewer may do. On the sign-in screen (sign-in required, nobody signed in):
+    only what it needs, nothing about the library or the server."""
+    user = request.state.user
+    out = {"index": public_version(), "stamp": app_stamp(), "appName": app_name(), "readOnly": appstate.read_only(),
+           "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK}
+    if user is None and users.require_login():
+        return {**out, "editing": False, "dbWrite": False, "pendingEdits": 0}
+    admin, signed, writer = users.is_admin(user), users.is_signed_in(user), users.can_write(user)
+    dk = photo_index.status()
+    out.update({
+        "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev,
+        "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
+                   "current": list(prewarmer.current.values())[:3] if signed else []},  # file paths: not for anonymous clients
+        "semantic": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done,
+                     "total": semantic.total, "indexed": 0 if semantic.ids is None else int(len(semantic.ids))},
+        "places": places.available(), "editing": edits.available() and writer, "pendingEdits": edits.pending_count(),
+        "dbWrite": config.DB_WRITE and not appstate.read_only() and writer, "writeFiles": edits.writes_files(),
+        "user": {**public_user(user), "person": user.get("person")} if user else None,  # the suite's shape, plus the linked person
+        "digikam": dk if admin else {k: v for k, v in dk.items() if k != "error"}, "faceDetect": facedetect.available(),
+        "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
+        "tagJobs": {**tagmanager.progress, "pending": tagmanager.pending_jobs()},
+        "analysis": analysis.progress, "jobs": bgjobs.status()})
+    return out
 
 
 app.include_router(browse.router)
@@ -212,8 +205,9 @@ app.include_router(albums.router)
 app.include_router(editing.router)
 app.include_router(settings.router)
 app.include_router(maintenance.router)
-app.include_router(auth_shared.server_router(updater, log_file=config.LOG_FILE, info=lambda: {"mcpEnabled": mcp_enabled(), "mcpLocked": config.MCP_FORCED}))  # /api/server, /api/log: admins
-app.include_router(auth.router)
+app.include_router(auth.status_router(updater, extra=_status_extra))  # /api/status: public, the same shape in every app
+app.include_router(auth.server_router(updater, log_file=config.LOG_FILE, info=lambda: {"mcpEnabled": mcp_enabled(), "mcpLocked": config.MCP_FORCED}))  # /api/server, /api/log: admins
+app.include_router(auth_routes.router)
 app.include_router(users_routes.router)
 app.include_router(geo.router)
 app.include_router(backup.router)
@@ -221,14 +215,7 @@ app.include_router(review.router)
 app.include_router(organize.router)
 app.include_router(faces.router)
 
-# MCP over HTTP on the same port: an assistant connects to http://host:8600/mcp with the admin token as a bearer header.
-# DNS-rebinding protection is off because the viewer is reached by LAN name or IP, not localhost only.
-from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
-
-_mcp_asgi = mcp.server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True,
-                                                   transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
-# its route handles the exact path /mcp; placed first
-app.router.routes[:0] = list(_mcp_asgi.routes)
+shared_mcp.mount(app, mcp.server)  # MCP over streamable HTTP at /mcp, ahead of everything else
 
 
 @app.get("/", include_in_schema=False)

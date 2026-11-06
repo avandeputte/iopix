@@ -130,17 +130,16 @@ def test_bad_precision_is_refused(client, lib):
 
 
 def test_the_mcp_tool_counts_then_marks_by_year(client, lib):
-    from app.auth import updater
-    from app.mcp import admin
-    tok = updater.admin_token()
+    from app.mcp import admin, current_user
+    current_user.set({"id": 0, "name": "test", "role": "admin"})  # the tool acts as an admin (over HTTP the gate sets it)
     con = index.open_index()
     pid, taken = con.execute("SELECT id, taken FROM photos WHERE video = 0 AND taken IS NOT NULL ORDER BY id LIMIT 1").fetchone()
     n_year = con.execute("SELECT count(*) FROM photos WHERE substr(taken, 1, 4) = ?", (taken[:4],)).fetchone()[0]
     con.close()
-    r = admin.set_date_precision(tok, "unknown", years=[int(taken[:4])])
+    r = admin.set_date_precision("unknown", years=[int(taken[:4])])
     assert r["photos"] == n_year and r["per_year"] == {taken[:4]: n_year} and "started" not in r, r
     try:
-        r = admin.set_date_precision(tok, "unknown", ids=[pid], dry_run=False)
+        r = admin.set_date_precision("unknown", ids=[pid], dry_run=False)
         assert r["started"] == 1, r
         for _ in range(100):
             if not admin.precision_job["running"]:

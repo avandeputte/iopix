@@ -17,17 +17,14 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 
 from app.ai import analysis, concepts, moments
-from app import __version__ as APP_VERSION, access, config, iocontacts, jobs as bgjobs, users
-from app.auth import updater
-from app.photos import edits, lossless, tagmanager
-from app.faces import facedetect
+from app import access, config, iocontacts, users
+from app.photos import edits
 from app.data import index, state as appstate
 from app.digikam.dkdb import in_chunks
-from app.geo import places
 from app.ai.semantic import enabled as semantic_enabled, semantic
 from app.data.query import SORTS
 from app.http import jresp
-from app.runtime import CACHES, app_name, app_stamp, db, prewarmer, public_version, resolve, state, tag_covers
+from app.runtime import CACHES, app_name, db, public_version, resolve, state, tag_covers
 
 from app import videostream
 from app.ai import clothing, dateclues, jerseys, rotation, videos
@@ -215,32 +212,6 @@ def _meta(version: str) -> dict:
 def api_meta(request: Request):
     return jresp(request, {**_meta(state["version"]), "version": public_version()})
 
-
-
-@router.get("/api/status", dependencies=[access.public])
-def api_status(request: Request):
-    user = request.state.user
-    if user is None and users.require_login():  # the sign-in screen: only what it needs, nothing about the library or the server
-        return {"version": public_version(), "app": app_stamp(), "appName": app_name(), "appVersion": APP_VERSION, "requireLogin": True,
-                "usersExist": users.any_users(), "signedIn": False, "isAdmin": False, "user": None, "readOnly": appstate.read_only(),
-                "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK, "editing": False, "dbWrite": False, "pendingEdits": 0}
-    admin, signed, writer = users.is_admin(user), users.is_signed_in(user), users.can_write(user)
-    dk = index.status()
-    return {"version": public_version(), "error": state["error"] if admin or not state["error"] else "The library could not be read; an admin can see why in Maintenance.", "rev": appstate.rev, "app": app_stamp(),
-            "thumbs": {"running": prewarmer.running, "done": prewarmer.done, "total": prewarmer.total, "since": prewarmer.started, "last": prewarmer.last,
-                       "current": list(prewarmer.current.values())[:3] if signed else []},  # file paths: not for anonymous clients
-            "semantic": {"enabled": semantic_enabled(), "running": semantic.running, "done": semantic.done,
-                         "total": semantic.total, "indexed": 0 if semantic.ids is None else int(len(semantic.ids))},
-            "places": places.available(), "editing": edits.available() and writer, "pendingEdits": edits.pending_count(),
-            "dbWrite": config.DB_WRITE and not appstate.read_only() and writer, "writeFiles": edits.writes_files(),
-            "user": ({"id": user["id"], "name": user["name"], "role": user["role"], "person": user.get("person")} if user else None), "usersExist": users.any_users(),
-            "isAdmin": admin, "signedIn": signed, "requireLogin": users.require_login(),
-            "updateAvailable": updater.available() if admin and updater.auto_check_enabled() else None,
-            "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikamCheck": config.DIGIKAM_CHECK,
-            "digikam": dk if admin else {k: v for k, v in dk.items() if k != "error"}, "faceDetect": facedetect.available(), "lossless": lossless.capabilities() if config.DB_WRITE and edits.available() else None,
-            "appVersion": APP_VERSION, "commit": updater.local_commit()[:7], "appName": app_name(),
-            "tagJobs": {**tagmanager.progress, "pending": tagmanager.pending_jobs()},
-            "analysis": analysis.progress, "jobs": bgjobs.status()}
 
 
 @router.get("/api/facets", dependencies=[access.public])

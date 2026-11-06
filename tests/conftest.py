@@ -34,7 +34,7 @@ else:  # no digiKam library to cut a scratch copy from (CI): the tests that need
     (_lib / "db").mkdir(parents=True, exist_ok=True); (_lib / "photos").mkdir(parents=True, exist_ok=True)
     print(f"\nNo test library at {SRC_DB} / {SRC_ROOT} (DIGIKAM_TEST_DB / DIGIKAM_TEST_ROOT): library tests are skipped")
 
-import mariadb  # noqa: E402  (tests/mariadb.py: the MariaDB iopix's own database runs on; Docker or IOSUITE_TEST_DB)
+import mariadb  # noqa: E402  (tests/mariadb.py: the MariaDB iopix's own database runs on, iosuite_shared.testing's; Docker or IOSUITE_TEST_DB)
 
 if mariadb.server() is None:
     print(f"\n{mariadb.server.reason}: iopix's own database is MariaDB-only, so every test needs one (Docker, or IOSUITE_TEST_DB=host:port:user:password)")
@@ -46,7 +46,7 @@ os.environ.update({
     **mariadb.env_for(VIEWER_DB),
     "DATA_DIR": str(_data), "DIGIKAM_DB_DIR": str(_lib / "db"), "PHOTOS_ROOT": str(LIB["root"] if LIB else _lib / "photos"),
     "PREWARM": "0", "SEMANTIC": "0", "ANALYSIS": "0", "CAPTIONS": "0", "REINDEX_POLL": "3600",
-    "DIGIKAM_CHECK": "none", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0",
+    "DIGIKAM_CHECK": "none", "BG_THREADS": "2", "HF_HUB_OFFLINE": "1", "SCANNER_LOOP": "0", "LOG_FILE": "",  # no server log from the tests
     # the shared accounts (iosuite-shared) in a database of their own on the test server, never the suite's `iosuite`
     "IOSUITE_DB_NAME": AUTH_DB["database"], "IOSUITE_DB_HOST": AUTH_DB["host"], "IOSUITE_DB_PORT": str(AUTH_DB["port"]),
     "IOSUITE_DB_USER": AUTH_DB["user"], "IOSUITE_DB_PASSWORD": AUTH_DB["password"],
@@ -76,7 +76,7 @@ def client(lib):
         import time
         for _ in range(600):
             s = c.get("/api/status").json()
-            if s.get("version") and not s.get("building"):
+            if s.get("index") and not s.get("building"):
                 break
             time.sleep(0.1)
         yield c

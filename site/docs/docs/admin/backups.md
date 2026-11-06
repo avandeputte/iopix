@@ -25,7 +25,7 @@ Sidecar and file backups are never deleted automatically. Allow disk space for t
 
 ## Backing iopix up
 
-Back up the database server and the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives `viewer.sql`, a `mysqldump` of iopix's database, plus the content-search embeddings files and the restore steps. The MCP admin token is not included, so set a new one after a restore if you use the MCP server.
+Back up the database server and the data folder with the rest of your server, or use **Maintenance › Storage and backups › Download a backup › iopix data**, which gives `viewer.sql`, a `mysqldump` of iopix's database, plus the content-search embeddings files and the restore steps.
 
 To restore: stop iopix, load the dump into an empty database (`mariadb iopix < viewer.sql`), copy the other files into the data folder, make sure `viewer-db.json` or the `DB_*` variables point at that database, and start iopix again.
 

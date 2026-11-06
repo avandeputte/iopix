@@ -1,7 +1,7 @@
 """The read-only tools any client may call without a token: the library overview, search and
 counts over the same filters the web app has, everything about one photo, the people / tag /
 album / place lists, duplicate sets, and looking at a picture. File paths are left out of
-answers unless the request carried the admin token (base.anon_paths_ok)."""
+answers unless the client signed in as an admin (base.anon_paths_ok)."""
 import io
 import json
 from typing import Literal, Optional
@@ -166,7 +166,7 @@ def get_photo(photo_id: int) -> dict:
             raise ToolError(f"No item with id {photo_id}")
         d = dict(r)
         if not anon_paths_ok():
-            d.pop("path", None)  # the file's location is for the token holder (the web API hides it from visitors too)
+            d.pop("path", None)  # the file's location is for admins (the web API hides it from visitors too)
         extra = json.loads(d.pop("extra") or "{}")
         d["favorite"] = appstate.is_favorite(photo_id)
         for k in ("hash", "ts", "mts", "md", "day", "ntags", "album_id"):

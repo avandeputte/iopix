@@ -1,31 +1,30 @@
 """The MCP server instance and what every tool module shares.
 
 A tool answers from the search index (`db()`), the same SQLite file the web app queries; the
-viewer's own data (favorites, albums, settings) is read through app.data.state. Tools that
-reveal paths or change the library take the admin token (`need_token`, or the request's bearer header), checked here rather
-than by the transport so the stdio server applies the same rule as the HTTP endpoint.
+viewer's own data (favorites, albums, settings) is read through app.data.state. Who is asking comes from
+iosuite-shared (every request signed in with an app password or a session; `current_user`): the library tools
+answer any account, the tools that reveal paths or change the library take an admin (`need_admin`), checked here
+rather than by the transport so the stdio server applies the same rule as the HTTP endpoint.
 """
-import contextvars
 import re
 import sqlite3
 from typing import Optional
 from urllib.parse import quote
 
-from mcp.server.mcpserver import MCPServer
+from iosuite_shared import mcp as shared_mcp
+from iosuite_shared.mcp import READ_ONLY, UPDATES, WRITES, current_user, who
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
 
-from app import config, users
-from app.auth import updater
+from app import __version__, config, users
 from app.photos import edits
 from app.data import index, state as appstate
 from app.data.query import DATE_RE, build_where
 from app.ai.semantic import semantic, enabled as semantic_enabled
 
+__all__ = ["READ_ONLY", "UPDATES", "WRITES", "current_user", "who", "need_admin", "server", "db", "list_rows", "clamp_limit",
+           "anon_paths_ok", "resolve_tag", "resolve_album", "filter_items", "where_for", "FILTER_DOC", "PICKS", "VIEWER"]
+
 VIEWER = config.BASE_URL  # for the links in results
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-# a tool that changes the library but can be repeated with the same outcome (an edit, a setting, a job start)
-WRITES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 PICKS = ["none", "rejected", "pending", "accepted"]
 MONTH_DAY_RE = re.compile(r"^\d\d-\d\d$")
 # how many visually ranked candidates a content search considers: enough for a page or two of
@@ -33,17 +32,11 @@ MONTH_DAY_RE = re.compile(r"^\d\d-\d\d$")
 CONTENT_SEARCH_CANDIDATES = 200
 _state_ready = False  # the viewer database's tables are checked on the first call, not on every one
 
-server = MCPServer(
-    "digikam-library",
-    instructions=(
-        "Read-only access to a personal digiKam photo library. Start with library_overview, "
-        "use list_people / list_tags / list_albums to find exact names, then search_photos. "
-        "People are tags too. Selecting a tag or album also matches everything nested under it. "
-        "Dates are local camera time. Use view_photo to actually look at a picture."
-    ),
-)
-
-token_given = contextvars.ContextVar("mcp_token_given", default=False)  # set per request by the HTTP layer
+server = shared_mcp.make_server("iopix", "ioPix", __version__, instructions=(
+    "A personal digiKam photo library. Start with library_overview, use list_people / list_tags / list_albums to find "
+    "exact names, then search_photos. People are tags too. Selecting a tag or album also matches everything nested "
+    "under it. Dates are local camera time. Use view_photo to actually look at a picture. The library tools answer "
+    "any account; the operator and maintenance tools take an admin's."))
 
 
 def db() -> sqlite3.Connection:
@@ -78,27 +71,21 @@ def clamp_limit(limit, cap: int) -> int:
     return max(1, min(int(limit), cap))
 
 
-# ---- the admin token: paths, log lines, settings and every change need it
-
-def request_has_token() -> bool:
-    return token_given.get()
-
+# ---- admins: paths, log lines, settings and every change
 
 def anon_paths_ok() -> bool:
-    """File paths in answers: only for a request that carried the admin token (checked by the HTTP layer when sign-in
-    is required), or on an install with no accounts at all."""
-    return not users.any_users() or request_has_token()
+    """File paths in answers: only for an admin (or on an install with no accounts at all)."""
+    return users.is_admin(current_user.get())
 
 
-def need_token(token: str, writes: bool = False):
-    """The operator and maintenance tools take the admin token (Maintenance > Updates and logs) as their `token`
-    argument. Over HTTP every /mcp request also carries it as a bearer header (main.py refuses the rest), so the
-    argument is checked twice there; over stdio (`python -m app.mcp`) it is the only check. writes: the tool changes
-    the library, so read-only mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
-    if not updater.token_ok(token):
-        raise ToolError("This tool needs the admin token (Maintenance > Updates and logs > MCP update token)")
+def need_admin(writes: bool = False) -> dict:
+    """The operator and maintenance tools take an admin: the account the client signed in as (over HTTP an app
+    password or session; over stdio, `python -m app.mcp --user`). writes: the tool changes the library, so read-only
+    mode (READ_ONLY=1 or the setting) refuses it as it refuses the web app's edits."""
+    u = shared_mcp.need_admin()
     if writes and appstate.read_only():
         raise ToolError("The viewer is in read-only mode; nothing in the library can be changed")
+    return u
 
 
 # ---- names to ids

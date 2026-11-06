@@ -45,8 +45,8 @@ async function _awaitReindex(until, tries, ms) {
     await sleep(ms);
     try {
       const s = await api('/api/status');
-      if (s.version === seen) continue;
-      seen = s.version;
+      if (s.index === seen) continue;
+      seen = s.index;
       const m = await api('/api/meta');
       if (until(m)) { indexMeta(m); return true; }
     } catch { /* retry */ }
@@ -101,14 +101,14 @@ export function updateBanner(u) {  // exported for test_ui.py, which calls it th
   banners().prepend(b);
 }
 /** Run update.sh on the server (POST /api/server {action: update}), then watch for the new version: /api/status every 5 s until its
- *  appVersion or commit differs from what runs here, and the page reloads. After 3 minutes without a change the update
+ *  version or commit differs from what runs here, and the page reloads. After 3 minutes without a change the update
  *  is reported as not finished. onState(text, failed) gets the words for the screen. Returns whether the update started. */
 export async function runUpdate(onState) {
   try { await post('/api/server', { action: 'update' }); } catch (e) { toastError(e, 10000); return false; }
   onState('Updating… the page reloads when the new version is up.', false);
   const was = `${S.APP_VERSION}|${S.APP_COMMIT}`, until = Date.now() + 180000;
   const check = async () => {
-    try { const s = await api('/api/status'); if (s.appVersion && `${s.appVersion}|${s.commit || ''}` !== was) { location.reload(); return; } } catch { /* restarting */ }
+    try { const s = await api('/api/status'); if (s.version && `${s.version}|${s.commit || ''}` !== was) { location.reload(); return; } } catch { /* restarting */ }
     if (Date.now() < until) setTimeout(check, 5000); else onState('The update did not finish; see Maintenance › Updates and logs.', true);
   };
   setTimeout(check, 5000);
@@ -170,23 +170,23 @@ export async function pollStatus() {
     }
     // the viewer was updated: the new version loads when it cannot interrupt anything (the tab is in the
     // background, or at the next change of page); meanwhile a quiet note offers to load it now
-    if (s.app && S.APP_STAMP && s.app !== S.APP_STAMP) {
+    if (s.stamp && S.APP_STAMP && s.stamp !== S.APP_STAMP) {
       if (document.hidden && !LB.open && !G.sel.size) { location.reload(); return; }
       if (!S.RELOAD_PENDING) { S.RELOAD_PENDING = true; updateReadyNote(); }
     }
-    if (s.app && !S.RELOAD_PENDING) S.APP_STAMP = s.app;
+    if (s.stamp && !S.RELOAD_PENDING) S.APP_STAMP = s.stamp;
     S.SEM = s.semantic; S.EDITING = s.editing; S.FACE_DETECT = !!s.faceDetect; S.LOSSLESS = s.lossless || null; S.SYNC_OFF = !!(s.digikam && !s.digikam.sync); S.NO_DK = !!(s.digikam && s.digikam.none); S.PENDING = s.pendingEdits; S.WRITE_FILES = s.writeFiles; S.CAN_MANAGE = s.editing && s.dbWrite;
     S.AUTO_DB = !!(s.dbWrite && s.digikam && (s.digikam.none || s.digikam.sync && s.digikam.reachable));  // edits go into the database by themselves, a minute later
     S.IS_ADMIN = s.isAdmin; S.USERS_EXIST = s.usersExist; S.DIGIKAM_CHECK = s.digikamCheck || 'pgrep';
-    if (s.appVersion) { S.APP_VERSION = s.appVersion; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
-    updateBanner(s.updateAvailable);
+    if (s.version) { S.APP_VERSION = s.version; S.APP_COMMIT = s.commit || ''; const b = $('.brand'); if (b) b.title = `${S.APP_NAME} v${S.APP_VERSION}`; } if ((s.user && s.user.id) !== (S.USER && S.USER.id)) { S.USER = s.user; renderUserMenu(); }  // before the banner, which names the installed version
+    updateBanner(s.update);
     dkBanner(s.digikam);
     if (s.appName && s.appName !== S.APP_NAME) { S.APP_NAME = s.appName; applyAppName(); }
     document.body.classList.toggle('noadmin', !S.IS_ADMIN);
     if (S.PENDING && s.dbWrite && !S.NO_DK && !el.childNodes.length) el.replaceChildren(h('button', { type: 'button', class: 'lnk', style: 'cursor:pointer', title: 'Edits saved in sidecars that digiKam’s database does not have yet', onclick: dbDialog },
       `${nf.format(S.PENDING)} ${S.PENDING === 1 ? 'edit' : 'edits'} not in digiKam yet`));
     if (s.rev !== ST.rev && ST.rev >= 0) { const mine = ST.rev; await loadState(); if (mine !== ST.rev && S.route.view === 'albums') showAlbums(); }
-    if (S.META && s.version && s.version !== S.META.version) {
+    if (S.META && s.index && s.index !== S.META.version) {
       indexMeta(await api('/api/meta'));
       details.clear();
       // pages that are only lists of the library are redrawn in place; pages holding work in progress (the map

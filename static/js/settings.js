@@ -1,7 +1,7 @@
 /** Settings and Maintenance: one loader (settingsPage) drawing the tabs of either page; the Users tab is users.js. */
 import { $, PREF, UNITS, act, api, dfDayLocal, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, plural, post, regionUsesMiles, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, hashFor, infoPrefsEditor, pollSoon, toast, toastError } from './state.js';
-import { confirmDialog, logDialog, modal } from './actions.js';
+import { confirmDialog, logDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
 import { pageTitle } from './pages.js';
 import { setupDialog, usersSection } from './users.js';
@@ -405,7 +405,7 @@ function serverTab(c) {
     })() : null,
     S.IS_ADMIN ? row(`${S.APP_NAME} database`, `Where ${S.APP_NAME} keeps its own data: users, albums, favorites, settings, pending edits, the AI results and its copy of the library: a MariaDB or MySQL database of its own (not digiKam’s). Moving to another one copies every row across and restarts ${S.APP_NAME}; the connection is kept in data/viewer-db.json, outside the database.`, viewerDbPanel()) : null,
     S.IS_ADMIN ? row('MCP server', m.mcpLocked ? 'Switched on by MCP=1 in the environment.'
-      : `The endpoint at /mcp that lets an AI assistant (Claude, for example) search and read this library. Off: /mcp does not answer at all. On: every request needs the MCP update token (Maintenance › iopix version) as a bearer header, the read-only tools included.`,
+      : `The endpoint at /mcp that lets an AI assistant (Claude, for example) search and read this library and, as an admin, run diagnostics and maintenance. Off: /mcp does not answer at all. On: every assistant signs in with an app password (Settings › Apps and devices) and acts as that account, the same in every ioThing app.`,
       m.mcpLocked ? null : switchField('mcp_enabled', !!m.mcpEnabled, { on: 'The MCP server at /mcp is on.', off: 'The MCP server is off: /mcp does not answer.' })) : null,
     S.IS_ADMIN ? row('Read-only mode', m.readOnlyLocked ? `Locked on by READ_ONLY=1 in the environment: nothing in the library can be changed from ${S.APP_NAME}.`
       : `${m.readOnly ? 'On' : 'Off'}. When on, ${S.APP_NAME} only browses: editing, tagging, face naming, place tags, GPS tracks, metadata sync and database updates are switched off and refused by the server. Favorites and viewer albums keep working; they never touch the library.`,
@@ -564,7 +564,7 @@ function storageTab(c) {
 }
 
 /** Maintenance › the app itself: the edit log, the server log, the version and updates, and restart. */
-/** Maintenance › Updates and logs: the version card, the daily check, the MCP admin token, the server log and Restart, from
+/** Maintenance › Updates and logs: the version card, the daily check, the server log and Restart, from
  *  iosuite-shared's /api/server and /api/log, so the page is the same in every ioThing app. */
 function viewerTab(c) {
   const { view, row, btn } = c;
@@ -585,8 +585,6 @@ function viewerTab(c) {
         const state = p.running ? `updating… ${S.APP_NAME} restarts when it is done` : p.error ? `last update failed: ${p.error}` : !c ? `v${u.version}` : c.status === 'current' ? `v${u.version} is the latest version` : c.status === 'update' ? `You have v${u.version}; ${c.remoteVersion ? `v${c.remoteVersion}` : 'a newer build'} is available${c.remoteDate ? ` (${c.remoteDate})` : ''}${c.remoteMessage ? `: ${c.remoteMessage.replace(/^v\d+\.\d+\.\d+:\s*/, '')}` : ''}` : `could not check: ${c.error}`;
         fill(body, state, outcome, h('div', { style: 'display:flex;gap:6px;margin-top:6px' },
           btn('Check for updates', async () => { fill(body, 'Checking…'); await act(() => post('/api/server', { action: 'check' })); draw(); }),
-          btn('MCP update token…', async () => { try { const t = await post('/api/server', { action: 'token' }); const back = modal('MCP update token', u.mcpEnabled ? null : h('p', { class: 'warn' }, 'The MCP server is switched off (Settings › MCP server), so this token is not usable until it is turned on.'), h('p', { class: 'muted' }, 'An MCP client (e.g. Claude) can run the update with the update_viewer tool and this token; the endpoint itself has no sign-in, so treat it like a password.'), h('div', { class: 'einput', style: 'font-family:monospace;user-select:all;word-break:break-all' }, t.token), t.fromEnv ? h('p', { class: 'muted' }, 'Set by MCP_ADMIN_TOKEN in the environment.') : null,
-            { buttons: [t.fromEnv ? null : ['Regenerate', async () => { if (!await confirmDialog('Generate a new token? The old one stops working.')) return; await act(() => post('/api/server', { action: 'regenerate_token' })); back.remove(); }], 'Close'] }); } catch (e) { toastError(e); } }),
           u.docker ? h('span', { class: 'muted' }, 'Docker: update by pulling the image (docker compose pull && docker compose up -d).')
             : u.canRun ? btn('Update now', async () => {
               if (!await confirmDialog(`Fetch the latest version, refresh the packages and restart ${S.APP_NAME}? The page reloads when the new version is up.`)) return;

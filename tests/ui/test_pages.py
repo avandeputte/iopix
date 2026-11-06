@@ -311,7 +311,7 @@ def test_update_banner_shows_and_can_be_dismissed(page, server):
     def fake_status(route):
         r = route.fetch()
         body = r.json()
-        body["updateAvailable"] = {"remote": "abc1234", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
+        body["update"] = {"remote": "abc1234", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
         route.fulfill(response=r, body=_json.dumps(body), headers={**r.headers, "content-type": "application/json"})
     page.route("**/api/status", fake_status)
     page.goto(server + "/#/photos")
@@ -762,9 +762,9 @@ def test_update_banner_runs_the_update_and_reloads_on_the_new_version(page, serv
         try:
             r = route.fetch()
             body = r.json()
-            body["updateAvailable"] = {"remote": "abc1234", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
+            body["update"] = {"remote": "abc1234", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
             if state["version"]:
-                body["appVersion"] = state["version"]
+                body["version"] = state["version"]
             route.fulfill(response=r, body=_json.dumps(body), headers={**r.headers, "content-type": "application/json"})
         except Exception:
             pass  # a status request still in flight when the page reloads itself: its response is gone with the old page

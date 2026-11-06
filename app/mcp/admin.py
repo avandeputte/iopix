@@ -1,4 +1,4 @@
-"""The maintenance tools, behind the admin token: what the web app's Maintenance and Explore pages
+"""The maintenance tools, for admins: what the web app's Maintenance and Explore pages
 offer, so an assistant can run the same reports, suggestions, edits and background jobs. Each tool
 calls the module the page calls, with the same checks (read-only mode, digiKam closed, editing on),
 so a change made here is logged and undoable exactly like one made in the browser."""
@@ -20,7 +20,7 @@ from app.faces import ages, facemgr, facequality
 from app.geo import placeguess
 from app.digikam.dbsync import SyncError
 from app.http import MAX_IDS
-from app.mcp.base import READ_ONLY, WRITES, clamp_limit, db, need_token, resolve_album, server
+from app.mcp.base import READ_ONLY, WRITES, clamp_limit, db, need_admin, resolve_album, server
 from app.routes.editing import current_dates
 from app.routes.maintenance import start_analysis
 
@@ -32,22 +32,22 @@ TAG_WAIT_SECONDS = 120  # how long tag_op waits for the previous change's sideca
 
 
 @server.tool(annotations=READ_ONLY)
-def consistency_report(token: str, field: str = "", offset: int = 0, limit: int = 500) -> dict:
+def consistency_report(field: str = "", offset: int = 0, limit: int = 500) -> dict:
     """The metadata consistency report (Maintenance › Metadata consistency): photos whose rating, title,
     caption or tags differ between digiKam's database, the XMP sidecar and the image file, with each
-    source's value. field narrows it to one of rating|title|caption|tags. Needs the admin token."""
-    need_token(token)
+    source's value. field narrows it to one of rating|title|caption|tags. Admins only."""
+    need_admin()
     return {"progress": dict(consistency.progress), "summary": consistency.summary(),
             **consistency.report(field or None, max(0, offset), clamp_limit(limit, 2000))}
 
 
 @server.tool(annotations=WRITES)
-def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, caption: Optional[str] = None, title: Optional[str] = None,
+def edit_photos(photo_ids: list[int], taken: Optional[str] = None, caption: Optional[str] = None, title: Optional[str] = None,
                 rating: Optional[int] = None, apply_to_database: bool = True) -> dict:
     """Change the date taken ("YYYY-MM-DDTHH:MM:SS"), caption, title or rating of these photos exactly as the web app
     does: written to each sidecar (and the file when the viewer writes into files), in the edit log with undo, and with
-    apply_to_database written into digiKam's database right away (digiKam closed). Needs the admin token."""
-    need_token(token, writes=True)
+    apply_to_database written into digiKam's database right away (digiKam closed). Admins only."""
+    need_admin(writes=True)
     import re
     ch = {}
     if taken is not None:
@@ -77,11 +77,11 @@ def edit_photos(token: str, photo_ids: list[int], taken: Optional[str] = None, c
 
 
 @server.tool(annotations=STARTS_JOB)
-def consistency_scan(token: str, rescan_all: bool = False) -> dict:
+def consistency_scan(rescan_all: bool = False) -> dict:
     """Start the metadata consistency check in the background, as Maintenance > Metadata consistency's buttons do:
     every photo (rescan_all) or those changed since they were last checked. consistency_report shows the progress and
-    the results. Needs the admin token."""
-    need_token(token)
+    the results. Admins only."""
+    need_admin()
     con = db()
     try:
         rows = [dict(r) for r in con.execute("SELECT id, path, name, video, hash, size, modified FROM photos ORDER BY ts DESC")]
@@ -92,11 +92,11 @@ def consistency_scan(token: str, rescan_all: bool = False) -> dict:
 
 
 @server.tool(annotations=WRITES)
-def consistency_sync(token: str, photo_ids: list[int], source: str, targets: list[str], fields: list[str]) -> dict:
+def consistency_sync(photo_ids: list[int], source: str, targets: list[str], fields: list[str]) -> dict:
     """Copy the given fields of the given photos from one source (db|sidecar|file) to the targets, exactly
     as the consistency page's Sync does: sidecars and files are backed up first; writing the database needs
-    digiKam closed and is backed up too. Returns {synced, skipped}. Needs the admin token."""
-    need_token(token, writes=True)
+    digiKam closed and is backed up too. Returns {synced, skipped}. Admins only."""
+    need_admin(writes=True)
     try:
         return consistency.sync([int(i) for i in photo_ids][:MAX_IDS], source, targets, fields)
     except (ValueError, dbsync.SyncError) as e:
@@ -104,11 +104,11 @@ def consistency_sync(token: str, photo_ids: list[int], source: str, targets: lis
 
 
 @server.tool(annotations=WRITES)
-def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
+def rewrite_sidecars(photo_ids: list[int]) -> dict:
     """Rewrite these photos' XMP sidecars (tag list and face regions) from digiKam's database, as the viewer does
     after a tag or face change: for when the database was changed outside the viewer. Each sidecar is backed up
-    before its first change. Returns {photos, tags_failed, regions}. Needs the admin token."""
-    need_token(token, writes=True)
+    before its first change. Returns {photos, tags_failed, regions}. Admins only."""
+    need_admin(writes=True)
     ids = [int(i) for i in photo_ids][:REWRITE_SIDECARS_MAX]
     paths = dict(dbsync.photo_paths(ids))
     failed = edits.rewrite_tags([{"id": i, "path": p} for i, p in paths.items()])
@@ -117,20 +117,20 @@ def rewrite_sidecars(token: str, photo_ids: list[int]) -> dict:
 
 
 @server.tool(annotations=STARTS_JOB)
-def face_quality(token: str) -> dict:
+def face_quality() -> dict:
     """Face metadata quality (Maintenance > Face quality): regions of one person stored twice a few pixels apart
     (near), the same person in two separate places (separate), empty or out-of-photo rectangles (invalid), and
-    the progress of the last clean-up. Needs the admin token."""
-    need_token(token)
+    the progress of the last clean-up. Admins only."""
+    need_admin()
     return facequality.summary(limit=20)
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-def rename_folder(token: str, folder: str, new_name: str) -> dict:
+def rename_folder(folder: str, new_name: str) -> dict:
     """Rename a folder (its last path segment) on disk and in digiKam's database, exactly as the Folders page does:
     subfolders and sidecars follow, backups move with it. folder: its id or path (e.g. "2022/20221008 Soccer").
-    digiKam must be closed. Needs the admin token."""
-    need_token(token, writes=True)
+    digiKam must be closed. Admins only."""
+    need_admin(writes=True)
     con = db()
     try:
         aid = resolve_album(con, folder)
@@ -145,14 +145,14 @@ def rename_folder(token: str, folder: str, new_name: str) -> dict:
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
-def tag_op(token: str, op: Literal["person", "notperson", "merge", "rename", "move", "add"], tag_id: int = 0,
+def tag_op(op: Literal["person", "notperson", "merge", "rename", "move", "add"], tag_id: int = 0,
            into: int = 0, name: str = "", parent: int = 0) -> dict:
     """Change a tag exactly as the Tags page does (digiKam's database backed up first, sidecars rewritten after, an
     Edit log entry per photo): person = mark a keyword tag as a person; notperson = undo that; merge = move everything
     on tag_id (photos, face boxes) to the person or tag `into`, then remove tag_id; rename (name); move (parent, 0 = top
     level); add (name inside parent). Ids are those of list_tags/list_people. digiKam must be closed unless the viewer
-    runs without it. Needs the admin token."""
-    need_token(token, writes=True)
+    runs without it. Admins only."""
+    need_admin(writes=True)
     if not (config.DB_WRITE and edits.available()):
         raise ToolError("Tag management is turned off (needs DB_WRITE and EDITING)")
     body = {"op": op, "id": tag_id, "into": into, "name": name, "parent": parent or None}
@@ -172,15 +172,15 @@ precision_job = {"running": False, "done": 0, "total": 0, "error": None}
 
 
 @server.tool(annotations=WRITES)
-def set_date_precision(token: str, precision: Literal["exact", "month", "year", "unknown"], years: list[int] = None,
+def set_date_precision(precision: Literal["exact", "month", "year", "unknown"], years: list[int] = None,
                        ids: list[int] = None, dry_run: bool = True) -> dict:
     """Mark how well photos' dates are known, exactly as the date editor does (Edit > Date: exact, month and year,
     year only, unknown): the tag under "Date approximate", a placeholder date where a full one is required (each
     photo's own year/month kept; an unknown date stays as it is), an Edit log entry per photo (undoable). Photos are
     chosen by `ids`, or by the year of their current date (`years`, e.g. [1970, 1974]). dry_run (default) only counts:
     how many photos match, per year, and how many already have this precision; with dry_run=False the change runs in
-    the background (call again with dry_run=True to see progress). Needs the admin token."""
-    need_token(token, writes=True)
+    the background (call again with dry_run=True to see progress). Admins only."""
+    need_admin(writes=True)
     if not (ids or years):
         raise ToolError("Give ids or years")
     con = index.open_index()
@@ -224,23 +224,23 @@ def set_date_precision(token: str, precision: Literal["exact", "month", "year", 
 
 
 @server.tool(annotations=READ_ONLY)
-def date_report(token: str, detail: bool = False, limit: int = 0) -> dict:
+def date_report(detail: bool = False, limit: int = 0) -> dict:
     """For the photos whose date does not match their folder (Maintenance > Metadata quality): every date stored in
     each file and its sidecar (EXIF, XMP, IPTC, QuickTime, GPS, the file's own modification time), and which agree
     with the folder. summary counts photos with some embedded date matching the folder, none, and whose embedded
     dates disagree with each other; tags_matching_the_folder says which tags those are. detail: per photo. Read-only.
-    Needs the admin token."""
-    need_token(token)
+    Admins only."""
+    need_admin()
     return datecheck.wrongfolder(detail=detail, limit=limit)
 
 
 @server.tool(annotations=READ_ONLY)
-def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
+def date_suggestions(photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
     """Year suggestions for the photos marked "Date unknown" (Explore > Date suggestions), best supported first:
     {total, items: [{id, year, lo, hi, clues: [{kind: ages|people|look|camera, text, year, sd}], people}], people, sources}.
     photo_ids limits it to those photos. Read-only: using a suggestion is edit_photos with taken "YYYY" (a year-only date)
-    or the page's Use button. Needs the admin token."""
-    need_token(token)
+    or the page's Use button. Admins only."""
+    need_admin()
     out = dateclues.suggestions(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + clamp_limit(limit, 500)], "people": out["people"],
@@ -248,22 +248,22 @@ def date_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, 
 
 
 @server.tool(annotations=READ_ONLY)
-def place_suggestions(token: str, photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
+def place_suggestions(photo_ids: list[int] = None, limit: int = 100, offset: int = 0) -> dict:
     """Where the photos without a position were probably taken (Explore > Place suggestions), surest first: {total, items:
     [{id, lat, lon, km (how far off it may be), place, region, country, basis: between|near|day|day-time|stay, text, from}]}.
-    Read-only: using one is a GPS edit with that accuracy (the page's Use button). Needs the admin token."""
-    need_token(token)
+    Read-only: using one is a GPS edit with that accuracy (the page's Use button). Admins only."""
+    need_admin()
     items = placeguess.suggestions(photo_ids)["items"]
     return {"total": len(items), "items": items[offset:offset + clamp_limit(limit, 1000)]}
 
 
 @server.tool(annotations=READ_ONLY)
-def jersey_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
+def jersey_suggestions(photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
     """Jersey numbers (Explore > Jersey numbers): the players suggested for people whose shirt number was read but whose
     face is not named: {total, items: [{id, number, tag, name, basis: folder|year, n, text, box}], players: [{tag, name,
     numbers}], read, named, coverage}. Read-only: using one is edit_photos / the page's Tag button, which adds the person's
-    tag to the photo. Needs the admin token."""
-    need_token(token)
+    tag to the photo. Admins only."""
+    need_admin()
     out = jerseys.suggestions(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + clamp_limit(limit, 2000)], "players": out["players"],
@@ -271,23 +271,23 @@ def jersey_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200
 
 
 @server.tool(annotations=READ_ONLY)
-def clothing_suggestions(token: str, photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
+def clothing_suggestions(photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
     """Clothing matches (Explore > Clothing matches): people probably present in a photo, matched by what they wear to the
     photos of the same event (one folder, one day) where their face is named: {total, items: [{id, tag, name, n, score,
     lead, box, event, text}], coverage}. Read-only: using one adds the person's tag to the photo (edit_photos / the page's
-    Tag button). Needs the admin token."""
-    need_token(token)
+    Tag button). Admins only."""
+    need_admin()
     items = clothing.suggestions(photo_ids)["items"]
     return {"total": len(items), "items": items[offset:offset + clamp_limit(limit, 2000)], "coverage": list(clothing.coverage())}
 
 
 @server.tool(annotations=READ_ONLY)
-def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
+def rotation_findings(photo_ids: list[int] = None, limit: int = 200, offset: int = 0) -> dict:
     """Photos that read as stored on their side or upside down (Maintenance > Wrongly rotated): {total, items: [{id, turn
     (quarter turns clockwise the file is off by), op (the lossless rotate that rights it: left|180|right), text, score}],
     dismissed, coverage, phase}. Read-only: righting one is the web app's Rotate button (POST /api/photos/transform).
-    Needs the admin token."""
-    need_token(token)
+    Admins only."""
+    need_admin()
     out = rotation.findings(photo_ids)
     items = out["items"]
     return {"total": len(items), "items": items[offset:offset + clamp_limit(limit, 2000)], "dismissed": out["dismissed"],
@@ -295,11 +295,11 @@ def rotation_findings(token: str, photo_ids: list[int] = None, limit: int = 200,
 
 
 @server.tool(annotations=WRITES)
-def set_date_hint(token: str, folder: str, not_before: Optional[int] = None, not_after: Optional[int] = None) -> dict:
+def set_date_hint(folder: str, not_before: Optional[int] = None, not_after: Optional[int] = None) -> dict:
     """A folder hint for the date suggestions: nothing in this folder (subfolders included; name, path such as "/1974"
     or id) was taken before not_before or after not_after. Both empty removes the hint. Written to iopix's own
-    database only; the suggestions then keep to the window. Needs the admin token."""
-    need_token(token)
+    database only; the suggestions then keep to the window. Admins only."""
+    need_admin()
     con = db()
     try:
         album = resolve_album(con, folder)
@@ -313,12 +313,11 @@ def set_date_hint(token: str, folder: str, not_before: Optional[int] = None, not
 
 
 @server.tool(annotations=WRITES)
-def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
+def run_analysis(job: str = "all", reset: bool = False) -> dict:
     """Start a background analysis as Maintenance > AI analysis does: job is all, embeddings, quality, vision, objects,
     captions, looks, faces, ages, jerseys, clothing, rotation, videos or facedetect (facedetect writes faces into digiKam's database). Without reset only
-    new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Needs the
-    admin token."""
-    need_token(token, writes=(job == "facedetect"))
+    new or changed photos are looked at; with reset that analysis starts over. Follow it with job_queue. Admins only."""
+    need_admin(writes=(job == "facedetect"))
     from fastapi import HTTPException
     try:
         return start_analysis(job, reset)
@@ -327,13 +326,13 @@ def run_analysis(token: str, job: str = "all", reset: bool = False) -> dict:
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
-def face_cleanup(token: str, files: bool = False) -> dict:
+def face_cleanup(files: bool = False) -> dict:
     """Remove the near-duplicate face regions, exactly as Maintenance > Face quality > Remove duplicates: one region
     of each group is kept, digiKam's database is backed up first, those photos' sidecars are rewritten (not the
     image files) and each photo gets a change-log entry. files=True, once that has finished: the image files of
     the cleaned photos that still carry the duplicates are rewritten too (each backed up first, pixels checked
-    unchanged). Runs in the background; face_quality shows progress. Needs the admin token."""
-    need_token(token)
+    unchanged). Runs in the background; face_quality shows progress. Admins only."""
+    need_admin()
     if not config.DB_WRITE or appstate.read_only():
         raise ToolError("Writing to digiKam's database is turned off")
     try:

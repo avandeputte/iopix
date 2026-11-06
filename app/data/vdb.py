@@ -514,7 +514,7 @@ def _dump_options(tool: str) -> list:
 
 def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
     """A mysqldump of the viewer database into `dst` (the backup form of the viewer's data: restore with
-    `mariadb <database> < file.sql`). skip_token leaves the MCP admin token out: it can be generated again
+    `mariadb <database> < file.sql`). skip_token leaves the admin token (mcp_admin_token) out: it can be generated again
     and need not travel with the data. Raises when no dump tool is installed or the dump fails."""
     tool = dump_tool()
     if not tool:
