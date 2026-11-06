@@ -39,6 +39,12 @@ without asking the shared questions again: the same database server (each app ge
 database, sign-in domain and admin (`iosuite-shared install`, from the shared library). Each app keeps its usual port
 and updates itself as always. The Proxmox installer offers the same as a checklist, for one container with several apps.
 
+The databases and users need not exist beforehand: give a MariaDB / MySQL administrator (the question after the
+databases; flag `--db-admin USER:PASSWORD`, or `IOPIX_DB_ADMIN`, also in the Proxmox installer) and `setup.sh` creates
+the app's database and user, the Shared ioSuite database and user and, with other apps installed alongside, their
+databases too, with the passwords you answered (`iosuite-shared provision`). Nothing is dropped, and the administrator's
+password is used once and not written anywhere.
+
 `setup.sh` is the installer: it asks where the photos are, whether you use digiKam with them and if so whether its database is the SQLite file or MySQL/MariaDB (and tests the connection), the MySQL/MariaDB server for iopix's own database (host, port, database, user, password; it tests the connection and creates the database when the account may), which features you want (content search, places, objects, text recognition, descriptions; each downloads its model), the port, an admin account, and whether to start the viewer at login (launchd on macOS, systemd on Linux). Then it creates the Python environment, installs the packages, downloads the models, writes `config.env`, creates the admin and starts the service. Run it again at any time to add a feature; it keeps what is there. Flags skip the questions (`./setup.sh --help`), e.g. `./setup.sh --yes --photos /srv/photos --digikam-db db:3306/digikam:digikam:secret --db db:3306/iopix:iopix:secret --features search,places --admin alex:secret` (`--db` is iopix's own database; without it iopix asks for one on its set-up page), or `./setup.sh --yes --photos /srv/photos --no-digikam` when you don't use digiKam.
 
 It also installs what the viewer needs from the system when it is missing: Python 3.10+, `exiftool` (metadata editing), `ffmpeg` (video thumbnails), `jpegtran` from libjpeg-turbo (lossless JPEG rotate and crop) and the MariaDB client (`mysqldump`, for the backups of iopix's database and of a MySQL/MariaDB digiKam database), with Homebrew on macOS (offering to install Homebrew first) or apt/dnf/zypper/pacman on Linux (`--no-system-deps` to skip). Without the service, `./run.sh` starts it in the foreground.
