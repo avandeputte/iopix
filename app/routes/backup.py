@@ -46,7 +46,7 @@ def api_backup(which: str, request: Request):
         tmp.mkdir(exist_ok=True)
         try:
             with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
-                vdb.dump(tmp / "viewer.sql")  # mysqldump of the viewer's database, the MCP admin token left out
+                vdb.dump(tmp / "viewer.sql")  # mysqldump of the viewer's database, the admin token left out
                 z.write(tmp / "viewer.sql", "viewer.sql")
                 for f in sorted(config.DATA_DIR.glob("embeddings*.npz")) + sorted(config.DATA_DIR.glob("embeddings*.npz.complete")):
                     z.write(f, f.name)

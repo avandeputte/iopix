@@ -36,7 +36,7 @@ One row per feature with its model or models: download, switch, remove, and comp
 The size of each part of the data folder, with what can be done about it on the same row, and the free space on the disk. The sizes are measured in the background and remembered for a few minutes, so the page opens quickly even with a large data folder. **Download a backup** offers:
 
 - **digiKam database**: a consistent copy of `digikam4.db` as it is right now, or a fresh dump for MariaDB,
-- **iopix data**: `viewer.sql`, a `mysqldump` of iopix's own database, the content-search embeddings files, and a README with the restore steps (`mariadb <database> < viewer.sql`). The MCP admin token is left out of this backup; set a new one after a restore if you use the MCP server.
+- **iopix data**: `viewer.sql`, a `mysqldump` of iopix's own database, the content-search embeddings files, and a README with the restore steps (`mariadb <database> < viewer.sql`).
 
 ## iopix
 
@@ -45,6 +45,5 @@ The size of each part of the data folder, with what can be done about it on the 
 | Version | the installed version, **Check for updates** and **Update now** |
 | Edit log | every change to every photo, with Undo |
 | Server log | the end of iopix's own log, filtered by level or text, and a download of the whole file |
-| MCP update token | the admin token for the MCP server's admin tools |
 
 The MCP server itself is switched on or off in **Settings › MCP server**.

@@ -1,16 +1,16 @@
-# the viewer's own data: index, caches, models, backups, settings (gigabytes, machine-specific)
-data/
 # virtual environment and Python caches
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
-# the settings setup.sh writes (they hold the database passwords)
+# the settings setup.sh writes (they hold the database passwords), and what the app writes on its own (data/: the log, the update result)
 config.env
-# installer output
-dist/
+data/
+*.log
+.update-result
+COMMIT
 # macOS
 .DS_Store
-# editable-install metadata
-*.egg-info/
-COMMIT
+# installer output
+dist/

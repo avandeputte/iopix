@@ -48,7 +48,7 @@ iopix's own data lives on a MariaDB or MySQL server (see [iopix's own database](
 | `DIGIKAM_CHECK` | `pgrep` | `pgrep` checks whether digiKam runs on this machine before writing; `none` does not check |
 | `AUTH_PROXY`, `AUTH_PROXY_HEADER`, `AUTH_PROXY_TRUSTED`, `AUTH_PROXY_CREATE` | off | sign-in through a proxy, see [Sign-in through a proxy](../admin/proxy-signin.md) |
 | `CF_ACCESS_TEAM`, `CF_ACCESS_AUD` | unset | Cloudflare Access team domain and AUD tag |
-| `MCP_ADMIN_TOKEN` | generated | the admin token for MCP admin tools |
+| `MCP_USER` | unset | the account `python -m app.mcp` (stdio) acts as; over HTTP every `/mcp` request signs in with an app password |
 
 ## AI and background work
 

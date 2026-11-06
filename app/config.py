@@ -1,5 +1,5 @@
 """Paths and tunables: config.env in the app folder (setup.sh writes it; config.env.example lists them all), or the
-environment, which wins.
+environment, which wins. The settings every app of the suite shares come from iosuite_shared.config.standard.
 
 Everything this app writes on its own (index, caches, state, models, backups)
 lives under DATA_DIR, inside the app's own folder by default. The library is
@@ -12,9 +12,16 @@ from pathlib import Path
 
 from iosuite_shared import config as shared
 
+APP = "iopix"
 APP_DIR = Path(__file__).resolve().parent.parent
 shared.load_file(APP_DIR)  # first: iosuite_shared reads its settings (the Shared ioSuite database, COOKIE_DOMAIN) from it too
 env, env_flag, env_int = shared.env, shared.env_flag, shared.env_int
+# APP_DIR, DATA_DIR, STATIC_DIR, LOG_FILE, HOST, PORT, PUBLIC_URL, BASE_URL, FORWARDED_ALLOW_IPS, TLS_CERT_FILE, TLS_KEY_FILE,
+# MCP_FORCED, ADMIN_USER, ADMIN_PASSWORD: the same names in every app (iosuite_shared.config.standard says what each is)
+_std = shared.standard(APP, APP_DIR)
+DATA_DIR, STATIC_DIR, LOG_FILE, HOST, PORT = _std["DATA_DIR"], _std["STATIC_DIR"], _std["LOG_FILE"], _std["HOST"], _std["PORT"]
+PUBLIC_URL, BASE_URL, FORWARDED_ALLOW_IPS = _std["PUBLIC_URL"], _std["BASE_URL"], _std["FORWARDED_ALLOW_IPS"]
+TLS_CERT_FILE, TLS_KEY_FILE, MCP_FORCED, ADMIN_USER, ADMIN_PASSWORD = _std["TLS_CERT_FILE"], _std["TLS_KEY_FILE"], _std["MCP_FORCED"], _std["ADMIN_USER"], _std["ADMIN_PASSWORD"]
 
 
 def _path(name: str, default: Path) -> Path:
@@ -27,25 +34,8 @@ DIGIKAM_DB = DIGIKAM_DB_DIR / "digikam4.db"
 # per-root paths are used.
 PHOTOS_ROOT = _path("PHOTOS_ROOT", Path.home() / "Pictures" / "photos")
 
-DATA_DIR = _path("DATA_DIR", APP_DIR / "data")
 INDEX_DB = DATA_DIR / "index.db"
 CACHE_DIR = DATA_DIR / "cache"
-STATIC_DIR = APP_DIR / "static"
-# The address people reach the viewer at (https://photo.example.com), as the suite's start page and the other apps
-# link to it; empty: the best address it has been reached at is noted on its own.
-PUBLIC_URL = env("PUBLIC_URL").strip().rstrip("/")
-
-# where the server listens (python -m app); every app of the suite has its own default port (iosuite_shared.suite.PORTS)
-HOST = env("HOST", "0.0.0.0")
-PORT = env_int("PORT", 8600)
-# the addresses that may tell the server the visitor's address and scheme (X-Forwarded-For / -Proto): * (any), or a
-# comma-separated list such as the reverse proxy's
-FORWARDED_ALLOW_IPS = env("FORWARDED_ALLOW_IPS", "*")
-# HTTPS served directly instead of behind a reverse proxy: both files
-TLS_CERT_FILE = env("TLS_CERT_FILE")
-TLS_KEY_FILE = env("TLS_KEY_FILE")
-# the address links in MCP results point at
-BASE_URL = PUBLIC_URL or f"http://localhost:{PORT}"
 
 # Grid thumbnails: fixed height, width follows the aspect ratio up to a cap.
 THUMB_HEIGHT = env_int("THUMB_HEIGHT", 360)
@@ -83,8 +73,6 @@ for _p in (DIGIKAM_DB_DIR, PHOTOS_ROOT):
 # AUTO_MODELS: models to download on first start when missing, e.g. "siglip2,yolox,geonames"
 # (keys as in app/ai/models.py). Containers and installers set it; the Mac service leaves it empty.
 AUTO_MODELS = [k.strip() for k in os.environ.get("AUTO_MODELS", "").split(",") if k.strip()]
-# rotating copy of the server's own log lines (Maintenance / MCP can show it); LOG_FILE= with nothing after it: none
-LOG_FILE = _path("LOG_FILE", DATA_DIR / "iopix.log") if os.environ.get("LOG_FILE", "x") else None
 # READ_ONLY=1 locks the viewer to browsing: no edits, tags, faces or database writes, whatever the settings say
 READ_ONLY = env_flag("READ_ONLY")
 # Allow metadata edits (XMP sidecars; image files too when the write_files setting is on).
@@ -135,16 +123,14 @@ DIGIKAM_DB_DUMP = os.environ.get("DIGIKAM_DB_DUMP", "").strip()
 # the GitHub repository and branch update.sh follows and the update check compares against
 IOPIX_REPO = env("IOPIX_REPO") or "avandeputte/iopix"
 IOPIX_BRANCH = env("IOPIX_BRANCH") or "main"
-MCP_FORCED = env_flag("MCP")  # MCP=1: the MCP endpoint is on whatever the setting says
-ADMIN_USER = os.environ.get("ADMIN_USER", "").strip()  # with ADMIN_PASSWORD: the first admin account, created on an empty users table
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+MCP_USER = env("MCP_USER")  # the account `python -m app.mcp` (stdio) acts as
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")  # the browser-facing key, when not entered in Settings
 GOOGLE_SERVER_KEY = os.environ.get("GOOGLE_SERVER_KEY", "")  # the key for the APIs this server calls, when not entered in Settings
 SCANNER_LOOP = os.environ.get("SCANNER_LOOP", "1") != "0"  # SCANNER_LOOP=0 (the test suite): file scanner passes only on request
 EXIFTOOL = os.environ.get("EXIFTOOL")  # a particular exiftool binary; else the one on PATH or digiKam's bundled copy
 
 
-# UPDATE_CHECK=0 (the daily version check locked off) and MCP_ADMIN_TOKEN (the MCP admin token) are read by iosuite_shared.updates (app.auth.updater)
+# UPDATE_CHECK=0 (the daily version check locked off) is read by iosuite_shared.updates (app.auth.updater)
 
 
 def sidecar_compat_env() -> bool:

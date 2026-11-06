@@ -124,7 +124,7 @@ def test_version_is_single_sourced_and_shown(client):
     toml = re.search(r'^version = "([^"]+)"', open("pyproject.toml").read(), re.M).group(1)
     assert __version__ == toml, "bump app/__init__.py and pyproject.toml together"
     s = client.get("/api/status").json()
-    assert s["appVersion"] == __version__ and "commit" in s
+    assert s["version"] == __version__ and s["app"] == "iopix" and s["name"] == "ioPix" and "commit" in s and "update" in s
     assert client.get("/api/server").json()["version"] == __version__
 
 

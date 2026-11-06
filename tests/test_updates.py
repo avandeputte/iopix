@@ -89,10 +89,10 @@ def test_daily_check_banner_and_setting(client, monkeypatch):
     monkeypatch.setattr(updater, "check_locked", False)
     state.set_setting("update_check", "1")
     updater.check()
-    u = client.get("/api/status").json()["updateAvailable"]
+    u = client.get("/api/status").json()["update"]
     assert u == {"remote": "fedcba1", "version": "9.9.9", "message": "v9.9.9: something new", "date": "2026-10-16"}
     assert client.post("/api/server", json={"autoCheck": False}).status_code == 200
-    assert client.get("/api/status").json()["updateAvailable"] is None and updater.auto_check_enabled() is False
+    assert client.get("/api/status").json()["update"] is None and updater.auto_check_enabled() is False
     assert client.get("/api/server").json()["autoCheck"] is False
     monkeypatch.setattr(updater, "check_locked", True)
     assert client.post("/api/server", json={"autoCheck": True}).status_code == 400, "locked off by the environment"

@@ -1,24 +1,24 @@
-"""The settings conventions every app of the suite shares."""
+"""The conventions every app of the suite follows (iosuite_shared.testing): the port, one version, config.env, and an
+access marker on every API route (test_access.py also checks each route's level against access_table.json)."""
 from pathlib import Path
 
-from iosuite_shared import suite
+from iosuite_shared import testing
 
-from app import __version__, config
+from app import __version__, access, config
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_default_port_is_the_suites():
-    assert config.PORT == suite.PORTS["iopix"] == 8600
-    for f in ("Dockerfile", "docker-compose.yml", "config.env.example", "run.sh"):
-        assert "8600" in (ROOT / f).read_text(), f
+def test_suite_conventions():
+    testing.check_conventions(ROOT, "iopix", __version__, config)
 
 
-def test_one_version_everywhere():
-    assert f'version = "{__version__}"' in (ROOT / "pyproject.toml").read_text()
+def test_every_api_route_declares_who_may_call_it():
+    from app.main import app
+    testing.check_access_declared(app, access.declared)
 
 
-def test_settings_file_is_config_env():
-    assert "config.env" in (ROOT / ".gitignore").read_text().split()
-    for f in ("setup.sh", "update.sh", "README.md"):
-        assert "iopix.env" not in (ROOT / f).read_text(), f
+def test_standard_paths():
+    assert config.APP_DIR == ROOT and config.STATIC_DIR == ROOT / "static"
+    assert config.INDEX_DB == config.DATA_DIR / "index.db"
+    assert config.LOG_FILE is None  # LOG_FILE= in the tests' environment

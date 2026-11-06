@@ -1,4 +1,4 @@
-"""The operator's diagnostics, behind the admin token: what one would check in a shell. The
+"""The operator's diagnostics, for admins: what one would check in a shell. The
 viewer's health, its log and job queue, what is inside one photo's or video's file and which of
 its files exist on disk, the proxy sign-in setup, the video repair, and the updater."""
 import json
@@ -6,7 +6,6 @@ import os
 from typing import Literal, Optional
 
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
 
 from app import __version__, config, jobs, thumbs, users
 from iosuite_shared import proxyauth
@@ -18,7 +17,7 @@ from app.ai.semantic import semantic, enabled as semantic_enabled
 from app.digikam import dbsync, dkdb
 from app.ai import models
 from app.ai.analysis import progress as analysis_progress
-from app.mcp.base import READ_ONLY, WRITES, db, need_token, server
+from app.mcp.base import READ_ONLY, UPDATES, WRITES, db, need_admin, server
 
 # the probe outputs an answer keeps: the first lines say what is wrong, the rest is noise in a transcript
 FFMPEG_ERRORS_MAX = 1500
@@ -28,11 +27,11 @@ BOXES_MAX = 30  # top-level MP4 boxes listed: a sound file has a handful; more m
 
 
 @server.tool(annotations=READ_ONLY)
-def diagnostics(token: str) -> dict:
+def diagnostics() -> dict:
     """The viewer's own health: version and commit, platform, database backend, which external tools
     exist (exiftool, ffmpeg, mysqldump), disk space, the background job queue with timing, installed
     models and features, user and permission mode, settings without secrets. Start here for any issue."""
-    need_token(token)
+    need_admin()
     import platform
     import shutil as sh
     import sys
@@ -83,10 +82,10 @@ def _public_settings() -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
-def server_log(token: str, lines: int = 200, contains: str = "", level: Literal["any", "warning", "error", "auth"] = "any") -> dict:
+def server_log(lines: int = 200, contains: str = "", level: Literal["any", "warning", "error", "auth"] = "any") -> dict:
     """The last lines of the viewer's own log (LOG_FILE, data/iopix.log by default, rotating). `contains` keeps only lines
     with that text; `level` keeps only WARNING+ or ERROR+ lines (tracebacks count as errors)."""
-    need_token(token)
+    need_admin()
     if config.LOG_FILE is None:
         raise ToolError("no log file (LOG_FILE is empty in config.env)")
     try:
@@ -96,11 +95,11 @@ def server_log(token: str, lines: int = 200, contains: str = "", level: Literal[
 
 
 @server.tool(annotations=READ_ONLY)
-def job_queue(token: str) -> dict:
+def job_queue() -> dict:
     """What the background worker is doing right now: the running job, its start time and elapsed
     minutes, what is queued, the core budget, and per-job progress with the time of the last
     completed item (a stall shows as a large 'idle_seconds')."""
-    need_token(token)
+    need_admin()
     import time
     q = jobs.status()
     now = time.time()
@@ -118,11 +117,11 @@ def job_queue(token: str) -> dict:
 
 
 @server.tool(annotations=WRITES)
-def repair_video(token: str, photo_id: int) -> dict:
+def repair_video(photo_id: int) -> dict:
     """Repair a video that does not play because its wrapper is damaged (inspect_file shows it): the same streams
     rewrapped without re-encoding, checked to play in full before it replaces the file. The original is kept
-    (the change log can put it back). Needs the admin token."""
-    need_token(token, writes=True)
+    (the change log can put it back). Admins only."""
+    need_admin(writes=True)
     try:
         return repair.video(int(photo_id))
     except dbsync.SyncError as e:
@@ -130,13 +129,13 @@ def repair_video(token: str, photo_id: int) -> dict:
 
 
 @server.tool(annotations=WRITES)
-def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optional[str] = None, cf_access_aud: Optional[str] = None,
+def proxy_signin(mode: Optional[str] = None, cf_access_team: Optional[str] = None, cf_access_aud: Optional[str] = None,
                  trusted: Optional[str] = None, create_role: Optional[str] = None) -> dict:
     """Sign-in at a reverse proxy (Cloudflare Access, Authelia behind HAProxy/nginx/Caddy/Traefik): with no settings
     given, how it is set up and the Cloudflare Access team and application last seen in requests; with settings, saves
     them (mode: off|cloudflare|haproxy|nginx|caddy|traefik|header; an empty string clears one; config.env still wins).
-    Needs the admin token."""
-    need_token(token)
+    Admins only."""
+    need_admin()
     changes = {k: v for k, v in (("AUTH_PROXY", mode), ("CF_ACCESS_TEAM", cf_access_team), ("CF_ACCESS_AUD", cf_access_aud),
                                  ("AUTH_PROXY_TRUSTED", trusted), ("AUTH_PROXY_CREATE", create_role)) if v is not None}
     if "AUTH_PROXY" in changes and changes["AUTH_PROXY"] not in ("", "off", *proxyauth.PRESETS):
@@ -153,11 +152,11 @@ def proxy_signin(token: str, mode: Optional[str] = None, cf_access_team: Optiona
 
 
 @server.tool(annotations=READ_ONLY)
-def inspect_file(token: str, photo_id: int) -> dict:
+def inspect_file(photo_id: int) -> dict:
     """What is inside one photo's or video's file, for "it does not show" questions: exiftool's reading of its
     container and streams (warnings included), ffmpeg's decode check of the first seconds, and the file's first and
-    last bytes (a QuickTime file needs its moov box; a file cut short has none). Read-only. Needs the admin token."""
-    need_token(token)
+    last bytes (a QuickTime file needs its moov box; a file cut short has none). Read-only. Admins only."""
+    need_admin()
     import shutil
     import subprocess
     con = db()
@@ -213,10 +212,10 @@ def inspect_file(token: str, photo_id: int) -> dict:
 
 
 @server.tool(annotations=READ_ONLY)
-def photo_file(token: str, photo_id: int) -> dict:
+def photo_file(photo_id: int) -> dict:
     """Checks one photo's files on disk: the image (exists, size, readable), its XMP sidecar, the
     thumbnail cache entry, and any backups the viewer made. For 'this photo does not show' issues."""
-    need_token(token)
+    need_admin()
     con = db()
     try:
         r = con.execute("SELECT id, path, name, size, hash, modified, video FROM photos WHERE id = ?", (photo_id,)).fetchone()
@@ -253,17 +252,15 @@ def check_for_update() -> dict:
     return {"version": __version__, **updater.check(), "lastUpdate": updater.last_result()}
 
 
-@server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True))  # openWorld: it reaches GitHub
-def update_viewer(token: str, ref: str = "") -> dict:
+@server.tool(annotations=UPDATES)  # openWorld: it reaches GitHub
+def update_viewer(ref: str = "") -> dict:
     """Update the viewer to the latest commit on GitHub and restart it (update.sh: code, packages,
-    service; settings and data are kept). Needs the admin token from Maintenance > Updates and logs,
-    because this endpoint has no sign-in. ref: the commit sha (or branch) to install; pass the sha
+    service; settings and data are kept). Admins only. ref: the commit sha (or branch) to install; pass the sha
     you just pushed, since GitHub can report the previous commit for a short while after a push.
     Nothing happens when that commit is already installed. The connection drops when the viewer
     restarts; call check_for_update afterwards: lastUpdate carries the outcome and installed the
     commit. Not available in Docker (pull the image)."""
-    if not updater.token_ok(token):
-        raise ToolError("Wrong or missing admin token (Maintenance > Updates and logs shows it to an admin)")
+    need_admin()
     try:
         updater.run(ref)
     except RuntimeError as e:
