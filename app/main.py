@@ -166,7 +166,7 @@ async def _without_database(request: Request, call_next):
         except HTTPException as e:
             return JSONResponse({"detail": e.detail}, status_code=e.status_code)
         return JSONResponse({"detail": "Not found"}, status_code=404)
-    if path in OPEN_PATHS or path.startswith(OPEN_PREFIXES[:3]) or path.endswith((".png", ".svg", ".ico")):  # the shell, not the sign-in API
+    if path in OPEN_PATHS or path.startswith("/static/") or path.endswith((".png", ".svg", ".ico")):  # the shell and its files, not the sign-in API
         return await call_next(request)
     return JSONResponse({"detail": f"{APP_NAME_DEFAULT} has no database yet ({vdb.error}); open the viewer to set one up", "needsDatabase": True}, status_code=503)
 
