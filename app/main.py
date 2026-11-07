@@ -9,7 +9,6 @@ and go through the modules that own those writes."""
 import logging
 import threading
 from contextlib import asynccontextmanager
-from urllib.parse import urlsplit
 
 from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -70,7 +69,8 @@ async def lifespan(_app):
 app = FastAPI(title="ioPix", version=APP_VERSION, lifespan=lifespan, docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
               description="A web front end for a digiKam photo library, for the family. Also an MCP endpoint (/mcp) for AI assistants.")
 
-MAX_JSON_BYTES = 4 << 20  # a JSON request larger than this is refused (uploads are multipart and not bound here)
+MAX_JSON_BYTES = 4 << 20   # a JSON request larger than this is refused
+MAX_UPLOAD_BYTES = 2 << 30  # a multipart upload (photos, a library, a model): what the upload routes accept at most
 
 # what a visitor may still fetch when sign-in is required: the app shell and its files (the map library among them),
 # the API docs, a share link, and the MCP endpoint (its gate below)
@@ -119,13 +119,11 @@ async def _without_database(request: Request, call_next):
         return JSONResponse({"ok": False, "app": config.APP, "name": APP_NAME_DEFAULT, "version": APP_VERSION, "appName": APP_NAME_DEFAULT,
                              "needsDatabase": True, "databaseError": vdb.error, "databaseConfigured": vdb.configured(), "index": "", "stamp": ""})
     if path.startswith("/api/viewerdb"):
-        if method not in ("GET", "HEAD", "OPTIONS"):  # the same cross-site rule the sign-in middleware applies
-            origin, site = request.headers.get("origin"), request.headers.get("sec-fetch-site")
-            if site == "cross-site" or (origin and (origin == "null" or urlsplit(origin).netloc.lower() != (request.headers.get("host") or "").lower())):
-                return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
+        if method not in ("GET", "HEAD", "OPTIONS") and auth.cross_site(request):  # the sign-in middleware's own rule
+            return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
         # a database is configured but did not answer at start (the server is down, or started after the viewer): nobody is
         # signed in, so nothing here may test another server with the stored password or point the viewer at another
-        # database; only Retry, and the error. Changing the connection then is done in data/viewer-db.json or DB_* in config.env.
+        # database; only Retry, and the error. Changing the connection then is done with DB_* in config.env.
         if vdb.configured():
             if path == "/api/viewerdb" and method == "GET":
                 return JSONResponse({"configured": True, "locked": True, "error": vdb.error, "type": "mysql"})
@@ -136,7 +134,7 @@ async def _without_database(request: Request, call_next):
                     return JSONResponse({"detail": e.detail}, status_code=e.status_code)
             if path in ("/api/viewerdb/test", "/api/viewerdb/switch"):
                 return JSONResponse({"detail": f"{APP_NAME_DEFAULT}'s database is configured but not answering ({vdb.error}). "
-                                               "Retry once it is up, or change the connection in data/viewer-db.json or the DB_* settings in config.env."}, status_code=403)
+                                               "Retry once it is up, or change the connection with the DB_* settings in config.env."}, status_code=403)
             return JSONResponse({"detail": "Not found"}, status_code=404)
         try:
             if path == "/api/viewerdb" and method == "GET":
@@ -164,13 +162,15 @@ async def _database_gate(request: Request, call_next):
 
 
 def _limit_for(path: str, ctype: str) -> int:
-    if ctype in ("application/json", "application/x-www-form-urlencoded", "text/plain", ""):
-        return MAX_JSON_BYTES
-    return 1 << 40  # uploads (multipart) and files: not bound here
+    """What BodyCap lets through: JSON and forms a few MiB, multipart uploads up to MAX_UPLOAD_BYTES (the upload routes
+    refuse larger files themselves too), anything else as JSON."""
+    if ctype.startswith("multipart/"):
+        return MAX_UPLOAD_BYTES
+    return MAX_JSON_BYTES
 
 
 # 400 for bad input, the headers, no-store on the API, the body cap: the same in every app of the suite
-auth.install(app, limit_for=_limit_for)
+auth.install(app, limit_for=_limit_for, forwarded_allow_ips=config.FORWARDED_ALLOW_IPS)  # also X-Forwarded-* from those proxies
 
 
 def _status_extra(request: Request) -> dict:

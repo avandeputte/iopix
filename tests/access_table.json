@@ -71,7 +71,12 @@
   "GET /api/users": "admin",
   "GET /api/users/{user_id}/sessions": "admin",
   "GET /api/viewerdb": "admin",
-  "GET /api/zip": "public",
+  "GET /api/zip": "downloads",
+  "GET /face/{tag_id}": "public",
+  "GET /facecrop/{photo_id}/{x}/{y}/{w}/{h}.jpg": "public",
+  "GET /orig/{photo_id}": "public",
+  "GET /preview/{photo_id}": "public",
+  "GET /thumb/{photo_id}": "public",
   "PATCH /api/users/{user_id}": "admin",
   "POST /api/analysis/run": "admin",
   "POST /api/auth/app-passwords": "signed_in",
@@ -151,10 +156,9 @@
   "POST /api/ualbums": "signed_in",
   "POST /api/ualbums/{album_id}": "signed_in",
   "POST /api/users": "admin",
-  "POST /api/users/{user_id}": "admin",
   "POST /api/viewerdb/retry": "admin",
   "POST /api/viewerdb/switch": "admin",
   "POST /api/viewerdb/test": "admin",
-  "POST /api/zip": "public",
-  "POST /api/zip/plan": "public"
+  "POST /api/zip": "downloads",
+  "POST /api/zip/plan": "downloads"
 }

@@ -1,4 +1,4 @@
-"""Every API route declares who may call it (app/access.py), and the declared levels match the table in
+"""Every API route (and every image route) declares who may call it (app/access.py), and the declared levels match the table in
 access_table.json: a new route without a marker, or a route whose level changed by accident, fails here.
 Change the table on purpose when a route's audience changes."""
 import json
@@ -14,10 +14,13 @@ from app.routes import albums, auth, backup, browse, editing, faces, geo, images
 TABLE = json.loads((Path(__file__).parent / "access_table.json").read_text())
 
 
+IMAGE_PREFIXES = ("/thumb/", "/preview/", "/face/", "/orig/", "/facecrop/")  # the image routes, outside /api, checked too
+
+
 def _api_routes():
     for mod in (browse, images, albums, editing, settings, maintenance, auth, users, geo, backup, review, organize, faces):
         for r in mod.router.routes:
-            if isinstance(r, APIRoute) and r.path.startswith("/api"):
+            if isinstance(r, APIRoute) and (r.path.startswith("/api") or r.path.startswith(IMAGE_PREFIXES)):
                 yield r
 
 

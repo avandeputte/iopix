@@ -84,20 +84,21 @@ def test_requests_through_the_proxy_are_signed_in(client, monkeypatch, account):
     assert client.get("/api/auth/me").json()["user"] is None, "no header: not signed in"
 
 
-def test_the_real_peer_survives_uvicorns_forwarded_rewrite():
-    """uvicorn replaces the client address with X-Forwarded-For for its trusted hosts; proxy sign-in keeps the
-    address the connection came from."""
+def test_the_real_peer_survives_the_forwarded_rewrite():
+    """iosuite-shared's Forwarded middleware (uvicorn runs with proxy_headers=False) takes the visitor's address from
+    X-Forwarded-For only for a connection from FORWARDED_ALLOW_IPS, and keeps the address the connection really
+    came from, which proxy sign-in and the throttles trust."""
     import asyncio
-    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-    proxyauth.remember_peer()
     seen = {}
 
     async def inner(scope, receive, send):
-        seen.update(client=scope["client"][0], peer=scope.get("iothing.peer"))
-    mw = ProxyHeadersMiddleware(inner, trusted_hosts="127.0.0.1")
-    scope = {"type": "http", "client": ("127.0.0.1", 5000), "headers": [(b"x-forwarded-for", b"203.0.113.9")], "scheme": "http"}
-    asyncio.run(mw(scope, None, None))
-    assert seen == {"client": "203.0.113.9", "peer": "127.0.0.1"}, seen
+        seen.update(client=scope["client"][0], peer=scope.get("iothing.peer"), scheme=scope["scheme"])
+    headers = [(b"x-forwarded-for", b"203.0.113.9"), (b"x-forwarded-proto", b"https")]
+    mw = proxyauth.Forwarded(inner, allow="127.0.0.1")
+    asyncio.run(mw({"type": "http", "client": ("127.0.0.1", 5000), "headers": headers, "scheme": "http"}, None, None))
+    assert seen == {"client": "203.0.113.9", "peer": "127.0.0.1", "scheme": "https"}, seen
+    asyncio.run(mw({"type": "http", "client": ("10.9.9.9", 5000), "headers": headers, "scheme": "http"}, None, None))
+    assert seen == {"client": "10.9.9.9", "peer": "10.9.9.9", "scheme": "http"}, "not from an allowed proxy: the headers are ignored"
 
 
 def test_settings_from_the_app_and_the_token_seen(monkeypatch, account):

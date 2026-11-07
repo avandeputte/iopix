@@ -203,7 +203,7 @@ def api_faces_queue(kind: str = "suggested", tag: int = None, offset: int = 0, l
         con.close()
 
 
-@router.get("/facecrop/{photo_id}/{x}/{y}/{w}/{h}.jpg")
+@router.get("/facecrop/{photo_id}/{x}/{y}/{w}/{h}.jpg", dependencies=[access.public])
 def facecrop(photo_id: int, x: int, y: int, w: int, h: int):
     """A square crop around any face rectangle (upright pixels), for the face queues."""
     row = photo_row(photo_id)

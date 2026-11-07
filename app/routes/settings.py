@@ -293,8 +293,7 @@ async def api_db_test(request: Request):
 
 @router.get("/api/viewerdb", dependencies=[access.admin])
 def api_viewerdb():
-    """Where the viewer keeps its own data (MariaDB/MySQL): the settings without the password, the current error,
-    and whether a viewer.db from before v1.113 waits to be imported."""
+    """Where the viewer keeps its own data (MariaDB/MySQL): the settings without the password, and the current error."""
     return vdb.public_settings()
 
 
@@ -319,8 +318,8 @@ async def api_viewerdb_test(request: Request):
 
 @router.post("/api/viewerdb/switch", dependencies=[access.admin])
 async def api_viewerdb_switch(request: Request):
-    """Body: the settings plus copy (default true: carry every row over, from the current database or from an
-    older install's viewer.db) and drop (default true: drop and recreate the viewer's tables at the target first).
+    """Body: the settings plus copy (default true: carry every row over from the current database) and drop (default
+    true: drop and recreate the viewer's tables at the target first).
     Saves the configuration and restarts the viewer."""
     d = await json_body(request)
     try:
