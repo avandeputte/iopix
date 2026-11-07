@@ -376,6 +376,18 @@ async def api_datehints_set(request: Request):
     return {"ok": True}
 
 
+@router.get("/api/people/list", dependencies=[access.public])
+def api_people_list():
+    """Every person in People, by name: {people: [{id, name, photos}]}. The suite's admin panel (iosuite-shared,
+    Settings › Suite › People › Person in photos) reads it, from any io app, to link an account to its person."""
+    con = db()
+    try:
+        rows = con.execute("SELECT id, name, n_all FROM tags WHERE person = 1 ORDER BY name COLLATE NOCASE").fetchall()
+    finally:
+        con.close()
+    return {"people": [{"id": r[0], "name": r[1], "photos": r[2] or 0} for r in rows]}
+
+
 @router.get("/api/people/birthdays", dependencies=[access.signed_in])
 def api_people_birthdays():
     """The birthdays from ioContacts (Settings › ioContacts) in the next month, today first:

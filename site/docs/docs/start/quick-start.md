@@ -77,7 +77,7 @@ The sidebar has three groups: **Explore, Photos, People and Places** at the top;
 1. Sign in with the admin account from the person icon.
 2. Open **Settings** to choose the theme, the name iopix shows, and the map provider.
 3. Open **Maintenance › AI analysis and models** to download the features you want, such as content search or places.
-4. Create accounts for the family under **Settings › Suite › People**, and link each to their person from People under **Settings › Accounts**.
+4. Create accounts for the family under **Settings › Suite › People**, and link each to their person in photos there too.
 
 ## 5. Turn on editing when you are ready
 

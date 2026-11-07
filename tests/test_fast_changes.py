@@ -21,6 +21,8 @@ def test_new_person_is_in_the_index_at_once_and_the_copy_follows(client, lib):
     t0 = time.time()
     index.ensure_fresh()
     assert any(t["id"] == tid for t in client.get("/api/meta").json()["tags"]), "the person is in the index"
+    people = client.get("/api/people/list").json()["people"]
+    assert any(p["id"] == tid and p["name"] == "Zz Fast Person" for p in people), "and in the list the Suite panel links accounts from"
     assert time.time() - t0 < 5
     # the copy of the library catches up by itself
     for _ in range(100):

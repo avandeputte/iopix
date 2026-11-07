@@ -74,7 +74,7 @@ def set_person(user_id: int, tag_id):
 
 
 def _on_update(user_id: int, body: dict):
-    """Settings › Accounts may also send {person}: the account's face badge."""
+    """The old /api/users/{id} may also send {person}: the account's face badge (now set from Settings › Suite › People)."""
     if "person" in body:
         if not person_tag(body["person"]):
             raise ValueError("That tag is not a person")

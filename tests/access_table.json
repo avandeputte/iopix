@@ -48,6 +48,7 @@
   "GET /api/neardups": "public",
   "GET /api/people/birthdays": "signed_in",
   "GET /api/people/groups": "public",
+  "GET /api/people/list": "public",
   "GET /api/photo/{photo_id}": "public",
   "GET /api/photos": "public",
   "GET /api/photos/trash/{job}": "public",

@@ -32,9 +32,8 @@ Accounts are shared by every app in the suite and kept in the Shared ioSuite dat
 
 - **role** in ioPix and in every other app, and **password** (or none, for a one-tap viewer),
 - **email address**, used to match sign-ins from a proxy such as Cloudflare Access,
-- **sign-in list**: take an account off the tiles on the sign-in screen (it then signs in through **Other**, by name and password).
-
-What only ioPix has stays in **Settings › Accounts**: link each account to someone in People, so their face is the account's picture.
+- **sign-in list**: take an account off the tiles on the sign-in screen (it then signs in through **Other**, by name and password),
+- **person in photos**: link the account to someone in People, so their face is the account's picture and "Photos of me" shows their photos. The panel reads People from ioPix, so this works from any io app.
 
 ## Signing in
 
