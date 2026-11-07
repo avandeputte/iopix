@@ -50,7 +50,7 @@ FLUSH PRIVILEGES;
 SQL
 mkdir -p /opt/iopix
 (umask 077; printf 'IOPIX_DB=127.0.0.1:3306/iopix:iopix:%s\n' "$VDB_PASS" > /opt/iopix/viewer-db.env)
-msg_ok "Set up MariaDB (database iopix, user iopix; credentials in /opt/iopix/viewer-db.env, root only)"
+msg_ok "Set up MariaDB (database iopix, user iopix; credentials in /opt/iopix/viewer-db.env, root only, until setup.sh puts them in config.env)"
 
 msg_info "Fetching iopix"
 REPO="${IOPIX_REPO:-https://github.com/avandeputte/iopix}"

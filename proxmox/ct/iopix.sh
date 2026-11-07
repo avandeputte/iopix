@@ -184,7 +184,8 @@ msg_ok "Mounted the library"
 
 msg_info "Running the app's setup inside the container (packages, models, settings, admin, service)"
 # iopix's own database: "local" means the MariaDB the install script set up in the container; its credentials wait
-# there in /opt/iopix/viewer-db.env (root only) and go into setup.sh's environment the same way as the other secrets
+# there in /opt/iopix/viewer-db.env (root only) and go into setup.sh's environment the same way as the other secrets;
+# setup.sh writes them into config.env, and the file is removed once it succeeded
 VDBENV=""; if [[ "${IOPIX_DB:-local}" == local ]]; then VDBENV=". /opt/iopix/viewer-db.env; "; else SECRETS+="IOPIX_DB=$(printf '%q' "$IOPIX_DB")"$'\n'; fi
 [[ -n "${IOPIX_ADMIN:-}" ]] && SECRETS+="IOPIX_ADMIN=$(printf '%q' "$IOPIX_ADMIN")"$'\n'
 # the answers with passwords go in as a root-only file (pushed, read into setup.sh's environment, removed), never as arguments
@@ -201,8 +202,9 @@ if ! pct exec "$CTID" -- bash -c "$WRAPPED"; then
   msg_error "Fix the cause, then run it again inside the container with IOPIX_ADMIN=name:password (and IOPIX_DIGIKAM_DB=host:port/db:user:password for a MariaDB digiKam, IOPIX_DB=the same form for iopix's own database, IOPIX_SUITE_DB for the Shared ioSuite database; for the container's own MariaDB it is in /opt/iopix/viewer-db.env) in the environment: pct exec $CTID -- bash -c \"$SETUP_CMD\""
   exit 1
 fi
-# the container cannot see digiKam's process on the host: ask before database writes instead of pgrep
-pct exec "$CTID" -- sh -c "grep -q ^DIGIKAM_CHECK= /opt/iopix/app/config.env || echo DIGIKAM_CHECK=none >> /opt/iopix/app/config.env; systemctl restart iopix"
+# the container cannot see digiKam's process on the host: ask before database writes instead of pgrep. The local
+# database's credentials are in config.env now (DB_*): the file that carried them to setup.sh goes.
+pct exec "$CTID" -- sh -c "grep -q ^DIGIKAM_CHECK= /opt/iopix/app/config.env || echo DIGIKAM_CHECK=none >> /opt/iopix/app/config.env; rm -f /opt/iopix/viewer-db.env; systemctl restart iopix"
 msg_ok "Setup finished"
 
 msg_ok "Completed successfully!\n"

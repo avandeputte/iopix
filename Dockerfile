@@ -33,7 +33,10 @@ RUN pip install --no-cache-dir -e ".$([ "$AI" = "1" ] && echo [ai])" \
 # the viewer runs as its own user (uid 1000), not as root: /data and the app belong to it. A volume created before
 # this change is still root-owned; give it to the user once: chown -R 1000:1000 on the mounted folder (see the README)
 RUN useradd --uid 1000 --user-group --create-home --shell /usr/sbin/nologin iopix \
-    && mkdir -p /data && chown -R iopix:iopix /data /app
+    && mkdir -p /data && chown -R iopix:iopix /data /app \
+    && ln -s /data/config.env /app/config.env
+# config.env lives in the data volume: the settings iopix writes itself (Settings › iopix database) survive a new
+# image. The environment below and the compose file's win over it.
 VOLUME ["/data"]
 # DIGIKAM_CHECK=none: the container cannot see the host's processes, so the viewer does not check
 # whether digiKam is open before writing its database. HF_HUB_OFFLINE=1: the server never

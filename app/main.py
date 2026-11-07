@@ -127,7 +127,7 @@ async def _without_database(request: Request, call_next):
                 return JSONResponse({"detail": "Requests from another site are refused"}, status_code=403)
         # a database is configured but did not answer at start (the server is down, or started after the viewer): nobody is
         # signed in, so nothing here may test another server with the stored password or point the viewer at another
-        # database; only Retry, and the error. Changing the connection then is done in data/viewer-db.json or DB_* in config.env.
+        # database; only Retry, and the error. Changing the connection then is done in the DB_* settings of config.env.
         if vdb.configured():
             if path == "/api/viewerdb" and method == "GET":
                 return JSONResponse({"configured": True, "locked": True, "error": vdb.error, "type": "mysql"})
@@ -138,7 +138,7 @@ async def _without_database(request: Request, call_next):
                     return JSONResponse({"detail": e.detail}, status_code=e.status_code)
             if path in ("/api/viewerdb/test", "/api/viewerdb/switch"):
                 return JSONResponse({"detail": f"{APP_NAME_DEFAULT}'s database is configured but not answering ({vdb.error}). "
-                                               "Retry once it is up, or change the connection in data/viewer-db.json or the DB_* settings in config.env."}, status_code=403)
+                                               "Retry once it is up, or change the connection in the DB_* settings of config.env."}, status_code=403)
             return JSONResponse({"detail": "Not found"}, status_code=404)
         try:
             if path == "/api/viewerdb" and method == "GET":

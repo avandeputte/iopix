@@ -1,7 +1,6 @@
 """The viewer database (MariaDB-only since v1.113): the schema lands in an empty database, data copies to
 another database with ids intact, a viewer.db from before v1.113 is imported once, the dump is the backup
 form, and the viewer waits for a database instead of starting on a file."""
-import json
 import sqlite3
 
 import pytest
@@ -129,16 +128,22 @@ def test_a_viewer_db_from_before_is_imported_once(tmp_path, other_db, monkeypatc
     legacy = tmp_path / "viewer.db"
     _legacy_file(legacy)
     monkeypatch.setattr(vdb, "LEGACY_SQLITE", legacy)
-    monkeypatch.setattr(vdb, "CONF", tmp_path / "viewer-db.json")
+    conf = tmp_path / "config.env"
+    conf.write_text("# iopix settings\nPORT=8600\n# DB_HOST=\n")
+    monkeypatch.setattr(vdb.config, "CONFIG_FILE", conf)
+    monkeypatch.setattr(vdb.config, "_PROCESS_ENV", {})  # as a service that reads config.env: nothing fixed outside it
+    for n in vdb.config.DB_ENV.values():
+        monkeypatch.delenv(n, raising=False)  # the test session's DB_* must not count as "configured" (and come back afterwards)
     monkeypatch.setattr(vdb, "_cfg", None)
-    monkeypatch.setattr(vdb.config, "db_env", lambda k: None)  # the suite's DB_* must not count as "configured"
     assert not vdb.configured() and vdb.public_settings()["legacy_sqlite"] == str(legacy)
     with pytest.raises(ValueError):
         vdb.switch({"host": other_db["host"]}, copy=True)  # a database and a user are needed too
     r = vdb.switch(other_db, copy=True, drop=True)
     assert r["imported"] == str(legacy) and r["copied"]["pix_favorite_photos"] == 2 and r["copied"]["pix_tags"] == 1 and "user_accounts" not in r["copied"]
     assert not legacy.exists() and (tmp_path / "viewer.db.imported").exists()
-    assert json.loads((tmp_path / "viewer-db.json").read_text())["database"] == other_db["database"]
+    saved = vdb.config.file_values(conf)
+    assert saved["DB_NAME"] == other_db["database"] and saved["DB_HOST"] == other_db["host"] and saved["PORT"] == "8600"
+    assert conf.read_text().startswith("# iopix settings\n") and "# DB_HOST=" not in conf.read_text(), "the commented line is filled in"
     con = vdb.connect(cfg=other_db)
     try:
         assert con.execute("SELECT undo_values FROM pix_photo_history WHERE photo_id = 1").fetchone()[0] == '{"rating": 3}'
@@ -150,9 +155,19 @@ def test_a_viewer_db_from_before_is_imported_once(tmp_path, other_db, monkeypatc
     assert vdb.settings()["database"] == other_db["database"]
 
 
-def test_switch_refuses_the_database_in_use(client):
-    with pytest.raises(ValueError):
+def test_switch_refuses_the_database_in_use(client, monkeypatch):
+    monkeypatch.setattr(vdb.config, "_PROCESS_ENV", {})
+    with pytest.raises(ValueError, match="already uses"):
         vdb.switch(vdb.settings(), copy=False)
+
+
+def test_switch_refuses_a_database_the_environment_fixes(other_db, tmp_path, monkeypatch):
+    """docker-compose's environment wins over config.env: a switch from Settings would be undone by the restart."""
+    monkeypatch.setattr(vdb.config, "CONFIG_FILE", tmp_path / "config.env")
+    assert "DB_HOST" in vdb.public_settings()["fromEnv"]
+    with pytest.raises(ValueError, match="environment"):
+        vdb.switch(other_db, copy=False)
+    assert not (tmp_path / "config.env").exists()
 
 
 def test_dump_is_the_backup_form_and_leaves_the_token_out(client, fresh, tmp_path):
@@ -173,7 +188,6 @@ def test_dump_is_the_backup_form_and_leaves_the_token_out(client, fresh, tmp_pat
 
 
 def test_without_a_configuration_the_viewer_waits(monkeypatch):
-    monkeypatch.setattr(vdb, "CONF", vdb.config.DATA_DIR / "nowhere.json")
     monkeypatch.setattr(vdb, "_cfg", None)
     monkeypatch.setattr(vdb.config, "db_env", lambda k: None)
     monkeypatch.setattr(vdb, "error", None)

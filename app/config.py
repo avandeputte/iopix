@@ -8,13 +8,15 @@ image files when enabled, digiKam's database while digiKam is closed), which
 are backed up first and can be locked out with READ_ONLY=1.
 """
 import os
+import re
 from pathlib import Path
 
 from iosuite_shared import config as shared
 
 APP = "iopix"
 APP_DIR = Path(__file__).resolve().parent.parent
-shared.load_file(APP_DIR)  # first: iosuite_shared reads its settings (the Shared ioSuite database, COOKIE_DOMAIN) from it too
+_PROCESS_ENV = dict(os.environ)  # what the service or container set, before config.env adds to it (see from_environment)
+CONFIG_FILE = shared.load_file(APP_DIR)  # first: iosuite_shared reads its settings (the Shared ioSuite database, COOKIE_DOMAIN) from it too
 env, env_flag, env_int = shared.env, shared.env_flag, shared.env_int
 # APP_DIR, DATA_DIR, STATIC_DIR, LOG_FILE, HOST, PORT, PUBLIC_URL, BASE_URL, FORWARDED_ALLOW_IPS, TLS_CERT_FILE, TLS_KEY_FILE,
 # MCP_FORCED, ADMIN_USER, ADMIN_PASSWORD: the same names in every app (iosuite_shared.config.standard says what each is)
@@ -150,10 +152,78 @@ def proxy_env(name: str):
 
 
 # the names of iopix's own database settings in config.env, by vdb.KEYS
-DB_ENV = {"type": "DB_TYPE", "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME", "user": "DB_USER",
-          "password": "DB_PASSWORD"}
+DB_ENV = {"type": "DB_TYPE", "host": "DB_HOST", "port": "DB_PORT", "database": "DB_NAME", "user": "DB_USER", "password": "DB_PASSWORD"}
 
 
 def db_env(key: str):
-    """DB_TYPE/HOST/PORT/NAME/USER/PASSWORD: iopix's own database, when not in data/viewer-db.json."""
+    """DB_TYPE/HOST/PORT/NAME/USER/PASSWORD: iopix's own database (config.env, or the environment)."""
     return os.environ.get(DB_ENV[key]) or None
+
+
+def file_values(path: Path = None) -> dict:
+    """The KEY=value lines of config.env as they are on disk now (read the way iosuite_shared.config reads them)."""
+    out = {}
+    try:
+        lines = Path(path or CONFIG_FILE).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = (x.strip() for x in line.split("=", 1))
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            if k:
+                out[k] = v
+    return out
+
+
+def from_environment(name: str) -> bool:
+    """Whether the service's or container's environment sets `name` to something config.env does not say (a
+    docker-compose `environment:` entry, for instance): that value wins, so writing config.env would not change it.
+    A systemd unit that reads config.env (EnvironmentFile) sets the file's own values, which does not count."""
+    v = _PROCESS_ENV.get(name)
+    return v not in (None, "") and file_values().get(name) != v
+
+
+def _quoted(v: str) -> str:
+    """A value as config.env holds it, read back the same by iosuite_shared and by systemd's EnvironmentFile: as it
+    is when plain, else in single quotes, or in double quotes when it holds a single quote itself."""
+    if "\n" in v or "\r" in v:
+        raise ValueError("A setting cannot span lines")
+    if not re.search(r"[\\'\"]", v) and v == v.strip():
+        return v
+    if "'" not in v:
+        return f"'{v}'"
+    if '"' not in v and "\\" not in v:
+        return f'"{v}"'
+    raise ValueError("A value with a single quote cannot also hold double quotes or backslashes")
+
+
+def save_values(values: dict, path: Path = None):
+    """Write KEY=value settings into config.env: each replaces its line (or a commented-out `# KEY=` line), the
+    rest is added at the end; comments and every other line stay. The file stays readable by its owner only, and
+    the environment of this process follows, until the restart that reads the file again. Through a symlink (the
+    Docker image keeps config.env in the data volume), the file it points at is written."""
+    p = Path(path or CONFIG_FILE).resolve()
+    lines = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
+    todo = {k: _quoted(str(v)) for k, v in values.items()}
+    for i, line in enumerate(lines):  # the active lines first, so a commented example further up is left alone
+        m = re.match(r"\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
+        if m and m.group(2) in todo:
+            k = m.group(2)
+            lines[i] = f"{k}={todo.pop(k)}" if k in todo else None
+    lines = [x for x in lines if x is not None]  # a key on two lines: the first one is kept
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*#\s*([A-Za-z_][A-Za-z0-9_]*)=", line)
+        if m and m.group(1) in todo:
+            lines[i] = f"{m.group(1)}={todo.pop(m.group(1))}"
+    lines += [f"{k}={v}" for k, v in todo.items()]
+    tmp = p.with_name(p.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, p)
+    for k, v in values.items():
+        os.environ[k] = str(v)

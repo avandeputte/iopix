@@ -35,7 +35,7 @@ An old volume is owned by root. Run `docker run --rm -v iopix-data:/data alpine 
 Set `DIGIKAM_MYSQL_DATES` to `local` or `utc`; see [digiKam on MariaDB](../connect/mariadb.md).
 
 **iopix only shows a page asking for a database.**
-Since 1.113 iopix keeps its own data on a MariaDB or MySQL server and starts on that page until it has one. Create a database (the page shows how), enter the details, **Test connection**, then **Use this database**. If the server is configured but down, the page shows the error and a **Retry** button only (change the connection in `data/viewer-db.json` if the server moved); API calls answer 503 meanwhile. See [iopix's own database](../connect/iopix-database.md).
+Since 1.113 iopix keeps its own data on a MariaDB or MySQL server and starts on that page until it has one. Create a database (the page shows how), enter the details, **Test connection**, then **Use this database**. If the server is configured but down, the page shows the error and a **Retry** button only (change the `DB_*` lines of `config.env` if the server moved); API calls answer 503 meanwhile. See [iopix's own database](../connect/iopix-database.md).
 
 **I updated and my settings, accounts and favorites are gone.**
 They are still in `viewer.db` in the data folder. On the database set-up page, leave **Import the existing data** ticked: every row is copied into the new database and the file is renamed `viewer.db.imported`.
