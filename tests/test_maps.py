@@ -1,12 +1,14 @@
 """Map provider: OpenStreetMap by default; Google Maps when chosen with a key, with the tile
 session created server-side and place search going to Google's geocoder; a failing session
 falls back to OpenStreetMap with a message; the key is never shown back."""
+from iosuite_shared import credentials
+
 from app.geo import geocode, maps
 from app.data import state
 
 
 def _reset():
-    state.set_setting("map_provider", "osm"); state.set_setting("google_maps_key", ""); maps.reset_session(); geocode._cache.clear()
+    state.set_setting("map_provider", "osm"); credentials.put("iopix", "google_maps_key", ""); maps.reset_session(); geocode._cache.clear()
 
 
 def test_default_is_openstreetmap(client):
@@ -28,7 +30,7 @@ def test_google_needs_a_key_and_never_shows_it(client):
 
 def test_google_tiles_use_a_server_created_session(client, monkeypatch):
     _reset()
-    state.set_setting("map_provider", "google"); state.set_setting("google_maps_key", "AIza-secret")
+    state.set_setting("map_provider", "google"); credentials.put("iopix", "google_maps_key", "AIza-secret")
     monkeypatch.setattr(maps, "_create_session", lambda k: {"session": "tok123", "expiry": 9999999999})
     c = client.get("/api/maps").json()
     assert c["provider"] == "google" and "session=tok123" in c["url"] and "key=AIza-secret" in c["url"] and c["linkLabel"] == "Google Maps"
@@ -41,7 +43,7 @@ def test_google_tiles_use_a_server_created_session(client, monkeypatch):
 
 def test_google_session_failure_falls_back_to_osm(client, monkeypatch):
     _reset()
-    state.set_setting("map_provider", "google"); state.set_setting("google_maps_key", "AIza-secret")
+    state.set_setting("map_provider", "google"); credentials.put("iopix", "google_maps_key", "AIza-secret")
     def boom(k):
         raise OSError("403 forbidden")
     monkeypatch.setattr(maps, "_create_session", boom)
@@ -52,7 +54,7 @@ def test_google_session_failure_falls_back_to_osm(client, monkeypatch):
 
 def test_place_search_uses_google_when_chosen(client, monkeypatch):
     _reset()
-    state.set_setting("map_provider", "google"); state.set_setting("google_maps_key", "AIza-secret")
+    state.set_setting("map_provider", "google"); credentials.put("iopix", "google_maps_key", "AIza-secret")
     monkeypatch.setattr(maps, "geocode", lambda q: [{"name": "Mt Lebanon High School", "detail": "Pittsburgh, PA", "lat": 40.37, "lon": -80.05, "zoom": 16}])
     monkeypatch.setattr(geocode, "_fetch", lambda q: (_ for _ in ()).throw(AssertionError("Nominatim must not be asked")))
     geocode._offline_until[0] = 0
@@ -65,7 +67,7 @@ def test_google_requests_carry_the_viewer_address_as_referer(client, monkeypatch
     """A key restricted to HTTP referrers (e.g. *.iothing.net/*) rejects requests without one; the
     session and geocoding calls are made by the server, which sends the browser's address."""
     _reset()
-    state.set_setting("map_provider", "google"); state.set_setting("google_maps_key", "AIza-secret")
+    state.set_setting("map_provider", "google"); credentials.put("iopix", "google_maps_key", "AIza-secret")
     seen = []
     class R:
         def __init__(self, payload): self.payload = payload
@@ -138,3 +140,14 @@ def test_maps_config_offers_satellite_and_street_view(client):
     c = client.get("/api/maps").json()
     assert c["satellite"]["url"] and c["satellite"]["attribution"]
     assert "{lat}" in c["streetview"]["link"] and "map_action=pano" in c["streetview"]["link"]
+
+
+def test_keys_move_to_the_suite(client):
+    state.write(lambda c: c.execute("INSERT OR REPLACE INTO pix_settings (name, value) VALUES ('google_server_key', 'AIza-server')"))
+    credentials.put("iopix", "google_server_key", "")
+    maps.declare_keys()
+    assert credentials.get("iopix", "google_server_key") == "AIza-server" and maps.server_key_set()
+    assert state.connect().execute("SELECT count(*) FROM pix_settings WHERE name = 'google_server_key'").fetchone()[0] == 0
+    names = {k["name"] for k in credentials.listing("iopix")}
+    assert {"google_maps_key", "google_server_key"} <= names
+    credentials.put("iopix", "google_server_key", "")

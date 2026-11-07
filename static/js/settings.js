@@ -308,7 +308,7 @@ function displayTab(c) {
       const sel = h('select', null, h('option', { value: 'osm', selected: m.mapProvider !== 'google' }, 'OpenStreetMap (no account needed)'), h('option', { value: 'google', selected: m.mapProvider === 'google' }, 'Google Maps (your API key)'));
       const keyIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleMapsKeySet ? 'key is set; paste a new one to replace it' : 'Google Maps API key', autocomplete: 'off', style: 'width:260px' });
       const srvIn = h('input', { class: 'einput', type: 'password', placeholder: m.googleServerKeySet ? 'server key is set; paste a new one to replace it' : 'Server key (optional)', title: 'A second key, restricted by API and by this server’s address, for geocoding, places, elevation and Vision; without one the first key is used', autocomplete: 'off', style: 'width:260px' });
-      return row('Map provider', `Maps and place search use ${m.mapProvider === 'google' && m.googleMapsKeySet ? 'Google Maps' : 'OpenStreetMap'}. Google needs an API key from the Google Cloud console with the Map Tiles API and Geocoding API enabled and billing on; restrict that key by HTTP referrer to ${S.APP_NAME}'s address, since browsers see it. An optional second key, restricted by API and by this server's address, is used for what the server calls (geocoding, places, elevation, Vision). Keys are stored in ${S.APP_NAME}'s settings and never shown again.`,
+      return row('Map provider', `Maps and place search use ${m.mapProvider === 'google' && m.googleMapsKeySet ? 'Google Maps' : 'OpenStreetMap'}. Google needs an API key from the Google Cloud console with the Map Tiles API and Geocoding API enabled and billing on; restrict that key by HTTP referrer to ${S.APP_NAME}'s address, since browsers see it. An optional second key, restricted by API and by this server's address, is used for what the server calls (geocoding, places, elevation, Vision). Keys are stored with the suite's keys and tokens (Settings › Suite on the start page) and never shown again.`,
         h('span', { class: 'toolbar tight' }, sel, keyIn, srvIn, btn('Save', async () => {
           const body = { map_provider: sel.value }; if (keyIn.value.trim()) body.google_maps_key = keyIn.value.trim(); if (srvIn.value.trim()) body.google_server_key = srvIn.value.trim();
           if (sel.value === 'google' && !keyIn.value.trim() && !m.googleMapsKeySet) { toast('Enter the Google Maps API key first.'); return; }
@@ -319,39 +319,20 @@ function displayTab(c) {
   ];
 }
 
-/** Settings › ioContacts: the optional link to the suite's address book, for the birthdays of the people named here
- * (iocontacts.py). The mirror of ioContacts' own Settings › ioPix: the server reads the contacts, never the browser. */
+/** Settings › ioContacts: the link to the suite's address book, for the birthdays of the people named here
+ * (iocontacts.py), made by itself when ioContacts is in the suite. The server reads the contacts, never the browser. */
 function contactsTab(c) {
   const { row, btn } = c;
   const box = h('div', null, loadingBox('Loading…'));
   const draw = (s, test) => {
-    const fixed = new Set(s.fromEnv);
-    const inp = (k, ph, type = 'text', w = 220) => h('input', { class: 'einput', type, placeholder: ph, value: type === 'password' ? '' : ({ url: s.url, user: s.user, cf_client_id: s.cfId }[k] || ''),
-      disabled: fixed.has(k), autocomplete: 'off', style: `margin:0;width:${w}px`, onkeydown: (e) => e.stopPropagation() });
-    const f = { url: inp('url', 'https://contacts.example.com', 'text', 320), user: inp('user', 'ioContacts user'),
-      password: inp('password', s.hasPassword ? 'app password (kept; type to replace)' : 'app password', 'password'),
-      cf_client_id: inp('cf_client_id', 'Cloudflare client ID (optional)'),
-      cf_client_secret: inp('cf_client_secret', s.hasCfSecret ? 'client secret (kept; type to replace)' : 'Cloudflare client secret', 'password') };
-    const state = test ? (test.ok ? `Connected: ${nf.format(test.contacts)} contacts, birthdays for ${nf.format(test.matched)} ${test.matched === 1 ? 'person' : 'people'} here.` : `Saved, but ioContacts did not answer: ${test.error}`)
-      : !s.enabled ? 'Off: no birthdays from ioContacts.'
+    const state = test ? (test.ok ? `Connected: ${nf.format(test.contacts)} contacts, birthdays for ${nf.format(test.matched)} ${test.matched === 1 ? 'person' : 'people'} here.` : `ioContacts did not answer: ${test.error}`)
+      : !s.enabled ? 'ioContacts is not part of this suite yet: once it runs on the same Shared ioSuite database, it connects by itself.'
       : s.error ? `The last try failed: ${s.error}`
-      : s.fetched ? `Connected: birthdays for ${nf.format(s.matched)} ${s.matched === 1 ? 'person' : 'people'} here, from ${nf.format(s.contacts)} contacts.` : 'Not fetched yet.';
-    const save = async (body) => {
-      try { const r = await post('/api/iocontacts/settings', body); draw(r, r.test); } catch (e) { toastError(e); }
-    };
-    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. ${S.APP_NAME} reads the contacts from the server; your browser never needs to reach ioContacts. Use an ioContacts account and an app password made for it (in ioContacts: Settings › Apps and devices). Behind Cloudflare Access, add a service token (Zero Trust › Access › Service auth) and allow it in the ioContacts application’s policy. Leave the address empty to turn this off.${fixed.size ? ' Some fields are set in config.env and can only be changed there.' : ''}`,
+      : s.fetched ? `Connected: birthdays for ${nf.format(s.matched)} ${s.matched === 1 ? 'person' : 'people'} here, from ${nf.format(s.contacts)} contacts.` : 'Connected; not fetched yet.';
+    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. Nothing to set up: ${S.APP_NAME} finds ioContacts in the suite and reads the contacts from the server with its own read-only app password (Settings › Suite on the start page lists it).`,
       h('div', null,
-        h('div', { class: 'toolbar tight' }, f.url, f.user, f.password),
-        h('div', { class: 'toolbar tight mt6' }, f.cf_client_id, f.cf_client_secret),
-        h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
-          btn('Save and test', () => {
-            const body = { url: f.url.value, user: f.user.value, cf_client_id: f.cf_client_id.value };
-            if (f.password.value) body.password = f.password.value;
-            if (f.cf_client_secret.value) body.cf_client_secret = f.cf_client_secret.value;
-            for (const k of fixed) delete body[k];
-            save(body);
-          }, true),
-          s.enabled && !fixed.has('url') ? btn('Turn off', () => save({ url: '' })) : null),
+        s.enabled ? h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
+          btn('Fetch now', async () => { try { draw(s, await post('/api/iocontacts/test', {})); } catch (e) { toastError(e); } }, true)) : null,
         h('div', { class: 'muted', style: `font-size:12.5px;margin-top:6px${(s.error && !test) || (test && !test.ok) ? ';color:var(--warn)' : ''}` }, state))));
   };
   api('/api/iocontacts/settings').then((s) => draw(s)).catch((e) => fill(box, e.message));

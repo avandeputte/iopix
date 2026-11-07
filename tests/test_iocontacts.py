@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from iosuite_shared import apppasswords, suite
+
 from app import iocontacts
 from app.data import index
 
@@ -56,11 +58,13 @@ def test_upcoming_birthdays_today_first_and_across_the_new_year(monkeypatch):
 class _Fake(BaseHTTPRequestHandler):
     contacts = []
     auth = None
+    refuse = False
 
     def do_GET(self):  # noqa: N802
         _Fake.auth = self.headers.get("Authorization")
         assert "iopix_linked=true" in self.path
-        if _Fake.auth != "Basic " + base64.b64encode(b"pix:app-pw").decode():
+        name, _, pw = base64.b64decode((_Fake.auth or "Basic ")[6:]).decode().partition(":")
+        if _Fake.refuse or name != "iopix-app" or not apppasswords.authenticate(name, pw, "iocontacts"):
             self.send_response(401); self.end_headers(); return
         body = json.dumps({"total": len(self.contacts), "items": self.contacts}).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
@@ -90,15 +94,16 @@ def test_settings_fetch_birthdays_and_ages(client, lib, fake_contacts):
     today = datetime.date.today()
     _Fake.contacts = [_c(7, "someone else", {"year": 1950, "month": today.month, "day": today.day}, pid=tag)]
     url = f"http://127.0.0.1:{fake_contacts.server_port}"
+    assert client.get("/api/iocontacts/settings").json()["enabled"] is False
+    suite.register("iocontacts", name="ioContacts", url=url, version="1")
     try:
-        assert client.post("/api/iocontacts/settings", json={"url": "ftp://x"}).status_code == 400
-        r = client.post("/api/iocontacts/settings", json={"url": url, "user": "pix", "password": "wrong"}).json()
-        assert not r["test"]["ok"] and "app password" in r["test"]["error"]
-        assert client.get("/api/people/birthdays").json()["upcoming"] == []  # ioContacts refused: nothing to show, no error
-        r = client.post("/api/iocontacts/settings", json={"password": "app-pw"}).json()
-        assert r["test"] == {"ok": True, "contacts": 1, "matched": 1}
+        _Fake.refuse = True  # every app password refused: nothing to show, no error
+        assert not client.post("/api/iocontacts/test").json()["ok"]
+        assert client.get("/api/people/birthdays").json()["upcoming"] == []
+        _Fake.refuse = False
+        assert client.post("/api/iocontacts/test").json() == {"ok": True, "contacts": 1, "matched": 1}
         s = client.get("/api/iocontacts/settings").json()
-        assert s["url"] == url and s["hasPassword"] and "password" not in s and s["matched"] == 1
+        assert s["url"] == url and s["enabled"] and "password" not in str(s) and s["matched"] == 1
         up = client.get("/api/people/birthdays").json()["upcoming"]
         assert up == [{"tag": tag, "month": today.month, "day": today.day, "year": 1950, "turns": today.year - 1950, "in": 0,
                        "date": today.isoformat(), "url": f"{url}/#/c/7"}]
@@ -112,6 +117,6 @@ def test_settings_fetch_birthdays_and_ages(client, lib, fake_contacts):
         assert client.get("/api/iocontacts/settings").json()["error"]
         assert client.get("/api/people/birthdays").json()["upcoming"][0]["tag"] == tag
     finally:
-        client.post("/api/iocontacts/settings", json={"url": "", "user": "", "password": ""})
+        suite.forget("iocontacts")
     assert client.get("/api/people/birthdays").json() == {"enabled": False, "upcoming": []}
     assert "ages" not in client.get(f"/api/photo/{photo}").json()

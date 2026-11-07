@@ -1,7 +1,7 @@
 """Map provider: OpenStreetMap tiles (default, no account) or Google Maps through the
 Map Tiles API and the Geocoding API, with the owner's own API key.
 
-The key comes from the `google_maps_key` setting (entered in Settings) or the
+The key comes from the suite's keys and tokens (`google_maps_key` of iopix, entered in Settings or Settings › Suite) or the
 GOOGLE_MAPS_API_KEY environment variable; the `map_provider` setting picks the provider.
 Google tiles need a session token: the server creates it with the key and hands the
 browser a tile URL template. The key appears in that template, as Google's design
@@ -9,11 +9,14 @@ expects (restrict the key to this viewer's address in the Google Cloud console);
 server never prints it back in Settings.
 """
 import json
+import logging
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from iosuite_shared import credentials
 
 from app import config as appconfig  # "config" is the map configuration function below
 from app.data import state
@@ -53,15 +56,51 @@ def provider() -> str:
     return "google" if p == "google" and key() else "osm"
 
 
+KEYS = [  # in the suite's keys and tokens (iosuite_shared.credentials), so Settings › Suite lists them with the others
+    {"name": "google_maps_key", "label": "Google Maps API key", "env": "GOOGLE_MAPS_API_KEY",
+     "hint": "browser-facing (tiles, Street View): restrict it by HTTP referrer to ioPix's address"},
+    {"name": "google_server_key", "label": "Google server key", "env": "GOOGLE_SERVER_KEY",
+     "hint": "optional, for the APIs the server calls (geocoding, places, elevation, Vision); else the Maps key"},
+]
+
+
+def declare_keys() -> None:
+    """At start: say which keys iopix keeps, and move them out of its own settings (before 1.130)."""
+    try:
+        credentials.declare("iopix", KEYS, adopt=(lambda k, d="": state.get_setting(k, d),
+                                                   lambda k, v: state.write(lambda c: c.execute("DELETE FROM pix_settings WHERE name = ?", (k,)))))
+    except Exception as e:  # noqa: BLE001 - the shared database is away: tried again next start
+        logging.getLogger(__name__).warning("Google keys: %s", e)
+
+
+def _stored(name: str) -> str:
+    try:
+        return credentials.get("iopix", name)
+    except Exception:  # noqa: BLE001 - the shared database is away
+        return ""
+
+
+def set_key(name: str):
+    """A Settings handler: store a key the admin pasted (with the suite's keys and tokens)."""
+    def f(value, _body):
+        credentials.put("iopix", name, str(value or "").strip())
+    return f
+
+
 def key() -> str:
     """The browser-facing key (tiles, Street View): restrict it by HTTP referrer in the Google Cloud console."""
-    return state.get_setting("google_maps_key") or appconfig.GOOGLE_MAPS_API_KEY
+    return _stored("google_maps_key") or appconfig.GOOGLE_MAPS_API_KEY
+
+
+def server_key_set() -> bool:
+    """A second key of its own (not the browser key standing in)."""
+    return bool(_stored("google_server_key") or appconfig.GOOGLE_SERVER_KEY)
 
 
 def server_key() -> str:
     """The key for the APIs this server calls (Geocoding, Places, Elevation, Vision): one restricted by API and by
     this server's address, when the owner entered a second one; else the browser key."""
-    return state.get_setting("google_server_key") or appconfig.GOOGLE_SERVER_KEY or key()
+    return _stored("google_server_key") or appconfig.GOOGLE_SERVER_KEY or key()
 
 
 def _create_session(k: str, map_type: str = "roadmap") -> dict:

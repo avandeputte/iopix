@@ -246,8 +246,8 @@ SETTINGS = {
     "database": _database,
     "album_roots": _album_roots,
     "map_provider": _map_provider,
-    "google_maps_key": _text("google_maps_key"),  # stored, never shown back
-    "google_server_key": _text("google_server_key"),  # a second key, restricted to this server's address, for the APIs called from here
+    "google_maps_key": maps.set_key("google_maps_key"),  # in the suite's keys and tokens, never shown back
+    "google_server_key": maps.set_key("google_server_key"),  # a second key, restricted to this server's address, for the APIs called from here
     "sidecar_compat": _sidecar_compat,
     "bg_threads": _bg_threads,
     "search_model": _search_model,
@@ -344,27 +344,14 @@ def api_maps(request: Request):
 
 @router.get("/api/iocontacts/settings", dependencies=[access.admin])
 def api_iocontacts_get():
-    """Settings › ioContacts: the address and account (secrets only as whether they are set), which of them
-    config.env fixes, and how the last fetch went."""
+    """Settings › ioContacts: whether ioContacts is part of the suite (found and signed in to by itself) and how the
+    last fetch went."""
     return iocontacts.public_settings()
-
-
-@router.post("/api/iocontacts/settings", dependencies=[access.admin])
-async def api_iocontacts_set(request: Request):
-    """Body: any of url, user, password, cf_client_id, cf_client_secret (an empty string clears one). Saved, then
-    tested when an address is set: {..settings, test: {ok, contacts, matched} or {ok: false, error}}."""
-    body = await json_body(request)
-    url = str(body.get("url") or "").strip()
-    if url and not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "The address starts with http:// or https://")
-    await run_in_threadpool(iocontacts.save_settings, body)
-    test = await run_in_threadpool(iocontacts.refresh) if iocontacts.enabled() else None
-    return {**iocontacts.public_settings(), "test": test}
 
 
 @router.post("/api/iocontacts/test", dependencies=[access.admin])
 async def api_iocontacts_test():
     """Fetch the contacts now: {ok, contacts, matched} or {ok: false, error}."""
     if not iocontacts.enabled():
-        raise HTTPException(400, "ioContacts is not set up")
+        raise HTTPException(400, "ioContacts is not part of the suite")
     return await run_in_threadpool(iocontacts.refresh)

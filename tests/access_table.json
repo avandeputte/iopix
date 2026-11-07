@@ -111,7 +111,6 @@
   "POST /api/import/stage": "editor+write",
   "POST /api/import/{token}/discard": "editor+write",
   "POST /api/import/{token}/run": "editor+write",
-  "POST /api/iocontacts/settings": "admin",
   "POST /api/iocontacts/test": "admin",
   "POST /api/library/merge": "admin+write",
   "POST /api/location/landmark": "editor+write",
