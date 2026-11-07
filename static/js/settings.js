@@ -1,10 +1,10 @@
-/** Settings and Maintenance: one loader (settingsPage) drawing the tabs of either page; the Users tab is users.js. */
+/** Settings and Maintenance: one loader (settingsPage) drawing the tabs of either page; the Accounts and Suite tabs are users.js. */
 import { $, PREF, UNITS, act, api, dfDayLocal, errorBox, fill, fmtBytes, fmtWhen, h, icon, loadingBox, main, nf, plural, post, regionUsesMiles, store } from './core.js';
 import { S, THEMES, applyBadgePref, applyTheme, hashFor, infoPrefsEditor, pollSoon, toast, toastError } from './state.js';
 import { confirmDialog, logDialog } from './actions.js';
 import { dbDialog, templatesSection } from './editing.js';
 import { pageTitle } from './pages.js';
-import { setupDialog, usersSection } from './users.js';
+import { setupDialog, suiteSection, usersSection } from './users.js';
 import { placeTagsDialog } from './admin.js';
 import { runUpdate } from './main.js';
 
@@ -233,7 +233,7 @@ function scannerRow(c) {
 const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
-  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['contacts', 'ioContacts'], ['users', 'Users and sign-in']],
+  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['contacts', 'ioContacts'], ['users', 'Accounts'], ['suite', 'Suite']],
   maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['updates', 'Updates and logs']],
 };
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
@@ -605,6 +605,8 @@ async function settingsPage(view) {
     S.IS_ADMIN && S.USERS_EXIST ? stab('users') : null,
     S.IS_ADMIN && S.USERS_EXIST ? usersSection() : null,
     S.IS_ADMIN && S.EDITING ? editingTab(c) : null,
+    S.USER && S.USER.suiteAdmin ? stab('suite') : null,
+    S.USER && S.USER.suiteAdmin ? suiteSection() : null,
     ] : [
     libraryTab(c),
     // 2. AI analysis and models

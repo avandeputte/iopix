@@ -1,8 +1,8 @@
 /** Sign-in and accounts: the session (loadUser sets S.USER and the fields that come with it), the user menu, the sign-in,
- *  setup and account dialogs, and the Users and proxy sign-in sections of Settings. */
+ *  setup and account dialogs, and the Accounts and Suite sections of Settings. */
 import { $, SETTINGS, act, api, errorBox, fill, h, icon, post } from './core.js';
 import { S, applyBadgePref, applyTheme, avatarOf, brandName, hashFor, onRoute, photosWith, toast, toastError } from './state.js';
-import { confirmDialog, modal, promptDialog } from './actions.js';
+import { confirmDialog, modal } from './actions.js';
 import { personPicker } from './faces.js';
 import { boot, pollStatus } from './main.js';
 import { loadSuite } from './suite.js';
@@ -96,93 +96,43 @@ function accountDialog() {
     h('h4', null, 'Who you are in People'),
     h('div', {}, avatarOf(S.USER, true), h('span', null, S.USER.person && S.tagById.get(S.USER.person) ? S.tagById.get(S.USER.person).name : 'not linked'),
       S.IS_ADMIN ? h('button', { class: 'pillbtn', onclick: () => personPicker(async (t) => { try { S.USER = await post('/api/auth/person', { person: t.id }); renderUserMenu(); back.remove(); accountDialog(); } catch (e) { toastError(e); } }) }, S.USER.person ? 'Change' : 'Link to a person')
-        : h('span', { class: 'muted' }, S.USER.person ? '' : '(an admin can link your account in Settings › Users)'),
+        : h('span', { class: 'muted' }, S.USER.person ? '' : '(an admin can link your account in Settings › Accounts)'),
       S.USER.person ? h('a', { class: 'lnk', href: hashFor('photos', photosWith({ tag: S.USER.person })), onclick: () => back.remove() }, 'Photos of me') : null),
     how,
     S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', {}, cur, pw)],
     S.VIA_PROXY ? null : h('div', {}, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toastError(e); } } }, 'Change password')),
     { buttons: [allBtn, outBtn, 'Done'] });
 }
+/** Settings › Accounts (admins): which person in People each account is ("Photos of me", their face on the sign-in
+ *  screen). The accounts themselves, their role here and in every app, passwords, the sign-in requirement and sign-in at
+ *  a proxy are the suite's: Settings › Suite. */
 export function usersSection() {
   const body = h('div');
-  const wrap = h('div', null, h('h2', null, 'Users'),
-    h('div', { class: 'muted', style: 'max-width:820px' }, 'Visitors who are not signed in browse read-only with display settings in their browser. Viewers keep settings, favorites and albums on the server; editors can also change the library; admins can also change settings, run maintenance and manage users.'),
-    h('div', { class: 'srow' }, h('div', null, h('b', null, 'Require sign-in'), h('div', { class: 'muted', style: 'font-size:13px' }, 'Visitors see only the sign-in screen; nothing from the library (not even thumbnails) is served without an account. MCP clients always sign in with an app password.')),
-      h('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;white-space:nowrap' }, h('input', { type: 'checkbox', id: 'reqlogin', checked: S.REQUIRE_LOGIN, disabled: !S.USERS_EXIST, onchange: async (e) => {
-        try { await post('/api/settings', { require_login: e.target.checked }); S.REQUIRE_LOGIN = e.target.checked; toast(S.REQUIRE_LOGIN ? 'Visitors now have to sign in.' : 'Visitors can browse again.'); } catch (err) { e.target.checked = !e.target.checked; toastError(err); } } }), 'Require sign-in')), body);
+  const wrap = h('div', null, h('h2', null, 'Accounts and people'),
+    h('div', { class: 'muted', style: 'max-width:820px' }, 'Link each account to the person it is in People: their face shows on the sign-in screen and in the menu, with “Photos of me”. ',
+      S.USER && S.USER.suiteAdmin ? ['Adding people, passwords, each one’s role here and in every io app, whether sign-in is required and sign-in at a proxy are under ', h('a', { class: 'lnk', href: hashFor('settings', new URLSearchParams('tab=suite')) }, 'Settings › Suite'), '.']
+        : 'A suite admin adds people and sets their role under Settings › Suite.'), body);
   const draw = async () => {
     let d; try { d = await api('/api/users'); } catch (e) { fill(body, errorBox(e)); return; }
-    const name = h('input', { class: 'einput', placeholder: 'User name', style: 'width:160px' }), pw = h('input', { class: 'einput', type: 'password', placeholder: 'Password', style: 'width:160px' });
-    const email = h('input', { class: 'einput', type: 'email', placeholder: 'Email (optional)', autocomplete: 'off', style: 'width:200px' });
-    const role = h('select', null, d.roles.map((r) => h('option', { value: r }, r)));
-    const nopw = h('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px' }, h('input', { type: 'checkbox', onchange: (e) => { pw.disabled = e.target.checked; if (e.target.checked) { pw.value = ''; role.value = 'viewer'; } } }), 'no password (one-click sign-in, viewer only)');
-    [name, pw, email].forEach((i) => { i.onkeydown = (e) => e.stopPropagation(); });
     const run = (fn, after = draw) => act(fn).then(() => after());
     const setPerson = (u, t) => run(async () => { await post(`/api/users/${u.id}`, { person: t ? t.id : null }); if (S.USER && S.USER.id === u.id) { S.USER.person = t ? t.id : null; renderUserMenu(); } });
     fill(body, h('table', { class: 'utable' },
-      h('thead', null, h('tr', null, ['Account', 'Email', 'Person in People', 'Role', 'Password', 'Sign-in list', ''].map((c) => h('th', null, c)))),
+      h('thead', null, h('tr', null, ['Account', 'Role here', 'Person in People'].map((c) => h('th', null, c)))),
       h('tbody', null, d.users.map((u) => h('tr', { 'data-user': u.name },
         h('td', null, h('span', { class: 'ucell' }, avatarOf(u), h('span', null, u.name, u.id === S.USER?.id ? h('span', { class: 'muted' }, ' (you)') : null))),
-        h('td', null, u.email || h('span', { class: 'muted' }, 'none'), ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: async () => { const v = await promptDialog(`Email address for ${u.name} (empty to clear)`, u.email || ''); if (v !== null) run(async () => { await post(`/api/users/${u.id}`, { email: v.trim() }); }); } }, u.email ? 'Change' : 'Set')),
+        h('td', { class: 'muted' }, u.role),
         h('td', null, u.person && S.tagById.get(u.person) ? S.tagById.get(u.person).name : h('span', { class: 'muted' }, 'not linked'), ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: () => personPicker((t) => setPerson(u, t)) }, u.person ? 'Change' : 'Link'), u.person ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: () => setPerson(u, null) }, 'Unlink')] : null),
-        h('td', null, h('select', { onchange: (e) => run(async () => { await post(`/api/users/${u.id}`, { role: e.target.value }); toast(`${u.name} is now ${e.target.value}.`); }) }, d.roles.map((r) => h('option', { value: r, selected: r === u.role }, r)))),
-        h('td', null, u.passwordless ? h('span', { class: 'muted' }, 'none (one-click)') : 'set', ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: async () => { const p = await promptDialog(`New password for ${u.name}`, { type: 'password', placeholder: '8 characters or more', ok: 'Set password' }); if (p) run(async () => { await post(`/api/users/${u.id}`, { password: p }); toast('Password set.'); }, () => {}); } }, 'Set'),
-          u.role === 'viewer' && !u.passwordless ? [' · ', h('button', { type: 'button', class: 'lnk', title: 'One-click sign-in from the account picker', onclick: async () => { if (await confirmDialog(`Remove ${u.name}’s password? Anyone who can reach ${S.APP_NAME} can then sign in as ${u.name} with one click.`)) run(() => post(`/api/users/${u.id}`, { password: '' })); } }, 'Remove')] : null),
-        h('td', { style: 'text-align:center' }, h('input', { type: 'checkbox', checked: u.listed !== false, title: `Offered on the sign-in screen. Unticked, ${u.name} signs in through “Other”, by name${u.passwordless ? '' : ' and password'}.`,
-          onchange: (e) => run(async () => { await post(`/api/users/${u.id}`, { listed: e.target.checked }); toast(e.target.checked ? `${u.name} is offered on the sign-in screen again.` : `${u.name} is no longer offered on the sign-in screen; “Other” and the name still sign in.`); }) })),
-        h('td', { style: 'text-align:right' }, u.id !== S.USER?.id ? h('button', { class: 'pillbtn', onclick: async () => { if (await confirmDialog(`Delete the user ${u.name}?`, { ok: 'Delete', danger: true })) run(() => post(`/api/users/${u.id}`, { delete: true })); } }, 'Delete') : null))))),
-      h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px' }, name, email, pw, role, nopw, h('button', { class: 'pillbtn on', onclick: async () => {
-        await act(() => post('/api/users', { name: name.value.trim(), email: email.value.trim(), password: nopw.querySelector('input').checked ? '' : pw.value, role: nopw.querySelector('input').checked ? 'viewer' : role.value }), { toast: `Added ${name.value.trim()}.` }); draw();
-      } }, icon('add'), 'Add user')));
+          h('button', { type: 'button', class: 'lnk', onclick: () => personPicker((t) => setPerson(u, t)) }, u.person ? 'Change' : 'Link'), u.person ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: () => setPerson(u, null) }, 'Unlink')] : null))))));
   };
   draw();
-  wrap.append(proxySection());
   return wrap;
 }
-// sign-in at a reverse proxy (Cloudflare Access, Authelia behind nginx...): who signed in there is signed in here
-function proxySection() {
+/** Settings › Suite (suite admins): the people and their role in every app (here too), app passwords, keys and tokens,
+ *  the apps and sign-in at the proxy, for the whole suite. The same panel in every io app, served by iosuite-shared. */
+export function suiteSection() {
   const box = h('div');
-  const draw = async () => {
-    let d; try { d = await api('/api/settings/proxy'); } catch (e) { fill(box, errorBox(e)); return; }
-    const v = d.values, env = new Set(d.fromEnv || []);
-    const lock = (k, el) => { if (env.has(k)) { el.disabled = true; el.title = 'Set in config.env'; } el.onkeydown = (e) => e.stopPropagation(); return el; };
-    const inp = (k, ph, w = 320) => lock(k, h('input', { class: 'einput', value: v[k] || '', placeholder: ph, style: `margin:0;width:${w}px;max-width:100%` }));
-    const modeSel = lock('AUTH_PROXY', h('select', null, [['off', 'Off'], ['cloudflare', 'Cloudflare Access'], ['haproxy', 'HAProxy'], ['nginx', 'nginx'], ['caddy', 'Caddy'], ['traefik', 'Traefik'], ['header', 'Another proxy']]
-      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY || 'off').toLowerCase() === k }, l))));
-    const team = inp('CF_ACCESS_TEAM', 'myteam.cloudflareaccess.com'), aud = inp('CF_ACCESS_AUD', 'Application Audience (AUD) tag', 520);
-    const header = inp('AUTH_PROXY_HEADER', 'default: ' + (d.mode === 'cloudflare' ? 'Cf-Access-Authenticated-User-Email' : 'Remote-User, X-Forwarded-User, X-Auth-Request-Email…'));
-    const trusted = inp('AUTH_PROXY_TRUSTED', 'default: 127.0.0.1, ::1');
-    const create = lock('AUTH_PROXY_CREATE', h('select', null, [['', 'Gets the sign-in screen (default)'], ['deny', 'Is denied access'], ['viewer', 'Gets a viewer account'], ['editor', 'Gets an editor account']]
-      .map(([k, l]) => h('option', { value: k, selected: (v.AUTH_PROXY_CREATE || '') === k }, l))));
-    const row = (label, detail, el) => h('div', { class: 'srow' }, h('div', null, h('b', null, label), h('div', { class: 'muted', style: 'font-size:13px' }, detail)), el);
-    const cf = h('div', null,
-      row('Cloudflare team domain', 'Zero Trust › Settings › Team name and domain (the address the Access sign-in page is on).', team),
-      row('Application Audience (AUD) tag', 'Zero Trust › Access › Applications › this app › Overview. With both set, the token Cloudflare signs is checked and the email comes from it; nothing else is believed.', aud));
-    const other = h('div', null,
-      row('User header', 'The request header the proxy puts the signed-in user (name or email) in. Comma-separate several.', header),
-      row('Proxy addresses', 'The header is believed only from these addresses or networks (where the proxy connects from).', trusted));
-    const seen = d.seen && d.seen.iss ? h('div', { class: 'muted', style: 'font-size:13px;margin:6px 0' }, `Last request through your tunnel (its claims as sent, unverified until saved): team ${String(d.seen.iss).replace(/^https:\/\//, '')}, AUD ${[].concat(d.seen.aud || []).join(', ')}${d.seen.email ? ', ' + d.seen.email : ''}${d.seen.account !== undefined ? (d.seen.account ? ' (account ' + d.seen.account + ')' : ' (no account)') : ''}. `,
-      env.has('CF_ACCESS_TEAM') || env.has('CF_ACCESS_AUD') ? null : h('button', { type: 'button', class: 'lnk', onclick: () => { team.value = String(d.seen.iss).replace(/^https:\/\//, ''); aud.value = [].concat(d.seen.aud || [])[0] || ''; } }, 'Use these')) : null;
-    const show = () => { cf.style.display = modeSel.value === 'cloudflare' ? '' : 'none'; other.style.display = modeSel.value === 'off' ? 'none' : ''; rest.style.display = modeSel.value === 'off' ? 'none' : ''; };
-    const rest = h('div', null, row('Someone with no account here', 'When the proxy lets in a person whose email or name matches no account. Denied: a “No access” page, with no way to sign in here.', create));
-    modeSel.onchange = show;
-    const state = d.mode === 'off' ? 'Off: only the sign-in here.' : d.mode === 'cloudflare' ? (d.cloudflareVerified ? 'On: Cloudflare Access tokens are verified.' : 'On, but without the team domain and AUD tag: the header is believed from the proxy addresses only.') : `On (${d.mode}): the user header is believed from ${d.trusted.join(', ')}.`;
-    fill(box, h('h2', null, 'Sign-in at a proxy'),
-      h('div', { class: 'muted', style: 'max-width:820px' }, 'Someone signed in at your reverse proxy (Cloudflare Access on a tunnel, or Authelia, Authentik or oauth2-proxy behind HAProxy, nginx, Caddy or Traefik) is signed in here too, matched to an account by email, then name. Everyone else still uses the sign-in here; requests from outside through Cloudflare can only use accounts with a password. One setting for every io app, kept in the Shared ioSuite database (also under Settings › Suite on the start page); the AUD field takes several tags, comma-separated. Proxy settings in config.env or the environment are ignored.'),
-      h('div', { style: 'margin:8px 0' }, h('b', null, state)),
-      env.size ? h('div', { class: 'muted', style: 'font-size:13px' }, `Set in config.env (change them there): ${[...env].join(', ')}`) : null,
-      row('Proxy', 'Which reverse proxy signs people in.', modeSel), cf, seen, other, rest,
-      h('div', { style: 'margin-top:8px' }, h('button', { class: 'pillbtn on', onclick: async () => {
-        const body = {};
-        [['AUTH_PROXY', modeSel], ['CF_ACCESS_TEAM', team], ['CF_ACCESS_AUD', aud], ['AUTH_PROXY_HEADER', header], ['AUTH_PROXY_TRUSTED', trusted], ['AUTH_PROXY_CREATE', create]]
-          .forEach(([k, el]) => { if (!env.has(k)) body[k] = el.value.trim(); });
-        try { await post('/api/settings/proxy', body); toast('Proxy sign-in saved.'); draw(); } catch (e) { toastError(e); }
-      } }, 'Save')));
-    show();
-  };
-  draw();
+  import(new URL('api/suite-admin/ui.js', document.baseURI).href)
+    .then((ui) => ui.mount(box, { sub: S.route.params.get('part'), toast, onSub: (x) => { S.route.params.set('part', x); history.replaceState(null, '', hashFor('settings', S.route.params)); } }))
+    .catch((e) => fill(box, errorBox(new Error(`The Suite panel did not load: ${e.message}`))));
   return box;
 }
