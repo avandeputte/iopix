@@ -1,4 +1,4 @@
-"""Accounts and the shell: the sign-in dialog, Settings › Accounts and Suite (proxy sign-in, the sign-in list), Require sign-in, the Content Security Policy, the
+"""Accounts and the shell: the sign-in dialog, Settings › Suite (proxy sign-in, the sign-in list), Require sign-in, the Content Security Policy, the
 service worker and a lost connection."""
 from helpers import make_admin, need_tool
 
@@ -27,7 +27,8 @@ def test_users_flow_in_the_browser(page, server, browser):
     page.locator(".modal input[type=password]").fill("correct horse")
     page.locator(".modal button", has_text="Create").click()
     page.wait_for_selector("#usermenu .avatar", timeout=5000)
-    page.goto(server + "/#/settings?tab=users"); page.wait_for_selector("h2:has-text('Accounts and people')", timeout=10000)
+    page.goto(server + "/#/settings?tab=suite"); page.wait_for_selector(".iosa .sa-t", timeout=10000)
+    assert page.locator(".stab[data-tab=users]").count() == 0, "no Accounts tab: the person in photos is in Settings › Suite › People"
     assert page.locator("#nav a[data-v=maintenance]").is_visible()
     # a visitor in a fresh context: read-only, no maintenance icon, sign-in dialog
     ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); visitor = ctx.new_page()
@@ -83,7 +84,7 @@ def test_account_picker_one_click_sign_in(page, server, browser):
     page.locator(".modal .account", has_text="alex").click(); page.locator(".modal input[type=password]").fill("correct horse"); page.locator(".modal button", has_text="Sign in").click()
     page.wait_for_selector("#usermenu .avatar", timeout=5000)
     _add_kid(page, server)
-    page.goto(server + "/#/settings?tab=users"); page.wait_for_selector(".utable tr[data-user='kid']", timeout=10000)
+    page.goto(server + "/#/settings?tab=suite"); page.wait_for_selector(".iosa .sa-t td:has-text('kid')", timeout=10000)
     # a visitor: two tiles, one click as kid
     ctx = browser.new_context(bypass_csp=True, viewport={"width": 1280, "height": 900}); v = ctx.new_page()
     v.goto(server + "/#/photos"); v.wait_for_selector(".tile img", timeout=15000)

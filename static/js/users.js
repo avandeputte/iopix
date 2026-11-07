@@ -96,36 +96,12 @@ function accountDialog() {
     h('h4', null, 'Who you are in People'),
     h('div', {}, avatarOf(S.USER, true), h('span', null, S.USER.person && S.tagById.get(S.USER.person) ? S.tagById.get(S.USER.person).name : 'not linked'),
       S.IS_ADMIN ? h('button', { class: 'pillbtn', onclick: () => personPicker(async (t) => { try { S.USER = await post('/api/auth/person', { person: t.id }); renderUserMenu(); back.remove(); accountDialog(); } catch (e) { toastError(e); } }) }, S.USER.person ? 'Change' : 'Link to a person')
-        : h('span', { class: 'muted' }, S.USER.person ? '' : '(an admin can link your account in Settings › Accounts)'),
+        : h('span', { class: 'muted' }, S.USER.person ? '' : '(a suite admin links your account in Settings › Suite › People)'),
       S.USER.person ? h('a', { class: 'lnk', href: hashFor('photos', photosWith({ tag: S.USER.person })), onclick: () => back.remove() }, 'Photos of me') : null),
     how,
     S.VIA_PROXY ? null : [h('h4', null, 'Change password'), h('div', {}, cur, pw)],
     S.VIA_PROXY ? null : h('div', {}, h('button', { class: 'pillbtn', onclick: async () => { try { await post('/api/auth/password', { current: cur.value, password: pw.value }); toast('Password changed.'); cur.value = pw.value = ''; } catch (e) { toastError(e); } } }, 'Change password')),
     { buttons: [allBtn, outBtn, 'Done'] });
-}
-/** Settings › Accounts (admins): which person in People each account is ("Photos of me", their face on the sign-in
- *  screen). The accounts themselves, their role here and in every app, passwords, the sign-in requirement and sign-in at
- *  a proxy are the suite's: Settings › Suite. */
-export function usersSection() {
-  const body = h('div');
-  const wrap = h('div', null, h('h2', null, 'Accounts and people'),
-    h('div', { class: 'muted', style: 'max-width:820px' }, 'Link each account to the person it is in People: their face shows on the sign-in screen and in the menu, with “Photos of me”. ',
-      S.USER && S.USER.suiteAdmin ? ['Adding people, passwords, each one’s role here and in every io app, whether sign-in is required and sign-in at a proxy are under ', h('a', { class: 'lnk', href: hashFor('settings', new URLSearchParams('tab=suite')) }, 'Settings › Suite'), '.']
-        : 'A suite admin adds people and sets their role under Settings › Suite.'), body);
-  const draw = async () => {
-    let d; try { d = await api('/api/users'); } catch (e) { fill(body, errorBox(e)); return; }
-    const run = (fn, after = draw) => act(fn).then(() => after());
-    const setPerson = (u, t) => run(async () => { await post(`/api/users/${u.id}`, { person: t ? t.id : null }); if (S.USER && S.USER.id === u.id) { S.USER.person = t ? t.id : null; renderUserMenu(); } });
-    fill(body, h('table', { class: 'utable' },
-      h('thead', null, h('tr', null, ['Account', 'Role here', 'Person in People'].map((c) => h('th', null, c)))),
-      h('tbody', null, d.users.map((u) => h('tr', { 'data-user': u.name },
-        h('td', null, h('span', { class: 'ucell' }, avatarOf(u), h('span', null, u.name, u.id === S.USER?.id ? h('span', { class: 'muted' }, ' (you)') : null))),
-        h('td', { class: 'muted' }, u.role),
-        h('td', null, u.person && S.tagById.get(u.person) ? S.tagById.get(u.person).name : h('span', { class: 'muted' }, 'not linked'), ' ',
-          h('button', { type: 'button', class: 'lnk', onclick: () => personPicker((t) => setPerson(u, t)) }, u.person ? 'Change' : 'Link'), u.person ? [' · ', h('button', { type: 'button', class: 'lnk', onclick: () => setPerson(u, null) }, 'Unlink')] : null))))));
-  };
-  draw();
-  return wrap;
 }
 /** Settings › Suite (suite admins): the people and their role in every app (here too), app passwords, keys and tokens,
  *  the apps and sign-in at the proxy, for the whole suite. The same panel in every io app, served by iosuite-shared. */

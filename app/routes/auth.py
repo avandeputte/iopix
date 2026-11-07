@@ -15,7 +15,7 @@ router = auth.router()  # the shared routes, plus iopix's own below
 async def api_my_person(request: Request):
     """Link the signed-in admin's own account to a person from People: {person: tag id or null}. Admins only:
     a linked person's face is shown on the sign-in screen, so who is who is the admin's call (other accounts
-    are linked from Settings › Accounts)."""
+    are linked from Settings › Suite › People › Person in photos)."""
     u = request.state.user
     if not u:
         raise HTTPException(401, "Sign in first")
