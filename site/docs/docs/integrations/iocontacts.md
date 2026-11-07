@@ -1,6 +1,6 @@
 # ioContacts
 
-ioContacts is the address book of the ioThing suite. Linked to it, iopix knows the birthdays of the people named in your library. This is optional and off until an admin sets it up.
+ioContacts is the address book of the ioThing suite. Linked to it, iopix knows the birthdays of the people named in your library. It turns on by itself when ioContacts is part of the suite.
 
 ## What it adds
 
@@ -16,14 +16,4 @@ iopix uses the links you make in ioContacts: a contact's **ioPix person** (in io
 
 ## Setting it up
 
-In **Settings › ioContacts**, an admin enters:
-
-| Field | What to enter |
-|---|---|
-| Address | ioContacts' address, such as `https://contacts.example.com`, or its address on your home network |
-| User and app password | an ioContacts account that can read the address books, and an app password made for it in ioContacts under **Settings › Apps and devices** |
-| Cloudflare client ID and secret | only when ioContacts sits behind Cloudflare Access: a service token (Zero Trust › Access › Service auth) allowed in the ioContacts application's policy |
-
-**Save and test** reads the contacts at once and says how many people it found birthdays for. Clear the address (or **Turn off**) to stop. The same settings can come from `IOCONTACTS_URL`, `IOCONTACTS_USER`, `IOCONTACTS_PASSWORD`, `IOCONTACTS_CF_CLIENT_ID` and `IOCONTACTS_CF_CLIENT_SECRET` in `config.env`, which win over the page.
-
-iopix's server reads ioContacts, never your browser, and does so again every ten minutes. When ioContacts can't be reached, pages carry on with the birthdays from the last good read (none just after iopix restarts), and the settings tab shows what went wrong.
+Nothing to set up. When ioContacts runs in the same suite (the same Shared ioSuite database), iopix finds it by itself and reads the contacts with its own read-only app password, which Settings › Suite › App passwords lists. Its server reads ioContacts, never your browser, and does so again every ten minutes. When ioContacts can't be reached, pages carry on with the birthdays from the last good read (none just after iopix restarts), and the server log says what went wrong.

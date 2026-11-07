@@ -150,7 +150,7 @@ export async function showPeople() {
     s.suggested[0] ? h('a', { class: 'pill', href: '#/faces?tab=suggested' }, 'Suggestions to confirm', h('b', null, `${nf.format(s.suggested[1])} in ${nf.format(s.suggested[0])} photos`)) : null,
     s.unknown[0] ? h('a', { class: 'pill', href: '#/faces?tab=unknown' }, 'Unnamed faces', h('b', null, `${nf.format(s.unknown[1])} in ${nf.format(s.unknown[0])} photos`)) : null,
     s.ignored[0] ? h('a', { class: 'pill', href: '#/faces?tab=ignored' }, 'Ignored faces', h('b', null, nf.format(s.ignored[1]))) : null)).catch(() => {});
-  // birthdays in the next month, from ioContacts (Settings › ioContacts): nothing shows when it is off or not reached
+  // birthdays in the next month, from ioContacts (found in the suite by itself): nothing shows when it is off or not reached
   const bdays = h('div', { class: 'pills bdays' });
   if (S.USER || !S.USERS_EXIST) api('/api/people/birthdays').then((r) => {
     const list = r.upcoming.filter((b) => byId.has(b.tag)).slice(0, 12);

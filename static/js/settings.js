@@ -233,7 +233,7 @@ function scannerRow(c) {
 const OPEN_COMPARE = new Set();  // model groups whose "Compare the models" fold is open on the Maintenance page
 // Settings and Maintenance are split into tabs: each stab() marks where one begins; what comes before the first is always shown
 const STABS = {
-  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['contacts', 'ioContacts'], ['suite', 'Suite']],
+  settings: [['display', 'Display'], ['server', 'digiKam and server'], ['editing', 'Editing'], ['ai', 'AI and search'], ['suite', 'Suite']],
   maintenance: [['library', 'Library'], ['models', 'AI analysis and models'], ['storage', 'Storage and backups'], ['updates', 'Updates and logs']],
 };
 const stab = (k) => h('span', { class: 'stab-mark', 'data-tab': k, hidden: true });
@@ -317,26 +317,6 @@ function displayTab(c) {
         })));
     })() : null,
   ];
-}
-
-/** Settings › ioContacts: the link to the suite's address book, for the birthdays of the people named here
- * (iocontacts.py), made by itself when ioContacts is in the suite. The server reads the contacts, never the browser. */
-function contactsTab(c) {
-  const { row, btn } = c;
-  const box = h('div', null, loadingBox('Loading…'));
-  const draw = (s, test) => {
-    const state = test ? (test.ok ? `Connected: ${nf.format(test.contacts)} contacts, birthdays for ${nf.format(test.matched)} ${test.matched === 1 ? 'person' : 'people'} here.` : `ioContacts did not answer: ${test.error}`)
-      : !s.enabled ? 'ioContacts is not part of this suite yet: once it runs on the same Shared ioSuite database, it connects by itself.'
-      : s.error ? `The last try failed: ${s.error}`
-      : s.fetched ? `Connected: birthdays for ${nf.format(s.matched)} ${s.matched === 1 ? 'person' : 'people'} here, from ${nf.format(s.contacts)} contacts.` : 'Connected; not fetched yet.';
-    fill(box, row('ioContacts', `Birthdays from ioContacts, the ioThing address book. With it, the People page lists the birthdays coming up, the photo info shows how old each person was, and date suggestions use the birth years. It uses the people you linked to contacts in ioContacts (a contact’s ioPix person); link more there. Nothing to set up: ${S.APP_NAME} finds ioContacts in the suite and reads the contacts from the server with its own read-only app password (Settings › Suite on the start page lists it).`,
-      h('div', null,
-        s.enabled ? h('div', { style: 'display:flex;gap:6px;margin-top:8px' },
-          btn('Fetch now', async () => { try { draw(s, await post('/api/iocontacts/test', {})); } catch (e) { toastError(e); } }, true)) : null,
-        h('div', { class: 'muted', style: `font-size:12.5px;margin-top:6px${(s.error && !test) || (test && !test.ok) ? ';color:var(--warn)' : ''}` }, state))));
-  };
-  api('/api/iocontacts/settings').then((s) => draw(s)).catch((e) => fill(box, e.message));
-  return [stab('contacts'), h('h2', null, 'ioContacts'), box];
 }
 
 /** Settings › digiKam and server: the two databases, album roots, the update check, the MCP server, read-only mode and sync. */
@@ -601,7 +581,6 @@ async function settingsPage(view) {
     S.IS_ADMIN ? serverTab(c) : null,
     S.IS_ADMIN ? stab('ai') : null,
     S.IS_ADMIN ? analysisSection(view, 'prefs') : null,
-    S.IS_ADMIN ? contactsTab(c) : null,
     S.IS_ADMIN && S.EDITING ? editingTab(c) : null,
     S.USER && S.USER.suiteAdmin ? stab('suite') : null,
     S.USER && S.USER.suiteAdmin ? suiteSection() : null,
