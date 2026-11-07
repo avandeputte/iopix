@@ -63,6 +63,7 @@ services:
       IOSUITE_DB_PASSWORD: change-me                  # CHANGE ME
       # the address people and the other apps reach iopix at, and the domain the sign-in is shared on
       # PUBLIC_URL: https://photo.example.com
+      # INTERNAL_URL: http://192.168.1.151:8600   # the host's LAN address and port, kept in the suite's list of apps (a container cannot tell)
       # COOKIE_DOMAIN: example.com
       # models fetched on first start: content search (SigLIP 2), objects (YOLOX), places (GeoNames)
       AUTO_MODELS: siglip2,yolox,geonames
