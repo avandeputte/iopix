@@ -19,22 +19,13 @@ import urllib.error
 
 from iosuite_shared import links
 
-from app.data import index, state as appstate
+from app.data import index
 
 log = logging.getLogger(__name__)
 APP, PROVIDER = "iopix", "iocontacts"
 TTL = 600              # seconds a fetch is used before the next one is started
-# what Settings › ioContacts used to keep before the suite found ioContacts by itself (removed at start)
-OLD_SETTINGS = ("iocontacts_url", "iocontacts_user", "iocontacts_password", "iocontacts_cf_id", "iocontacts_cf_secret")
 _lock = threading.Lock()
 _state = {"at": 0.0, "people": None, "error": None, "busy": False, "contacts": 0}
-
-
-def forget_old_settings() -> None:
-    try:
-        appstate.write(lambda c: c.execute("DELETE FROM pix_settings WHERE name IN (?, ?, ?, ?, ?)", OLD_SETTINGS))
-    except Exception as e:  # noqa: BLE001 - tried again next start
-        log.debug("old ioContacts settings: %s", e)
 
 
 def settings() -> dict:

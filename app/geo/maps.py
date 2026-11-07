@@ -65,10 +65,9 @@ KEYS = [  # in the suite's keys and tokens (iosuite_shared.credentials), so Sett
 
 
 def declare_keys() -> None:
-    """At start: say which keys iopix keeps, and move them out of its own settings (before 1.130)."""
+    """At start: say which keys iopix keeps."""
     try:
-        credentials.declare("iopix", KEYS, adopt=(lambda k, d="": state.get_setting(k, d),
-                                                   lambda k, v: state.write(lambda c: c.execute("DELETE FROM pix_settings WHERE name = ?", (k,)))))
+        credentials.declare("iopix", KEYS)
     except Exception as e:  # noqa: BLE001 - the shared database is away: tried again next start
         logging.getLogger(__name__).warning("Google keys: %s", e)
 

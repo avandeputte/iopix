@@ -62,14 +62,6 @@ SPEC = {
 }
 TABLE = {name: "pix_" + name for name in SPEC}  # the table in the viewer database; SPEC's names are what the code and the merge base call them
 DIGIKAM = {dk: TABLE[ours] for ours, (dk, *_rest) in SPEC.items()}
-# the index names from before the suite naming convention (vdb renames them once, at start)
-RENAME_INDEXES = {"pix_folders": {"folders_path": "uq_pix_folders_path"}, "pix_photos": {"photos_name": "uq_pix_photos_name", "photos_hash": "idx_pix_photos_hash"},
-                  "pix_comments": {"comments_image": "idx_pix_comments_image"}, "pix_copyright": {"copyright_image": "idx_pix_copyright_image"},
-                  "pix_photo_properties": {"photo_properties_key": "uq_pix_photo_properties_image_property"},
-                  "pix_photo_tags": {"photo_tags_tag": "idx_pix_photo_tags_tag"},
-                  "pix_face_regions": {"face_regions_image": "idx_pix_face_regions_image", "face_regions_tag": "idx_pix_face_regions_tag"},
-                  "pix_tags": {"tags_name": "uq_pix_tags_name"}, "pix_tag_properties": {"tag_properties_tag": "idx_pix_tag_properties_tag"},
-                  "pix_library_settings": {"library_settings_key": "uq_pix_library_settings_keyword"}}
 _NAMES = re.compile(r"\b(" + "|".join(sorted(DIGIKAM, key=len, reverse=True)) + r")\b")
 _WRITE = re.compile(r"^\s*(INSERT|UPDATE|DELETE|REPLACE)\b", re.I)
 

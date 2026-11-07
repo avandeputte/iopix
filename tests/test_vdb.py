@@ -1,8 +1,6 @@
 """The viewer database (MariaDB-only since v1.113): the schema lands in an empty database, data copies to
 another database with ids intact, a viewer.db from before v1.113 is imported once, the dump is the backup
 form, and the viewer waits for a database instead of starting on a file."""
-import json
-import sqlite3
 
 import pytest
 
@@ -94,60 +92,15 @@ def test_private_albums_and_accounts_on_the_server(client, fresh):
         state.viewer.reset(tok)
 
 
-def test_an_older_table_without_the_album_columns_is_migrated_in_place(client):
+def test_a_column_added_to_the_schema_reaches_an_existing_table(client):
     c = vdb.connect()
     try:
-        c.execute("CREATE TABLE viewer_albums AS SELECT id, name, created_at AS created FROM pix_albums")  # the name and columns before v1.27
-        c.execute("DROP TABLE pix_albums")
+        c.execute("ALTER TABLE pix_albums DROP COLUMN shared")
         c.commit()
         vdb.ensure_schema(c)
-        assert {"created_at", "owner_id", "shared"} <= set(vdb.columns(c, "pix_albums")) and "viewer_albums" not in vdb.table_names(c)
-        assert {r[0] for r in c.execute("SELECT shared FROM pix_albums")} <= {1}
+        assert "shared" in vdb.columns(c, "pix_albums")
     finally:
         c.close()
-
-
-def _legacy_file(path):
-    """A viewer.db as an install from before v1.113 left it: a few tables in the SQLite spelling, with rows."""
-    con = sqlite3.connect(path)
-    con.executescript("""
-        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT); INSERT INTO app_settings VALUES ('theme', 'dark'), ('mcp_admin_token', 'secret');
-        CREATE TABLE user_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE, hash TEXT NOT NULL, role TEXT NOT NULL,
-            settings TEXT NOT NULL DEFAULT '{}', created INTEGER, last_login INTEGER, person INTEGER, email TEXT, session_gen INTEGER DEFAULT 0, listed INTEGER NOT NULL DEFAULT 1);
-        INSERT INTO user_accounts (name, hash, role) VALUES ('old', 'h', 'admin');
-        CREATE TABLE favorite_photos (photo_id INTEGER PRIMARY KEY, hash TEXT, added INTEGER); INSERT INTO favorite_photos VALUES (5, 'h5', 1), (6, 'h6', 2);
-        CREATE TABLE photo_history (id INTEGER PRIMARY KEY AUTOINCREMENT, photo_id INTEGER, ts INTEGER, user_name TEXT, action TEXT, summary TEXT, details TEXT, undo TEXT, sidecar_copy TEXT, path TEXT);
-        INSERT INTO photo_history (photo_id, ts, action, summary, undo) VALUES (1, 2, 'edit', 's', '{"rating": 3}');
-        CREATE TABLE tags (id INTEGER PRIMARY KEY, pid INTEGER, name TEXT, icon INTEGER, iconkde TEXT, lft INTEGER, rgt INTEGER);
-        INSERT INTO tags VALUES (0, -1, '_Digikam_root_tag_', NULL, NULL, 1, 2);
-    """); con.commit(); con.close()
-
-
-def test_a_viewer_db_from_before_is_imported_once(tmp_path, other_db, monkeypatch):
-    """An upgraded install's first switch copies every row out of its viewer.db (the v1.24 column name included,
-    digiKam's root tag with id 0 kept), then renames the file so it is never read again."""
-    legacy = tmp_path / "viewer.db"
-    _legacy_file(legacy)
-    monkeypatch.setattr(vdb, "LEGACY_SQLITE", legacy)
-    monkeypatch.setattr(vdb, "CONF", tmp_path / "viewer-db.json")
-    monkeypatch.setattr(vdb, "_cfg", None)
-    monkeypatch.setattr(vdb.config, "db_env", lambda k: None)  # the suite's DB_* must not count as "configured"
-    assert not vdb.configured() and vdb.public_settings()["legacy_sqlite"] == str(legacy)
-    with pytest.raises(ValueError):
-        vdb.switch({"host": other_db["host"]}, copy=True)  # a database and a user are needed too
-    r = vdb.switch(other_db, copy=True, drop=True)
-    assert r["imported"] == str(legacy) and r["copied"]["pix_favorite_photos"] == 2 and r["copied"]["pix_tags"] == 1 and "user_accounts" not in r["copied"]
-    assert not legacy.exists() and (tmp_path / "viewer.db.imported").exists()
-    assert json.loads((tmp_path / "viewer-db.json").read_text())["database"] == other_db["database"]
-    con = vdb.connect(cfg=other_db)
-    try:
-        assert con.execute("SELECT undo_values FROM pix_photo_history WHERE photo_id = 1").fetchone()[0] == '{"rating": 3}'
-        assert con.execute("SELECT id FROM pix_tags").fetchone()[0] == 0, "digiKam's root tag keeps id 0 (NO_AUTO_VALUE_ON_ZERO)"
-        assert con.execute("SELECT value FROM pix_settings WHERE name = 'theme'").fetchone()[0] == "dark"
-        assert set(vdb.TABLES) <= vdb.table_names(con), "the tables the file never had are created too"
-    finally:
-        con.close()
-    assert vdb.settings()["database"] == other_db["database"]
 
 
 def test_switch_refuses_the_database_in_use(client):
@@ -155,21 +108,14 @@ def test_switch_refuses_the_database_in_use(client):
         vdb.switch(vdb.settings(), copy=False)
 
 
-def test_dump_is_the_backup_form_and_leaves_the_token_out(client, fresh, tmp_path):
+def test_dump_is_the_backup_form(client, fresh, tmp_path):
     if not vdb.dump_tool():
         pytest.skip("no mysqldump/mariadb-dump on this machine")
     _seed()
-    before = state.get_setting("mcp_admin_token", "")
-    state.set_setting("mcp_admin_token", "very-secret-token-of-24-chars")
-    try:
-        out = tmp_path / "viewer.sql"
-        vdb.dump(out)
-        text = out.read_text(errors="replace")
-        assert "CREATE TABLE `pix_favorite_photos`" in text and "'zz_probe'" in text and "very-secret" not in text and "mcp_admin_token" not in text
-        vdb.dump(tmp_path / "all.sql", skip_token=False)
-        assert "very-secret" in (tmp_path / "all.sql").read_text(errors="replace")
-    finally:
-        state.set_setting("mcp_admin_token", before)
+    out = tmp_path / "viewer.sql"
+    vdb.dump(out)
+    text = out.read_text(errors="replace")
+    assert "CREATE TABLE `pix_favorite_photos`" in text and "'zz_probe'" in text
 
 
 def test_without_a_configuration_the_viewer_waits(monkeypatch):

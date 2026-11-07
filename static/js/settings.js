@@ -638,7 +638,7 @@ export function viewerDbPanel({ setup = false } = {}) {
     const fields = h('div', { class: 'toolbar tight mt6' }, f.host, f.port, f.database, f.user, f.password);
     const hasData = d.configured && !d.error;
     const copy = h('input', { type: 'checkbox', checked: true }), drop = h('input', { type: 'checkbox' });  // dropping is opt-in: the target may be a database in use
-    const copyLabel = hasData ? 'Copy all the data from the current database to the new one' : d.legacy_sqlite ? `Import everything from the ${S.APP_NAME} file of before (${d.legacy_sqlite}); the file is renamed afterwards` : null;
+    const copyLabel = hasData ? 'Copy all the data from the current database to the new one' : null;
     const opts = h('div', { style: 'display:grid;gap:4px;margin-top:8px;font-size:13px' },
       copyLabel ? h('label', { class: 'chk' }, copy, copyLabel) : null,
       h('label', { class: 'chk' }, drop, `Drop and recreate ${S.APP_NAME}’s tables at the target first (a clean slate; anything already there is lost)`));
