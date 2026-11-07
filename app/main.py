@@ -212,6 +212,7 @@ app.include_router(auth.status_router(updater, extra=_status_extra))  # /api/sta
 app.include_router(auth.server_router(updater, log_file=config.LOG_FILE, info=lambda: {"mcpEnabled": mcp_enabled(), "mcpLocked": config.MCP_FORCED}))  # /api/server, /api/log: admins
 app.include_router(auth_routes.router)
 app.include_router(users_routes.router)
+app.include_router(auth.admin_router())  # /api/suite-admin (+ ui.js, the Settings › Suite panel): the whole suite (suite admins)
 app.include_router(geo.router)
 app.include_router(backup.router)
 app.include_router(review.router)
