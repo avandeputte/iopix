@@ -94,15 +94,15 @@ def test_settings_fetch_birthdays_and_ages(client, lib, fake_contacts):
     today = datetime.date.today()
     _Fake.contacts = [_c(7, "someone else", {"year": 1950, "month": today.month, "day": today.day}, pid=tag)]
     url = f"http://127.0.0.1:{fake_contacts.server_port}"
-    assert client.get("/api/iocontacts/settings").json()["enabled"] is False
+    assert iocontacts.public_settings()["enabled"] is False
     suite.register("iocontacts", name="ioContacts", url=url, version="1")
     try:
         _Fake.refuse = True  # every app password refused: nothing to show, no error
-        assert not client.post("/api/iocontacts/test").json()["ok"]
+        assert not iocontacts.refresh()["ok"]
         assert client.get("/api/people/birthdays").json()["upcoming"] == []
         _Fake.refuse = False
-        assert client.post("/api/iocontacts/test").json() == {"ok": True, "contacts": 1, "matched": 1}
-        s = client.get("/api/iocontacts/settings").json()
+        assert iocontacts.refresh() == {"ok": True, "contacts": 1, "matched": 1}
+        s = iocontacts.public_settings()
         assert s["url"] == url and s["enabled"] and "password" not in str(s) and s["matched"] == 1
         up = client.get("/api/people/birthdays").json()["upcoming"]
         assert up == [{"tag": tag, "month": today.month, "day": today.day, "year": 1950, "turns": today.year - 1950, "in": 0,
@@ -111,10 +111,10 @@ def test_settings_fetch_birthdays_and_ages(client, lib, fake_contacts):
         assert d["ages"][str(tag)] == iocontacts.age_text({"year": 1950, "month": today.month, "day": today.day}, d["taken"], d["dprec"])
         from app.faces import ages
         assert ages.known_births()[tag] == 1950
-        # ioContacts down: the last good list stays in use, and Settings says what went wrong
+        # ioContacts down: the last good list stays in use, and the error is kept (the server log has it too)
         fake_contacts.shutdown(); fake_contacts.server_close()
-        assert not client.post("/api/iocontacts/test").json()["ok"]
-        assert client.get("/api/iocontacts/settings").json()["error"]
+        assert not iocontacts.refresh()["ok"]
+        assert iocontacts.public_settings()["error"]
         assert client.get("/api/people/birthdays").json()["upcoming"][0]["tag"] == tag
     finally:
         suite.forget("iocontacts")

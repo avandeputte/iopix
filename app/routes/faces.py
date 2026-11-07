@@ -390,7 +390,7 @@ def api_people_list():
 
 @router.get("/api/people/birthdays", dependencies=[access.signed_in])
 def api_people_birthdays():
-    """The birthdays from ioContacts (Settings › ioContacts) in the next month, today first:
+    """The birthdays from ioContacts (found in the suite by itself) in the next month, today first:
     {enabled, upcoming: [{tag, month, day, year, turns, in, date, url}]}. Read from what was last fetched."""
     return {"enabled": iocontacts.enabled(), "upcoming": iocontacts.upcoming()}
 

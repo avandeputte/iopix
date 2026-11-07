@@ -1,4 +1,4 @@
-"""ioContacts: birthdays of the people named here, from the suite's address book (optional, Settings › ioContacts).
+"""ioContacts: birthdays of the people named here, from the suite's address book (found in the suite by itself; nothing to set up).
 
 The mirror of ioContacts' own ioPix link, with nothing to set up: ioContacts is found in the suite's list of apps, and
 the server (never the browser) reads from it as iopix's own service account with a read-only app password, both made

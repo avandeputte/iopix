@@ -10,7 +10,7 @@ from fastapi import Request
 from starlette.concurrency import run_in_threadpool
 
 from app.ai import models as dlmodels
-from app import access, config, events, iocontacts, jobs as bgjobs, users
+from app import access, config, events, jobs as bgjobs, users
 from iosuite_shared import proxyauth
 from app.auth import auth as auth_shared
 from app.digikam import dkdb, library
@@ -342,16 +342,3 @@ def api_maps(request: Request):
     return maps.config()
 
 
-@router.get("/api/iocontacts/settings", dependencies=[access.admin])
-def api_iocontacts_get():
-    """Settings › ioContacts: whether ioContacts is part of the suite (found and signed in to by itself) and how the
-    last fetch went."""
-    return iocontacts.public_settings()
-
-
-@router.post("/api/iocontacts/test", dependencies=[access.admin])
-async def api_iocontacts_test():
-    """Fetch the contacts now: {ok, contacts, matched} or {ok: false, error}."""
-    if not iocontacts.enabled():
-        raise HTTPException(400, "ioContacts is not part of the suite")
-    return await run_in_threadpool(iocontacts.refresh)
