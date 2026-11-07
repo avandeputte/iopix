@@ -35,7 +35,7 @@ SETTINGS = {
     "file_scanner": ("0", bool, "watch the album folders for files added, changed or removed outside the viewer (on by default with no digiKam)"),
     "scan_interval": ("15", int, "minutes between file scanner passes"),
     "mcp_enabled": ("0", bool, "the MCP endpoint answers (MCP=1 in the environment locks it on); stored once at first start"),
-    "mcp_admin_token": ("", str, "the admin token iosuite_shared.updates keeps (POST /api/server {action: token}); MCP itself signs in with app passwords"),
+    "mcp_admin_token": ("", str, "an old admin token iosuite_shared.updates kept before 0.18 (nothing used it; removed at start)"),
     "update_check": ("1", bool, "look at GitHub daily for a newer version (UPDATE_CHECK=0 locks it off)"),
     "bg_threads": ("", int, "cores the background jobs may use; empty: BG_THREADS from the environment, half the machine by default"),
     "search_model": ("clip", str, "the embedding model behind search (clip, siglip2, jinaclip); runtime reads it with default '' to see whether one was chosen"),
@@ -49,8 +49,6 @@ SETTINGS = {
     "near_dups_gen": ("", str, "the generation the near-duplicate groups were computed for; empty: compute again"),
     "import_layout": ("", str, "the folder layout imports go into (importer.LAYOUTS); empty: the first one"),
     "map_provider": ("osm", str, "osm or google: who draws the map and the Street View links"),
-    "google_maps_key": ("", str, "the browser-facing Google key (GOOGLE_MAPS_API_KEY in the environment otherwise)"),
-    "google_server_key": ("", str, "the Google key for the APIs this server calls (GOOGLE_SERVER_KEY otherwise; else the browser key)"),
     "album_roots": ("", "json", "{album root id: local path}: where digiKam's album roots are mounted here, when not at their recorded paths"),
     "templates": ("[]", "json", "the edit templates (owner name and contact) the Edit panel offers"),
     "recent_tags": ("[]", "json", "the last tags used in the Edit panel, newest first (at most 12)"),
@@ -70,12 +68,6 @@ SETTINGS = {
     "auth_proxy_create": ("", str, "someone with no account: the sign-in screen (empty), deny, or a viewer or editor account"),
     "cf_access_team": ("", str, "the Cloudflare Access team domain whose tokens are verified"),
     "cf_access_aud": ("", str, "the Cloudflare Access application's AUD tag"),
-    # ioContacts, for the birthdays of the people here (iocontacts.py): IOCONTACTS_* in the environment wins
-    "iocontacts_url": ("", str, "ioContacts' address; empty: the link is off"),
-    "iocontacts_user": ("", str, "the ioContacts account iopix reads the contacts as"),
-    "iocontacts_password": ("", str, "an app password of that account (stored, never shown back)"),
-    "iocontacts_cf_id": ("", str, "the Cloudflare Access service token's client ID, when ioContacts is behind Access"),
-    "iocontacts_cf_secret": ("", str, "that service token's client secret (stored, never shown back)"),
 }
 _unknown_keys = set()  # logged once each
 

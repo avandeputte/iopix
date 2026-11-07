@@ -20,12 +20,12 @@ from iosuite_shared.updates import setup_log
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facedetect, facemgr
-from app import config, events, jobs as bgjobs, mcp, thumbs, users
+from app import config, events, iocontacts, jobs as bgjobs, mcp, thumbs, users
 from app.auth import auth, updater
 from app.photos import consistency, edits, history, lossless, scanner, tagmanager
 from app.data import index as photo_index, state as appstate, vdb
 from app.digikam import dkdb
-from app.geo import places
+from app.geo import maps, places
 from app.ai.semantic import enabled as semantic_enabled, semantic
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,9 @@ async def lifespan(_app):
             yield
         return
     users.init()
+    iocontacts.forget_old_settings()  # the ioContacts address and sign-in from before the suite found it by itself
+    maps.declare_keys()  # the Google keys live with the suite's keys and tokens
+    appstate.write(lambda c: c.execute("DELETE FROM pix_settings WHERE name = 'mcp_admin_token'"))  # nothing ever used it
     edits.init()
     tagmanager.init()
     analysis.init()

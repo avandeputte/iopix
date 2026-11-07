@@ -138,7 +138,7 @@ def api_maintenance(request: Request):
             "free": free},
         "writeFiles": edits.writes_files(), "readOnly": appstate.read_only(), "readOnlyLocked": config.READ_ONLY, "digikam": index.status(), "appName": app_name(), "appNameSet": appstate.get_setting("app_name", ""),
         "mcpEnabled": appstate.get_setting("mcp_enabled", "0") == "1", "mcpLocked": config.MCP_FORCED,
-        "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": bool(appstate.get_setting("google_server_key", "") or config.GOOGLE_SERVER_KEY), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
+        "database": db_settings_public(), "mapProvider": appstate.get_setting("map_provider", "osm"), "googleMapsKeySet": bool(maps.key()), "googleServerKeySet": maps.server_key_set(), "sidecarCompat": paths.compat_naming(), "searchModel": semantic.chosen(),
         "templates": json.loads(appstate.get_setting("templates", "[]")), "templateFields": list(edits.TEMPLATE_FIELDS),
         "recentTags": json.loads(appstate.get_setting("recent_tags", "[]")),
         "scanner": _scanner_state(),
