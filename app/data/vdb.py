@@ -10,23 +10,20 @@ the statements stay readable.
 Where the connection goes is kept outside the database itself, in data/viewer-db.json (or DB_* in
 config.env), since the settings table lives inside. Without a configuration, or with one the server
 refuses, the viewer starts in its "database needed" state (main.py): the Settings page asks for the
-details, tests them, and the viewer restarts on them. An install from before v1.113 still has its SQLite
-file (data/viewer.db): the first switch copies every row out of it, once, and the file is renamed. That
-read-only import is the only SQLite code left here; the search index (index.db) is a rebuilt cache and
-stays a file.
+details, tests them, and the viewer restarts on them. The search index (index.db) is a rebuilt cache and stays a
+file.
 """
 import json
 import logging
 import os
 import re
 import shutil
-import sqlite3  # only to read a viewer.db from before v1.112 once (import_sqlite)
+import sqlite3
 import subprocess
 import threading
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote
 
 from iosuite_shared import schema
 
@@ -36,7 +33,6 @@ from app.digikam.dkdb import Conn, Cursor, norm_plain
 
 log = logging.getLogger("app.data.vdb")
 CONF = config.DATA_DIR / "viewer-db.json"
-LEGACY_SQLITE = config.DATA_DIR / "viewer.db"  # the file of an install from before v1.112: imported at the first switch
 KEYS = ("type", "host", "port", "database", "user", "password")
 _cfg = None
 _lock = threading.Lock()
@@ -171,10 +167,10 @@ def ready() -> bool:
 
 def public_settings() -> dict:
     """The database settings for the settings page: the password replaced by whether one is set, plus the
-    current error and whether a viewer.db from before v1.113 waits to be imported."""
+    current error."""
     c = settings()
     return {**{k: v for k, v in c.items() if k != "password"}, "password_set": bool(c["password"]), "configured": configured(),
-            "error": error, "legacy_sqlite": str(LEGACY_SQLITE) if LEGACY_SQLITE.exists() else None}
+            "error": error}
 
 
 def save_settings(c: dict):
@@ -351,13 +347,6 @@ def connect(timeout: float = 10, cfg: dict = None) -> VConn:
     return VConn(_mysql_raw(c) if cfg is not None else _mysql_kept(c), True, True)
 
 
-def _sqlite_source(path: Path) -> VConn:
-    """A viewer.db from before v1.113, read-only: the source of the one-time import."""
-    raw = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
-    raw.row_factory = sqlite3.Row
-    return VConn(raw, False, False)
-
-
 write_lock = threading.Lock()  # one writer at a time in this process: the jobs and the requests take turns, never wait on row locks
 
 
@@ -440,51 +429,9 @@ def add_missing_columns(con: VConn) -> list:
     return added
 
 
-# ---- the suite's naming convention (iosuite-shared 0.8.0): every table pix_<name>, *_at timestamps, name/value settings,
-# idx_/uq_ index names. A database from before is renamed once at start, every row kept (instant metadata changes).
+# ---- the suite's naming convention: every table pix_<name>, *_at timestamps, name/value settings, idx_/uq_ index names
 PREFIX = "pix"
 SCHEMA_VERSION = 1  # 1: the suite naming convention
-_SPECIAL = {"app_settings": "pix_settings", "viewer_albums": "pix_albums", "viewer_album_photos": "pix_album_photos",
-            "suggestion_dismissed": "pix_dismissed_suggestions"}
-RENAME_TABLES = {
-    **{old: _SPECIAL.get(old, "pix_" + old) for old in (
-        "app_settings", "favorite_photos", "viewer_albums", "viewer_album_photos", "saved_searches", "pending_edits", "tag_rewrite_queue",
-        "ai_scans", "ai_quality", "ai_text", "ai_face_count", "ai_objects", "ai_descriptions", "ai_looks", "ai_face_ages", "person_births",
-        "ai_face_embeddings", "ai_person_references", "photo_history", "image_data_checksums", "ai_jerseys", "ai_person_looks", "ai_rotation",
-        "video_info", "suggestion_dismissed", "date_hints", "face_sidecar_queue", "ai_similar_photos", "library_info", "photo_identity",
-        "quality_accepted", "people_groups", "people_group_members", "metadata_check")},
-    **{name: _library.TABLE[name] for name in _library.SPEC},  # the library tables: photos -> pix_photos, ...
-}
-RENAME_COLUMNS = {  # keyed by the new table name
-    "pix_settings": {"key": "name"}, "pix_library_info": {"key": "name"},
-    "pix_favorite_photos": {"added": "added_at"}, "pix_album_photos": {"added": "added_at"},
-    "pix_albums": {"created": "created_at", "is_shared": "shared"},
-    "pix_saved_searches": {"created": "created_at"}, "pix_people_groups": {"created": "created_at"},
-    "pix_pending_edits": {"ts": "updated_at"}, "pix_person_births": {"ts": "updated_at"}, "pix_video_info": {"ts": "updated_at"},
-    "pix_date_hints": {"ts": "updated_at"},
-    "pix_photo_history": {"ts": "created_at"}, "pix_dismissed_suggestions": {"ts": "created_at"}, "pix_quality_accepted": {"ts": "created_at"},
-    "pix_face_sidecar_queue": {"image_id": "photo_id", "ts": "created_at"}, "pix_tag_rewrite_queue": {"image_id": "photo_id"},
-    "pix_ai_similar_photos": {"a": "photo_id", "b": "similar_photo_id"},
-    "pix_photo_identity": {"vid": "id", "first_seen": "first_seen_at", "last_seen": "last_seen_at"},
-    "pix_image_data_checksums": {"verified": "verified_at"}, "pix_metadata_check": {"checked": "checked_at"},
-}
-RENAME_INDEXES = {
-    "pix_ai_scans": {"ai_scans_job": "idx_pix_ai_scans_job"}, "pix_ai_objects": {"ai_objects_photo": "idx_pix_ai_objects_photo"},
-    "pix_photo_history": {"photo_history_photo": "idx_pix_photo_history_photo"},
-    "pix_ai_similar_photos": {"ai_similar_photos_a": "idx_pix_ai_similar_photos_photo"},
-    "pix_photo_identity": {"photo_identity_dk": "idx_pix_photo_identity_dk", "photo_identity_hash": "idx_pix_photo_identity_hash"},
-    **_library.RENAME_INDEXES,
-}
-
-
-def _rename_to_convention(con: VConn) -> list:
-    """The tables, columns and indexes of a database from before the convention, renamed in place (rows kept)."""
-    cur = con.raw.cursor()
-    done = schema.rename(cur, RENAME_TABLES, RENAME_COLUMNS)
-    done += schema.rename(cur, None, None, RENAME_INDEXES)
-    if done:
-        log.info("viewer database: renamed to the suite naming convention: %s", ", ".join(done))
-    return done
 
 
 def table_names(con: VConn) -> set:
@@ -512,10 +459,9 @@ def _dump_options(tool: str) -> list:
     return ["--column-statistics=0"] if "mariadb" not in v.lower() and major >= 8 else []
 
 
-def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
+def dump(dst: Path, cfg: dict = None):
     """A mysqldump of the viewer database into `dst` (the backup form of the viewer's data: restore with
-    `mariadb <database> < file.sql`). skip_token leaves the admin token (mcp_admin_token) out: it can be generated again
-    and need not travel with the data. Raises when no dump tool is installed or the dump fails."""
+    `mariadb <database> < file.sql`). Raises when no dump tool is installed or the dump fails."""
     tool = dump_tool()
     if not tool:
         raise RuntimeError("no mysqldump/mariadb-dump on this machine (install mariadb-client)")
@@ -527,13 +473,11 @@ def dump(dst: Path, cfg: dict = None, skip_token: bool = True):
         con.close()
     cmd = [tool, *_dump_options(tool), "-h", str(c["host"]), "-P", str(c["port"]), "-u", c["user"], "--single-transaction", "--skip-extended-insert", c["database"], *tables]
     with open(dst, "wb") as f:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE if skip_token else f, stderr=subprocess.PIPE, timeout=1800,
+        res = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, timeout=1800,
                              env={**os.environ, "MYSQL_PWD": c["password"] or ""})  # the password never on the command line
         if res.returncode != 0:
             f.close(); dst.unlink(missing_ok=True)  # a dump cut short is no backup
             raise RuntimeError(res.stderr.decode(errors="replace")[-300:])
-        if skip_token:  # one INSERT per row (--skip-extended-insert), so the token's row is one line
-            f.write(b"".join(line for line in res.stdout.splitlines(keepends=True) if b"'mcp_admin_token'" not in line))
 
 
 def ensure_schema(con: VConn = None):
@@ -541,17 +485,11 @@ def ensure_schema(con: VConn = None):
     own = con is None
     con = con or connect()
     try:
-        _rename_to_convention(con)
         for name, (cols, ddl) in TABLES.items():
             con.execute(ddl)
-        # every column added since a database was created: v1.27's album owner_id and shared (albums from before are
-        # shared), v1.32's file_copy, the settings' updated_at, and whatever comes next
-        add_missing_columns(con)
+        add_missing_columns(con)  # a column added to TABLES later reaches databases made before it
         schema.ensure_version_table(con.raw.cursor(), PREFIX)
         schema.record_version(con.raw.cursor(), PREFIX, SCHEMA_VERSION)
-        # v1.43: the full comparison is kept only for photos whose copies disagree or that lack a sidecar; rows from
-        # before carried it for every photo (tens of MB), and nothing reads it for the others
-        con.execute("UPDATE pix_metadata_check SET data = NULL WHERE data IS NOT NULL AND mismatch = 0 AND has_sidecar = 1")
         con.commit()
     finally:
         if own:
@@ -607,18 +545,15 @@ def test_connection(c: dict) -> dict:
         for t in TABLES:
             if t in have:
                 counts[t] = con.execute(f"SELECT count(*) FROM `{t}`").fetchone()[0]
-        return {"ok": True, "version": ver, "tables": counts, "existing": sorted({RENAME_TABLES.get(t, t) for t in have} & set(TABLES))}
+        return {"ok": True, "version": ver, "tables": counts, "existing": sorted(have & set(TABLES))}
     finally:
         con.close()
 
 
 def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
-    """Every table, row by row, ids kept, into a MySQL target from another MySQL database or a viewer.db of
-    before v1.112. drop: DROP the viewer tables at the target first (so a re-run or a stale copy never leaves
+    """Every table, row by row, ids kept, into a MySQL target from another MySQL database. drop: DROP the viewer tables at the target first (so a re-run or a stale copy never leaves
     rows behind); else existing rows are replaced by id."""
     counts = {}
-    qs = (lambda t: f"`{t}`") if src.mysql else (lambda t: t)
-    _rename_to_convention(dst)  # a target last written by an older viewer
     dst.execute("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_AUTO_VALUE_ON_ZERO')")  # digiKam's root tag has id 0, which MySQL would otherwise replace
     for name, (cols, ddl) in TABLES.items():  # the whole schema first, then the rows
         if drop:
@@ -626,20 +561,15 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
         dst.execute(ddl)
     dst.commit()
     present = table_names(src)
-    old_name = {new: old for old, new in RENAME_TABLES.items()}
     for name, (cols, ddl) in TABLES.items():
-        # a viewer.db from before v1.113 has the names from before the suite convention (app_settings, its `key` column...)
-        table = name if name in present or name not in old_name else old_name[name]
-        have = columns(src, table) if table in present else []  # a table the source never had (hand-made schema) copies nothing
+        have = columns(src, name) if name in present else []  # a table the source never had (hand-made schema) copies nothing
         if not have:
             counts[name] = 0
             dst.commit()
             continue
-        was = {new: old for old, new in RENAME_COLUMNS.get(name, {}).items()} if table != name else {}
-        use = [c for c in cols if c in have or was.get(c) in have]
+        use = [c for c in cols if c in have]
         collist = ", ".join(use)
-        sel = ", ".join(c if c in have else was[c] for c in use)
-        cur, n = src.execute(f"SELECT {sel} FROM {qs(table)}"), 0
+        cur, n = src.execute(f"SELECT {collist} FROM `{name}`"), 0
         while True:  # in slices: the face embeddings and tag rows of a large library do not all sit in memory at once
             rows = cur.fetchmany(2000)
             if not rows:
@@ -655,8 +585,7 @@ def copy_all(src: VConn, dst: VConn, drop: bool = True, progress=None) -> dict:
 
 def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
     """Move the viewer to the given database: test it, (re)create the tables there, copy the data from the
-    current one (or, on an install from before v1.113 that has no database yet, from its viewer.db, which is
-    then renamed), save the configuration. The caller restarts the viewer afterwards."""
+    current one, save the configuration. The caller restarts the viewer afterwards."""
     cur = settings()
     c = _with_stored(c)
     c["type"] = "mysql"
@@ -670,7 +599,7 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
         with _lock:
             save_settings(c)
         return {"ok": True, "copied": {}, "database": describe()}
-    counts, imported = {}, None
+    counts = {}
     with _lock:
         dst = connect(cfg=c)
         try:
@@ -680,29 +609,9 @@ def switch(c: dict, copy: bool = True, drop: bool = True) -> dict:
                     counts = copy_all(src, dst, drop=drop)
                 finally:
                     src.close()
-            elif copy and not configured() and LEGACY_SQLITE.exists():
-                counts = import_sqlite(LEGACY_SQLITE, dst, drop=drop)
-                imported = str(LEGACY_SQLITE)
             else:
                 ensure_schema(dst)
         finally:
             dst.close()
         save_settings(c)
-        if imported:
-            LEGACY_SQLITE.rename(LEGACY_SQLITE.with_name("viewer.db.imported"))  # kept until the owner deletes it; never read again
-    return {"ok": True, "copied": counts, "database": describe(), "imported": imported}
-
-
-def import_sqlite(path: Path, dst: VConn, drop: bool = True) -> dict:
-    """Every row of a viewer.db from before v1.113 into `dst` (the one-time import of an upgraded install). Its
-    user_accounts rows are not among them: accounts live in the Shared ioSuite database since v1.112."""
-    src = _sqlite_source(path)
-    try:
-        if "undo" in columns(src, "photo_history"):  # v1.24 named the column after a reserved word; the file may predate the rename
-            src.raw.close()
-            raw = sqlite3.connect(path)
-            raw.execute("ALTER TABLE photo_history RENAME COLUMN undo TO undo_values"); raw.commit(); raw.close()
-            src = _sqlite_source(path)
-        return copy_all(src, dst, drop=drop)
-    finally:
-        src.close()
+    return {"ok": True, "copied": counts, "database": describe()}

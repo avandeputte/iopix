@@ -20,7 +20,7 @@ from iosuite_shared.updates import setup_log
 
 from app.ai import analysis, models as dlmodels
 from app.faces import facedetect, facemgr
-from app import config, events, iocontacts, jobs as bgjobs, mcp, thumbs, users
+from app import config, events, jobs as bgjobs, mcp, thumbs, users
 from app.auth import auth, updater
 from app.photos import consistency, edits, history, lossless, scanner, tagmanager
 from app.data import index as photo_index, state as appstate, vdb
@@ -39,15 +39,13 @@ __all__ = ["app", "state", "kick", "refresh", "auto", "watch", "resolve", "prewa
 @asynccontextmanager
 async def lifespan(_app):
     appstate.init()
-    if not vdb.ready():  # no viewer database (a fresh install, an upgrade from before v1.113, or its server is down): the set-up page only
+    if not vdb.ready():  # no viewer database (a fresh install, or its server is down): the set-up page only
         logging.getLogger("app.main").error("starting without a viewer database (%s): only the database set-up page answers until one is configured", vdb.error)
         async with shared_mcp.running(mcp.server):
             yield
         return
     users.init()
-    iocontacts.forget_old_settings()  # the ioContacts address and sign-in from before the suite found it by itself
     maps.declare_keys()  # the Google keys live with the suite's keys and tokens
-    appstate.write(lambda c: c.execute("DELETE FROM pix_settings WHERE name = 'mcp_admin_token'"))  # nothing ever used it
     edits.init()
     tagmanager.init()
     analysis.init()
