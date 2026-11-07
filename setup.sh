@@ -154,12 +154,11 @@ fi
 [ -z "$SQLITE" ] || [ -f "$SQLITE/digikam4.db" ] || die "digikam4.db not found in $SQLITE"
 ask DATA "Folder for the viewer's own data (index, thumbnails, models, backups)" "${DATA:-$APP/data}"
 # iopix's own database (settings, accounts, favorites, albums, AI results, and the library without digiKam) lives on
-# MySQL/MariaDB. Asked once: a later run keeps the DB_* lines of config.env (or data/viewer-db.json, written by
-# the Settings page).
+# MySQL/MariaDB. Asked once: a later run keeps the DB_* lines of config.env (the Settings page writes them too).
 ENVF="$APP/config.env"
 OLDVDB="$(grep '^DB_' "$ENVF" 2>/dev/null || true)"
 CANLOCAL=0; [ "$OS" != Darwin ] && [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1 && CANLOCAL=1  # Debian, Ubuntu, Proxmox as root
-if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ] && [ ! -f "$DATA/viewer-db.json" ]; then
+if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ]; then
   if [ "$CANLOCAL" = 1 ]; then
     ask VH "iopix's own database: 'local' installs MariaDB on this machine, or the host of an existing MySQL/MariaDB server" "local"
     [ "$VH" != local ] || VIEWERDB=local
@@ -176,7 +175,7 @@ if [ -z "$VIEWERDB" ] && [ -z "$OLDVDB" ] && [ ! -f "$DATA/viewer-db.json" ]; th
     VIEWERDB="$VH:$VP/$VD:$VU:$VW"
   fi
 elif [ -z "$VIEWERDB" ]; then
-  echo "iopix's own database: kept as configured ($([ -n "$OLDVDB" ] && echo "$ENVF" || echo "$DATA/viewer-db.json"); Settings › Database switches)"
+  echo "iopix's own database: kept as configured ($ENVF; Settings › Database switches)"
 fi
 if [ "$VIEWERDB" = local ]; then
   [ "$CANLOCAL" = 1 ] || die "--db local needs apt (Debian, Ubuntu, Proxmox) and root; give --db HOST:PORT/DB:USER:PASS of a MySQL/MariaDB server instead"
@@ -304,12 +303,12 @@ fi
   echo "PORT=$PORT"
   echo "PUBLIC_URL=$PUBURL"
   echo "COOKIE_DOMAIN=$COOKIE"
-  # iopix's own database (MySQL/MariaDB); these win over $DATA/viewer-db.json, which the Settings page writes
+  # iopix's own database (MySQL/MariaDB); the Settings page writes these too
   if [ -n "$VIEWERDB" ]; then
     vhp=${VIEWERDB%%/*}; vrest=${VIEWERDB#*/}; vdb=${vrest%%:*}; vrest=${vrest#*:}; vus=${vrest%%:*}; vpw=${vrest#*:}
     echo "DB_TYPE=mysql"; echo "DB_HOST=${vhp%%:*}"; echo "DB_PORT=${vhp##*:}"; echo "DB_NAME=$vdb"; echo "DB_USER=$vus"; echo "DB_PASSWORD=$vpw"
   elif [ -z "$OLDVDB" ]; then
-    echo "# DB_TYPE=mysql DB_HOST= DB_PORT=3306 DB_NAME= DB_USER= DB_PASSWORD=: iopix's own database, or $DATA/viewer-db.json (Settings)"
+    echo "# DB_TYPE=mysql DB_HOST= DB_PORT=3306 DB_NAME= DB_USER= DB_PASSWORD=: iopix's own database (the Settings page writes them)"
   fi
   case "$SUITE" in ''|keep) ;; *)
     shp=${SUITE%%/*}; srest=${SUITE#*/}; sdb=${srest%%:*}; srest=${srest#*:}; sus=${srest%%:*}; spw=${srest#*:}

@@ -155,5 +155,5 @@ DB_ENV = {"type": "DB_TYPE", "host": "DB_HOST", "port": "DB_PORT", "database": "
 
 
 def db_env(key: str):
-    """DB_TYPE/HOST/PORT/NAME/USER/PASSWORD: iopix's own database, when not in data/viewer-db.json."""
+    """DB_TYPE/HOST/PORT/NAME/USER/PASSWORD: iopix's own database (config.env, or the environment)."""
     return os.environ.get(DB_ENV[key]) or None

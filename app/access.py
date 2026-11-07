@@ -9,8 +9,15 @@ open to everyone by mistake. The markers come from iosuite-shared (app/auth.py),
 - editor_write: a change to the library (refused for everyone in read-only mode)
 - admin: settings, maintenance, users, logs, backups
 - admin_write: a library change only admins make (merging a library, repairing files)
+- downloads: the zip downloads (/api/zip*): anyone while there are no accounts, then signed-in accounts
+The image routes (/thumb, /preview, /face, /orig, /facecrop) are public: the sign-in rule alone decides.
 """
 from app.auth import auth
+
+
+def _downloads_allowed(user, _request) -> bool:
+    from app import users  # zips re-encode and ship whole folders: once accounts exist they are for signed-in users
+    return not users.any_users() or users.is_signed_in(user)
 
 ROLES = ("public", "signed_in", "editor", "admin")
 
@@ -21,4 +28,5 @@ editor_write = auth.access.editor_write
 admin = auth.access.admin
 admin_write = auth.access.admin_write
 require = auth.access.require
+downloads = auth.access.custom("downloads", _downloads_allowed, message="Sign in to download photos")  # /api/zip*
 declared = auth.access.declared

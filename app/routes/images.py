@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
-from app import access, config, thumbs, users, videostream
+from app import access, config, thumbs, videostream
 from app.http import IMG_CACHE, cached_image, form_items, photo_row
 from app.runtime import THUMB_COLS, db, resolve
 from app.photos import edits, export
@@ -26,7 +26,7 @@ router = APIRouter()
 # --------------------------------------------------------------------------
 
 
-@router.get("/thumb/{photo_id}")
+@router.get("/thumb/{photo_id}", dependencies=[access.public])
 def thumb(photo_id: int, fit: str = "", h: int = 0):
     """The grid thumbnail; fit=square (or fit=WxH, an aspect such as 16x9) crops it to that shape around the photo's
     subject (smartcrop.py: the faces, else the people, else the middle), for tiles that would otherwise crop the centre;
@@ -58,13 +58,13 @@ def thumb(photo_id: int, fit: str = "", h: int = 0):
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 
-@router.get("/preview/{photo_id}")
+@router.get("/preview/{photo_id}", dependencies=[access.public])
 def preview(photo_id: int, dl: int = 0):
     """The screen-size JPEG; dl=1 downloads it under the photo's name (Share > Download preview)."""
     return cached_image("p", photo_id, dl=bool(dl))
 
 
-@router.get("/face/{tag_id}")
+@router.get("/face/{tag_id}", dependencies=[access.public])
 def face(tag_id: int):
     """A face crop to use as a person's avatar."""
     con = db()
@@ -90,7 +90,7 @@ def face(tag_id: int):
     return FileResponse(path, media_type="image/jpeg", headers=IMG_CACHE)
 
 
-@router.get("/orig/{photo_id}")
+@router.get("/orig/{photo_id}", dependencies=[access.public])
 def original(photo_id: int, dl: int = 0):
     """The untouched original file (supports range requests for video)."""
     row = photo_row(photo_id, "path, name")
@@ -184,24 +184,16 @@ def _zip_stream(entries):
     yield sink.take()
 
 
-@router.post("/api/zip", dependencies=[access.public])
+@router.post("/api/zip", dependencies=[access.downloads])
 async def api_zip_post(request: Request):
     """Same as GET /api/zip, for selections too long for a URL (form-encoded body)."""
-    _downloads_allowed(request)
     items = await form_items(request)
     d = dict(items)
     return _zip_response(items, 1 if d.get("sidecars") == "1" else 0, d.get("name") or "photos")
 
 
-def _downloads_allowed(request: Request):
-    """Zips re-encode and ship whole folders: once accounts exist they are for signed-in users (visitors have the viewer)."""
-    if users.any_users() and not users.is_signed_in(request.state.user):
-        raise HTTPException(401, "Sign in to download photos")
-
-
-@router.get("/api/zip", dependencies=[access.public])
+@router.get("/api/zip", dependencies=[access.downloads])
 def api_zip(request: Request, sidecars: int = 0, name: str = "photos"):
-    _downloads_allowed(request)
     return _zip_response(request.query_params.multi_items(), sidecars, name)
 
 
@@ -237,10 +229,9 @@ def _zip_parts(items, part_mb: int):
     return parts
 
 
-@router.post("/api/zip/plan", dependencies=[access.public])
+@router.post("/api/zip/plan", dependencies=[access.downloads])
 async def api_zip_plan(request: Request):
     """How a download would be split. Body: the filters, form-encoded, plus part_mb."""
-    _downloads_allowed(request)
     items = await form_items(request)
     parts = _zip_parts(items, int(dict(items).get("part_mb") or 2000))
     return {"files": sum(len(p) for p in parts), "bytes": sum(r[3] or 0 for p in parts for r in p),

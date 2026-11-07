@@ -1,6 +1,6 @@
 """The viewer database (MariaDB-only since v1.113): the schema lands in an empty database, data copies to
-another database with ids intact, a viewer.db from before v1.113 is imported once, the dump is the backup
-form, and the viewer waits for a database instead of starting on a file."""
+another database with ids intact, the dump is the backup form, and the viewer waits for a database instead of
+starting on a file."""
 
 import pytest
 
