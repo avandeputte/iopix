@@ -35,7 +35,7 @@ A Cloudflare Tunnel publishes iopix without opening a port at home. Pair it with
 ## After the proxy is in place
 
 - Set `PUBLIC_URL=https://photos.example.com` so links in MCP results use the public address.
-- Turn on **Require sign-in** (Settings › Users and sign-in) on anything that faces the internet.
+- Turn on **Sign-in required** (Settings › Suite › Apps) on anything that faces the internet.
 - Do not expose port 8600 directly.
 
 !!! warning "The MCP endpoint"
