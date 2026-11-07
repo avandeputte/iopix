@@ -64,7 +64,7 @@ def test_place_search_uses_google_when_chosen(client, monkeypatch):
 
 
 def test_google_requests_carry_the_viewer_address_as_referer(client, monkeypatch):
-    """A key restricted to HTTP referrers (e.g. *.iothing.net/*) rejects requests without one; the
+    """A key restricted to HTTP referrers (e.g. *.example.com/*) rejects requests without one; the
     session and geocoding calls are made by the server, which sends the browser's address."""
     _reset()
     state.set_setting("map_provider", "google"); credentials.put("iopix", "google_maps_key", "AIza-secret")
