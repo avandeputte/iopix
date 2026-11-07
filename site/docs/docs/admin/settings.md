@@ -39,10 +39,6 @@ Display choices are saved with your account when signed in, else in the browser.
 
 The content-search model, background threads (how many cores a job may use), and the switches for each analysis job.
 
-## ioContacts
-
-The optional link to ioContacts, the suite's address book, for the birthdays of the people in your library. See [ioContacts](../integrations/iocontacts.md).
-
 ## Suite
 
 For suite admins: the suite's admin panel, the same in every io app. People and their role in every app, app passwords, keys and tokens, the apps (default role, sign-in required) and sign-in at the proxy. See [Users and sign-in](users.md).
